@@ -103,12 +103,13 @@ use crate::telegram::requests::{
     send_chat_action_kind, send_document, send_group_call_message, send_message_album,
     send_payment_form as send_payment_form_request, send_photo, send_poll, send_rich_message,
     send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_archive_chat_list_settings, set_authentication_phone_number, set_bio,
+    set_archive_chat_list_settings, set_authentication_phone_number, set_bio, set_chat_description,
     set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
-    set_chat_slow_mode_delay, set_group_call_participant_volume_level,
-    set_message_sender_block_list, set_name, set_password, set_pinned_chats, set_poll_answer,
-    set_profile_photo, set_recovery_email_address, set_scope_notification_settings,
+    set_chat_photo, set_chat_slow_mode_delay, set_chat_title,
+    set_group_call_participant_volume_level, set_message_sender_block_list, set_name, set_password,
+    set_pinned_chats, set_poll_answer, set_profile_photo, set_recovery_email_address,
+    set_scope_notification_settings,
     set_story_privacy_settings as set_story_privacy_settings_request, set_story_reaction,
     set_supergroup_username, set_user_privacy_setting_rules, set_username, set_video_chat_title,
     start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
@@ -6151,6 +6152,144 @@ impl<S: JsonSender> ConnectDriver<S> {
             });
         }
         Ok(Some(extra))
+    }
+
+    /// Slice: group/channel title edit — `setChatTitle` (schema 1.8.67,
+    /// line 13430). Basic groups, supergroups and channels, gated on
+    /// `can_change_info`. Title length is validated client-side (1–128
+    /// characters per the schema); invalid input is refused with
+    /// `InvalidRequest` before anything is sent. Not optimistic — the
+    /// server's `updateChatTitle` carries the new title; a TDLib error is
+    /// surfaced to the caller unchanged.
+    pub fn set_group_title(
+        &mut self,
+        chat_id: ChatId,
+        title: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let len = title.chars().count();
+        if len == 0 || len > 128 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.group_info_edit_allowed(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetChatTitle;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let json = set_chat_title(extra, chat_id, title);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice: group/channel description edit — `setChatDescription`
+    /// (schema 1.8.67, line 13533). Same gating as title; description is
+    /// 0–255 characters, empty clears it. Not optimistic and not
+    /// refetched: TDLib has no `updateChatDescription` broadcast, so the
+    /// new description arrives on the next `getSupergroupFullInfo` /
+    /// `getBasicGroupFullInfo` pull; errors are surfaced unchanged.
+    pub fn set_group_description(
+        &mut self,
+        chat_id: ChatId,
+        description: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if description.chars().count() > 255 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.group_info_edit_allowed(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetChatDescription;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let json = set_chat_description(extra, chat_id, description);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice: group/channel photo edit — `setChatPhoto` (schema 1.8.67,
+    /// line 13435). Same gating as title. `photo_path` is a local JPEG
+    /// file (`inputChatPhotoStatic` / `inputFileLocal`); `None` deletes
+    /// the photo (a null top-level `photo` per the schema — "pass null to
+    /// delete the chat photo"). Not optimistic — the server's
+    /// `updateChatPhoto` carries the new photo; errors are surfaced
+    /// unchanged.
+    pub fn set_group_photo(
+        &mut self,
+        chat_id: ChatId,
+        photo_path: Option<&str>,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.group_info_edit_allowed(chat_id) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::SetChatPhoto;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let photo_json = match photo_path {
+            Some(path) => serde_json::json!({
+                "@type": "inputChatPhotoStatic",
+                "photo": { "@type": "inputFileLocal", "path": path },
+            }),
+            None => serde_json::Value::Null,
+        };
+        let json = set_chat_photo(extra, chat_id, photo_json);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Shared gate for the three group/channel info-edit drivers
+    /// (`setChatTitle` / `setChatDescription` / `setChatPhoto`, all
+    /// schema-limited to basic groups, supergroups and channels). Basic
+    /// groups are democratic — every member may change the title,
+    /// photo and description (telegram.org/blog/supergroups: "Everyone
+    /// can invite new members and change the group's name and photo"),
+    /// so no right is required there. Supergroups and channels need
+    /// the `can_change_info` right: creator, an admin with the right
+    /// (`Session::chat_can_change_info`), or a plain member with the
+    /// default `permissions.can_change_info` permission (schema 1.8.67,
+    /// line 1066 — "True, if the user can change the chat title, photo,
+    /// and other settings"), mirroring `Session::chat_can_add_members`.
+    fn group_info_edit_allowed(&self, chat_id: ChatId) -> bool {
+        let Some(chat) = self.session.chats.get(&chat_id.0) else {
+            return false;
+        };
+        match chat.kind {
+            ChatKind::BasicGroup { .. } => true,
+            ChatKind::Supergroup { .. } => {
+                self.session.chat_can_change_info(chat_id)
+                    || chat.permissions.as_ref().is_some_and(|p| p.can_change_info)
+            }
+            _ => false,
+        }
     }
 
     /// Slice G2: `toggleSupergroupSignMessages` (schema 1.8.67, line
@@ -17884,6 +18023,177 @@ mod tests {
                 .set_chat_member_tag(ChatId(9), 42, "this title is way too long")
                 .is_err()
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_group_info_edit_gates_and_shape() {
+        // Slice: `setChatTitle` / `setChatDescription` / `setChatPhoto`
+        // (schema 1.8.67, lines 13430/13533/13435) — basic groups,
+        // supergroups and channels. Basic groups are democratic: any
+        // member may edit (telegram.org/blog/supergroups), no right
+        // needed. Supergroups and channels are gated on `can_change_info`
+        // — creator, an admin with the right, or a plain member with
+        // the default `permissions.can_change_info`. Client length
+        // validation refuses invalid input before sending; a TDLib
+        // `ok` is handled by the generic pending-request path — no
+        // optimistic state.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":10,"title":"Supergroup","type":{"@type":"chatTypeSupergroup","supergroup_id":10,"is_channel":false},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Unknown chat id → refused without sending.
+        let sent_before = recorder.snapshot().len();
+        assert!(
+            driver
+                .set_group_title(ChatId(404), "New")
+                .unwrap()
+                .is_none()
+        );
+        // Private chat (wrong kind) → refused without sending.
+        assert!(
+            driver
+                .set_group_description(ChatId(7), "about")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // Plain member of a basic group → sends: basic groups are
+        // democratic — no right needed.
+        let extra = driver
+            .set_group_photo(ChatId(9), None)
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setChatPhoto");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert!(v["photo"].is_null());
+        driver
+            .session
+            .requests
+            .take_purpose(RequestPurpose::SetChatPhoto);
+        // Supergroup plain member without `permissions.can_change_info`
+        // → refused.
+        let sent_before = recorder.snapshot().len();
+        assert!(driver.set_group_photo(ChatId(10), None).unwrap().is_none());
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // Supergroup plain member WITH the default
+        // `permissions.can_change_info` → sends.
+        driver
+            .session
+            .chats
+            .get_mut(&10)
+            .unwrap()
+            .permissions
+            .as_mut()
+            .unwrap()
+            .can_change_info = true;
+        let extra = driver
+            .set_group_photo(ChatId(10), None)
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setChatPhoto");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert!(v["photo"].is_null());
+        driver
+            .session
+            .requests
+            .take_purpose(RequestPurpose::SetChatPhoto);
+        // Creator → sends `setChatTitle`.
+        driver.session.my_user_id = Some(7);
+        driver.session.chats.get_mut(&9).unwrap().my_member_status =
+            Some(ChannelMemberStatus::Creator);
+        let extra = driver
+            .set_group_title(ChatId(9), "New name")
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setChatTitle");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["chat_id"], 9);
+        assert_eq!(v["title"], "New name");
+        // In-flight dedup: second title while one is pending → no-op.
+        assert!(
+            driver
+                .set_group_title(ChatId(9), "Another")
+                .unwrap()
+                .is_none()
+        );
+        // Length validation before send: empty and 129 chars refused,
+        // exactly 128 accepted by the builder (dedup keeps it unsent).
+        assert!(driver.set_group_title(ChatId(9), "").is_err());
+        assert!(driver.set_group_title(ChatId(9), &"x".repeat(129)).is_err());
+        // 255-char description sends; 256 is refused.
+        let extra = driver
+            .set_group_description(ChatId(9), &"y".repeat(255))
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setChatDescription");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["description"], "y".repeat(255));
+        assert!(
+            driver
+                .set_group_description(ChatId(9), &"y".repeat(256))
+                .is_err()
+        );
+        // Photo set → `inputChatPhotoStatic` / `inputFileLocal`.
+        let extra = driver
+            .set_group_photo(ChatId(9), Some("/tmp/group.jpg"))
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setChatPhoto");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["photo"]["@type"], "inputChatPhotoStatic");
+        assert_eq!(v["photo"]["photo"]["@type"], "inputFileLocal");
+        assert_eq!(v["photo"]["photo"]["path"], "/tmp/group.jpg");
+        // Photo delete → null top-level `photo`.
+        driver
+            .session
+            .requests
+            .take_purpose(RequestPurpose::SetChatPhoto);
+        let extra = driver
+            .set_group_photo(ChatId(9), None)
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setChatPhoto");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert!(v["photo"].is_null());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

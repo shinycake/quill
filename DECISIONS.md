@@ -5576,3 +5576,75 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - All GIF search/tab UI, trending tab, empty states, autoplay setting UI — kit Phase 9 owns UI surfaces.
   - `getOption("animation_search_bot_username")` / `searchPublicChat` bot-resolution wiring — no `get_option` / `search_public_chat` builders exist in `requests.rs`; the driver/UI slice composes them when it needs the bot id (YAGNI).
   - `connect.rs` driver methods — UI slices call `session.request(purpose, None)` + builder directly (the S8 pattern); no speculative driver API added.
+## Slice: GROUP/CHANNEL TITLE + DESCRIPTION + PHOTO EDITING, BACKEND (2026-09-29)
+
+- **Task:** checklist gap — title/description/photo editing had no README
+  items and no request builders. This slice adds the three backend paths;
+  edit UI is deferred until after kit Phase 9 (`src/ui/mod.rs` frozen).
+- **Schema (pinned TDLib 1.8.67, verbatim):**
+  - `setChatTitle chat_id:int53 title:string = Ok;` (:13430) — "Changes the
+    chat title. Supported only for basic groups, supergroups and channels.
+    Requires can_change_info member right" — "New title of the chat; 1-128
+    characters".
+  - `setChatDescription chat_id:int53 description:string = Ok;` (:13533) —
+    "Changes information about a chat. Available for basic groups,
+    supergroups, and channels. Requires can_change_info member right" —
+    "New chat description; 0-255 characters".
+  - `setChatPhoto chat_id:int53 photo:InputChatPhoto = Ok;` (:13435) —
+    "Changes the photo of a chat. Supported only for basic groups,
+    supergroups and channels. Requires can_change_info member right" —
+    "New chat photo; pass null to delete the chat photo".
+  - `inputChatPhotoStatic photo:InputFile = InputChatPhoto;` (:1042) —
+    "A static photo in JPEG format" — "Only inputFileLocal and
+    inputFileGenerated are allowed".
+  - Delete encoding (concept-level, not a single-grep claim): the delete
+    is a null top-level `photo`, per the constructor's own "pass null to
+    delete the chat photo". `inputChatPhotoPrevious` (:1039) is "A
+    previously used profile photo of the current user" — user-profile
+    reuse only, not the chat-delete path.
+- **Honest gaps in the update surface:** `updateChatTitle` (:10485) and
+  `updateChatPhoto` (:10488) are already parsed (envelope.rs) and applied
+  (state.rs), so title/photo refresh from the server with no driver state.
+  TDLib has NO `updateChatDescription` broadcast (no constructor of that
+  name exists anywhere in `schema/td_api.tl`) — a changed description is
+  only re-read on the next `getSupergroupFullInfo` / `getBasicGroupFullInfo`
+  pull. The driver deliberately does NOT refetch after send; note stays
+  here so the post-Phase-9 UI slice decides whether to pull on success.
+- **Built:**
+  - Builders (`src/telegram/requests.rs`): `set_chat_title`,
+    `set_chat_description`, `set_chat_photo(extra, chat_id, photo_json)`
+    where `photo_json` is the `InputChatPhoto` object
+    (`inputChatPhotoStatic`/`inputFileLocal`, or `Value::Null` for
+    delete) — same `json!` pattern as `set_supergroup_username`.
+  - Drivers (`src/connect.rs`): `set_group_title`, `set_group_description`,
+    `set_group_photo` — thin, modeled on `set_chat_member_tag`: gate on
+    `chats_path_active`, client-side length validation (title 1–128 chars
+    → `Err(InvalidRequest)`; description ≤255 → `Err`), then
+    `group_info_edit_allowed` (basic group/supergroup/channel + the
+    `chat_can_change_info` session gate, `Ok(None)` refusal), in-flight
+    dedup per `(purpose, chat)`. NO optimistic state — a TDLib error is
+    surfaced unchanged and the pending `@extra` is dropped; the server's
+    updates carry the truth.
+  - `RequestPurpose::SetChatTitle/SetChatDescription/SetChatPhoto`
+    (state.rs); all response-side matches have wildcard arms — no new
+    handling needed for the `ok` responses.
+  - Tests: `group_info_edit_request_shapes` (requests.rs) — shape, the
+    128/255 boundary lengths, empty description, null-photo delete
+    encoding; `driver_group_info_edit_gates_and_shape` (connect.rs) —
+    unknown-chat-id and wrong-kind refusal, rights-gate refusal,
+    sent-JSON shape per method, in-flight dedup, client-side length
+    refusals (empty/129-char title, 256-char description), delete-photo
+    null encoding.
+  - README: three new unchecked items `parity:groups-set-title`,
+    `parity:groups-set-description`, `parity:groups-set-photo` (partial:
+    backend done — builders + drivers; edit UI deferred post-Phase-9).
+    Denominator 522 → 525 via the standing mechanism; `scripts/parity_pct.sh`
+    recomputes the percentage.
+- **Out of this slice (all 3 boxes stay UNCHECKED):** the group/channel
+  info-panel edit UI (title/description text fields, photo picker + delete
+  affordance, rights-gated) — that is `src/ui/mod.rs`, frozen for kit
+  Phase 9. The drivers are the post-Phase-9 UI's entry points; their
+  `Result<Option<RequestId>, ConnectSendError>` contract already encodes
+  refused (`Ok(None)`), invalid (`Err(InvalidRequest)`), and sent
+  (`Ok(Some(_))`) so the UI needs no new error plumbing. Description
+  refresh-after-edit is explicitly undecided (see honest-gaps note above).
