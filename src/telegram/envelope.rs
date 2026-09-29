@@ -306,7 +306,7 @@ pub enum EnvelopePayload {
         user: ParsedUser,
     },
     /// Slice A12: `updateProfileAccentColors` (TDLib 1.8.67,
-    /// `schema/td_api.tl:10963`) — the accent palette plus the ids
+    /// `schema/td_api.tl:10964`) — the accent palette plus the ids
     /// `setProfileAccentColor` accepts. Stored in `Session`; drives the
     /// edit-profile accent picker.
     UpdateProfileAccentColors {
@@ -7494,7 +7494,7 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 user: parsed,
             })
         }
-        // Slice A12: `updateProfileAccentColors` (schema:10963).
+        // Slice A12: `updateProfileAccentColors` (schema:10964).
         // Malformed palette entries are skipped; a missing
         // `available_accent_color_ids` just means an empty picker.
         "updateProfileAccentColors" => {
@@ -15336,7 +15336,7 @@ mod channel_envelope_tests {
     #[test]
     fn update_profile_accent_colors_parsed() {
         // Slice A12: `updateProfileAccentColors` (schema 1.8.67, line
-        // 10963) — the palette and the settable accent ids.
+        // 10964) — the palette and the settable accent ids.
         let env = parse_envelope(
             r#"{"@type":"updateProfileAccentColors","colors":[{"@type":"profileAccentColor","id":3,"light_theme_colors":{"@type":"profileAccentColors","palette_colors":[43776,65280],"background_colors":[1313280],"story_colors":[1966080,255]},"dark_theme_colors":{"@type":"profileAccentColors","palette_colors":[262144],"background_colors":[],"story_colors":[]}}],"available_accent_color_ids":[1,3,5]}"#,
         )

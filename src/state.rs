@@ -4567,7 +4567,7 @@ pub struct Session {
     /// the contacts list and the user info panel.
     pub users: HashMap<i64, ParsedUser>,
     /// Slice A12: accent palette from `updateProfileAccentColors`
-    /// (schema 1.8.67, line 10963) — full `profileAccentColor` entries
+    /// (schema 1.8.67, line 10964) — full `profileAccentColor` entries
     /// for swatch rendering.
     pub profile_accent_colors: Vec<ProfileAccentColor>,
     /// Slice A12: ids `setProfileAccentColor` accepts, in server order —

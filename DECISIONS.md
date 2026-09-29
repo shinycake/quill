@@ -6546,8 +6546,8 @@ is applied to the stored message in place.
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
   - `setProfileAccentColor profile_accent_color_id:int32 profile_background_custom_emoji_id:int64 = Ok;` (:14820) — "Changes the profile accent color and background custom emoji for the current user".
-  - `profileAccentColor id:int32 light_theme_colors:profileAccentColors dark_theme_colors:profileAccentColors min_supergroup_chat_boost_level:int32 min_channel_chat_boost_level:int32 = ProfileAccentColor;` (:2260); `profileAccentColors palette_colors:vector<int32> background_colors:vector<int32> story_colors:vector<int32> = ProfileAccentColors;` (:2259).
-  - `updateProfileAccentColors colors:vector<profileAccentColor> available_accent_color_ids:vector<int32> = Update;` (:10963) — the palette is pushed post-auth; no getter exists (concept search finds only the update).
+  - `profileAccentColor id:int32 light_theme_colors:profileAccentColors dark_theme_colors:profileAccentColors min_supergroup_chat_boost_level:int32 min_channel_chat_boost_level:int32 = ProfileAccentColor;` (:2260); `profileAccentColors palette_colors:vector<int32> background_colors:vector<int32> story_colors:vector<int32> = ProfileAccentColors;` (:2252).
+  - `updateProfileAccentColors colors:vector<profileAccentColor> available_accent_color_ids:vector<int32> = Update;` (:10964) — the palette is pushed post-auth; no getter exists (concept search finds only the update).
   - The current user's accent arrives via `updateUser`: `profile_accent_color_id` (:2386) and `profile_background_custom_emoji_id` (:2403).
 - **Built:**
   - New module `src/telegram/profile_accent.rs`: `ProfileAccentColor` (id + light/dark `Vec<u32>` palette colors), `swatch_rgb()` (first light palette color; Telegram blue fallback), tolerant parse (bad ints → skip/0, never fail), 3 unit tests.

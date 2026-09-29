@@ -1,7 +1,7 @@
 //! Profile accent colors (parity:auth-profile-accent).
 //!
 //! One responsibility: the `profileAccentColor` palette types from
-//! `updateProfileAccentColors` (TDLib 1.8.67, `schema/td_api.tl:10963`).
+//! `updateProfileAccentColors` (TDLib 1.8.67, `schema/td_api.tl:10964`).
 //! Parsing lives here so the waived `envelope.rs` only grows a match arm
 //! and an enum variant (type-coherent extensions).
 

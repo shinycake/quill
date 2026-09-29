@@ -5139,7 +5139,7 @@ pub fn delete_profile_photo(extra: RequestId, profile_photo_id: i64) -> String {
 /// profile_background_custom_emoji_id:int64 = Ok;` (TDLib 1.8.67,
 /// `schema/td_api.tl:14820`): "Changes the profile accent color and
 /// background custom emoji for the current user". The `available_accent_color_ids`
-/// from `updateProfileAccentColors` (schema:10963) are the settable ids;
+/// from `updateProfileAccentColors` (schema:10964) are the settable ids;
 /// pass -1 for no accent color. The caller preserves the current
 /// `profile_background_custom_emoji_id` (Quill has no background-emoji
 /// picker — a separate unchecked concern).
