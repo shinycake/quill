@@ -556,6 +556,19 @@ pub enum RequestPurpose {
     /// Applied optimistically by the driver at send time; a TDLib error
     /// restores the previous username via `PendingRequest::rollback`.
     SetSupergroupUsername,
+    /// Slice: group/channel title edit — `setChatTitle` (schema 1.8.67,
+    /// line 13430). Response is `ok`; `updateChatTitle` carries the new
+    /// title. No optimistic state: the update arrives from the server.
+    SetChatTitle,
+    /// Slice: group/channel description edit — `setChatDescription`
+    /// (schema 1.8.67, line 13533). Response is `ok`; TDLib has no
+    /// `updateChatDescription` broadcast, so the new description arrives
+    /// on the next full-info pull. No optimistic state.
+    SetChatDescription,
+    /// Slice: group/channel photo edit — `setChatPhoto` (schema 1.8.67,
+    /// line 13435). Response is `ok`; `updateChatPhoto` carries the new
+    /// photo. No optimistic state: the update arrives from the server.
+    SetChatPhoto,
     /// Slice G1: `setChatMemberTag` (schema 1.8.67, line 13598) — the
     /// admin custom-title setter (Telegram X `EditRightsController`
     /// drives the "Custom title" field through it). Response is `ok`;

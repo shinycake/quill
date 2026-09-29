@@ -1759,6 +1759,64 @@ pub fn set_supergroup_username(extra: RequestId, supergroup_id: i64, username: &
     .to_string()
 }
 
+/// Slice: group/channel title edit — `setChatTitle` (TDLib 1.8.67,
+/// `schema/td_api.tl:13430`):
+/// `setChatTitle chat_id:int53 title:string = Ok;`
+/// "Changes the chat title. Supported only for basic groups, supergroups
+/// and channels. Requires can_change_info member right" — "New title of
+/// the chat; 1-128 characters". Length is validated client-side by the
+/// driver; the server confirms via `updateChatTitle`.
+pub fn set_chat_title(extra: RequestId, chat_id: ChatId, title: &str) -> String {
+    json!({
+        "@type": "setChatTitle",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "title": title,
+    })
+    .to_string()
+}
+
+/// Slice: group/channel description edit — `setChatDescription`
+/// (TDLib 1.8.67, `schema/td_api.tl:13533`):
+/// `setChatDescription chat_id:int53 description:string = Ok;`
+/// "Changes information about a chat. Available for basic groups,
+/// supergroups, and channels. Requires can_change_info member right" —
+/// "New chat description; 0-255 characters". Empty string clears the
+/// description. TDLib has no `updateChatDescription` broadcast; the new
+/// description arrives on the next `getSupergroupFullInfo` /
+/// `getBasicGroupFullInfo` pull. Length is validated client-side by the
+/// driver.
+pub fn set_chat_description(extra: RequestId, chat_id: ChatId, description: &str) -> String {
+    json!({
+        "@type": "setChatDescription",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "description": description,
+    })
+    .to_string()
+}
+
+/// Slice: group/channel photo edit — `setChatPhoto` (TDLib 1.8.67,
+/// `schema/td_api.tl:13435`):
+/// `setChatPhoto chat_id:int53 photo:InputChatPhoto = Ok;`
+/// "Changes the photo of a chat. Supported only for basic groups,
+/// supergroups and channels. Requires can_change_info member right" —
+/// "New chat photo; pass null to delete the chat photo". `photo_json` is
+/// the `InputChatPhoto` object — the `inputChatPhotoStatic` /
+/// `inputFileLocal` shape (schema lines 1042, 1039), or
+/// `serde_json::Value::Null` to delete (a null top-level `photo`, not an
+/// `inputChatPhotoPrevious`, which is only "a previously used profile
+/// photo of the current user"). The server confirms via `updateChatPhoto`.
+pub fn set_chat_photo(extra: RequestId, chat_id: ChatId, photo_json: Value) -> String {
+    json!({
+        "@type": "setChatPhoto",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "photo": photo_json,
+    })
+    .to_string()
+}
+
 /// Slice G1: `setChatMemberTag` (TDLib 1.8.67, `schema/td_api.tl:13598`):
 /// `setChatMemberTag chat_id:int53 user_id:int53 tag:string = Ok;`
 /// "Changes the tag or custom title of a chat member" — this is the
@@ -9247,6 +9305,64 @@ mod channel_requests_tests {
         assert_eq!(v["description"], "desc");
         assert!(v["location"].is_null());
         assert!(v["for_import"].as_bool() == Some(false));
+    }
+
+    #[test]
+    fn group_info_edit_request_shapes() {
+        use super::{set_chat_description, set_chat_photo, set_chat_title};
+
+        // `setChatTitle chat_id:int53 title:string = Ok` (schema 1.8.67,
+        // line 13430).
+        let v: serde_json::Value =
+            serde_json::from_str(&set_chat_title(RequestId(81), ChatId(9), "Rustaceans")).unwrap();
+        assert_eq!(v["@type"], "setChatTitle");
+        assert_eq!(v["chat_id"], 9);
+        assert_eq!(v["title"], "Rustaceans");
+        // Boundary lengths encode fine; the driver enforces 1-128.
+        let title_128 = "x".repeat(128);
+        let v: serde_json::Value =
+            serde_json::from_str(&set_chat_title(RequestId(82), ChatId(9), &title_128)).unwrap();
+        assert_eq!(v["title"], title_128);
+
+        // `setChatDescription chat_id:int53 description:string = Ok`
+        // (schema 1.8.67, line 13533); empty clears, 255 is the max.
+        let v: serde_json::Value =
+            serde_json::from_str(&set_chat_description(RequestId(83), ChatId(9), "about")).unwrap();
+        assert_eq!(v["@type"], "setChatDescription");
+        assert_eq!(v["chat_id"], 9);
+        assert_eq!(v["description"], "about");
+        let desc_255 = "y".repeat(255);
+        let v: serde_json::Value =
+            serde_json::from_str(&set_chat_description(RequestId(84), ChatId(9), &desc_255))
+                .unwrap();
+        assert_eq!(v["description"], desc_255);
+        let v: serde_json::Value =
+            serde_json::from_str(&set_chat_description(RequestId(85), ChatId(9), "")).unwrap();
+        assert_eq!(v["description"], "");
+
+        // `setChatPhoto chat_id:int53 photo:InputChatPhoto = Ok` (schema
+        // 1.8.67, line 13435) — `inputChatPhotoStatic` / `inputFileLocal`.
+        let photo_json = serde_json::json!({
+            "@type": "inputChatPhotoStatic",
+            "photo": { "@type": "inputFileLocal", "path": "/tmp/pic.jpg" },
+        });
+        let v: serde_json::Value =
+            serde_json::from_str(&set_chat_photo(RequestId(86), ChatId(9), photo_json)).unwrap();
+        assert_eq!(v["@type"], "setChatPhoto");
+        assert_eq!(v["chat_id"], 9);
+        assert_eq!(v["photo"]["@type"], "inputChatPhotoStatic");
+        assert_eq!(v["photo"]["photo"]["@type"], "inputFileLocal");
+        assert_eq!(v["photo"]["photo"]["path"], "/tmp/pic.jpg");
+        // Delete = null top-level `photo` ("pass null to delete the chat
+        // photo", schema line 13435) — not `inputChatPhotoPrevious`,
+        // which is only a reused *user profile* photo.
+        let v: serde_json::Value = serde_json::from_str(&set_chat_photo(
+            RequestId(87),
+            ChatId(9),
+            serde_json::Value::Null,
+        ))
+        .unwrap();
+        assert!(v["photo"].is_null());
     }
 
     #[test]
