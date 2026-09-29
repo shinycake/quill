@@ -55,8 +55,8 @@ fn canonical_file(path: &Path) -> Option<PathBuf> {
 /// per process; `prepare_connect` sets the real scope, default is "primary".
 static MEDIA_CACHE_SCOPE: OnceLock<String> = OnceLock::new();
 
-/// Set the account scope used by [`media_cache_base`]. Called once from
-/// `prepare_connect`; later calls are ignored.
+/// Set the account scope used by [`media_cache_base`]. Called from
+/// `plan_restore` once per connect; later calls are ignored.
 pub fn set_media_cache_scope(scope: &str) {
     let _ = MEDIA_CACHE_SCOPE.set(scope.to_owned());
 }
