@@ -7,6 +7,7 @@ pub mod requests;
 pub mod requests_emoji;
 pub mod requests_group_stickers;
 pub mod requests_payments;
+pub mod requests_privacy;
 pub mod requests_story;
 pub mod story_areas;
 

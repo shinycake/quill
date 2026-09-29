@@ -19,6 +19,7 @@ use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::notify::NotificationSoundKind;
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
+use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use crate::rich::RichBlock;
 use crate::settings::{
     AccountPaths, InstantViewMode, load_call_prefs, load_contact_prefs, load_media_prefs,
@@ -29,9 +30,8 @@ use crate::state::{
     ChatSearchJumpNeed, ChatStatisticsFetch, ComposerLinkPreview, ForwardFlight, InfoPanelTarget,
     InlineQueryFetch, InlineQuerySlot, InstantViewPage, InviteLinkFetch, JoinRequestFetch,
     LoginUrlRequest, MemberListFilter, MemberStatusChange, PasswordOp, PaymentRequest,
-    PollVotersFetch, PrivacyKeyState, PrivacyRuleDetail, RequestPurpose, RequestRollback,
-    SearchStatus, Session, SharedMediaTab, ShutdownPhase, SupergroupMembersFetch,
-    WelcomeMessagesFetch,
+    PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus, Session, SharedMediaTab,
+    ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
@@ -48,8 +48,7 @@ use crate::telegram::ffi::{LibraryOrigin, TdJsonError, resolve_tdjson_path};
 use crate::telegram::requests::{
     AnimationSend, ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet,
     GroupCallJoinParams, ImportedContact, InputGroupCallRef, MessageSenderRef, PollSend,
-    PollTypeSend, PrivacySettingKey, PrivacyWho, SendReply, SetTdlibParameters, StickerSend,
-    VideoNoteSend,
+    PollTypeSend, PrivacyWho, SendReply, SetTdlibParameters, StickerSend, VideoNoteSend,
     VideoNoteThumbnailSend, VideoSend, VoiceNoteSend, accept_call_with_protocol,
     activate_story_stealth_mode as activate_story_stealth_mode_request, add_chat_member,
     add_chat_members, add_chat_to_list, add_chat_to_list_value, add_chat_welcome_message,
@@ -74,8 +73,8 @@ use crate::telegram::requests::{
     edit_story as edit_story_request, edit_story_cover as edit_story_cover_request, end_group_call,
     end_group_call_recording, end_group_call_screen_sharing, forward_messages, get_account_ttl,
     get_active_sessions, get_archive_chat_list_settings, get_authorization_state,
-    get_available_chat_boost_slots, get_basic_group_full_info, get_blocked_message_senders,
-    get_bot_similar_bots, get_callback_query_answer, get_callback_query_answer_game,
+    get_available_chat_boost_slots, get_basic_group_full_info, get_bot_similar_bots,
+    get_callback_query_answer, get_callback_query_answer_game,
     get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
     get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
     get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
@@ -85,9 +84,9 @@ use crate::telegram::requests::{
     get_inline_query_results, get_installed_sticker_sets, get_link_preview, get_login_url,
     get_login_url_info, get_me, get_message_link, get_message_properties,
     get_message_thread_history, get_password_state, get_payment_form, get_payment_receipt,
-    get_poll_voters, get_privacy_rules, get_read_date_privacy_settings, get_saved_animations,
-    get_saved_notification_sounds, get_scope_notification_settings, get_secret_chat,
-    get_sticker_set, get_storage_statistics, get_story, get_story_available_reactions,
+    get_poll_voters, get_saved_animations, get_saved_notification_sounds,
+    get_scope_notification_settings, get_secret_chat, get_sticker_set, get_storage_statistics,
+    get_story, get_story_available_reactions,
     get_story_interactions as get_story_interactions_request, get_supergroup,
     get_supergroup_full_info, get_supergroup_members, get_user_full_info,
     get_user_privacy_setting_rules, get_video_chat_invite_link, get_video_chat_rtmp_url,
@@ -138,6 +137,9 @@ use crate::telegram::requests::{
 };
 use crate::telegram::requests_group_stickers::{
     set_supergroup_custom_emoji_sticker_set, set_supergroup_sticker_set,
+use crate::telegram::requests_privacy::{
+    PrivacySettingKey, get_blocked_message_senders, get_privacy_rules,
+    get_read_date_privacy_settings, set_privacy_rules, set_read_date_privacy_settings,
 };
 use crate::telegram::requests_story::{
     add_story_album_stories, create_story_album, delete_story_album, get_chat_archived_stories,

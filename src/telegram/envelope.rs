@@ -2,6 +2,7 @@ use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use super::story_areas::parse_story_areas;
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
+use crate::privacy::PrivacyRule;
 use crate::rich::{RichBlock, parse_rich_message};
 use crate::telegram::envelope_story::{ParsedStoryAlbum, parse_story_album};
 use crate::telegram::requests::ArchiveChatListSettings;
@@ -84,36 +85,6 @@ pub struct InlineQueryResultsButton {
     pub parameter: String,
     /// WebApp url, empty unless `kind == "web_app"` (schema `td_api.tl:7704`).
     pub url: String,
-/// Slice S3: one parsed `UserPrivacySettingRule` — the constructor name
-/// plus the exception ids it carries (`userPrivacySettingRuleAllowUsers`
-/// / `userPrivacySettingRuleRestrictUsers` / the chat-member variants,
-/// schema 1.8.67, :8955-:8973).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrivacyRule {
-    pub name: String,
-    pub user_ids: Vec<i64>,
-    pub chat_ids: Vec<i64>,
-}
-
-impl PrivacyRule {
-    pub fn parse(value: &Value) -> Self {
-        let ids = |key: &str| {
-            value
-                .get(key)
-                .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(Value::as_i64).collect())
-                .unwrap_or_default()
-        };
-        Self {
-            name: value
-                .get("@type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            user_ids: ids("user_ids"),
-            chat_ids: ids("chat_ids"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
