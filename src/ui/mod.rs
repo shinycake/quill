@@ -20317,7 +20317,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(label),
+                    .child(label.to_owned()),
             )
             .child(
                 Switch::new(format!("badge-{id}"))
