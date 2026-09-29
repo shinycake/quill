@@ -142,11 +142,13 @@ use crate::telegram::requests::{
 use crate::telegram::requests_data_settings::{
     get_auto_download_settings_presets, remove_all_files_from_downloads, set_auto_download_settings,
 };
+use crate::telegram::requests_group_stickers::{
+    set_supergroup_custom_emoji_sticker_set, set_supergroup_sticker_set,
+};
 use crate::telegram::requests_privacy::{
     PrivacySettingKey, get_blocked_message_senders, get_privacy_rules,
     get_read_date_privacy_settings, set_privacy_rules, set_read_date_privacy_settings,
-use crate::telegram::requests_group_stickers::{
-    set_supergroup_custom_emoji_sticker_set, set_supergroup_sticker_set,};
+};
 use crate::telegram::requests_story::{
     add_story_album_stories, create_story_album, delete_story_album, get_chat_archived_stories,
     get_chat_posted_to_chat_page_stories, get_chat_story_albums, get_story_album_stories,
