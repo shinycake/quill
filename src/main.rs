@@ -102,6 +102,29 @@ fn ui_main(args: &[String]) {
                     },
                     move |window, cx| {
                         let view = cx.new(|cx| ui::QuillApp::new(window, cx, credentials.clone()));
+                        // parity:platform-tray-icon — system tray icon with
+                        // unread count, synced on a 1s UI-thread timer. The
+                        // tray module no-ops when the count is unchanged or
+                        // the OS exposes no system tray.
+                        cx.spawn({
+                            let tray_view = view.downgrade();
+                            async move |cx| {
+                                loop {
+                                    cx.background_executor()
+                                        .timer(std::time::Duration::from_secs(1))
+                                        .await;
+                                    let alive = tray_view
+                                        .update(cx, |this, _| {
+                                            quill::tray::sync_tray(this.session())
+                                        })
+                                        .is_ok();
+                                    if !alive {
+                                        break;
+                                    }
+                                }
+                            }
+                        })
+                        .detach();
                         // kit Phase 2 (redo): shell mounts the kit dialog +
                         // notification layers that Root does not mount itself.
                         let shell = cx.new(|_cx| ui::QuillShell::new(view));

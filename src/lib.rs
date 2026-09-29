@@ -35,6 +35,7 @@ pub mod story_restriction;
 pub mod story_viewer;
 pub mod telegram;
 pub mod text;
+pub mod tray;
 pub mod video;
 pub mod voice;
 

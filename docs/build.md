@@ -22,6 +22,21 @@ cargo run --no-default-features -- --connect-smoke
 
 See `docs/credentials.md`. Requires `QUILL_TDJSON_PATH` and owner credentials. Prints one redacted line (`SMOKE_OK wait-phone` / `SMOKE_BLOCKED …`).
 
+## System dependencies (Linux)
+
+`cargo build --features ui` on Linux additionally needs the GTK3 development
+libraries — the `tray-icon` crate's AppIndicator backend links GTK3
+unconditionally on Linux (no feature flag drops it):
+
+```bash
+sudo apt-get install libgtk-3-dev
+```
+
+Without it the build fails in the `gdk-pixbuf-sys` build script
+(`gdk-3.0.pc` missing). Not needed on macOS (tray-icon uses Cocoa there).
+CI's Linux job does not build `--features ui`, so this dependency is
+documented here rather than CI-enforced.
+
 ## Tests (Linux CI)
 
 ```bash
