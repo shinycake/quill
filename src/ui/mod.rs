@@ -33508,15 +33508,16 @@ impl QuillApp {
             if is_quiz {
                 let marked = quiz_correct_row == Some(index);
                 row = row.child(
-                    Radio::new(format!("poll-quiz-correct-{index}"))
+                    // Phase 6: kit Checkbox, not Radio — a quiz correct answer
+                    // is toggleable (clicking the marked option clears it),
+                    // and kit Radio cannot deselect itself.
+                    Checkbox::new(format!("poll-quiz-correct-{index}"))
                         .checked(marked)
                         .accessibility_label(format!(
                             "Mark option {} as the correct answer",
                             index + 1
                         ))
                         .on_click(cx.listener(move |this, &on, _, cx| {
-                            // Phase 6: kit Radio. Requested value wins; clicking
-                            // the marked option again clears it (was: toggle).
                             if let Some(dialog) = this.poll_dialog.as_mut() {
                                 dialog.quiz_correct_row = if on { Some(index) } else { None };
                             }
