@@ -4533,7 +4533,7 @@ impl QuillApp {
                     app.open_community_hub(cx);
                 }
                 _ => {
-                    app.open_community_info(9001, cx);
+                    app.open_info_panel_target(InfoPanelTarget::Community(9001), window, cx);
                 }
             }
             app.status_note = "screenshot demo — communities G10".into();
@@ -14455,22 +14455,6 @@ impl QuillApp {
 
     fn close_community_hub(&mut self, cx: &mut Context<Self>) {
         self.community_ui.hub_open = false;
-        cx.notify();
-    }
-
-    /// Slice G10: open the community info panel and fetch its full
-    /// info on the live path (`loadCommunityFullInfo` is cached and
-    /// deduped by the driver); the demo path relies on the fixture.
-    fn open_community_info(&mut self, community_id: i64, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            live.driver
-                .set_info_panel(Some(InfoPanelTarget::Community(community_id)));
-            if let Err(err) = live.driver.load_community_full_info(community_id) {
-                self.status_note = format!("info request failed: {err:?}");
-            }
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.open_info_panel = Some(InfoPanelTarget::Community(community_id));
-        }
         cx.notify();
     }
 

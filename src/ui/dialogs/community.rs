@@ -260,7 +260,11 @@ pub fn build_community_hub_dialog(
                             .ghost()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.close_community_hub(cx);
-                                this.open_community_info(community_id, cx);
+                                this.open_info_panel_target(
+                                    InfoPanelTarget::Community(community_id),
+                                    window,
+                                    cx,
+                                );
                                 this.close_kit_dialog_if_done(DialogKind::CommunityHub, window, cx);
                             })),
                     ),
@@ -287,7 +291,7 @@ pub fn build_community_hub_dialog(
 /// `InfoPanelTarget::Community` — name with an edit button (opens the
 /// `CommunityName` text prompt), full-info counts, and the member
 /// chats with hidden badges. `loadCommunityFullInfo` is kicked off by
-/// `open_community_info`; a missing pack renders "Loading…".
+/// `open_info_panel_target`; a missing pack renders "Loading…".
 pub fn render_community_info_panel(
     app: &QuillApp,
     community_id: i64,
