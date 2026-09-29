@@ -270,8 +270,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.67 method) <!-- parity:communities-add-chat -->
 - [ ] Communities: admin-rights management (blocked: no TDLib 1.8.67 method) <!-- parity:communities-admin-rights -->
 - [ ] Communities: info panel (partial: Quill backend landed — loadFullInfo/setName builders + drivers + state sync; no Quill UI) <!-- parity:communities-info -->
-- [ ] Communities: "chat added to community" service message <!-- parity:groups-added-to-community -->
-- [ ] Communities: "chat removed from community" service message <!-- parity:groups-removed-from-community -->
+- [ ] Communities: "chat added to community" service message (partial: envelope parsing done — MessageContent::ChatAddedToCommunity { community_id } + preview; row rendering deferred post-Phase-9) <!-- parity:groups-added-to-community -->
+- [ ] Communities: "chat removed from community" service message (partial: envelope parsing done — MessageContent::ChatRemovedFromCommunity + preview; row rendering deferred post-Phase-9) <!-- parity:groups-removed-from-community -->
 - [ ] Communities: community search filter (searchMessagesChatTypeFilterCommunity) <!-- parity:communities-search-filter -->
 - [ ] Communities: community join service message <!-- parity:communities-join-service-message -->
 

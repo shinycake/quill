@@ -5295,6 +5295,16 @@ pub enum MessageContent {
     /// has been taken. No fields; attribution comes from
     /// `message.is_outgoing` at render time.
     ScreenshotTaken,
+    /// Slice C2k: `messageChatAddedToCommunity` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5360`) — the chat was added to a community.
+    /// Only `community_id` is kept; the renderer resolves the community
+    /// name post-Phase-9 (the envelope layer has no name lookup).
+    ChatAddedToCommunity {
+        community_id: i64,
+    },
+    /// Slice C2k: `messageChatRemovedFromCommunity` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5363`) — the chat was removed from a community.
+    ChatRemovedFromCommunity,
     /// M2: `messageRichMessage` (TDLib 1.8.67, `schema/td_api.tl:5143`) —
     /// an anniversary rich message; `blocks` are the parsed `pageBlock*`
     /// list (possibly partial when `is_full` is false — the renderer
@@ -6108,6 +6118,15 @@ impl MessageContent {
             // Phase S1: chat-list preview for `messageScreenshotTaken`
             // (TGX ChatContentScreenshot).
             MessageContent::ScreenshotTaken => "Took a screenshot".to_string(),
+            // Slice C2k: community service messages (TGX
+            // ActionChatAddedToCommunityUnknown / ActionChatRemovedFromCommunity;
+            // no name lookup in the envelope layer, so no "%1$s" form).
+            MessageContent::ChatAddedToCommunity { .. } => {
+                "This chat was added to a community".to_string()
+            }
+            MessageContent::ChatRemovedFromCommunity => {
+                "This chat was removed from a community".to_string()
+            }
             // Slice P1: chat-list previews for payments (TGX shows the
             // invoice title / "Payment successful").
             MessageContent::Invoice(invoice) => {
@@ -10080,6 +10099,23 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         // "{name} took a screenshot", TGX YouTookAScreenshot /
         // XTookAScreenshot).
         Some("messageScreenshotTaken") => (MessageContent::ScreenshotTaken, Vec::new()),
+        // Slice C2k: `messageChatAddedToCommunity` (schema 1.8.67, line
+        // 5360) — keep only `community_id`; name resolution is the
+        // post-Phase-9 renderer's job.
+        Some("messageChatAddedToCommunity") => (
+            MessageContent::ChatAddedToCommunity {
+                community_id: value
+                    .get("community_id")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+            },
+            Vec::new(),
+        ),
+        // Slice C2k: `messageChatRemovedFromCommunity` (schema 1.8.67,
+        // line 5363) — no fields.
+        Some("messageChatRemovedFromCommunity") => {
+            (MessageContent::ChatRemovedFromCommunity, Vec::new())
+        }
         // M2: `messageRichMessage` (schema 1.8.67, line 5143).
         Some("messageRichMessage") => parse_message_rich_message(value),
         // B1: `messageGame` (schema 1.8.67, line 5234) — keep only
@@ -15473,6 +15509,39 @@ mod channel_envelope_tests {
         let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
         assert!(matches!(parsed.content, MessageContent::ScreenshotTaken));
         assert_eq!(parsed.content.preview(), "Took a screenshot");
+    }
+
+    #[test]
+    fn service_message_chat_added_to_community_parsed() {
+        // Slice C2k: `messageChatAddedToCommunity` (schema 1.8.67, line
+        // 5360) keeps only the community id; the preview carries no
+        // name because the envelope layer has no name lookup.
+        let json = r#"{"id":503,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageChatAddedToCommunity","community_id":123}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(matches!(
+            parsed.content,
+            MessageContent::ChatAddedToCommunity { community_id: 123 }
+        ));
+        assert_eq!(
+            parsed.content.preview(),
+            "This chat was added to a community"
+        );
+    }
+
+    #[test]
+    fn service_message_chat_removed_from_community_parsed() {
+        // Slice C2k: `messageChatRemovedFromCommunity` (schema 1.8.67,
+        // line 5363) has no fields.
+        let json = r#"{"id":504,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageChatRemovedFromCommunity"}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(matches!(
+            parsed.content,
+            MessageContent::ChatRemovedFromCommunity
+        ));
+        assert_eq!(
+            parsed.content.preview(),
+            "This chat was removed from a community"
+        );
     }
 
     #[test]

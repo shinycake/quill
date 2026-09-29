@@ -5732,3 +5732,21 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   refused (`Ok(None)`), invalid (`Err(InvalidRequest)`), and sent
   (`Ok(Some(_))`) so the UI needs no new error plumbing. Description
   refresh-after-edit is explicitly undecided (see honest-gaps note above).
+## Slice C2k — COMMUNITY SERVICE-MESSAGE ENVELOPE PARSING (2026-09-28)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `messageChatAddedToCommunity community_id:int53 = MessageContent;` (:5360).
+  - `messageChatRemovedFromCommunity = MessageContent;` (:5363).
+- **Telegram X reference (verified verbatim, `~/workspace/telegram-x/app/src/main/res/values/strings.xml:1432-1434`):**
+  - `ActionChatAddedToCommunity` = `This chat was added to community "%1$s"`.
+  - `ActionChatAddedToCommunityUnknown` = `This chat was added to community`.
+  - `ActionChatRemovedFromCommunity` = `This chat was removed from community`.
+- **Built (backend only — row rendering deferred, same pattern as C2j):**
+  - Envelope (`src/telegram/envelope.rs`): `MessageContent::ChatAddedToCommunity { community_id: i64 }` and `MessageContent::ChatRemovedFromCommunity` variants, parse arms on `@type`, and `preview()` labels `"This chat was added to a community"` / `"This chat was removed from a community"` (no `%1$s` form — the envelope layer has no community-name lookup; the id alone is kept for the renderer to resolve post-Phase-9).
+  - Composer (`src/composer.rs`): both variants added to the not-editable service-row arm (exhaustive match).
+  - Tests: `service_message_chat_added_to_community_parsed`, `service_message_chat_removed_from_community_parsed` (variant + community_id + preview).
+- **Key decisions (ponytail):**
+  - Kept only `community_id`; no name lookup, no renderer data structures — the post-Phase-9 renderer resolves the name from existing community state.
+- **Known open item:** two exhaustive `MessageContent` matches in `src/ui/mod.rs` (the not-editable caption arm and the inline-keyboard arm) need the new variants added — `src/ui/mod.rs` is frozen for kit Phase 9, so this lands when it unfreezes (final UI gate at PR time).
+- **Out of this slice (left unchecked with evidence):**
+  - Row rendering of both service messages (README `parity:groups-added-to-community` / `parity:groups-removed-from-community` stay `[ ]` with the partial note).
