@@ -229,9 +229,6 @@ pub enum ConnectBlocker {
     LockedStore,
     StoreError,
     TdjsonLoad,
-    /// No platform data directory could be resolved; refusing to scatter
-    /// account state under the working directory.
-    NoSafeDataDir,
 }
 
 impl ConnectBlocker {
@@ -251,9 +248,6 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => {
                 "tdjson library found but failed to load (missing symbols or wrong arch)"
             }
-            ConnectBlocker::NoSafeDataDir => {
-                "no platform data directory — refusing to write account state under the working directory"
-            }
         }
     }
 
@@ -266,7 +260,6 @@ impl ConnectBlocker {
             ConnectBlocker::LockedStore => "locked-store",
             ConnectBlocker::StoreError => "store-error",
             ConnectBlocker::TdjsonLoad => "tdjson-load",
-            ConnectBlocker::NoSafeDataDir => "no-safe-data-dir",
         }
     }
 }
@@ -12639,7 +12632,7 @@ pub fn start_live_connect(
         ConnectGate::Blocked(b) => return Err(b),
         ConnectGate::Ready { .. } => {}
     }
-    let app_root = safe_app_root().ok_or(ConnectBlocker::NoSafeDataDir)?;
+    let app_root = safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
     let prepared = prepare_connect(&app_root, AccountKey::primary(), store, &credentials)?;
     let live = LiveTdJson::connect().map_err(|e| match e {
         TdJsonError::NotFound => ConnectBlocker::MissingTdjson,
@@ -12713,14 +12706,6 @@ mod tests {
     use serde_json::Value;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::AtomicU64;
-
-    #[test]
-    fn no_safe_data_dir_blocker_is_descriptive() {
-        // Fail-closed refusal must tell the user why, with a stable slug.
-        let b = ConnectBlocker::NoSafeDataDir;
-        assert!(!b.user_message().is_empty());
-        assert_eq!(b.slug(), "no-safe-data-dir");
-    }
 
     static TDJSON_ENV_LOCK: StdMutex<()> = StdMutex::new(());
 
