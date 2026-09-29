@@ -24081,7 +24081,7 @@ impl QuillApp {
         let Some(me) = me else {
             return;
         };
-        let (first, last, bio, username) = self
+        let (first, last, bio, username, accent) = self
             .session()
             .and_then(|s| s.user(me))
             .map(|u| {
@@ -24095,6 +24095,8 @@ impl QuillApp {
                     u.last_name.clone(),
                     bio,
                     u.editable_username.clone(),
+                    // A12: -1 = no accent color (schema 1.8.67, line 2386).
+                    u.profile_accent_color_id,
                 )
             })
             .unwrap_or_default();
@@ -24104,7 +24106,7 @@ impl QuillApp {
             live.driver.session.username_check_pending = None;
         }
         self.edit_profile_dialog = Some(EditProfileDialog::new(
-            window, cx, &first, &last, &bio, &username,
+            window, cx, &first, &last, &bio, &username, accent,
         ));
         if let Some(dialog) = &self.edit_profile_dialog {
             dialog
@@ -24310,6 +24312,38 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// A12: `setProfileAccentColor` from the dialog. The current
+    /// `profile_background_custom_emoji_id` is preserved by the driver
+    /// (Quill has no background-emoji picker).
+    fn submit_profile_accent(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = &self.edit_profile_dialog else {
+            return;
+        };
+        let selected = dialog.accent_selection;
+        let current = self
+            .session()
+            .and_then(|s| s.my_user_id)
+            .and_then(|me| self.session().and_then(|s| s.user(me)))
+            .map(|u| u.profile_accent_color_id)
+            .unwrap_or(-1);
+        if selected == current {
+            self.status_note = "Accent color unchanged.".into();
+            cx.notify();
+            return;
+        }
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = "Demo mode: profile edits need a live session.".into();
+            cx.notify();
+            return;
+        };
+        live.driver.session.profile_edit_error = None;
+        match live.driver.set_profile_accent_color(selected) {
+            Ok(_) => self.status_note = "Accent color update requested.".into(),
+            Err(err) => self.status_note = format!("set accent color failed: {err:?}"),
+        }
+        cx.notify();
+    }
+
     /// A5: `deleteProfilePhoto` for the current photo (`chatPhoto.id`
     /// from the cached user full info).
     fn remove_profile_photo(&mut self, cx: &mut Context<Self>) {
@@ -24402,11 +24436,12 @@ impl QuillApp {
                 .and_then(|s| s.username_check_pending.clone())
                 .is_some_and(|text| text == username_text);
         let error = self.session().and_then(|s| s.profile_edit_error.clone());
-        let section = |title: &'static str| {
+        let section_muted = cx.theme().muted_foreground;
+        let section = move |title: &'static str| {
             div()
                 .text_xs()
                 .font_semibold()
-                .text_color(cx.theme().muted_foreground)
+                .text_color(section_muted)
                 .child(title)
         };
         let verdict_line: AnyElement = if checking {
@@ -24619,6 +24654,72 @@ impl QuillApp {
                         ),
                     ),
             );
+        // A12: accent color picker — swatches from the server palette
+        // (`updateProfileAccentColors`), saved via `setProfileAccentColor`.
+        // The server pushes the palette after authorization; until then
+        // only "None" shows (honest empty state, not a fake palette).
+        let (available_ids, palette) = self
+            .session()
+            .map(|s| {
+                (
+                    s.available_accent_color_ids.clone(),
+                    s.profile_accent_colors.clone(),
+                )
+            })
+            .unwrap_or_default();
+        let mut swatch_row = div().flex().flex_wrap().gap_2();
+        for id in &available_ids {
+            let color = palette
+                .iter()
+                .find(|c| c.id == *id)
+                .map(|c| c.swatch_rgb())
+                .unwrap_or(0x229ED9);
+            let selected = dialog.accent_selection == *id;
+            let id = *id;
+            swatch_row = swatch_row.child(self.appearance_swatch(
+                format!("edit-profile-accent-{id}"),
+                color,
+                "",
+                selected,
+                cx,
+                move |this, cx| {
+                    if let Some(dialog) = this.edit_profile_dialog.as_mut() {
+                        dialog.accent_selection = id;
+                    }
+                    cx.notify();
+                },
+            ));
+        }
+        let none_selected = dialog.accent_selection == -1;
+        swatch_row = swatch_row.child(self.appearance_chip(
+            "edit-profile-accent-none",
+            "None",
+            none_selected,
+            cx,
+            |this, cx| {
+                if let Some(dialog) = this.edit_profile_dialog.as_mut() {
+                    dialog.accent_selection = -1;
+                }
+                cx.notify();
+            },
+        ));
+        panel = panel.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(section("Accent color"))
+                .child(swatch_row)
+                .child(
+                    div().flex().gap_2().child(
+                        Button::new("edit-profile-save-accent")
+                            .label("Save accent color")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_profile_accent(cx);
+                            })),
+                    ),
+                ),
+        );
         Some(panel.into_any_element())
     }
 
@@ -42373,11 +42474,13 @@ fn apply_ready_profile_edit(session: &mut Session, sink: &Arc<MemorySink>, seq: 
     session.my_user_id = Some(777);
     let info_extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 777);
     let jsons = [
-        r#"{"@type":"updateUser","user":{"id":777,"first_name":"Demo","last_name":"Viewer","usernames":{"@type":"usernames","active_usernames":["demoviewer","demoviewer_alt"],"disabled_usernames":["oldhandle"],"editable_username":"demoviewer","collectible_usernames":[]},"phone_number":"+15550131","type":{"@type":"userTypeRegular"}}}"#.to_string(),
+        r#"{"@type":"updateUser","user":{"id":777,"first_name":"Demo","last_name":"Viewer","usernames":{"@type":"usernames","active_usernames":["demoviewer","demoviewer_alt"],"disabled_usernames":["oldhandle"],"editable_username":"demoviewer","collectible_usernames":[]},"phone_number":"+15550131","profile_accent_color_id":3,"profile_background_custom_emoji_id":0,"type":{"@type":"userTypeRegular"}}}"#.to_string(),
         format!(
             r#"{{"@type":"userFullInfo","@extra":"{}","bio":{{"@type":"formattedText","text":"Quill profile slice demo — bio, usernames and photo id are injected.","entities":[]}},"photo":{{"@type":"chatPhoto","id":555001,"sizes":[]}},"block_list":null,"birthdate":null,"bot_info":null}}"#,
             info_extra.0,
         ),
+        // Slice A12: seed the accent palette so the dialog shows swatches.
+        r#"{"@type":"updateProfileAccentColors","colors":[{"@type":"profileAccentColor","id":1,"light_theme_colors":{"@type":"profileAccentColors","palette_colors":[16749055],"background_colors":[],"story_colors":[]},"dark_theme_colors":{"@type":"profileAccentColors","palette_colors":[16749055],"background_colors":[],"story_colors":[]}},{"@type":"profileAccentColor","id":3,"light_theme_colors":{"@type":"profileAccentColors","palette_colors":[43776],"background_colors":[],"story_colors":[]},"dark_theme_colors":{"@type":"profileAccentColors","palette_colors":[43776],"background_colors":[],"story_colors":[]}},{"@type":"profileAccentColor","id":5,"light_theme_colors":{"@type":"profileAccentColors","palette_colors":[255],"background_colors":[],"story_colors":[]},"dark_theme_colors":{"@type":"profileAccentColors","palette_colors":[255],"background_colors":[],"story_colors":[]}}],"available_accent_color_ids":[1,3,5]}"#.to_string(),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {

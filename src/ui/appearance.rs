@@ -260,7 +260,7 @@ impl QuillApp {
     }
 
     /// A selectable chip; the selected one gets the accent border.
-    fn appearance_chip(
+    pub(crate) fn appearance_chip(
         &self,
         id: impl Into<SharedString>,
         label: impl Into<SharedString>,
@@ -284,7 +284,7 @@ impl QuillApp {
     }
 
     /// A color swatch; the selected one gets the accent ring.
-    fn appearance_swatch(
+    pub(crate) fn appearance_swatch(
         &self,
         id: impl Into<SharedString>,
         color: u32,

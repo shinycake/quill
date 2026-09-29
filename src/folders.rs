@@ -255,6 +255,8 @@ mod tests {
             is_bot,
             status: UserStatusKind::Empty,
             photo_small_file_id: 0,
+            profile_accent_color_id: -1,
+            profile_background_custom_emoji_id: 0,
         }
     }
 

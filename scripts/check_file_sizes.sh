@@ -15,11 +15,11 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:49101"
-  "src/connect.rs:24898"
-  "src/state.rs:21773"
-  "src/telegram/envelope.rs:18633"
-  "src/telegram/requests.rs:10477"
+  "src/ui/mod.rs:49204"
+  "src/connect.rs:24922"
+  "src/state.rs:21854"
+  "src/telegram/envelope.rs:18722"
+  "src/telegram/requests.rs:10517"
   # Slice S17 (2026-09-29, merge-pipeline rebase post-#177): type-coherent
   # extensions only — ui/mod.rs +11 (49090 → 49101: peer-activity label
   # lookup on `conversation_header` + 3 "typing…" label swaps to
@@ -107,6 +107,20 @@ WAIVERS=(
   # `parse_payload` match (null-distinguishing block)). Slice tests live in
   # `tests/ephemeral_updates.rs`, never in the waived files.
   # (Waiver deltas are post-fmt exact line counts.)
+  # Slice A12 (2026-09-29, merge-pipeline rebase post-#179): type-coherent
+  # extensions only — ui/mod.rs +103 (49101 → 49204: accent `section()`
+  # closure borrow fix, `EditProfileDialog` ctor arg, `submit_profile_accent`
+  # method on `QuillApp`, accent-section render in the existing dialog body,
+  # demo-fixture palette seed); connect.rs +24 (24898 → 24922:
+  # `set_profile_accent_color` driver method on the existing `Connect`
+  # type + 1 import line); state.rs +81 (21773 → 21854: session palette
+  # fields + ctor init, `RequestPurpose` variant + profile-edit error arm,
+  # reducer arm, 2 tests); envelope.rs +89 (18633 → 18722: payload variant
+  # + parse arms on the existing matches, `ParsedUser` fields, 1 test);
+  # requests.rs +40 (10477 → 10517: builder fn + shape test). New domain
+  # module `src/telegram/profile_accent.rs` (93 lines) holds the palette
+  # types, parser, and 3 tests — the waived files grow only where the code
+  # must attach to existing types/matches.
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )

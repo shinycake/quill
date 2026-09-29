@@ -1,4 +1,5 @@
 use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
+use super::profile_accent::{ProfileAccentColor, parse_profile_accent_color};
 use super::story_areas::parse_story_areas;
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 use crate::data_settings::{AutoDownloadNetSettings, StorageChatStats};
@@ -303,6 +304,14 @@ pub enum EnvelopePayload {
     UpdateUser {
         user_id: UserId,
         user: ParsedUser,
+    },
+    /// Slice A12: `updateProfileAccentColors` (TDLib 1.8.67,
+    /// `schema/td_api.tl:10964`) — the accent palette plus the ids
+    /// `setProfileAccentColor` accepts. Stored in `Session`; drives the
+    /// edit-profile accent picker.
+    UpdateProfileAccentColors {
+        colors: Vec<ProfileAccentColor>,
+        available_ids: Vec<i32>,
     },
     /// `updateUserStatus` (schema 1.8.67, line 10729) — online / last-seen
     /// for a known user; refreshes the contacts list row.
@@ -2671,6 +2680,13 @@ pub struct ParsedUser {
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
     pub photo_small_file_id: i32,
+    /// A12: `user.profile_accent_color_id` (schema 1.8.67, line 2386) —
+    /// the accent color for the user's profile; -1 if none.
+    pub profile_accent_color_id: i32,
+    /// A12: `user.profile_background_custom_emoji_id` (schema 1.8.67,
+    /// line 2403) — preserved when `setProfileAccentColor` changes the
+    /// color; 0 if none.
+    pub profile_background_custom_emoji_id: i64,
 }
 
 impl ParsedUser {
@@ -7478,6 +7494,30 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 user: parsed,
             })
         }
+        // Slice A12: `updateProfileAccentColors` (schema:10964).
+        // Malformed palette entries are skipped; a missing
+        // `available_accent_color_ids` just means an empty picker.
+        "updateProfileAccentColors" => {
+            let colors = value
+                .get("colors")
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().filter_map(parse_profile_accent_color).collect())
+                .unwrap_or_default();
+            let available_ids = value
+                .get("available_accent_color_ids")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_i64())
+                        .filter_map(|n| i32::try_from(n).ok())
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(EnvelopePayload::UpdateProfileAccentColors {
+                colors,
+                available_ids,
+            })
+        }
         "updateUserStatus" => Ok(EnvelopePayload::UpdateUserStatus {
             user_id: UserId(int53(value.get("user_id"))?),
             status: parse_user_status(value.get("status")),
@@ -9412,6 +9452,16 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
             .and_then(|f| f.get("id")),
     ))
     .unwrap_or(0);
+    // A12: -1 = no profile accent color (schema 1.8.67, line 2386).
+    let profile_accent_color_id = value
+        .get("profile_accent_color_id")
+        .and_then(Value::as_i64)
+        .and_then(|n| i32::try_from(n).ok())
+        .unwrap_or(-1);
+    let profile_background_custom_emoji_id = value
+        .get("profile_background_custom_emoji_id")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     Some(ParsedUser {
         id,
         first_name,
@@ -9425,6 +9475,8 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_bot,
         status,
         photo_small_file_id,
+        profile_accent_color_id,
+        profile_background_custom_emoji_id,
     })
 }
 
@@ -15276,6 +15328,43 @@ mod channel_envelope_tests {
         match env.payload {
             EnvelopePayload::UpdateUserStatus { status, .. } => {
                 assert_eq!(status, UserStatusKind::Empty)
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_profile_accent_colors_parsed() {
+        // Slice A12: `updateProfileAccentColors` (schema 1.8.67, line
+        // 10964) — the palette and the settable accent ids.
+        let env = parse_envelope(
+            r#"{"@type":"updateProfileAccentColors","colors":[{"@type":"profileAccentColor","id":3,"light_theme_colors":{"@type":"profileAccentColors","palette_colors":[43776,65280],"background_colors":[1313280],"story_colors":[1966080,255]},"dark_theme_colors":{"@type":"profileAccentColors","palette_colors":[262144],"background_colors":[],"story_colors":[]}}],"available_accent_color_ids":[1,3,5]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateProfileAccentColors {
+                colors,
+                available_ids,
+            } => {
+                assert_eq!(available_ids, vec![1, 3, 5]);
+                assert_eq!(colors.len(), 1);
+                assert_eq!(colors[0].id, 3);
+                assert_eq!(colors[0].swatch_rgb(), 0xAB00);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Empty palette → tolerated, never a parse failure.
+        let env = parse_envelope(
+            r#"{"@type":"updateProfileAccentColors","colors":[],"available_accent_color_ids":[]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateProfileAccentColors {
+                colors,
+                available_ids,
+            } => {
+                assert!(colors.is_empty());
+                assert!(available_ids.is_empty());
             }
             other => panic!("{other:?}"),
         }

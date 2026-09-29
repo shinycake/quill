@@ -6540,3 +6540,28 @@ is applied to the stored message in place.
 - **Key decisions (ponytail):** mirror the existing `UpdateMessageContent` path rather than a parallel pipeline; in-place replacement, no new state shape.
 - **Not verifiable without live Telegram:** real timer-driven `updateMessageEphemeralContent` arrivals on a disappearing message.
 - **Out of this slice:** the ephemeral countdown UI itself (separate box).
+
+
+## Slice A12 — AUTH: PROFILE ACCENT COLOR (setProfileAccentColor) (2026-09-29)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `setProfileAccentColor profile_accent_color_id:int32 profile_background_custom_emoji_id:int64 = Ok;` (:14820) — "Changes the profile accent color and background custom emoji for the current user".
+  - `profileAccentColor id:int32 light_theme_colors:profileAccentColors dark_theme_colors:profileAccentColors min_supergroup_chat_boost_level:int32 min_channel_chat_boost_level:int32 = ProfileAccentColor;` (:2260); `profileAccentColors palette_colors:vector<int32> background_colors:vector<int32> story_colors:vector<int32> = ProfileAccentColors;` (:2252).
+  - `updateProfileAccentColors colors:vector<profileAccentColor> available_accent_color_ids:vector<int32> = Update;` (:10964) — the palette is pushed post-auth; no getter exists (concept search finds only the update).
+  - The current user's accent arrives via `updateUser`: `profile_accent_color_id` (:2386) and `profile_background_custom_emoji_id` (:2403).
+- **Built:**
+  - New module `src/telegram/profile_accent.rs`: `ProfileAccentColor` (id + light/dark `Vec<u32>` palette colors), `swatch_rgb()` (first light palette color; Telegram blue fallback), tolerant parse (bad ints → skip/0, never fail), 3 unit tests.
+  - Envelope: `EnvelopePayload::UpdateProfileAccentColors { colors, available_ids }`; `ParsedUser` gains `profile_accent_color_id` (default -1) + `profile_background_custom_emoji_id` (default 0).
+  - State: `Session.profile_accent_colors` + `Session.available_accent_color_ids` (wholesale replace on each update — the update is the full server state); `RequestPurpose::SetProfileAccentColor` wired into profile-edit error handling.
+  - Requests: `set_profile_accent_color` builder; shape test pins it to :14820 (incl. the -1 = none convention).
+  - Driver: `ConnectDriver::set_profile_accent_color` preserves the current `profile_background_custom_emoji_id` from the cached user.
+  - UI (kit-first): the edit-profile dialog gains an "Accent color" section — swatches from the server palette in server order + a "None" chip, reusing the appearance settings' `appearance_swatch` / `appearance_chip` (promoted to `pub(crate)`); per-section "Save accent color" button. Until the palette arrives the section shows only "None" (honest empty state, not a fake palette).
+- **Key decisions (ponytail):**
+  - No background-emoji picker: the driver preserves the existing emoji id; a picker is a separate unchecked concern (no emoji-picker infrastructure exists for this).
+  - No fetch for the palette: it is pushed by the server (`updateProfileAccentColors`), so no request/response plumbing — the reducer just stores it.
+  - `folders.rs` test initializer updated for the two new `ParsedUser` fields (explicit struct literal).
+- **Not verifiable without live Telegram:** real palette push, real `setProfileAccentColor` round trip, the `updateUser` reflection of the new color.
+- **Out of this slice (left unchecked with evidence):**
+  - `auth-qr-authorize-other` — separate slice, stays unchecked.
+  - Profile background custom emoji picker — same constructor's second field; deferred until an emoji-picker exists.
+  - Accent colors on other users' profiles / chat accent rendering — receive-side display is a separate UI slice.
