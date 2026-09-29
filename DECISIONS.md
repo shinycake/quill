@@ -2179,9 +2179,10 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
     StoryArea` (:6566); `story … areas:vector<storyArea> … = Story`
     (:6742). `locationAddress country_code:string state:string
     city:string street:string = LocationAddress` (:4633).
-  - Negative check (concept-level, not name-grep): there is no
-    client-side "open gift info" constructor — the gift area carries
-    only `gift_name`; no `getUpgradedGift`-style viewer in scope.
+  - `getUpgradedGift name:string = UpgradedGift` exists
+    (`schema/td_api.tl:15446`); the gift area's status-note fallback is
+    because no gift-info UI exists in the app yet, not because no
+    constructor exists.
 - **Telegram X reference:** this checkout's TGX source
   (`~/workspace/telegram-x`) implements the story *tray* only
   (`StoryList.java` / `StoryListener.java`) — no story-area click

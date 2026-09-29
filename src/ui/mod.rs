@@ -1,4 +1,5 @@
 mod chat_theme;
+mod story_areas;
 mod synthetic;
 
 pub(crate) use chat_theme::*;
@@ -4402,8 +4403,12 @@ impl QuillApp {
             }
             app.open_story_page(ChatId(11), window, cx);
             app.status_note = "screenshot demo — story albums / chat page / archive".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyStoryAreas)) {
-                apply_ready_story_areas(session, &app.demo_sink, &app.demo_seq);
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                story_areas::apply_ready_story_areas(session, &app.demo_sink, &app.demo_seq);
+            }
             // Phase 9.8: viewer opens on the seeded photo story carrying
             // one of every `storyAreaType` — the fixture injected the real
             // `story` (with `areas`) through the reducer.
@@ -11542,9 +11547,11 @@ impl QuillApp {
     }
 
     /// Phase 9.8: a story area tap — the action each `StoryAreaType`
-    /// performs (Telegram X reference: tapping the area opens what it
-    /// points to). Reuses the existing viewer actions wherever one
-    /// exists: OSM map for location/venue (same as `location_row` /
+    /// performs. The tap actions follow the official clients' documented
+    /// behavior: Telegram X implements the story tray only, so no
+    /// area-click handling exists there to copy (DECISIONS.md Phase
+    /// 9.8). Reuses the existing viewer actions wherever one exists:
+    /// OSM map for location/venue (same as `location_row` /
     /// `venue_row`), `setStoryReaction` for suggested reactions (same as
     /// the picker), the URL opener for links, chat-open + message jump
     /// for messages. Weather shows its info line; the gift shows its
@@ -11554,11 +11561,7 @@ impl QuillApp {
         match kind {
             StoryAreaKind::Location { location, address } => {
                 let url = location.open_street_map_url();
-                let label = if address.is_empty() {
-                    format!("📍 {}", location.coords_label())
-                } else {
-                    format!("📍 {address}")
-                };
+                let label = Self::story_area_pin_label(&[address, &location.coords_label()]);
                 self.status_note = if quill::platform::open_external_url(&url) {
                     label
                 } else {
@@ -11572,13 +11575,11 @@ impl QuillApp {
                 location,
             } => {
                 let url = location.open_street_map_url();
-                let label = if title.is_empty() {
-                    "📍 Venue".to_string()
-                } else if address.is_empty() {
-                    format!("📍 {title}")
-                } else {
-                    format!("📍 {title} — {address}")
-                };
+                let mut label = Self::story_area_pin_label(&[title, "Venue"]);
+                if !title.is_empty() && !address.is_empty() {
+                    label.push_str(" — ");
+                    label.push_str(address);
+                }
                 self.status_note = if quill::platform::open_external_url(&url) {
                     label
                 } else {
@@ -34890,18 +34891,31 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Phase 9.8: shared map-pin label for location/venue areas — "📍"
+    /// plus the first non-empty of the given parts (bare "📍" when all
+    /// are empty). Used by both the chip labels and the tap status
+    /// notes.
+    fn story_area_pin_label(parts: &[&str]) -> String {
+        let detail = parts
+            .iter()
+            .copied()
+            .find(|part| !part.is_empty())
+            .unwrap_or("");
+        if detail.is_empty() {
+            "📍".to_string()
+        } else {
+            format!("📍 {detail}")
+        }
+    }
+
     /// Phase 9.8: the chip label for a story area kind — what the official
     /// clients paint on the area (glyph + one-line summary).
     fn story_area_label(kind: &StoryAreaKind) -> String {
         match kind {
-            StoryAreaKind::Location { address, location } if !address.is_empty() => {
-                format!("📍 {address}")
+            StoryAreaKind::Location { address, location } => {
+                Self::story_area_pin_label(&[address, &location.coords_label()])
             }
-            StoryAreaKind::Location { location, .. } => {
-                format!("📍 {}", location.coords_label())
-            }
-            StoryAreaKind::Venue { title, .. } if !title.is_empty() => format!("📍 {title}"),
-            StoryAreaKind::Venue { .. } => "📍".to_string(),
+            StoryAreaKind::Venue { title, .. } => Self::story_area_pin_label(&[title]),
             StoryAreaKind::SuggestedReaction { emoji, total_count } => {
                 if *total_count > 0 {
                     format!("{emoji} {total_count}")
@@ -35021,10 +35035,11 @@ impl QuillApp {
                 .into_any_element()
         };
         // Phase 9.8: clickable story areas — chips over the 360x640 media
-        // box, positioned by the `storyAreaPosition` fractions
-        // (`schema/td_api.tl:6530`). The media box is the positioning
-        // context (areas are media fractions); `rotation_angle` is not
-        // rendered in this slice.
+        // box, centered on the `storyAreaPosition` x/y fractions
+        // (`schema/td_api.tl:6530`; x/y are the rectangle's CENTER). The
+        // media box is the positioning context (areas are media fractions)
+        // and clips overflowing chips; `rotation_angle` is not rendered in
+        // this slice.
         let area_chips: Vec<AnyElement> = item
             .areas
             .iter()
@@ -35032,16 +35047,21 @@ impl QuillApp {
             .map(|(index, area)| {
                 let kind = area.kind.clone();
                 let label = Self::story_area_label(&kind);
+                // `storyAreaPosition` x/y are the rectangle's CENTER
+                // (`schema/td_api.tl:6530`): the chip's top-left is the
+                // center minus half the chip size.
+                let chip_w = (area.width * 360.0).max(48.0) as f32;
+                let chip_h = (area.height * 640.0).max(24.0) as f32;
                 div()
                     .id((
                         "story-area",
                         (item.story_id as u64).wrapping_mul(1000) + index as u64,
                     ))
                     .absolute()
-                    .left(px((area.x * 360.0) as f32))
-                    .top(px((area.y * 640.0) as f32))
-                    .w(px((area.width * 360.0).max(48.0) as f32))
-                    .h(px((area.height * 640.0).max(24.0) as f32))
+                    .left(px(area.x as f32 * 360.0 - chip_w / 2.0))
+                    .top(px(area.y as f32 * 640.0 - chip_h / 2.0))
+                    .w(px(chip_w))
+                    .h(px(chip_h))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -35063,6 +35083,7 @@ impl QuillApp {
         let visual: AnyElement = div()
             .relative()
             .w(px(360.))
+            .overflow_hidden()
             .child(visual)
             .children(area_chips)
             .into_any_element();
@@ -41106,46 +41127,6 @@ fn apply_ready_story_edit(session: &mut Session, sink: &Arc<MemorySink>, seq: &A
     );
     let story = format!(
         r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"is_edited":true,"can_be_edited":true,"can_be_deleted":true,"can_be_forwarded":true,"can_set_privacy_settings":true,"repost_info":{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":12,"story_id":6}},"is_content_modified":false}},"privacy_settings":{{"@type":"storyPrivacySettingsCloseFriends"}},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"areas":[{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":35.0,"y_percentage":80.0,"width_percentage":30.0,"height_percentage":9.0,"rotation_angle":0.0,"corner_radius_percentage":20.0}},"type":{{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}}}},{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":50.0,"y_percentage":50.0,"width_percentage":20.0,"height_percentage":20.0,"rotation_angle":0.0,"corner_radius_percentage":50.0}},"type":{{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{{"@type":"reactionTypeEmoji","emoji":"🔥"}},"total_count":1,"is_dark":false,"is_flipped":false}}}}],"caption":{{"@type":"formattedText","text":"Phase 9.5: edit posted stories — caption, areas, cover and privacy.","entities":[]}}}}"#,
-    );
-    for json in [tray, story] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
-/// `ReadyStoryAreas` fixture: inject a photo story on Demo chat A (id 11)
-/// carrying one of every `storyAreaType` — location, venue, suggested
-/// reaction, message, link, weather, gift — through the real reducer, no
-/// live Telegram. The viewer opens on it; the chips show the area labels
-/// and each tap performs its action.
-fn apply_ready_story_areas(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
-    let caption = |text: &str| -> String {
-        format!(
-            r#"{{"@type":"formattedText","text":{},"entities":[]}}"#,
-            serde_json::to_string(text).unwrap()
-        )
-    };
-    let tray = format!(
-        r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":11,"list":{{"@type":"storyListMain"}},"order":"30","can_be_archived":false,"max_read_story_id":4,"stories":[{{"@type":"storyInfo","story_id":5,"date":1700000000,"is_for_close_friends":false,"is_live":false}}]}}}}"#
-    );
-    let areas = concat!(
-        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.06,"y_percentage":0.08,"width_percentage":0.5,"height_percentage":0.06,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeLocation","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0.0},"address":{"@type":"locationAddress","country_code":"US","state":"CA","city":"San Francisco","street":"1 Ferry Building"}}},"#,
-        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.44,"y_percentage":0.16,"width_percentage":0.5,"height_percentage":0.06,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeVenue","venue":{"@type":"venue","location":{"@type":"location","latitude":37.7955,"longitude":-122.3937,"horizontal_accuracy":0.0},"title":"Ferry Building","address":"1 Ferry Building, San Francisco","provider":"foursquare","id":"4a1a2b3c","type":"Food"}}},"#,
-        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.06,"y_percentage":0.24,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"total_count":12,"is_dark":false,"is_flipped":false}},"#,
-        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.64,"y_percentage":0.24,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeMessage","chat_id":11,"message_id":42}},"#,
-        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.06,"y_percentage":0.32,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}},"#,
-        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.64,"y_percentage":0.32,"width_percentage":0.3,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeWeather","temperature":21.5,"emoji":"☀️","background_color":-16777216}},"#,
-        r#"{"@type":"storyArea","position":{"@type":"storyAreaPosition","x_percentage":0.06,"y_percentage":0.40,"width_percentage":0.5,"height_percentage":0.05,"rotation_angle":0.0,"corner_radius_percentage":0.5},"type":{"@type":"storyAreaTypeUpgradedGift","gift_name":"Ion Gem"}}"#,
-    );
-    let story = format!(
-        r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"areas":[{areas}],"caption":{}}}"#,
-        caption(
-            "Phase 9.8: every story area type as a clickable chip — \
-             location, venue, suggested reaction, message, link, weather, gift.",
-        ),
     );
     for json in [tray, story] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
