@@ -37,7 +37,8 @@ pub enum RemoteVideoState {
 
 /// Phase C2e: one decoded video frame. `rgba` is RGBA8 row-major with the
 /// frame rotation already applied; `is_local` marks the local camera
-/// preview, `false` marks the peer's camera.
+/// preview, `false` marks the peer's camera or screen share
+/// (disambiguated by `is_screen`).
 /// Phase C2g: group-call frames carry `participant_user_id` (the TDLib
 /// user id the frame's ssrc was subscribed for); `None` for 1:1 calls
 /// and the local preview. `is_screen` marks frames from a participant's
@@ -253,6 +254,12 @@ pub trait CallEngine {
     /// on/off/paused state.
     fn set_remote_video_state_callback(&mut self, callback: RemoteVideoStateCallback);
 
+    /// Phase C2j: engine -> app; register the hook receiving the peer's
+    /// 1:1 screen-share on/off/paused state. Same state enum as the
+    /// camera hook; the driver drops retained screen frames when the
+    /// peer's share goes inactive so no stale picture renders.
+    fn set_remote_screen_state_callback(&mut self, callback: RemoteVideoStateCallback);
+
     /// Phase C2e: app -> engine; toggle the local camera. `camera` doubles
     /// as camera selection, `None` means the default device.
     fn set_camera_enabled(
@@ -386,6 +393,8 @@ struct MockInner {
     /// Phase C2e: video frame and peer camera-state hooks (replace semantics).
     video_hook: Option<VideoFrameCallback>,
     remote_video_hook: Option<RemoteVideoStateCallback>,
+    /// Phase C2j: peer 1:1 screen-share state hook (replace semantics).
+    remote_screen_hook: Option<RemoteVideoStateCallback>,
     camera_changes: Vec<(i32, bool, Option<String>)>,
     /// Phase C2i: 1:1 screen-share toggle recording for driver tests.
     p2p_screen_share_changes: Vec<(i32, bool)>,
@@ -623,6 +632,19 @@ impl MockEngine {
         }
     }
 
+    /// Phase C2j: deliver a synthetic peer screen-share state to the hook.
+    pub fn emit_remote_screen_state(&self, call_id: i32, state: RemoteVideoState) {
+        let hook = self
+            .inner
+            .lock()
+            .expect("mock call engine")
+            .remote_screen_hook
+            .clone();
+        if let Some(hook) = hook {
+            hook(call_id, state);
+        }
+    }
+
     fn engine_protocol() -> EngineProtocol {
         EngineProtocol {
             udp_p2p: true,
@@ -706,6 +728,13 @@ impl CallEngine for MockEngine {
             .lock()
             .expect("mock call engine")
             .remote_video_hook = Some(callback);
+    }
+
+    fn set_remote_screen_state_callback(&mut self, callback: RemoteVideoStateCallback) {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .remote_screen_hook = Some(callback);
     }
 
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {
@@ -955,6 +984,8 @@ struct CallbackShared {
     transport_hook: Mutex<Option<TransportStateCallback>>,
     frame_hook: Mutex<Option<VideoFrameCallback>>,
     remote_video_hook: Mutex<Option<RemoteVideoStateCallback>>,
+    /// Phase C2j: peer 1:1 screen-share state hook.
+    remote_screen_hook: Mutex<Option<RemoteVideoStateCallback>>,
     frame_seq: AtomicU64,
     /// Phase C2g: group-call callback routing: native `chat_id` -> the
     /// TDLib group call id the driver assigned, and the ssrc map that
@@ -1073,6 +1104,7 @@ impl NtgcallsEngine {
                 transport_hook: Mutex::new(None),
                 frame_hook: Mutex::new(None),
                 remote_video_hook: Mutex::new(None),
+                remote_screen_hook: Mutex::new(None),
                 frame_seq: AtomicU64::new(0),
                 group_chat_to_call: Mutex::new(HashMap::new()),
                 group_video_ssrc_to_user: Mutex::new(HashMap::new()),
@@ -1494,6 +1526,14 @@ impl CallEngine for NtgcallsEngine {
             .remote_video_hook
             .lock()
             .expect("ntgcalls remote video state hook") = Some(callback);
+    }
+
+    fn set_remote_screen_state_callback(&mut self, callback: RemoteVideoStateCallback) {
+        *self
+            .callback
+            .remote_screen_hook
+            .lock()
+            .expect("ntgcalls remote screen state hook") = Some(callback);
     }
 
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {
@@ -2249,6 +2289,24 @@ unsafe extern "C" fn connection_trampoline(
     }
 }
 
+/// Phase C2j: P2P frame kinds that reach the app: the local camera
+/// preview (`CAPTURE+CAMERA`), the peer's camera (`PLAYBACK+CAMERA`),
+/// and the peer's screen share (`PLAYBACK+SCREEN`). Returns
+/// `Some(is_screen)` for accepted kinds; audio and anything else is
+/// dropped before it can be misattributed to a tile.
+fn p2p_frame_kind(mode: ntg_stream_mode, device: ntg_stream_device) -> Option<bool> {
+    if mode == NTG_STREAM_MODE_CAPTURE && device == NTG_STREAM_DEVICE_CAMERA {
+        return Some(false);
+    }
+    if mode == NTG_STREAM_MODE_PLAYBACK && device == NTG_STREAM_DEVICE_CAMERA {
+        return Some(false);
+    }
+    if mode == NTG_STREAM_MODE_PLAYBACK && device == NTG_STREAM_DEVICE_SCREEN {
+        return Some(true);
+    }
+    None
+}
+
 /// Phase C2e: ntgcalls emits decoded video frames here. Incoming peer camera
 /// frames arrive as PLAYBACK, local camera preview frames as CAPTURE; the
 /// newest frame of a batch is delivered.
@@ -2314,10 +2372,11 @@ unsafe extern "C" fn frames_trampoline(
         }
     } else {
         let is_local = mode == NTG_STREAM_MODE_CAPTURE && device == NTG_STREAM_DEVICE_CAMERA;
-        if !is_local && !(mode == NTG_STREAM_MODE_PLAYBACK && device == NTG_STREAM_DEVICE_CAMERA) {
-            // Screen sharing is a later slice; audio frames never reach this path.
+        // Phase C2j: the peer's screen-share stream is accepted into its
+        // own slot instead of being dropped; audio frames still return.
+        let Some(is_screen) = p2p_frame_kind(mode, device) else {
             return;
-        }
+        };
         let Some(call_id) = shared
             .user_to_call
             .lock()
@@ -2327,7 +2386,7 @@ unsafe extern "C" fn frames_trampoline(
         else {
             return;
         };
-        (call_id, None, is_local, false)
+        (call_id, None, is_local, is_screen)
     };
     let frame = unsafe { &*frames.add(frames_len - 1) };
     let bytes = if frame.data.is_null() || frame.data_len == 0 {
@@ -2382,7 +2441,9 @@ unsafe extern "C" fn remote_source_trampoline(
     state: ntg_remote_source,
     user_data: *mut c_void,
 ) {
-    if user_data.is_null() || state.device != NTG_STREAM_DEVICE_CAMERA {
+    if user_data.is_null()
+        || (state.device != NTG_STREAM_DEVICE_CAMERA && state.device != NTG_STREAM_DEVICE_SCREEN)
+    {
         return;
     }
     let shared = unsafe { &*user_data.cast::<CallbackShared>() };
@@ -2392,11 +2453,22 @@ unsafe extern "C" fn remote_source_trampoline(
         .expect("ntgcalls callback map")
         .get(&user_id)
         .copied();
-    let hook = shared
-        .remote_video_hook
-        .lock()
-        .expect("ntgcalls remote video state hook")
-        .clone();
+    // Phase C2j: camera and screen-share states ride separate hooks so the
+    // driver can clear retained screen frames without touching the camera
+    // state. Audio and other devices never reach this path.
+    let hook = if state.device == NTG_STREAM_DEVICE_SCREEN {
+        shared
+            .remote_screen_hook
+            .lock()
+            .expect("ntgcalls remote screen state hook")
+            .clone()
+    } else {
+        shared
+            .remote_video_hook
+            .lock()
+            .expect("ntgcalls remote video state hook")
+            .clone()
+    };
     if let (Some(call_id), Some(hook)) = (call_id, hook) {
         hook(call_id, remote_video_state_from(state.state));
     }
@@ -3028,6 +3100,53 @@ mod tests {
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].1.seq, 1);
         assert_eq!(second[0].1.width, 2);
+    }
+
+    /// Phase C2j: P2P frame acceptance — local preview, peer camera, and
+    /// peer screen share reach the app; anything else is dropped.
+    #[test]
+    fn p2p_frame_kind_accepts_screen_share() {
+        assert_eq!(
+            p2p_frame_kind(NTG_STREAM_MODE_CAPTURE, NTG_STREAM_DEVICE_CAMERA),
+            Some(false)
+        );
+        assert_eq!(
+            p2p_frame_kind(NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_DEVICE_CAMERA),
+            Some(false)
+        );
+        assert_eq!(
+            p2p_frame_kind(NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_DEVICE_SCREEN),
+            Some(true)
+        );
+        // Capture-side screen frames and unknown kinds never reach a tile.
+        assert_eq!(
+            p2p_frame_kind(NTG_STREAM_MODE_CAPTURE, NTG_STREAM_DEVICE_SCREEN),
+            None
+        );
+        assert_eq!(p2p_frame_kind(999, 999), None);
+    }
+
+    /// Phase C2j: validates peer screen-share state delivery ordering.
+    #[test]
+    fn mock_remote_screen_state_emission() {
+        let mut engine = MockEngine::new();
+        let states = Arc::new(Mutex::new(Vec::new()));
+        let states_hook = states.clone();
+        engine.set_remote_screen_state_callback(Arc::new(move |call_id, state| {
+            states_hook
+                .lock()
+                .expect("remote screen hook")
+                .push((call_id, state));
+        }));
+        engine.emit_remote_screen_state(77, RemoteVideoState::Active);
+        engine.emit_remote_screen_state(77, RemoteVideoState::Inactive);
+        assert_eq!(
+            *states.lock().expect("remote screen hook"),
+            vec![
+                (77, RemoteVideoState::Active),
+                (77, RemoteVideoState::Inactive)
+            ]
+        );
     }
 
     /// Phase C2e: validates peer-state delivery ordering.
