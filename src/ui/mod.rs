@@ -6,6 +6,9 @@ pub(crate) use chat_theme::*;
 mod dialogs;
 
 pub(crate) use dialogs::*;
+mod story_page;
+
+pub(crate) use story_page::{StoryPage, apply_ready_story_albums};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::avatar::Avatar;
@@ -76,11 +79,12 @@ use quill::state::{
     HistoryMessage, InfoPanelTarget, InviteLinkFetch, JoinRequestFetch, LoginUrlRequest,
     MemberListFilter, OutboxReceipt, PollVotersFetch, RequestPurpose, SearchStatus, Session,
     SharedMediaTab, SharedMediaTabStatus, SimilarBotsFetch, SponsoredReportFlight,
-    StoryPageOpState, StoryPostOutcome, StoryPostState, StoryReportStage, SupergroupMembersFetch,
+    StoryPostOutcome, StoryPostState, StoryReportStage, SupergroupMembersFetch,
     WelcomeMessagesFetch, active_custom_keyboard, effective_preview, event_log_relative_time,
-    message_time_hhmm, outgoing_status_label, parse_story_id_list, unix_ms_now, unread_badge_text,
+    message_time_hhmm, outgoing_status_label, unix_ms_now, unread_badge_text,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
+use quill::story_page::{StoryPageOpState, parse_story_id_list};
 use quill::story_viewer::{
     StoryPlayback, StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items,
 };
@@ -867,48 +871,6 @@ impl EditProfileDialog {
         let text = Self::text(&self.username_input, cx);
         let text = text.trim();
         text.strip_prefix('@').unwrap_or(text).to_string()
-    }
-}
-
-/// Phase 9.7: the chat story page overlay — story albums (list, open,
-/// create, rename, delete, add/remove/reorder stories, reorder albums),
-/// chat-page stories (pin/unpin), and the paginated archive list for one
-/// chat. All mutations round-trip through TDLib; the honest
-/// Checking/Sending/Succeeded/Failed states live in
-/// `Session::story_page_op` and render as the page's status line.
-pub struct StoryPage {
-    chat_id: ChatId,
-    /// Opened album id, or `None` for the album list.
-    open_album: Option<i32>,
-    /// "New album" form inputs.
-    new_album_name: Entity<TextareaState>,
-    new_album_story_ids: Entity<TextareaState>,
-    /// Rename + add-stories inputs on the opened album.
-    rename_input: Entity<TextareaState>,
-    add_story_ids: Entity<TextareaState>,
-    /// Album id awaiting the second delete click (two-click confirm).
-    delete_confirm: Option<i32>,
-}
-
-impl StoryPage {
-    fn new(chat_id: ChatId, window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
-        let mut input = |placeholder: &str| {
-            cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .placeholder(placeholder)
-                    .auto_grow(1, 1)
-                    .submit_on_enter(false)
-            })
-        };
-        Self {
-            chat_id,
-            open_album: None,
-            new_album_name: input("Album name (1–12 characters)"),
-            new_album_story_ids: input("Story ids, comma-separated (optional)"),
-            rename_input: input("Album name (1–12 characters)"),
-            add_story_ids: input("Story ids to add, comma-separated"),
-            delete_confirm: None,
-        }
     }
 }
 
@@ -40320,63 +40282,6 @@ fn apply_ready_group_call_scheduled(
         ),
     ];
     for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
-/// Phase 9.7: `ReadyStoryAlbums` fixture — the `ReadyStories` seed plus
-/// story albums, chat-page stories (one pinned) and archive stories for
-/// chat 11, injected through the same reducers the live paths use
-/// (`@extra`-correlated like `apply_ready_sponsored`).
-fn apply_ready_story_albums(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    apply_ready_stories(session, sink, seq);
-    let story = |id: i32, caption: &str| {
-        format!(
-            r#"{{"@type":"story","id":{id},"poster_chat_id":11,"date":1700000000,"caption":{{"@type":"formattedText","text":"{caption}","entities":[]}}}}"#
-        )
-    };
-    // `getChatStoryAlbums` answer — two albums.
-    let extra_albums = session.request(RequestPurpose::GetChatStoryAlbums, Some(ChatId(11)));
-    let albums = format!(
-        r#"{{"@type":"storyAlbums","@extra":"{}","albums":[{{"@type":"storyAlbum","id":1,"name":"Travel"}},{{"@type":"storyAlbum","id":2,"name":"Food"}}]}}"#,
-        extra_albums.0
-    );
-    // `getChatPostedToChatPageStories` first page — story 301 pinned.
-    let extra_page = session.request(
-        RequestPurpose::GetChatPostedToChatPageStories,
-        Some(ChatId(11)),
-    );
-    let chat_page = format!(
-        r#"{{"@type":"stories","@extra":"{}","total_count":2,"pinned_story_ids":[301],"stories":[{},{}]}}"#,
-        extra_page.0,
-        story(301, "Venice at dusk"),
-        story(302, "Pasta night")
-    );
-    // `getChatArchivedStories` first page.
-    let extra_archive = session.request(RequestPurpose::GetChatArchivedStories, Some(ChatId(11)));
-    let archive = format!(
-        r#"{{"@type":"stories","@extra":"{}","total_count":2,"stories":[{},{}]}}"#,
-        extra_archive.0,
-        story(201, "Old road trip"),
-        story(202, "Winter market")
-    );
-    // `getStoryAlbumStories` for album 1 (Travel).
-    let extra_album_stories = session.request_for_story_album(
-        RequestPurpose::GetStoryAlbumStories,
-        ChatId(11),
-        None,
-        Some(1),
-    );
-    let album_stories = format!(
-        r#"{{"@type":"stories","@extra":"{}","total_count":2,"stories":[{},{}]}}"#,
-        extra_album_stories.0,
-        story(301, "Venice at dusk"),
-        story(303, "Mountain pass")
-    );
-    for json in [albums, chat_page, archive, album_stories] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }

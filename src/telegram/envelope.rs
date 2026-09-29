@@ -1,6 +1,7 @@
 use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use crate::rich::{RichBlock, parse_rich_message};
+use crate::telegram::envelope_story::{ParsedStoryAlbum, parse_story_album};
 use crate::telegram::requests::ArchiveChatListSettings;
 use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 use base64::Engine;
@@ -4964,29 +4965,6 @@ pub struct ParsedStory {
     /// schema `td_api.tl:6724` comment: "True, if the story can be added
     /// to an album using createStoryAlbum and addStoryAlbumStories").
     pub can_be_added_to_album: bool,
-
-/// Phase 9.7: one `storyAlbum` row (TDLib 1.8.67, `schema/td_api.tl:6758`:
-/// `storyAlbum id:int32 name:string photo_icon:photo video_icon:video =
-/// StoryAlbum`). The icons are dropped — the story page lists albums by
-/// name (covers are a future slice).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedStoryAlbum {
-    pub id: i32,
-    pub name: String,
-}
-
-fn parse_story_album(value: &Value) -> Option<ParsedStoryAlbum> {
-    if value.get("@type").and_then(Value::as_str) != Some("storyAlbum") {
-        return None;
-    }
-    Some(ParsedStoryAlbum {
-        id: value.get("id")?.as_i64()? as i32,
-        name: value
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-    })
 }
 
 fn parse_story_list(value: Option<&Value>) -> Option<StoryListView> {

@@ -4,6 +4,8 @@ pub mod envelope_emoji;
 pub mod ffi;
 pub mod requests;
 pub mod requests_emoji;
+pub mod envelope_story;
+pub mod requests_story;
 
 pub use client::{BridgeCommand, LiveTdJson, OwnedEnvelope, ReceiveBridge, ordered_receive_loop};
 pub use envelope::{

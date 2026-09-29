@@ -27,6 +27,7 @@ pub mod rich;
 pub mod settings;
 pub mod state;
 pub mod story_composer;
+pub mod story_page;
 pub mod story_viewer;
 pub mod telegram;
 pub mod text;
