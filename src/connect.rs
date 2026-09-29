@@ -13210,6 +13210,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.search_debounce_token = self.search_debounce_token.saturating_add(1);
     }
 
+    /// Slice (communities-search-filter): community filter chip in the
+    /// typed-search panel. Stores the selection in
+    /// `SearchState::community_filter` and immediately re-runs the current
+    /// query so `searchMessages` carries `searchMessagesChatTypeFilterCommunity`
+    /// (schema 1.8.67, line 6344); `None` (the "All chats" chip) restores the
+    /// null filter. With no query text the selection is just stored for the
+    /// next search.
+    pub fn set_search_community_filter(
+        &mut self,
+        community_id: Option<i64>,
+    ) -> Result<Option<SearchFlight>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.clear_typed_debounce();
+        self.session.search.community_filter = community_id;
+        let query = self.session.search.query.clone();
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        let _search_gen = self.session.search.begin_query(trimmed);
+        self.send_typed_search(trimmed)
+    }
+
     /// Correlate a failed typed search: drop the pending requests and mark
     /// all three searches errored so the status resolves instead of
     /// stranding the query in `Searching`.
@@ -13251,10 +13276,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.abort_typed_search(chats_extra, messages_extra, public_extra);
             return Err(err);
         }
-        if let Err(err) =
-            self.sender
-                .send_json(&search_messages(messages_extra, trimmed, SEARCH_LIMIT))
-        {
+        if let Err(err) = self.sender.send_json(&search_messages(
+            messages_extra,
+            trimmed,
+            SEARCH_LIMIT,
+            self.session.search.community_filter,
+        )) {
             self.abort_typed_search(chats_extra, messages_extra, public_extra);
             return Err(err);
         }

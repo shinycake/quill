@@ -466,8 +466,22 @@ pub fn search_public_chats(extra: RequestId, query: &str) -> String {
 
 /// `searchMessages` (TDLib 1.8.67). `chat_list` null = all lists (official
 /// clients / Unigram); schema: only Main and Archive are searchable.
-/// `filter` / `chat_type_filter` null = all messages / all chat types.
-pub fn search_messages(extra: RequestId, query: &str, limit: i32) -> String {
+/// `filter` null = all message types; `community_filter` selects the
+/// `searchMessagesChatTypeFilterCommunity` constructor when `Some(id)`,
+/// `None` keeps the historical null-filter behavior (all chat types).
+pub fn search_messages(
+    extra: RequestId,
+    query: &str,
+    limit: i32,
+    community_filter: Option<i64>,
+) -> String {
+    let chat_type_filter = match community_filter {
+        Some(id) => json!({
+            "@type": "searchMessagesChatTypeFilterCommunity",
+            "community_id": id,
+        }),
+        None => Value::Null,
+    };
     json!({
         "@type": "searchMessages",
         "@extra": extra.as_extra(),
@@ -476,7 +490,7 @@ pub fn search_messages(extra: RequestId, query: &str, limit: i32) -> String {
         "offset": "",
         "limit": limit,
         "filter": Value::Null,
-        "chat_type_filter": Value::Null,
+        "chat_type_filter": chat_type_filter,
         "min_date": 0,
         "max_date": 0,
     })
@@ -7915,7 +7929,7 @@ mod tests {
 
     #[test]
     fn search_messages_shape_matches_1_8_67() {
-        let json = search_messages(RequestId(22), "hello", 20);
+        let json = search_messages(RequestId(22), "hello", 20, None);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "searchMessages");
         assert_eq!(v["@extra"], "22");
