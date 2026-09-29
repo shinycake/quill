@@ -81,7 +81,9 @@ use quill::state::{
     message_time_hhmm, unix_ms_now,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
-use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
+use quill::story_viewer::{
+    StoryPlayback, StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items,
+};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     AddressData, AuthorizationState, BotInfo, CallDiscardReason, CallState, CallbackQueryAnswer,
@@ -1598,6 +1600,11 @@ pub struct QuillApp {
     composer_group_media: Option<bool>,
     /// Phase 9.1: fullscreen story viewer (active-story tray → overlay).
     story_viewer: StoryViewer,
+    /// Phase 9.6: playback clock + segmented progress bar for the viewer;
+    /// `story_tick_active` guards the at-most-one 100ms tick task (same
+    /// pattern as `ensure_call_tick`).
+    story_playback: StoryPlayback,
+    story_tick_active: bool,
     /// Phase 9.1: `(chat_id, story_id)` the user tapped while the story's
     /// full content was still being fetched; resolved on the next render
     /// once the `story` response lands in the cache.
@@ -3834,6 +3841,8 @@ impl QuillApp {
             viewer_extract_epoch: 0,
             viewer_demo_sync_frames: false,
             story_viewer: StoryViewer::closed(),
+            story_playback: StoryPlayback::default(),
+            story_tick_active: false,
             pending_story_open: None,
             story_reaction_picker_open: false,
             story_reply_open: false,
@@ -11484,6 +11493,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.open_story(chat_id, story_id);
         }
+        // Phase 9.6: (re)start the playback clock + tick whenever the
+        // viewer (re)opens — also covers the deferred `pending_story_open`
+        // path, which funnels through here.
+        self.story_playback.start(Instant::now());
+        self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         true
     }
@@ -11911,6 +11925,9 @@ impl QuillApp {
         self.story_cover_sent = false;
         self.story_privacy_edit = None;
         self.story_privacy_sent = false;
+        // Phase 9.6: the tick task self-exits on the next wake when the
+        // viewer is no longer open.
+        self.story_playback.stop();
         cx.notify();
     }
 
@@ -12265,8 +12282,81 @@ impl QuillApp {
         }
         self.story_reaction_picker_open = false;
         self.story_reply_open = false;
+        // Phase 9.6: manual nav restarts the playback clock for the new
+        // current story (same as the official clients).
+        self.story_playback.start(Instant::now());
+        self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         cx.notify();
+    }
+
+    /// Phase 9.6: pause predicate for story playback — the timer must never
+    /// auto-advance under an open panel. Mirrors Telegram Android pausing on
+    /// any open popup/sheet/keyboard/reaction UI (`StoryViewer.isPaused`,
+    /// `StoryViewer.java:2270`). The S4 viewers panel / report flow hook
+    /// into this same predicate when they land (they live on their own
+    /// parity branch; not touched here).
+    fn story_playback_paused(&self) -> bool {
+        self.story_reaction_picker_open || self.story_reply_open
+    }
+
+    /// Phase 9.6: 100ms tick while the story viewer is open (mirrors
+    /// Telegram Desktop's `kPhotoProgressInterval`,
+    /// `media_stories_controller.cpp:70`), at most one task — the same
+    /// pattern as `ensure_call_tick`. Each wake updates the pause state,
+    /// auto-advances when the current story's duration elapses, and closes
+    /// the viewer at the end of the sequence (Telegram Desktop:
+    /// `updatePlayback` → `subjumpFor(1)` else `storiesClose()`,
+    /// `media_stories_controller.cpp:1235-1240`).
+    fn ensure_story_tick(&mut self, cx: &mut Context<Self>) {
+        if !self.story_viewer.is_open() || self.story_tick_active {
+            return;
+        }
+        self.story_tick_active = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let cont = this
+                    .update(cx, |this, cx| {
+                        if !this.story_viewer.is_open() {
+                            this.story_playback.stop();
+                            this.story_tick_active = false;
+                            return false;
+                        }
+                        let now = Instant::now();
+                        this.story_playback
+                            .set_paused(this.story_playback_paused(), now);
+                        if let Some(item) = this.story_viewer.current().cloned() {
+                            if this.story_playback.finished(&item, now) {
+                                this.advance_story_playback(cx);
+                            }
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !cont {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Phase 9.6: auto-advance from the playback tick — next story, or close
+    /// the viewer at the end of the sequence (official behavior: no loop).
+    fn advance_story_playback(&mut self, cx: &mut Context<Self>) {
+        if self
+            .story_viewer
+            .position()
+            .is_some_and(|(position, total)| position < total)
+        {
+            self.step_story_viewer(1, cx);
+        } else {
+            self.close_story_viewer(cx);
+        }
     }
 
     /// Trigger `downloadFile` for the current story when no display
@@ -34757,9 +34847,11 @@ impl QuillApp {
                 caption: String::new(),
                 caption_entities: Vec::new(),
                 duration_label: None,
+                duration_secs: None,
                 is_live: false,
             });
         let (position, total) = self.story_viewer.position().unwrap_or((0, 0));
+        let now = Instant::now();
         let poster = self
             .session()
             .and_then(|s| s.chats.get(&item.chat_id.0))
@@ -34881,6 +34973,7 @@ impl QuillApp {
                     .p_4()
                     .max_w(px(480.))
                     .max_h_full()
+                    .child(self.story_progress_bar(position, total, now))
                     .child(
                         div()
                             .flex()
@@ -34946,6 +35039,47 @@ impl QuillApp {
                             ),
                     ),
             )
+    }
+
+    /// Phase 9.6: segmented progress bar — one segment per story in the
+    /// viewer sequence; viewed segments full, the current one fills with
+    /// playback progress, upcoming ones dim. Matches Telegram Android's
+    /// `StoryLinesDrawable` (segment `a < index` full, `a == index` partial,
+    /// the rest a dim track, `StoryLinesDrawable.java:111-140`) and
+    /// Unigram's `StoryProgress` (viewed opacity 1, upcoming 0.3,
+    /// `StoryContent.xaml.cs:2117`).
+    fn story_progress_bar(&self, position: usize, total: usize, now: Instant) -> impl IntoElement {
+        let current_progress = self
+            .story_viewer
+            .current()
+            .map(|item| self.story_playback.progress(item, now))
+            .unwrap_or(0.0);
+        div()
+            .id("story-viewer-progress")
+            .flex()
+            .w(px(360.))
+            .gap_1()
+            .children((0..total).map(|i| {
+                let fill = if i + 1 < position {
+                    1.0
+                } else if i + 1 == position {
+                    current_progress
+                } else {
+                    0.0
+                };
+                div()
+                    .flex_1()
+                    .h(px(3.))
+                    .rounded_full()
+                    .bg(rgba(0xffffff4d))
+                    .child(
+                        div()
+                            .h_full()
+                            .rounded_full()
+                            .bg(rgb(0xffffff))
+                            .w(relative(fill)),
+                    )
+            }))
     }
 
     /// Phase 9.3: the story composer overlay — path entry (no native file
