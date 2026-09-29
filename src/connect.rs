@@ -106,14 +106,13 @@ use crate::telegram::requests::{
     resend_authentication_code, resend_messages, resend_phone_number_code,
     resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
     search_call_messages, search_chat_messages, search_chats, search_messages,
-    search_messages_chat_type_filter_json, search_messages_filter_json, search_public_chats,
-    search_recently_found_chats, search_stickers, send_animation,
-    send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
-    send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
-    send_chat_action_kind, send_document, send_group_call_message, send_message_album,
-    send_payment_form as send_payment_form_request, send_phone_number_code, send_photo, send_poll,
-    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
-    send_voice_note, set_account_ttl, set_archive_chat_list_settings,
+    search_messages_filter_json, search_public_chats, search_recently_found_chats, search_stickers,
+    send_animation, send_bot_start_message as send_bot_start_message_request,
+    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
+    send_chat_action, send_chat_action_kind, send_document, send_group_call_message,
+    send_message_album, send_payment_form as send_payment_form_request, send_phone_number_code,
+    send_photo, send_poll, send_rich_message, send_sticker, send_text, send_text_story_reply,
+    send_video, send_video_note, send_voice_note, set_account_ttl, set_archive_chat_list_settings,
     set_authentication_phone_number, set_bio, set_chat_description, set_chat_draft_message,
     set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
     set_chat_notification_settings, set_chat_permissions, set_chat_photo, set_chat_slow_mode_delay,
@@ -13277,13 +13276,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.abort_typed_search(chats_extra, messages_extra, public_extra);
             return Err(err);
         }
-        let chat_type_filter =
-            search_messages_chat_type_filter_json(self.session.search.community_filter);
         if let Err(err) = self.sender.send_json(&search_messages(
             messages_extra,
             trimmed,
             SEARCH_LIMIT,
-            chat_type_filter,
+            self.session.search.community_filter,
         )) {
             self.abort_typed_search(chats_extra, messages_extra, public_extra);
             return Err(err);

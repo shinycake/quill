@@ -16,10 +16,10 @@ HARD_CAP=2000
 # elsewhere.
 WAIVERS=(
   "src/ui/mod.rs:49279"
-  "src/connect.rs:24952"
+  "src/connect.rs:24950"
   "src/state.rs:21863"
   "src/telegram/envelope.rs:18722"
-  "src/telegram/requests.rs:10539"
+  "src/telegram/requests.rs:10531"
   # Slice S17 (2026-09-29, merge-pipeline rebase post-#177): type-coherent
   # extensions only — ui/mod.rs +11 (49090 → 49101: peer-activity label
   # lookup on `conversation_header` + 3 "typing…" label swaps to
@@ -84,55 +84,18 @@ WAIVERS=(
   # (`..SendOptions::default()` in the existing `composer_send_options`
   # literal — required to cover the new field, text sends keep default
   # false). All S15 tests moved to `tests/sticker_dynamic_order.rs`.
-  # Slice G10 (2026-09-29, merge-pipeline review fixup + rebase post-S16):
-  # type-coherent extensions only — ui/mod.rs +234 (48852 → 49086:
-  # DialogKind variants + dialog_is_open / dialog_builder / KINDS match
-  # arms, info-panel fetch/render arms, username-dialog submit/title-hint
-  # arms, demo-scenario dispatch arms, new methods on QuillApp + one
-  # bundled `community_ui` field, side-menu entries, 3 screenshot
-  # scenarios; the duplicated `open_community_info` was removed in favor
-  # of the shared `open_info_panel_target` — net −15); state.rs +4
-  # (21654 → 21658: `InfoPanelTarget::Community` variant).
-  # Slice bots-force-reply-keyboard (2026-09-29, merge-pipeline rebase
-  # post-G10): type-coherent extension only — ui/mod.rs +4 (49086 → 49090:
-  # `mod force_reply` decl + one render-chain link mounting the panel; all
-  # other logic lives in the new named modules `src/force_reply.rs` and
-  # `src/ui/force_reply.rs`).
-  # Slice ephemeral-updates (2026-09-29, merge-pipeline rebase post-#178):
-  # type-coherent extensions only — state.rs +52 (21721 → 21773:
-  # `update_ephemeral` method on the existing `HistoryState` type (takes
-  # `Option`, clears on schema-legal null) + `UpdateMessageEphemeralContent`
-  # reducer match arm); envelope.rs +29 (18604 → 18633:
-  # `UpdateMessageEphemeralContent` enum variant + parse arm on the existing
-  # `parse_payload` match (null-distinguishing block)). Slice tests live in
-  # `tests/ephemeral_updates.rs`, never in the waived files.
-  # (Waiver deltas are post-fmt exact line counts.)
-  # Slice A12 (2026-09-29, merge-pipeline rebase post-#179): type-coherent
-  # extensions only — ui/mod.rs +103 (49101 → 49204: accent `section()`
-  # closure borrow fix, `EditProfileDialog` ctor arg, `submit_profile_accent`
-  # method on `QuillApp`, accent-section render in the existing dialog body,
-  # demo-fixture palette seed); connect.rs +24 (24898 → 24922:
-  # `set_profile_accent_color` driver method on the existing `Connect`
-  # type + 1 import line); state.rs +81 (21773 → 21854: session palette
-  # fields + ctor init, `RequestPurpose` variant + profile-edit error arm,
-  # reducer arm, 2 tests); envelope.rs +89 (18633 → 18722: payload variant
-  # + parse arms on the existing matches, `ParsedUser` fields, 1 test);
-  # requests.rs +40 (10477 → 10517: builder fn + shape test). New domain
-  # module `src/telegram/profile_accent.rs` (93 lines) holds the palette
-  # types, parser, and 3 tests — the waived files grow only where the code
-  # must attach to existing types/matches.
   # Slice communities-search-filter (2026-09-29, merge-pipeline rebase
-  # post-#180): type-coherent extensions only — requests.rs +22
-  # (10517 → 10539: `search_messages_chat_type_filter_json` builder next to
-  # its sibling `search_messages_filter_json` + `search_messages`
-  # `chat_type_filter` param); connect.rs +30 (24922 → 24952:
-  # `set_search_community_filter` driver method on the existing `Connect`
-  # type + import + call-site wiring); state.rs +9 (21854 → 21863:
-  # `SearchState::community_filter` field + Default init + resets);
-  # ui/mod.rs +75 (49204 → 49279: `search_community_filter_chips` render fn
-  # + `set_search_community_filter` handler methods on the existing app type
-  # + chips-row hook in `search_results`). All new tests live in
-  # `tests/community_search_filter.rs`.
+  # post-#180): type-coherent extensions only — requests.rs +14
+  # (10517 → 10531: `community_filter: Option<i64>` param + inline
+  # chat_type_filter constructor in `search_messages` — an edit to the
+  # existing function only, no new functions); connect.rs +28
+  # (24922 → 24950: `set_search_community_filter` method on the existing
+  # `Connect` type + import + call-site wiring); state.rs +9
+  # (21854 → 21863: `SearchState::community_filter` field + Default init +
+  # resets); ui/mod.rs +75 (49204 → 49279: `search_community_filter_chips`
+  # render fn + `set_search_community_filter` handler methods on the
+  # existing app type + chips-row hook in `search_results`). All new tests
+  # live in `tests/community_search_filter.rs`.
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )

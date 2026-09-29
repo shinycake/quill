@@ -466,15 +466,22 @@ pub fn search_public_chats(extra: RequestId, query: &str) -> String {
 
 /// `searchMessages` (TDLib 1.8.67). `chat_list` null = all lists (official
 /// clients / Unigram); schema: only Main and Archive are searchable.
-/// `filter` null = all message types; `chat_type_filter` is a
-/// `searchMessagesChatTypeFilter*` constructor (build it with
-/// [`search_messages_chat_type_filter_json`]), null = all chat types.
+/// `filter` null = all message types; `community_filter` selects the
+/// `searchMessagesChatTypeFilterCommunity` constructor when `Some(id)`,
+/// `None` keeps the historical null-filter behavior (all chat types).
 pub fn search_messages(
     extra: RequestId,
     query: &str,
     limit: i32,
-    chat_type_filter: Value,
+    community_filter: Option<i64>,
 ) -> String {
+    let chat_type_filter = match community_filter {
+        Some(id) => json!({
+            "@type": "searchMessagesChatTypeFilterCommunity",
+            "community_id": id,
+        }),
+        None => Value::Null,
+    };
     json!({
         "@type": "searchMessages",
         "@extra": extra.as_extra(),
@@ -669,21 +676,6 @@ pub fn search_chat_messages(
 /// (schema/td_api.tl lines 6275-6326 — every constructor takes no fields).
 pub fn search_messages_filter_json(constructor: &str) -> Value {
     json!({ "@type": constructor })
-}
-
-/// `searchMessagesChatTypeFilter*` JSON for a `searchMessages`
-/// `chat_type_filter` slot (schema/td_api.tl lines 6332-6344). The only
-/// parameterized variant is the community one — the private/group/channel
-/// variants are out of scope for this slice. `None` keeps the historical
-/// null-filter behavior (all chat types).
-pub fn search_messages_chat_type_filter_json(community_id: Option<i64>) -> Value {
-    match community_id {
-        Some(id) => json!({
-            "@type": "searchMessagesChatTypeFilterCommunity",
-            "community_id": id,
-        }),
-        None => Value::Null,
-    }
 }
 
 /// `getForumTopics` (TDLib 1.8.67, `schema/td_api.tl:12701`):
@@ -7937,7 +7929,7 @@ mod tests {
 
     #[test]
     fn search_messages_shape_matches_1_8_67() {
-        let json = search_messages(RequestId(22), "hello", 20, Value::Null);
+        let json = search_messages(RequestId(22), "hello", 20, None);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["@type"], "searchMessages");
         assert_eq!(v["@extra"], "22");
