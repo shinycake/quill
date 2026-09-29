@@ -5,6 +5,7 @@ pub mod envelope_story;
 pub mod ffi;
 pub mod requests;
 pub mod requests_emoji;
+pub mod requests_payments;
 pub mod requests_story;
 pub mod story_areas;
 
@@ -51,3 +52,4 @@ pub use requests_emoji::{
     get_trending_emoji_sets, get_upgraded_gift_emoji_statuses, reorder_installed_emoji_sets,
     search_emoji_sets, search_emojis, set_emoji_status,
 };
+pub use requests_payments::{delete_saved_credentials, delete_saved_order_info};
