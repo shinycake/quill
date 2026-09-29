@@ -11953,6 +11953,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the request JSON only — never stored on the session or
     /// diagnostics (the A2 rule).
     pub fn check_phone_number_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
+        // Intentional asymmetry with the send guard: a check may run during a
+        // send/resend because resend is number-stable, a fresh send aborts the
+        // previous verification server-side (a stale check gets an honest
+        // server refusal), and a user may verify an already-received code
+        // while a resend round-trips.
         if !self.chats_path_active() || self.session.change_number_checking {
             return Err(ConnectSendError::InvalidRequest);
         }
