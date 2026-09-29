@@ -56,17 +56,44 @@ impl QuillApp {
         active_custom_keyboard(&history.messages, &self.dismissed_keyboards)
     }
 
-    /// The force-reply bar target for the open chat, if any: the latest
-    /// standalone `replyMarkupForceReply` message that hasn't been
-    /// dismissed — shown only while its reply is still the composer's
+    /// The force-reply bar target for the open chat, if any: the live
+    /// standalone `replyMarkupForceReply` message the composer is actually
+    /// replying to — shown only while its reply is still the composer's
     /// reply-to (sending or cancelling the reply hides the bar).
+    ///
+    /// The armed reply wins over the newest message: the drain arms the
+    /// oldest unanswered force-reply first and refuses to re-arm while a
+    /// draft exists, so after a second force-reply arrives mid-draft the
+    /// newest-wins selector alone would point at a message the composer
+    /// is not replying to (and the bar would vanish). Falling back to the
+    /// selector covers a draft armed before this slice's logic existed.
     fn open_chat_force_reply(&self) -> Option<(ChatId, MessageId, String)> {
         let session = self.session()?;
         let chat_id = session.open_chat?;
         let history = session.histories.get(&chat_id.0)?;
+        let pending = self.pending_reply.as_ref()?;
+        let force_reply_placeholder = |message_id: MessageId| {
+            history
+                .messages
+                .get(&message_id.0)
+                .and_then(|message| message.reply_markup.as_ref())
+                .and_then(|markup| match markup {
+                    ReplyMarkup::ForceReply { placeholder } => Some(placeholder.clone()),
+                    _ => None,
+                })
+                .filter(|_| {
+                    !self
+                        .dismissed_keyboards
+                        .contains(&(chat_id.0, message_id.0))
+                })
+        };
+        if pending.chat_id == chat_id {
+            if let Some(placeholder) = force_reply_placeholder(pending.message_id) {
+                return Some((chat_id, pending.message_id, placeholder));
+            }
+        }
         let (kb_chat, kb_message, placeholder) =
             active_force_reply(&history.messages, &self.dismissed_keyboards)?;
-        let pending = self.pending_reply.as_ref()?;
         (pending.chat_id == kb_chat && pending.message_id == kb_message).then_some((
             kb_chat,
             kb_message,
