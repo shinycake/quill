@@ -10,7 +10,7 @@ use super::super::*;
 /// `InfoPanelTarget::Community`. Dialog state bundles into
 /// `CommunityUi` (one field on `QuillApp`) instead of one field per
 /// dialog.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct CommunityUi {
     pub(crate) create_dialog: Option<CreateCommunityDialog>,
     pub(crate) hub_open: bool,
@@ -262,7 +262,7 @@ pub fn build_community_hub_dialog(
                         Button::new(format!("g10-hub-info-{community_id}"))
                             .label("ℹ Info")
                             .ghost()
-                            .on_click(cx.listener(move |this, _, _, cx| {
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 this.close_community_hub(cx);
                                 this.open_community_info(community_id, cx);
                                 this.close_kit_dialog_if_done(DialogKind::CommunityHub, window, cx);
