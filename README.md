@@ -543,10 +543,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Privacy: See My Read Date <!-- parity:settings-privacy-readreceipts -->
 - [x] Blocked users list <!-- parity:settings-blocked-users -->
 - [x] Privacy exceptions per rule (always allow / never allow user lists; rule keys only — call rules keep the base choice, see DECISIONS.md) <!-- parity:settings-privacy-exceptions -->
-- [ ] Auto-download per network (mobile / Wi-Fi / roaming) and media type <!-- parity:settings-auto-download -->
-- [ ] Use less data for calls <!-- parity:settings-less-data-calls -->
-- [ ] Storage usage view with per-chat / file-type breakdown <!-- parity:settings-storage-usage -->
-- [ ] Clear cache <!-- parity:settings-clear-cache -->
+- [x] Auto-download per network (mobile / Wi-Fi / roaming) and media type <!-- parity:settings-auto-download -->
+- [x] Use less data for calls <!-- parity:settings-less-data-calls -->
+- [x] Storage usage view with per-chat / file-type breakdown <!-- parity:settings-storage-usage -->
+- [x] Clear cache <!-- parity:settings-clear-cache -->
 - [ ] App language selector (partial: `system_language_code:"en"` hardcoded in src/connect.rs:284) <!-- parity:settings-language -->
 - [ ] Enter-to-send toggle (partial: Enter always sends, hardcoded in src/composer.rs:19-20; no toggle) <!-- parity:settings-enter-send -->
 - [ ] Send by Cmd/Ctrl+Enter option <!-- parity:settings-ctrlenter-send -->

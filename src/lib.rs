@@ -9,6 +9,7 @@ pub mod composer;
 pub mod connect;
 pub mod connect_smoke;
 pub mod credentials;
+pub mod data_settings;
 pub mod diagnostics;
 pub mod emoji;
 pub mod folders;

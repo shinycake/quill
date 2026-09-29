@@ -15,10 +15,10 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:48884"
-  "src/connect.rs:24754"
-  "src/state.rs:21517"
-  "src/telegram/envelope.rs:18520"
+  "src/ui/mod.rs:48851"
+  "src/connect.rs:24898"
+  "src/state.rs:21622"
+  "src/telegram/envelope.rs:18575"
   "src/telegram/requests.rs:10470"
   # Slice A10 (2026-09-29): type-coherent extensions only — ui/mod.rs +3
   # (`mod auth_recovery` decl, `QuillApp` recovery fields + ctor init,
@@ -57,6 +57,11 @@ WAIVERS=(
   # `messageChatRemovedFromCommunity` parse arms on the existing
   # `EnvelopePayload` match + 2 tests in the existing
   # `mod channel_envelope_tests` — `parse_message` is private).
+  # Slice S4 (2026-09-29, rebased post-S3/S13/G9): type-coherent extensions
+  # only — connect.rs +142 (auto-download / less-data / storage-stats
+  # driver methods on the existing `Connect` type); state.rs +105
+  # (`DataStorageState` fields + reducer match arms); envelope.rs +55
+  # (storage-statistics payload parsing arms on the existing match).
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )
