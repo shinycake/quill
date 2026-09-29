@@ -44,11 +44,11 @@ pub use requests::{
     search_recently_found_chats, send_animation, send_chat_action_kind, send_document, send_photo,
     send_poll, send_rich_message, send_sticker, send_text, send_video, send_video_note,
     send_voice_note, set_authentication_phone_number, set_chat_draft_message,
-    set_chat_member_status, set_chat_permissions, set_poll_answer, set_supergroup_username,
-    supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
-    supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
-    supergroup_members_filter_search_json, toggle_supergroup_is_broadcast_group,
-    toggle_supergroup_join_by_request, view_messages,
+    set_chat_member_status, set_chat_permissions, set_poll_answer, set_profile_accent_color,
+    set_supergroup_username, supergroup_members_filter_administrators_json,
+    supergroup_members_filter_banned_json, supergroup_members_filter_recent_json,
+    supergroup_members_filter_restricted_json, supergroup_members_filter_search_json,
+    toggle_supergroup_is_broadcast_group, toggle_supergroup_join_by_request, view_messages,
 };
 pub use requests_emoji::{
     clear_recent_emoji_statuses, get_animated_emoji, get_archived_emoji_sets,
