@@ -65,6 +65,7 @@ use quill::composer::{
     clear_format_markup, command_menu_trigger, draft_text_to_store, filter_command_menu_items,
     find_urls, should_send_on_enter, strip_command_menu_trigger,
 };
+use quill::community_mode::community_member_ids;
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, DraftSaveOutcome, LiveConnect,
     PREVIEW_HISTORY_LIMIT, SEARCH_DEBOUNCE, SearchQueryOutcome, SoundResolution,
@@ -1587,6 +1588,11 @@ enum ChatListFilter {
     All,
     Unread,
     Archived,
+    /// Parity slice `parity:communities-chatlist-mode`: community
+    /// chat-list mode — the main list shows only the selected
+    /// community's chats (membership from the cached
+    /// `communityFullInfo.chats` pack; see `community_mode`).
+    Community(i64),
 }
 
 /// Parity slice: data for the channel/supergroup conversation header —
@@ -14468,6 +14474,105 @@ impl QuillApp {
     fn close_community_hub(&mut self, cx: &mut Context<Self>) {
         self.community_ui.hub_open = false;
         cx.notify();
+    }
+
+    /// Parity slice `parity:communities-chatlist-mode`: enter community
+    /// chat-list mode from the hub's "View chats" button. Replaces any
+    /// folder tab / category filter (like `Archived` does); fires
+    /// `loadCommunityFullInfo` so membership resolves for communities
+    /// never opened in the info panel (deduped by the driver).
+    fn enter_community_chat_list_mode(&mut self, community_id: i64, cx: &mut Context<Self>) {
+        self.folder_tab = None;
+        self.contacts_tab_open = false;
+        self.chat_filter = ChatListFilter::Community(community_id);
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.load_community_full_info(community_id)
+        {
+            self.status_note = format!("community info request failed: {err:?}");
+        }
+        cx.notify();
+    }
+
+    /// Parity slice `parity:communities-chatlist-mode`: leave the mode
+    /// (banner ✕). Selecting a folder tab or the Unread/Archived tabs
+    /// also exits it — they overwrite `chat_filter`.
+    fn exit_community_chat_list_mode(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.chat_filter, ChatListFilter::Community(_)) {
+            self.chat_filter = ChatListFilter::All;
+            cx.notify();
+        }
+    }
+
+    /// Parity slice `parity:communities-chatlist-mode`: the mode banner
+    /// under the folder tabs — the community name plus an ✕ that exits
+    /// the mode (kit `Button`, same treatment as the CL3 select bar).
+    fn community_mode_banner(&self, community_id: i64, cx: &mut Context<Self>) -> impl IntoElement {
+        let name = self
+            .session()
+            .and_then(|s| s.communities.get(&community_id))
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| "Community".to_string());
+        div()
+            .id("community-mode-banner")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(cx.theme().accent.opacity(0.12))
+            .child(
+                div()
+                    .flex_1()
+                    .text_sm()
+                    .font_semibold()
+                    .child(format!("👥 {name}")),
+            )
+            .child(
+                Button::new("community-mode-clear")
+                    .label("✕")
+                    .ghost()
+                    .tooltip("Show all chats")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.exit_community_chat_list_mode(cx);
+                    })),
+            )
+    }
+
+    /// Parity slice `parity:communities-chatlist-mode`: the folder tabs
+    /// plus the mode banner directly underneath when the mode is active
+    /// (the banner's ✕ exits the mode).
+    fn folder_tabs_with_community_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let tabs = self.folder_tabs(cx);
+        if let ChatListFilter::Community(community_id) = self.chat_filter {
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(tabs)
+                .child(self.community_mode_banner(community_id, cx))
+                .into_any_element()
+        } else {
+            tabs.into_any_element()
+        }
+    }
+
+    /// Parity slice `parity:communities-chatlist-mode`: narrow `chats`
+    /// to the community's chats when the mode is active. Membership is
+    /// the cached `communityFullInfo.chats` pack (state keeps no
+    /// per-chat `community_id`); `updateCommunityFullInfo` replaces the
+    /// pack wholesale, so a chat leaving the community drops out on the
+    /// next render. Hidden chats (`is_hidden`) stay included — see
+    /// `community_mode::community_member_ids`.
+    fn retain_community_chats(&self, chats: &mut Vec<ChatSummary>, filter: ChatListFilter) {
+        if let ChatListFilter::Community(community_id) = filter {
+            let members = community_member_ids(
+                self.session()
+                    .and_then(|s| s.community_full_infos.get(&community_id)),
+            );
+            chats.retain(|c| members.contains(&c.id.0));
+        }
     }
 
     /// Slice G10: community name edit prompt (`setCommunityName`,
@@ -40458,7 +40563,7 @@ impl QuillApp {
                     // history + call settings.
                     list = list.child(self.calls_list(cx));
                 } else {
-                    list = list.child(self.folder_tabs(cx));
+                    list = list.child(self.folder_tabs_with_community_banner(cx));
                     list = list.child(self.sidebar_search_field(cx));
                     // Slice CL2: "Mark all as read" for the main list
                     // (TGX overflow menu, `readChatList`). Hidden when
@@ -40686,6 +40791,7 @@ impl QuillApp {
                         // Slice CL2: the Archived category shows only the
                         // archive section.
                         let show_main_list = filter != ChatListFilter::Archived;
+                        self.retain_community_chats(&mut chats, filter);
                         // Slice CL3: multi-select mode — rows toggle the
                         // check instead of opening the chat. Defined
                         // once here so the select bar, the main loop,
@@ -40788,7 +40894,28 @@ impl QuillApp {
                                 }
                                 loading_list
                             } else {
-                                let (glyph, title, hint) = if filter == ChatListFilter::Unread {
+                                let (glyph, title, hint) = if let ChatListFilter::Community(community_id) = filter {
+                                    // Parity slice
+                                    // `parity:communities-chatlist-mode`: a
+                                    // missing pack means the fetch hasn't
+                                    // landed yet (entering the mode fires
+                                    // `loadCommunityFullInfo` when live) —
+                                    // "Loading…", like the community info
+                                    // panel. An empty pack / no matching
+                                    // loaded chats is the genuine empty
+                                    // state, never a crash.
+                                    if self.session().is_some_and(|s| {
+                                        !s.community_full_infos.contains_key(&community_id)
+                                    }) {
+                                        ("⏳", "Loading community…", "Fetching the community's chats.")
+                                    } else {
+                                        (
+                                            "👥",
+                                            "No chats in this community yet",
+                                            "Chats added to the community show up here.",
+                                        )
+                                    }
+                                } else if filter == ChatListFilter::Unread {
                                     ("🔕", "No unread chats", "You are all caught up.")
                                 } else if folder.is_some() {
                                     (
