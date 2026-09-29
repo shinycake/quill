@@ -5517,6 +5517,8 @@ impl QuillApp {
             link_preview_media: self.composer_preview_media,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
+            // S15: text sends never move installed sticker sets.
+            update_order_of_installed_sticker_sets: false,
         }
     }
 

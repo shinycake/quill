@@ -475,6 +475,11 @@ pub struct SendOptions {
     /// (schema 1.8.67), so `send_text` strips blockquote entities instead
     /// of letting TDLib drop them.
     pub is_secret: bool,
+    /// S15: `messageSendOptions.update_order_of_installed_sticker_sets`
+    /// (TDLib 1.8.67, `schema/td_api.tl:5934`) — pass true when the user
+    /// explicitly chose a sticker from an installed set so TDLib moves
+    /// that set to the front of the installed order.
+    pub update_order_of_installed_sticker_sets: bool,
 }
 
 /// MED4b: media-size half of `linkPreviewOptions` (TDLib 1.8.67,

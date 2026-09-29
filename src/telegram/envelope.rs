@@ -767,6 +767,15 @@ pub enum EnvelopePayload {
         provider: String,
         emojis: Vec<String>,
     },
+    /// Slice S15: `updateInstalledStickerSets` (schema 1.8.67, line 10932)
+    /// — TDLib's authoritative new order of installed set ids after a
+    /// reorder (manual, or usage-driven via `update_order_of_installed_
+    /// sticker_sets` on a sticker send). `is_regular` selects the sticker
+    /// panel's sets; other types route to the emoji panel's installed sets.
+    UpdateInstalledStickerSets {
+        sticker_set_ids: Vec<i64>,
+        is_regular: bool,
+    },
     /// `notificationSounds` — `getSavedNotificationSounds` response.
     NotificationSounds {
         sounds: Vec<NotificationSound>,
@@ -8094,6 +8103,22 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 })
                 .unwrap_or_default(),
         }),
+        // Slice S15: `updateInstalledStickerSets` (schema 1.8.67, line
+        // 10932). Ids arrive as int64s (string or number); a missing or
+        // malformed list parses to empty, which the reducer treats as a
+        // no-op.
+        "updateInstalledStickerSets" => Ok(EnvelopePayload::UpdateInstalledStickerSets {
+            sticker_set_ids: value
+                .get("sticker_set_ids")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(|id| int64(Some(id))).collect())
+                .unwrap_or_default(),
+            is_regular: value
+                .get("sticker_type")
+                .and_then(|t| t.get("@type"))
+                .and_then(Value::as_str)
+                == Some("stickerTypeRegular"),
+        }),
         "notificationSounds" => {
             let sounds = value
                 .get("notification_sounds")
@@ -14051,6 +14076,36 @@ mod tests {
             EnvelopePayload::UpdateAnimationSearchParameters { provider, emojis } => {
                 assert_eq!(provider, "GIPHY");
                 assert_eq!(emojis, vec!["😀".to_string(), "🐱".to_string()]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        // Slice S15: `updateInstalledStickerSets` (schema 1.8.67:10932).
+        let env = parse_envelope(
+            r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeRegular"},"sticker_set_ids":["78","77"]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateInstalledStickerSets {
+                sticker_set_ids,
+                is_regular,
+            } => {
+                assert_eq!(sticker_set_ids, vec![78, 77]);
+                assert!(is_regular);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeCustomEmoji"},"sticker_set_ids":[55]}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateInstalledStickerSets {
+                sticker_set_ids,
+                is_regular,
+            } => {
+                assert_eq!(sticker_set_ids, vec![55]);
+                assert!(!is_regular);
             }
             other => panic!("unexpected {other:?}"),
         }

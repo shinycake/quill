@@ -8087,6 +8087,17 @@ impl Session {
                     self.accept_found_emoji_sets(sets);
                 }
             }
+            // Slice S15: `updateInstalledStickerSets` — TDLib's authoritative
+            // new order after a usage-driven (sticker send with
+            // `update_order_of_installed_sticker_sets`) or manual reorder.
+            // Applied in place so an open panel reshuffles live; an empty
+            // cache is a no-op and the next fetch arrives ordered.
+            EnvelopePayload::UpdateInstalledStickerSets {
+                sticker_set_ids,
+                is_regular,
+            } => {
+                self.apply_installed_sticker_set_order(&sticker_set_ids, is_regular);
+            }
             // Slice S8: `getTrendingStickerSets` answers with
             // `trendingStickerSets`.
             EnvelopePayload::TrendingStickerSets {
@@ -10880,6 +10891,27 @@ impl Session {
         self.stickers.selected_set_id = None;
         self.stickers.loaded_set_id = None;
         self.stickers.stickers.clear();
+    }
+
+    /// Slice S15: apply TDLib's `updateInstalledStickerSets` order to the
+    /// cached installed sets. Stable: sets missing from the update keep
+    /// their relative order at the end. Regular sets reorder the sticker
+    /// panel; other types reorder the emoji panel's installed sets. This
+    /// never fights the manual reorder (`parity:stickers-reorder`) — both
+    /// flows converge on TDLib's authoritative order.
+    pub fn apply_installed_sticker_set_order(&mut self, ids: &[i64], is_regular: bool) {
+        let sets = if is_regular {
+            &mut self.stickers.sets
+        } else {
+            // Non-regular types (custom emoji; mask sets are never fetched)
+            // route to the emoji panel's installed sets.
+            &mut self.emoji.installed_sets
+        };
+        if sets.is_empty() || ids.is_empty() {
+            return;
+        }
+        let rank: HashMap<i64, usize> = ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+        sets.sort_by_key(|set| rank.get(&set.id).copied().unwrap_or(usize::MAX));
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {
@@ -14267,6 +14299,99 @@ mod tests {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
         assert!(with_purpose.stickers.sets.is_empty());
+    }
+
+    /// Slice S15: `updateInstalledStickerSets` reorders the cached
+    /// installed sets in place (regular → sticker panel, other types →
+    /// emoji panel); sets missing from the update keep their relative
+    /// order at the end; an empty cache is a no-op.
+    #[test]
+    fn s15_dynamic_set_order_applies_update() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let set_json = |id: i64, title: &str| {
+            format!(
+                r#"{{"@type":"stickerSetInfo","id":"{id}","title":"{title}","name":"{title}","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":false,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":1,"covers":[]}}"#
+            )
+        };
+        let extra = session.request(RequestPurpose::GetInstalledStickerSets, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"stickerSets","total_count":3,"sets":[{},{},{}],"@extra":"{}"}}"#,
+                set_json(77, "Alpha"),
+                set_json(78, "Beta"),
+                set_json(79, "Gamma"),
+                extra.0
+            ),
+        );
+        assert_eq!(
+            session
+                .stickers
+                .sets
+                .iter()
+                .map(|s| s.id)
+                .collect::<Vec<_>>(),
+            vec![77, 78, 79]
+        );
+
+        // Usage-driven reorder: 79 used most recently, 77 next; 78 is
+        // absent from the update and keeps its relative order at the end.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeRegular"},"sticker_set_ids":["79","77"]}"#,
+        );
+        assert_eq!(
+            session
+                .stickers
+                .sets
+                .iter()
+                .map(|s| s.id)
+                .collect::<Vec<_>>(),
+            vec![79, 77, 78]
+        );
+
+        // Non-regular types route to the emoji panel's installed sets.
+        session.emoji.installed_sets = session.stickers.sets.clone();
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeCustomEmoji"},"sticker_set_ids":["78","79","77"]}"#,
+        );
+        assert_eq!(
+            session
+                .emoji
+                .installed_sets
+                .iter()
+                .map(|s| s.id)
+                .collect::<Vec<_>>(),
+            vec![78, 79, 77]
+        );
+        // The sticker panel is untouched by the emoji-type update.
+        assert_eq!(
+            session
+                .stickers
+                .sets
+                .iter()
+                .map(|s| s.id)
+                .collect::<Vec<_>>(),
+            vec![79, 77, 78]
+        );
+
+        // Empty cache: no-op, no panic.
+        session.stickers.sets.clear();
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeRegular"},"sticker_set_ids":["79"]}"#,
+        );
+        assert!(session.stickers.sets.is_empty());
     }
 
     /// Slice S9: GIF-backend answers are stored only under a matching
