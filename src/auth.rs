@@ -220,5 +220,6 @@ mod tests {
         assert!(json.contains("\"@type\":\"recoverAuthenticationPassword\""));
         assert!(json.contains("\"recovery_code\":\"unit-test-code\""));
         assert!(json.contains("\"new_password\":\"\""));
+        assert!(json.contains("\"new_hint\":\"\""));
     }
 }

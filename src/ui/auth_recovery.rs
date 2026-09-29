@@ -109,12 +109,14 @@ impl QuillApp {
     /// Slice A10: the auth password-screen section — password entry, or
     /// recovery-code entry when `recovery_mode` is set. "Forgot password?"
     /// only appears when the server advertised a recovery email.
-    pub(crate) fn auth_password_section(
-        &self,
-        recovery_mode: bool,
-        has_recovery_email: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    pub(crate) fn auth_password_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let recovery_mode = self.recovery_mode;
+        let has_recovery_email = matches!(
+            self.current_auth(),
+            AuthorizationState::WaitPassword {
+                has_recovery_email: true
+            }
+        );
         if recovery_mode {
             div()
                 .child(

@@ -37482,21 +37482,7 @@ impl Render for QuillApp {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(self.sidebar(
-                        &auth,
-                        show_phone,
-                        show_code,
-                        show_password,
-                        show_qr,
-                        self.recovery_mode,
-                        matches!(
-                            self.current_auth(),
-                            AuthorizationState::WaitPassword {
-                                has_recovery_email: true
-                            }
-                        ),
-                        cx,
-                    ))
+                    .child(self.sidebar(&auth, show_phone, show_code, show_password, show_qr, cx))
                     .child(self.conversation(cx))
                     // Phase 6: user / group info panel beside the conversation.
                     .when_some(self.info_panel(cx), |this, panel| this.child(panel))
@@ -39559,8 +39545,6 @@ impl QuillApp {
         show_code: bool,
         show_password: bool,
         show_qr: bool,
-        recovery_mode: bool,
-        has_recovery_email: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let mode = self.pane_mode();
@@ -40104,7 +40088,7 @@ impl QuillApp {
         .when(show_password, |this| {
             // Slice A10: password / recovery-code entry lives in
             // `ui/auth_recovery.rs` (kit-first, named module).
-            this.child(self.auth_password_section(recovery_mode, has_recovery_email, cx))
+            this.child(self.auth_password_section(cx))
         })
         .when(show_qr, |this| {
             // Slice A1: the QR payload rides on the auth state (envelope.rs
