@@ -6523,3 +6523,20 @@ sidebar preview (previously only "typing…" was shown).
   - No new send-path or state machinery: reuses the existing sender-action routing and the `typing_senders` lifecycle pattern.
 - **Not verifiable without live Telegram:** real `chatActionChoosingSticker` updates arriving from another client; real multi-sender interleavings.
 - **Out of this slice (left unchecked with evidence):** other `ChatAction` values still map to `Other` (pre-existing); `is_personal`/selective semantics for force-reply (separate follow-up).
+
+## Slice ephemeral-updates — apply updateMessageEphemeralContent over time (2026-09-29)
+
+**Scope:** `parity:msg-ephemeral-updates` — TDLib's `updateMessageEphemeralContent`
+(a message's ephemeral/disappearing content refreshing as its timer ticks)
+is applied to the stored message in place.
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified):**
+  - `updateMessageEphemeralContent` (:10424) — carries the refreshed ephemeral content for a message; missing `ephemeral_content` drops the update (`MissingField`).
+- **Built:**
+  - `envelope.rs` +29: `UpdateMessageEphemeralContent` enum variant (field is `Option` — schema-legal explicit null clears the stored content) + parse arm on the existing `parse_payload` match (null-distinguishing block; only missing/mistyped fields are `MissingField`).
+  - `state.rs` +52: `update_ephemeral` method on the existing `HistoryState` type (takes `Option`, assigns in place) + reducer match arm mirroring `UpdateMessageContent` — replaces the stored ephemeral content in place and refreshes `chat.last_preview` when it is the last message (ephemeral wins via `effective_content`; null clears, preview falls back to regular content).
+  - Tests in the new named file `tests/ephemeral_updates.rs` (review fixup — no test code in waived files): parse test + reducer test (synthetic update through `apply_json`, asserting stored content and preview).
+  - README box `parity:msg-ephemeral-updates` checked.
+- **Key decisions (ponytail):** mirror the existing `UpdateMessageContent` path rather than a parallel pipeline; in-place replacement, no new state shape.
+- **Not verifiable without live Telegram:** real timer-driven `updateMessageEphemeralContent` arrivals on a disappearing message.
+- **Out of this slice:** the ephemeral countdown UI itself (separate box).

@@ -2803,6 +2803,23 @@ impl HistoryState {
         }
     }
 
+    /// `parity:msg-ephemeral-updates`: `updateMessageEphemeralContent`
+    /// refreshes the ephemeral content in place (schema 1.8.67 line 10424,
+    /// secret-chat lane). `None` clears the stored ephemeral content
+    /// (schema-legal explicit null).
+    fn update_ephemeral(
+        &mut self,
+        id: MessageId,
+        ephemeral: Option<EphemeralMessageContent>,
+    ) -> bool {
+        if let Some(message) = self.messages.get_mut(&id.0) {
+            message.ephemeral = ephemeral;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Phase 3.2: `updateMessageEdited` replaces the message's inline
     /// keyboard (or removes it when `None`).
     fn update_reply_markup(&mut self, id: MessageId, reply_markup: Option<ReplyMarkup>) -> bool {
@@ -7612,6 +7629,41 @@ impl Session {
                         == Some(message_id.0);
                     if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
                         chat.last_preview = preview;
+                    }
+                }
+            }
+            EnvelopePayload::UpdateMessageEphemeralContent {
+                chat_id,
+                message_id,
+                ephemeral,
+            } => {
+                // `parity:msg-ephemeral-updates` (schema 1.8.67 line 10424,
+                // secret-chat lane): replace the stored ephemeral content in
+                // place; the row re-renders via `effective_content` (ephemeral
+                // wins) and the chat-list preview refreshes when it's the
+                // last message.
+                let updated = self
+                    .histories
+                    .get_mut(&chat_id.0)
+                    .is_some_and(|history| history.update_ephemeral(message_id, ephemeral));
+                if updated {
+                    let is_last = self
+                        .histories
+                        .get(&chat_id.0)
+                        .and_then(|history| history.messages.keys().next_back().copied())
+                        == Some(message_id.0);
+                    if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                        let preview = self
+                            .histories
+                            .get(&chat_id.0)
+                            .and_then(|history| history.messages.get(&message_id.0))
+                            .map(|message| {
+                                effective_content(&message.content, message.ephemeral.as_ref())
+                                    .preview()
+                            });
+                        if let Some(preview) = preview {
+                            chat.last_preview = preview;
+                        }
                     }
                 }
             }
