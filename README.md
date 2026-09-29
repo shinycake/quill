@@ -316,7 +316,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] openStory/closeStory mark stories viewed; read state from max_read_story_id (telegram/requests.rs:2519,2531) <!-- parity:stories-read-state -->
 - [x] Quick-react ❤️ toggle on viewer, chosen state shown (ui/mod.rs:5505-5566) <!-- parity:stories-quick-react -->
 - [x] Reaction picker fed by getStoryAvailableReactions (ui/mod.rs:5532 toggle_story_reaction_picker) <!-- parity:stories-reaction-picker -->
-- [ ] Chosen custom-emoji or paid reactions (parser drops them: chosen_reaction_emoji emoji-only, telegram/envelope.rs Phase 9.2) <!-- parity:stories-custom-reactions -->
+- [ ] Chosen custom-emoji or paid reactions (partial: envelope parses reactionTypeCustomEmoji/reactionTypePaid into story state + viewers list (S13), setStoryReaction custom-emoji builder + driver; viewer render + picker offer pending post-Phase-9) <!-- parity:stories-custom-reactions -->
 - [x] Reaction removal (setStoryReaction with null; request asserts, telegram/requests.rs:2556) <!-- parity:stories-reaction-remove -->
 - [x] Interaction counters (views / hearts / reposts, non-zero, when can_get_interactions) (ui/mod.rs Phase 9.2) <!-- parity:stories-interaction-counters -->
 - [x] Detailed viewers list (getStoryInteractions, gated on can_get_interactions; paginated panel with reactions, forwards, Load more; ui/mod.rs Phase 9.5) <!-- parity:stories-viewers-list -->

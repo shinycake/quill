@@ -116,6 +116,27 @@ use crate::telegram::requests::{
     set_chat_title, set_community_name, set_group_call_participant_volume_level,
     set_message_sender_block_list, set_name, set_password, set_pinned_chats, set_poll_answer,
     set_profile_photo, set_recovery_email_address, set_scope_notification_settings,
+    read_chat_list, recognize_speech, remove_contacts, remove_message_reaction,
+    reorder_active_usernames, reorder_chat_folders, replace_primary_chat_invite_link,
+    replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
+    report_story as report_story_request, request_qr_code_authentication,
+    resend_authentication_code, resend_messages, resend_recovery_email_address_code,
+    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
+    search_chat_messages, search_chats, search_messages, search_messages_filter_json,
+    search_public_chats, search_recently_found_chats, send_animation,
+    send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
+    send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
+    send_chat_action_kind, send_document, send_group_call_message, send_message_album,
+    send_payment_form as send_payment_form_request, send_photo, send_poll, send_rich_message,
+    send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
+    set_account_ttl, set_archive_chat_list_settings, set_authentication_phone_number, set_bio,
+    set_chat_description, set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
+    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
+    set_chat_photo, set_chat_slow_mode_delay, set_chat_title, set_community_name,
+    set_group_call_participant_volume_level, set_message_sender_block_list, set_name, set_password,
+    set_pinned_chats, set_poll_answer, set_profile_photo, set_recovery_email_address,
+    set_scope_notification_settings,
+    set_story_custom_emoji_reaction as set_story_custom_emoji_reaction_request,
     set_story_privacy_settings as set_story_privacy_settings_request, set_story_reaction,
     set_supergroup_username, set_user_privacy_setting_rules, set_username, set_video_chat_title,
     start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
@@ -8898,6 +8919,53 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&set_story_reaction(extra, chat_id, story_id, emoji))
         {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.2+: `setStoryReaction` with a `reactionTypeCustomEmoji`.
+    /// Same gates as the emoji path (chats path, story cached, not live);
+    /// the id must be positive. Premium enforcement is server-side —
+    /// TDLib rejects non-Premium callers and the error surfaces on the
+    /// in-flight request; the picker gates on
+    /// `availableReaction.needs_premium`. Reuses
+    /// `RequestPurpose::SetStoryReaction`: the `ok` is ignored either way
+    /// (the truth arrives via `updateStory` → `chosen_reaction_type`).
+    pub fn set_story_custom_emoji_reaction(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        custom_emoji_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let story = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        if matches!(story.content, StoryContentView::Live) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if custom_emoji_id <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra =
+            self.session
+                .request_for_story(RequestPurpose::SetStoryReaction, chat_id, story_id);
+        match self
+            .sender
+            .send_json(&set_story_custom_emoji_reaction_request(
+                extra,
+                chat_id,
+                story_id,
+                custom_emoji_id,
+            )) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
@@ -20101,6 +20169,69 @@ mod tests {
         );
         let story = driver.session.stories.get(&(7, 5)).unwrap();
         assert_eq!(story.chosen_reaction_emoji.as_deref(), Some("👍"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_story_custom_emoji_reaction_gates() {
+        // Phase 9.2+: the custom-emoji `setStoryReaction` driver mirrors
+        // the emoji path's gates plus a positive-id check.
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+        // Unknown story: rejected.
+        assert_eq!(
+            driver.set_story_custom_emoji_reaction(ChatId(7), 99, 123),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            5,
+            "storyContentPhoto",
+            r#""chosen_reaction_type":null,"#,
+        );
+        // Non-positive custom emoji id: rejected.
+        assert_eq!(
+            driver.set_story_custom_emoji_reaction(ChatId(7), 5, 0),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        // Live stories: rejected, like the emoji path.
+        seed_story(&mut driver, &seq, &dyn_sink, 7, 6, "storyContentLive", "");
+        assert_eq!(
+            driver.set_story_custom_emoji_reaction(ChatId(7), 6, 123),
+            Err(ConnectSendError::InvalidRequest)
+        );
+
+        let extra = driver
+            .set_story_custom_emoji_reaction(ChatId(7), 5, 123)
+            .unwrap()
+            .expect("custom emoji reaction sends");
+        let json = recorder
+            .snapshot()
+            .last()
+            .cloned()
+            .expect("setStoryReaction");
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "setStoryReaction");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["story_poster_chat_id"], 7);
+        assert_eq!(v["story_id"], 5);
+        assert_eq!(v["reaction_type"]["@type"], "reactionTypeCustomEmoji");
+        assert_eq!(v["reaction_type"]["custom_emoji_id"], "123");
+        assert_eq!(v["update_recent_reactions"], true);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

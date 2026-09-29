@@ -4987,6 +4987,10 @@ pub struct ParsedStory {
     /// when none is chosen or when the chosen reaction is a custom emoji /
     /// paid reaction (same call as message reactions).
     pub chosen_reaction_emoji: Option<String>,
+    /// Phase 9.2+: the non-emoji half of the user's chosen reaction
+    /// (`reactionTypeCustomEmoji` / `reactionTypePaid`) — `None` when the
+    /// chosen reaction is a plain emoji or absent.
+    pub chosen_reaction_extra: Option<StoryChosenExtraReaction>,
     /// Phase 9.2: `storyInteractionInfo` — counters, meaningful only when
     /// `can_get_interactions`.
     pub interaction_info: Option<StoryInteractionInfoView>,
@@ -5129,6 +5133,10 @@ fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
     // Phase 9.5: link + suggested-reaction area texts for the edit
     // surface prefill.
     let (area_link_url, area_reaction_emojis) = parse_story_area_texts(value.get("areas"));
+    // Phase 9.2+: `chosen_reaction_type` splits into the emoji half and the
+    // custom-emoji / paid half.
+    let (chosen_reaction_emoji, chosen_reaction_extra) =
+        parse_story_chosen_reaction(value.get("chosen_reaction_type"));
     Some((
         ParsedStory {
             id,
@@ -5137,7 +5145,8 @@ fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
             content,
             caption,
             caption_entities,
-            chosen_reaction_emoji: parse_story_chosen_reaction(value.get("chosen_reaction_type")),
+            chosen_reaction_emoji,
+            chosen_reaction_extra,
             interaction_info: parse_story_interaction_info(value.get("interaction_info")),
             can_be_deleted: value
                 .get("can_be_deleted")
@@ -5250,19 +5259,45 @@ fn parse_story_area_texts(value: Option<&Value>) -> (Option<String>, Vec<String>
     }
     (link_url, reaction_emojis)
 }
-/// Phase 9.2: `chosen_reaction_type` on a `story` — returns the emoji when
-/// the user's chosen reaction is a `reactionTypeEmoji`, else `None` (no
-/// reaction, custom emoji, or paid reaction).
-fn parse_story_chosen_reaction(value: Option<&Value>) -> Option<String> {
-    let reaction_type = value.filter(|value| !value.is_null())?;
-    if reaction_type.get("@type").and_then(Value::as_str) != Some("reactionTypeEmoji") {
-        return None;
+/// Phase 9.2+: the non-emoji half of a story's `chosen_reaction_type`
+/// (`reactionTypeCustomEmoji` / `reactionTypePaid`, TDLib 1.8.67,
+/// `schema/td_api.tl:2918` / `:2921`). The Phase 9.2 parser dropped these;
+/// they now ride alongside `chosen_reaction_emoji` so the post-Phase-9
+/// viewer can render the real chosen state. `Copy` like the id it wraps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryChosenExtraReaction {
+    CustomEmoji(i64),
+    Paid,
+}
+
+/// Phase 9.2+: `chosen_reaction_type` on a `story` — the emoji half plus the
+/// non-emoji half (`reactionTypeCustomEmoji` / `reactionTypePaid`, else
+/// `None`). `(None, None)` when there is no reaction.
+fn parse_story_chosen_reaction(
+    value: Option<&Value>,
+) -> (Option<String>, Option<StoryChosenExtraReaction>) {
+    let reaction_type = match value.filter(|value| !value.is_null()) {
+        Some(reaction_type) => reaction_type,
+        None => return (None, None),
+    };
+    match reaction_type.get("@type").and_then(Value::as_str) {
+        Some("reactionTypeEmoji") => (
+            reaction_type
+                .get("emoji")
+                .and_then(Value::as_str)
+                .filter(|emoji| !emoji.is_empty())
+                .map(str::to_string),
+            None,
+        ),
+        Some("reactionTypeCustomEmoji") => (
+            None,
+            int64(reaction_type.get("custom_emoji_id"))
+                .filter(|id| *id > 0)
+                .map(StoryChosenExtraReaction::CustomEmoji),
+        ),
+        Some("reactionTypePaid") => (None, Some(StoryChosenExtraReaction::Paid)),
+        _ => (None, None),
     }
-    reaction_type
-        .get("emoji")
-        .and_then(Value::as_str)
-        .filter(|emoji| !emoji.is_empty())
-        .map(str::to_string)
 }
 
 /// Phase 9.2: `storyInteractionInfo` counters; `None` when the field is
@@ -6079,6 +6114,10 @@ pub struct StoryInteractionView {
     pub actor: MessageSender,
     pub interaction_date: i32,
     pub reaction_emoji: Option<String>,
+    /// Phase 9.2+: the non-emoji half of the viewer's chosen reaction
+    /// (`reactionTypeCustomEmoji` / `reactionTypePaid`) — same split as
+    /// `ParsedStory::chosen_reaction_extra`.
+    pub reaction_extra: Option<StoryChosenExtraReaction>,
     pub kind: StoryInteractionKind,
 }
 
@@ -11607,7 +11646,7 @@ fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
                 continue;
             };
             let interaction_type = entry.get("type");
-            let (kind, reaction_emoji) = match interaction_type
+            let (kind, (reaction_emoji, reaction_extra)) = match interaction_type
                 .and_then(|t| t.get("@type"))
                 .and_then(Value::as_str)
             {
@@ -11617,8 +11656,10 @@ fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
                         interaction_type.and_then(|t| t.get("chosen_reaction_type")),
                     ),
                 ),
-                Some("storyInteractionTypeForward") => (StoryInteractionKind::Forward, None),
-                Some("storyInteractionTypeRepost") => (StoryInteractionKind::Repost, None),
+                Some("storyInteractionTypeForward") => {
+                    (StoryInteractionKind::Forward, (None, None))
+                }
+                Some("storyInteractionTypeRepost") => (StoryInteractionKind::Repost, (None, None)),
                 _ => continue,
             };
             interactions.push(StoryInteractionView {
@@ -11628,6 +11669,7 @@ fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
                     .and_then(Value::as_i64)
                     .unwrap_or(0) as i32,
                 reaction_emoji,
+                reaction_extra,
                 kind,
             });
         }
@@ -16243,26 +16285,67 @@ mod channel_envelope_tests {
 
     #[test]
     fn story_reaction_absent_or_non_emoji_parses_to_none() {
-        // `chosen_reaction_type: null` and custom-emoji / paid reactions
-        // all parse to `None` — the viewer only renders emoji reactions.
+        // `chosen_reaction_type: null` and an empty emoji parse to
+        // `(None, None)` on both halves.
         let reaction_json = |reaction: &str| {
             format!(
                 r#"{{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{{"@type":"storyContentUnsupported"}},"chosen_reaction_type":{reaction},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
             )
         };
-        for reaction in [
-            "null",
-            r#"{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"123"}"#,
-            r#"{"@type":"reactionTypePaid"}"#,
-            r#"{"@type":"reactionTypeEmoji","emoji":""}"#,
-        ] {
+        for reaction in ["null", r#"{"@type":"reactionTypeEmoji","emoji":""}"#] {
             let env = parse_envelope(&reaction_json(reaction)).unwrap();
             match env.payload {
                 EnvelopePayload::Story { story, .. } => {
                     assert_eq!(story.chosen_reaction_emoji, None, "reaction {reaction}");
+                    assert_eq!(story.chosen_reaction_extra, None, "reaction {reaction}");
                 }
                 other => panic!("{other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn story_chosen_reaction_custom_emoji_and_paid_parsed() {
+        // Phase 9.2+: custom-emoji and paid chosen reactions are no longer
+        // dropped — they land in `chosen_reaction_extra`.
+        let reaction_json = |reaction: &str| {
+            format!(
+                r#"{{"@type":"story","id":7,"poster_chat_id":11,"date":1,"content":{{"@type":"storyContentUnsupported"}},"chosen_reaction_type":{reaction},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#,
+            )
+        };
+        let env = parse_envelope(&reaction_json(
+            r#"{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"123"}"#,
+        ))
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, .. } => {
+                assert_eq!(story.chosen_reaction_emoji, None);
+                assert_eq!(
+                    story.chosen_reaction_extra,
+                    Some(StoryChosenExtraReaction::CustomEmoji(123))
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(&reaction_json(r#"{"@type":"reactionTypePaid"}"#)).unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, .. } => {
+                assert_eq!(story.chosen_reaction_emoji, None);
+                assert_eq!(
+                    story.chosen_reaction_extra,
+                    Some(StoryChosenExtraReaction::Paid)
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        // Unknown reaction types still parse to (None, None) — never an error.
+        let env = parse_envelope(&reaction_json(r#"{"@type":"reactionTypeUnknown"}"#)).unwrap();
+        match env.payload {
+            EnvelopePayload::Story { story, .. } => {
+                assert_eq!(story.chosen_reaction_emoji, None);
+                assert_eq!(story.chosen_reaction_extra, None);
+            }
+            other => panic!("{other:?}"),
         }
     }
 
@@ -18328,9 +18411,37 @@ mod notification_sound_tests {
                 let second = &interactions.interactions[1];
                 assert_eq!(second.actor, MessageSender::Chat { chat_id: 11 });
                 assert_eq!(second.reaction_emoji, None);
+                assert_eq!(second.reaction_extra, None);
                 assert_eq!(
                     interactions.interactions[2].kind,
                     StoryInteractionKind::Forward
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Phase 9.2+: the viewers list keeps custom-emoji / paid chosen
+    /// reactions in `reaction_extra` instead of dropping them.
+    #[test]
+    fn story_interactions_extra_reactions_parse() {
+        let json = r#"{"@type":"storyInteractions","total_count":2,"interactions":[
+            {"actor_id":{"@type":"messageSenderUser","user_id":777},"interaction_date":1,"type":{"@type":"storyInteractionTypeView","chosen_reaction_type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"987"}}},
+            {"actor_id":{"@type":"messageSenderUser","user_id":778},"interaction_date":1,"type":{"@type":"storyInteractionTypeView","chosen_reaction_type":{"@type":"reactionTypePaid"}}}
+        ],"next_offset":""}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::StoryInteractions { interactions } => {
+                assert_eq!(interactions.interactions.len(), 2);
+                assert_eq!(interactions.interactions[0].reaction_emoji, None);
+                assert_eq!(
+                    interactions.interactions[0].reaction_extra,
+                    Some(StoryChosenExtraReaction::CustomEmoji(987))
+                );
+                assert_eq!(interactions.interactions[1].reaction_emoji, None);
+                assert_eq!(
+                    interactions.interactions[1].reaction_extra,
+                    Some(StoryChosenExtraReaction::Paid)
                 );
             }
             other => panic!("unexpected {other:?}"),
