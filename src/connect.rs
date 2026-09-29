@@ -58,9 +58,10 @@ use crate::telegram::requests::{
     check_chat_username, clear_imported_contacts, clear_recently_found_chats,
     click_chat_sponsored_message, close_chat, close_request,
     close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
-    create_chat_folder, create_chat_invite_link, create_forum_topic, create_new_basic_group_chat,
-    create_new_secret_chat, create_new_supergroup_chat, create_private_chat, create_video_chat,
-    decline_group_call_invitation, delete_chat, delete_chat_folder, delete_chat_history,
+    create_chat_folder, create_chat_invite_link, create_community, create_forum_topic,
+    create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
+    create_private_chat, create_video_chat, decline_group_call_invitation, delete_chat,
+    delete_chat_folder, delete_chat_history,
     delete_chat_reply_markup as delete_chat_reply_markup_request, delete_chat_welcome_message,
     delete_forum_topic, delete_messages, delete_profile_photo, delete_story,
     discard_call as discard_call_request, disconnect_all_websites, disconnect_website,
@@ -89,15 +90,16 @@ use crate::telegram::requests::{
     get_web_page_instant_view, import_contacts, input_message_photo, input_message_video,
     invite_group_call_participant, join_chat, join_group_call, join_video_chat, leave_chat,
     leave_group_call, load_active_stories, load_chat_welcome_messages, load_chats, load_chats_list,
-    load_group_call_participants, open_chat, open_message_content, open_story, pin_chat_message,
-    post_story as post_story_request, process_chat_join_request, read_chat_list, recognize_speech,
-    remove_contacts, remove_message_reaction, reorder_active_usernames, reorder_chat_folders,
-    replace_primary_chat_invite_link, replace_video_chat_rtmp_url, report_chat,
-    report_chat_sponsored_message, report_story as report_story_request,
-    request_qr_code_authentication, resend_authentication_code, resend_messages,
-    resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
-    search_call_messages, search_chat_messages, search_chats, search_messages,
-    search_messages_filter_json, search_public_chats, search_recently_found_chats, send_animation,
+    load_community_full_info, load_group_call_participants, open_chat, open_message_content,
+    open_story, pin_chat_message, post_story as post_story_request, process_chat_join_request,
+    read_chat_list, recognize_speech, remove_contacts, remove_message_reaction,
+    reorder_active_usernames, reorder_chat_folders, replace_primary_chat_invite_link,
+    replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
+    report_story as report_story_request, request_qr_code_authentication,
+    resend_authentication_code, resend_messages, resend_recovery_email_address_code,
+    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
+    search_chat_messages, search_chats, search_messages, search_messages_filter_json,
+    search_public_chats, search_recently_found_chats, send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
     send_chat_action_kind, send_document, send_group_call_message, send_message_album,
@@ -106,7 +108,7 @@ use crate::telegram::requests::{
     set_archive_chat_list_settings, set_authentication_phone_number, set_bio, set_chat_description,
     set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
-    set_chat_photo, set_chat_slow_mode_delay, set_chat_title,
+    set_chat_photo, set_chat_slow_mode_delay, set_chat_title, set_community_name,
     set_group_call_participant_volume_level, set_message_sender_block_list, set_name, set_password,
     set_pinned_chats, set_poll_answer, set_profile_photo, set_recovery_email_address,
     set_scope_notification_settings,
@@ -1184,6 +1186,32 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
                 _ => None,
             });
+        // Slice (communities backend core): the `createCommunity` answer
+        // is `communityId`; `updateCommunity` for the new community is
+        // guaranteed to have arrived first, so the id chains straight
+        // into `loadCommunityFullInfo` after apply.
+        let created_community_id: Option<i64> = match &owned.envelope.payload {
+            EnvelopePayload::CommunityId { id } => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.purpose(id))
+                .and_then(|purpose| (purpose == RequestPurpose::CreateCommunity).then_some(*id)),
+            _ => None,
+        };
+        // Slice (communities backend core): a confirmed `setCommunityName`
+        // drops the cached full-info pack (see `Session::apply`); capture
+        // before apply so the post-apply refetch reloads it. A dropped
+        // cache is the success signal — on a TDLib error the cache stays
+        // and nothing refetches.
+        let community_mutation_refetch: Option<i64> = owned
+            .envelope
+            .extra
+            .and_then(|id| self.session.requests.get(id))
+            .and_then(|pending| {
+                (pending.purpose == RequestPurpose::SetCommunityName)
+                    .then_some(pending.community_id)
+                    .flatten()
+            });
         self.session.apply(owned);
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;
@@ -1227,6 +1255,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         // model; a failed open must not fail the ingest.
         if let Some(chat_id) = created_chat {
             let _ = self.select_chat(chat_id);
+        }
+        // Slice (communities backend core): resolve a just-created
+        // community id into its full-info pack. `let _` on purpose: the
+        // community is already in the model; a failed send must not
+        // fail the ingest.
+        if let Some(community_id) = created_community_id {
+            let _ = self.load_community_full_info(community_id);
+        }
+        // Slice (communities backend core): refetch the full-info pack
+        // the state dropped after a confirmed `setCommunityName`.
+        if let Some(community_id) = community_mutation_refetch
+            && !self
+                .session
+                .community_full_infos
+                .contains_key(&community_id)
+        {
+            let _ = self.load_community_full_info(community_id);
         }
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready || load_chats_ok {
@@ -6290,6 +6335,114 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => false,
         }
+    }
+
+    /// Slice (communities backend core): `createCommunity` (schema 1.8.67,
+    /// line 11806) — creates a community from an owned chat (owned basic
+    /// group / supergroup / channel, or a chat with an owned bot; basic
+    /// groups are auto-upgraded to supergroups). Empty names are refused
+    /// client-side (`Err(InvalidRequest)`); the chat must exist or the
+    /// call is refused with `Ok(None)`. The response is `communityId`
+    /// (the update `updateCommunity` is guaranteed to arrive first); the
+    /// ingest chain resolves the id into `loadCommunityFullInfo`.
+    pub fn create_community(
+        &mut self,
+        chat_id: ChatId,
+        name: &str,
+        is_chat_hidden: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if name.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chats.contains_key(&chat_id.0) {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::CreateCommunity;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) =
+            self.sender
+                .send_json(&create_community(extra, name, chat_id.0, is_chat_hidden))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice (communities backend core): `loadCommunityFullInfo` (schema
+    /// 1.8.67, line 11799). No-op when the pack is already cached or a
+    /// fetch is in flight (deduped per community id); the response is
+    /// `ok` and the pack arrives as `updateCommunityFullInfo`.
+    pub fn load_community_full_info(
+        &mut self,
+        community_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::LoadCommunityFullInfo;
+        if self
+            .session
+            .community_full_infos
+            .contains_key(&community_id)
+            || self
+                .session
+                .requests
+                .has_purpose_for_community(purpose, community_id)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request_for_community(purpose, community_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&load_community_full_info(extra, community_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Slice (communities backend core): `setCommunityName` (schema 1.8.67,
+    /// line 11811). Empty names are refused client-side
+    /// (`Err(InvalidRequest)`). Not optimistic — the new name arrives via
+    /// `updateCommunity`; on `ok` the state drops the cached full-info
+    /// pack and the ingest refetches it (the welcome-message-mutation
+    /// pattern). In-flight dedupe is per community id.
+    pub fn set_community_name(
+        &mut self,
+        community_id: i64,
+        name: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if name.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::SetCommunityName;
+        if self
+            .session
+            .requests
+            .has_purpose_for_community(purpose, community_id)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request_for_community(purpose, community_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&set_community_name(extra, community_id, name))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
     }
 
     /// Slice G2: `toggleSupergroupSignMessages` (schema 1.8.67, line
@@ -18194,6 +18347,158 @@ mod tests {
         assert_eq!(v["@type"], "setChatPhoto");
         assert_eq!(v["@extra"], extra.0.to_string());
         assert!(v["photo"].is_null());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn driver_community_create_rename_refetch_chain() {
+        // Slice (communities backend core): `createCommunity` (schema
+        // 1.8.67, line 11806) / `loadCommunityFullInfo` (line 11799) /
+        // `setCommunityName` (line 11811). Empty names are refused
+        // client-side; unknown chats are refused without sending;
+        // in-flight dedupe is per (purpose, chat) / (purpose, community).
+        // The `communityId` answer chains into `loadCommunityFullInfo`,
+        // and a confirmed `setCommunityName` refetches the dropped
+        // full-info pack (the welcome-message-mutation pattern).
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        seed_ready_alice(&mut driver, &seq, &dyn_sink);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":3},"permissions":{"@type":"chatPermissions","can_send_basic_messages":true},"unread_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Unknown chat → refused without sending.
+        let sent_before = recorder.snapshot().len();
+        assert!(
+            driver
+                .create_community(ChatId(404), "Rustaceans", false)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // Empty / whitespace-only name → InvalidRequest.
+        assert!(driver.create_community(ChatId(9), "", false).is_err());
+        assert!(driver.create_community(ChatId(9), "   ", false).is_err());
+        // Sends `createCommunity` with the right shape.
+        let extra = driver
+            .create_community(ChatId(9), "Rustaceans", true)
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "createCommunity");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["name"], "Rustaceans");
+        assert_eq!(v["chat_id"], 9);
+        assert!(v["is_chat_hidden"].as_bool() == Some(true));
+        // In-flight dedup: second create while one is pending → no-op.
+        assert!(
+            driver
+                .create_community(ChatId(9), "Other", false)
+                .unwrap()
+                .is_none()
+        );
+        // `updateCommunity` (guaranteed before the `communityId` answer)
+        // creates the community; the `communityId` then chains into
+        // `loadCommunityFullInfo`.
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateCommunity","community":{"@type":"community","id":42,"have_access":true,"name":"Rustaceans","date":1759000000}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.communities.contains_key(&42));
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"communityId","id":42,"@extra":"{}"}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "loadCommunityFullInfo");
+        assert_eq!(v["community_id"], 42);
+        // The `ok` for the chained load consumes its pending request;
+        // the pack itself arrives as `updateCommunityFullInfo`.
+        let load_extra = v["@extra"].as_str().expect("@extra").to_string();
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, load_extra),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[],"administrator_count":1,"banned_count":0,"add_chat_request_count":0}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(driver.session.community_full_infos.contains_key(&42));
+        let sent_before = recorder.snapshot().len();
+        assert!(driver.load_community_full_info(42).unwrap().is_none());
+        assert_eq!(recorder.snapshot().len(), sent_before);
+        // `setCommunityName`: empty refused, shape right, deduped in
+        // flight.
+        assert!(driver.set_community_name(42, "").is_err());
+        let extra = driver
+            .set_community_name(42, "Rustaceans+")
+            .unwrap()
+            .expect("request sent");
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "setCommunityName");
+        assert_eq!(v["@extra"], extra.0.to_string());
+        assert_eq!(v["community_id"], 42);
+        assert_eq!(v["name"], "Rustaceans+");
+        assert!(driver.set_community_name(42, "Again").unwrap().is_none());
+        // `ok` drops the pack and the ingest refetches it.
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(!driver.session.community_full_infos.contains_key(&42));
+        let sent = recorder.snapshot().last().cloned().expect("request");
+        let v: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(v["@type"], "loadCommunityFullInfo");
+        assert_eq!(v["community_id"], 42);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

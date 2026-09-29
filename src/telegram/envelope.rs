@@ -869,6 +869,28 @@ pub enum EnvelopePayload {
         /// (schema 1.8.67, line 2792) — gates the anti-spam toggle.
         can_toggle_aggressive_anti_spam: bool,
     },
+    /// Slice (communities backend core): `updateCommunity` (schema 1.8.67,
+    /// line 10726) — the update carries the full `community` object and is
+    /// guaranteed to arrive before the `communityId` of a just-created
+    /// community, so the reducer inserts it create-on-first-sight.
+    UpdateCommunity {
+        community: ParsedCommunity,
+    },
+    /// Slice (communities backend core): `updateCommunityFullInfo`
+    /// (schema 1.8.67, line 10753) — carries its own `community_id`, so
+    /// it applies whenever it arrives (no pending-request correlation).
+    /// This is the arrival path for `loadCommunityFullInfo` (schema line
+    /// 11799, which answers `ok` and delivers the data through update).
+    UpdateCommunityFullInfo {
+        community_id: i64,
+        full_info: ParsedCommunityFullInfo,
+    },
+    /// Slice (communities backend core): `communityId` (schema 1.8.67,
+    /// line 2264) — the response of `createCommunity` (line 11806). The
+    /// driver chains it into `loadCommunityFullInfo`.
+    CommunityId {
+        id: i64,
+    },
     /// Slice G2: `updateChatWelcomeMessages` (schema 1.8.67, line 10649)
     /// — the chat's welcome-message pack, sent after
     /// `loadChatWelcomeMessages` and whenever the pack changes.
@@ -3647,6 +3669,100 @@ fn parse_chat_join_request(value: Option<&Value>) -> Option<ParsedChatJoinReques
     })
 }
 
+/// Slice (communities backend core): `community` (TDLib 1.8.67,
+/// `schema/td_api.tl:2305`):
+/// `community id:int53 have_access:Bool name:string photo:chatPhotoInfo date:int32 status:CommunityMemberStatus permissions:communityPermissions = Community;`
+/// Scalar fields only — `photo` (chatPhotoInfo), `status`
+/// (CommunityMemberStatus) and `permissions` (communityPermissions) are
+/// intentionally NOT parsed: no driver in this slice consumes them and no
+/// UI exists yet (post-Phase-9 UI slices extend these structs).
+// ponytail: flat scalar subset; nested photo/status/permissions objects when a consumer needs them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedCommunity {
+    pub id: i64,
+    /// Schema line 2299: when false the community is inaccessible and
+    /// "Identifier of the community can't be passed to any method".
+    pub have_access: bool,
+    pub name: String,
+    pub date: i32,
+}
+
+/// Slice (communities backend core): `communityChat` (TDLib 1.8.67,
+/// `schema/td_api.tl:2311`):
+/// `communityChat chat_id:int53 can_view_history:Bool is_hidden:Bool = CommunityChat;`
+/// `is_hidden` is read-only — there is NO schema method to toggle it
+/// (concept-level scan; 265/267/268 stay BLOCKED).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedCommunityChat {
+    pub chat_id: i64,
+    pub can_view_history: bool,
+    pub is_hidden: bool,
+}
+
+/// Slice (communities backend core): `communityFullInfo` (TDLib 1.8.67,
+/// `schema/td_api.tl:2319`):
+/// `communityFullInfo photo:chatPhoto chats:vector<communityChat> administrator_count:int32 banned_count:int32 add_chat_request_count:int32 = CommunityFullInfo;`
+/// `photo` intentionally skipped (no consumer yet; see ParsedCommunity note).
+// ponytail: flat scalar subset; nested chatPhoto when a consumer needs it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedCommunityFullInfo {
+    pub chats: Vec<ParsedCommunityChat>,
+    pub administrator_count: i32,
+    pub banned_count: i32,
+    pub add_chat_request_count: i32,
+}
+
+fn parse_community(value: &Value) -> Option<ParsedCommunity> {
+    if value.get("@type").and_then(Value::as_str) != Some("community") {
+        return None;
+    }
+    Some(ParsedCommunity {
+        id: int53(value.get("id")).ok()?,
+        have_access: value
+            .get("have_access")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        date: int53(value.get("date")).ok().unwrap_or(0) as i32,
+    })
+}
+
+fn parse_community_chat(value: &Value) -> Option<ParsedCommunityChat> {
+    if value.get("@type").and_then(Value::as_str) != Some("communityChat") {
+        return None;
+    }
+    Some(ParsedCommunityChat {
+        chat_id: int53(value.get("chat_id")).ok()?,
+        can_view_history: value
+            .get("can_view_history")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_hidden: value
+            .get("is_hidden")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+fn parse_community_full_info(value: &Value) -> Option<ParsedCommunityFullInfo> {
+    if value.get("@type").and_then(Value::as_str) != Some("communityFullInfo") {
+        return None;
+    }
+    Some(ParsedCommunityFullInfo {
+        chats: value
+            .get("chats")
+            .and_then(Value::as_array)
+            .map(|chats| chats.iter().filter_map(parse_community_chat).collect())
+            .unwrap_or_default(),
+        administrator_count: int53(value.get("administrator_count")).ok().unwrap_or(0) as i32,
+        banned_count: int53(value.get("banned_count")).ok().unwrap_or(0) as i32,
+        add_chat_request_count: int53(value.get("add_chat_request_count")).ok().unwrap_or(0) as i32,
+    })
+}
 /// Phase D3c: short text excerpt of a `message` object inside a
 /// `chatEvent*` action (edited/deleted/pinned). Only `messageText`
 /// content yields text; anything else is an empty string so the UI
@@ -8021,6 +8137,32 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(|info| info.get("can_toggle_aggressive_anti_spam"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+        }),
+        // Slice (communities backend core): `updateCommunity` (schema
+        // 1.8.67, line 10726) — the update carries the full `community`
+        // object; guaranteed to come before the community identifier is
+        // returned, so no pending-request correlation is needed.
+        "updateCommunity" => Ok(EnvelopePayload::UpdateCommunity {
+            community: value
+                .get("community")
+                .and_then(parse_community)
+                .ok_or(ParseError::MissingField)?,
+        }),
+        // Slice (communities backend core): `updateCommunityFullInfo`
+        // (schema 1.8.67, line 10753) — the arrival path for
+        // `loadCommunityFullInfo` (line 11799 answers `ok`; the data is
+        // sent through update). Carries its own `community_id`.
+        "updateCommunityFullInfo" => Ok(EnvelopePayload::UpdateCommunityFullInfo {
+            community_id: int53(value.get("community_id"))?,
+            full_info: value
+                .get("community_full_info")
+                .and_then(parse_community_full_info)
+                .ok_or(ParseError::MissingField)?,
+        }),
+        // Slice (communities backend core): `communityId` (schema 1.8.67,
+        // line 2264) — the `createCommunity` response (line 11806).
+        "communityId" => Ok(EnvelopePayload::CommunityId {
+            id: int53(value.get("id"))?,
         }),
         // Phase D2: `getChatStatistics` response (schema 1.8.67, line
         // 15760) — `chatStatisticsChannel` / `chatStatisticsSupergroup`.
@@ -15094,6 +15236,66 @@ mod channel_envelope_tests {
         // dropping the statistics response).
         let env = parse_envelope(r#"{"@type":"chatStatisticsQuantum"}"#);
         assert!(env.is_err());
+    }
+
+    #[test]
+    fn community_updates_parsed() {
+        // Slice (communities backend core): `updateCommunity` (schema
+        // 1.8.67, line 10726) carries the full `community` (line 2305);
+        // `updateCommunityFullInfo` (line 10753) carries the
+        // `communityFullInfo` (line 2319) with its own `community_id`.
+        let env = parse_envelope(
+            r#"{"@type":"updateCommunity","community":{"@type":"community","id":42,"have_access":true,"name":"Rustaceans","date":1759000000,"status":{"@type":"communityMemberStatusCreator"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":true}}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateCommunity { community } => {
+                assert_eq!(
+                    community,
+                    ParsedCommunity {
+                        id: 42,
+                        have_access: true,
+                        name: "Rustaceans".to_string(),
+                        date: 1759000000,
+                    }
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        let env = parse_envelope(
+            r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[{"@type":"communityChat","chat_id":7,"can_view_history":true,"is_hidden":false}],"administrator_count":3,"banned_count":1,"add_chat_request_count":0}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateCommunityFullInfo {
+                community_id,
+                full_info,
+            } => {
+                assert_eq!(community_id, 42);
+                assert_eq!(
+                    full_info,
+                    ParsedCommunityFullInfo {
+                        chats: vec![ParsedCommunityChat {
+                            chat_id: 7,
+                            can_view_history: true,
+                            is_hidden: false,
+                        }],
+                        administrator_count: 3,
+                        banned_count: 1,
+                        add_chat_request_count: 0,
+                    }
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        // `communityId` (schema line 2264) is the `createCommunity`
+        // response (line 11806) — the driver chains it into
+        // `loadCommunityFullInfo`.
+        let env = parse_envelope(r#"{"@type":"communityId","id":42}"#).unwrap();
+        match env.payload {
+            EnvelopePayload::CommunityId { id } => assert_eq!(id, 42),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

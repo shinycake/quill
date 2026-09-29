@@ -1759,6 +1759,64 @@ pub fn set_supergroup_username(extra: RequestId, supergroup_id: i64, username: &
     .to_string()
 }
 
+/// Slice (communities backend core): `createCommunity` (TDLib 1.8.67,
+/// `schema/td_api.tl:11806`):
+/// `createCommunity name:string chat_id:int53 is_chat_hidden:Bool = CommunityId;`
+/// "Creates a new community for the given chat. Returns identifier of
+/// the created community" — "Identifier of the chat in the community;
+/// only chats with owned bots and owned basic group, supergroup and
+/// channel chats are allowed; basic group chats will be automatically
+/// upgraded to supergroup chats". The response is `communityId`; the
+/// driver chains it into `loadCommunityFullInfo`. Empty names are
+/// refused client-side by the driver.
+pub fn create_community(
+    extra: RequestId,
+    name: &str,
+    chat_id: i64,
+    is_chat_hidden: bool,
+) -> String {
+    json!({
+        "@type": "createCommunity",
+        "@extra": extra.as_extra(),
+        "name": name,
+        "chat_id": chat_id,
+        "is_chat_hidden": is_chat_hidden,
+    })
+    .to_string()
+}
+
+/// Slice (communities backend core): `loadCommunityFullInfo` (TDLib
+/// 1.8.67, `schema/td_api.tl:11799`):
+/// `loadCommunityFullInfo community_id:int53 = Ok;`
+/// "Returns full information about a community. The data will be sent
+/// through update" — i.e. as `updateCommunityFullInfo`, which the
+/// reducer applies directly (it carries its own `community_id`).
+pub fn load_community_full_info(extra: RequestId, community_id: i64) -> String {
+    json!({
+        "@type": "loadCommunityFullInfo",
+        "@extra": extra.as_extra(),
+        "community_id": community_id,
+    })
+    .to_string()
+}
+
+/// Slice (communities backend core): `setCommunityName` (TDLib 1.8.67,
+/// `schema/td_api.tl:11811`):
+/// `setCommunityName community_id:int53 name:string = Ok;`
+/// "Changes name of the given community; requires can_change_info
+/// administrator right in the community". Empty names are refused
+/// client-side by the driver; the new name arrives via `updateCommunity`
+/// and the driver refetches the full-info pack on success.
+pub fn set_community_name(extra: RequestId, community_id: i64, name: &str) -> String {
+    json!({
+        "@type": "setCommunityName",
+        "@extra": extra.as_extra(),
+        "community_id": community_id,
+        "name": name,
+    })
+    .to_string()
+}
+
 /// Slice: group/channel title edit — `setChatTitle` (TDLib 1.8.67,
 /// `schema/td_api.tl:13430`):
 /// `setChatTitle chat_id:int53 title:string = Ok;`
@@ -9363,6 +9421,35 @@ mod channel_requests_tests {
         ))
         .unwrap();
         assert!(v["photo"].is_null());
+    }
+
+    #[test]
+    fn community_request_shapes() {
+        use super::{create_community, load_community_full_info, set_community_name};
+
+        // `createCommunity name:string chat_id:int53 is_chat_hidden:Bool
+        // = CommunityId` (schema 1.8.67, line 11806).
+        let v: serde_json::Value =
+            serde_json::from_str(&create_community(RequestId(91), "Rustaceans", 9, true)).unwrap();
+        assert_eq!(v["@type"], "createCommunity");
+        assert_eq!(v["name"], "Rustaceans");
+        assert_eq!(v["chat_id"], 9);
+        assert!(v["is_chat_hidden"].as_bool() == Some(true));
+
+        // `loadCommunityFullInfo community_id:int53 = Ok` (schema 1.8.67,
+        // line 11799).
+        let v: serde_json::Value =
+            serde_json::from_str(&load_community_full_info(RequestId(92), 42)).unwrap();
+        assert_eq!(v["@type"], "loadCommunityFullInfo");
+        assert_eq!(v["community_id"], 42);
+
+        // `setCommunityName community_id:int53 name:string = Ok` (schema
+        // 1.8.67, line 11811).
+        let v: serde_json::Value =
+            serde_json::from_str(&set_community_name(RequestId(93), 42, "Rustaceans+")).unwrap();
+        assert_eq!(v["@type"], "setCommunityName");
+        assert_eq!(v["community_id"], 42);
+        assert_eq!(v["name"], "Rustaceans+");
     }
 
     #[test]

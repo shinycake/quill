@@ -5576,6 +5576,90 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - All GIF search/tab UI, trending tab, empty states, autoplay setting UI — kit Phase 9 owns UI surfaces.
   - `getOption("animation_search_bot_username")` / `searchPublicChat` bot-resolution wiring — no `get_option` / `search_public_chat` builders exist in `requests.rs`; the driver/UI slice composes them when it needs the bot id (YAGNI).
   - `connect.rs` driver methods — UI slices call `session.request(purpose, None)` + builder directly (the S8 pattern); no speculative driver API added.
+## Slice: COMMUNITIES BACKEND CORE — TYPES + SYNC + 3 BUILDERS (2026-09-29)
+
+- **Task:** backend-only communities core (zero UI; `src/ui/mod.rs`
+  untouched, frozen for kit Phase 9): parse `community` /
+  `communityChat` / `communityFullInfo` plus the `updateCommunity` /
+  `updateCommunityFullInfo` updates, cache them in state, and wire the
+  three schema methods (`createCommunity`, `loadCommunityFullInfo`,
+  `setCommunityName`) as request builders + thin drivers.
+- **Schema (pinned TDLib 1.8.67, verbatim from `schema/td_api.tl` — no
+  invented constructors/fields):**
+  - `communityId id:int53 = CommunityId;` (:2264) — the
+    `createCommunity` response.
+  - `community id:int53 have_access:Bool name:string photo:chatPhotoInfo date:int32 status:CommunityMemberStatus permissions:communityPermissions = Community;` (:2305)
+  - `communityChat chat_id:int53 can_view_history:Bool is_hidden:Bool = CommunityChat;` (:2311)
+  - `communityFullInfo photo:chatPhoto chats:vector<communityChat> administrator_count:int32 banned_count:int32 add_chat_request_count:int32 = CommunityFullInfo;` (:2319)
+  - `updateCommunity community:community = Update;` (:10726) —
+    "//@description Some data of a community has changed. This update is
+    guaranteed to come before the community identifier is returned to
+    the application".
+  - `updateCommunityFullInfo community_id:int53 community_full_info:communityFullInfo = Update;` (:10753)
+  - `loadCommunityFullInfo community_id:int53 = Ok;` (:11799) —
+    "Returns full information about a community. The data will be sent
+    through update".
+  - `createCommunity name:string chat_id:int53 is_chat_hidden:Bool = CommunityId;` (:11806) — "Creates a new community for the given
+    chat. Returns identifier of the created community"; "only chats
+    with owned bots and owned basic group, supergroup and channel chats
+    are allowed; basic group chats will be automatically upgraded to
+    supergroup chats".
+  - `setCommunityName community_id:int53 name:string = Ok;` (:11811) —
+    "Changes name of the given community; requires can_change_info
+    administrator right in the community".
+- **Honest gap — only 3 community methods exist in the schema.** A
+  concept-level scan of `schema/td_api.tl` (all `community*`
+  constructors/methods, not a single-name grep) finds NO method to
+  toggle chat visibility, NO method to add a chat to a community, and NO
+  community admin-rights method. `communityChat.is_hidden` (:2311) is
+  read-only in 1.8.67. So checklist items `parity:communities-chat-visibility`,
+  `parity:communities-add-chat`, and `parity:communities-admin-rights`
+  stay BLOCKED (their README rows already say so — untouched here).
+- **Built:**
+  - `src/telegram/envelope.rs`: `ParsedCommunity` /
+    `ParsedCommunityChat` / `ParsedCommunityFullInfo` (scalar fields
+    only — `photo`/`status`/`permissions` nested objects intentionally
+    unparsed, marked `ponytail:`; no driver in this slice consumes them
+    and no UI exists yet) + `parse_community` /
+    `parse_community_chat` / `parse_community_full_info`; payload
+    variants `UpdateCommunity`, `UpdateCommunityFullInfo`,
+    `CommunityId`; dispatch arms for `"updateCommunity"`,
+    `"updateCommunityFullInfo"`, `"communityId"`.
+  - `src/state.rs`: `Session::communities: HashMap<i64,
+    ParsedCommunity>` (create-on-first-sight on `updateCommunity`,
+    like chat ingestion) and `Session::community_full_infos:
+    HashMap<i64, ParsedCommunityFullInfo>` (full replace on
+    `updateCommunityFullInfo`); `RequestPurpose::CreateCommunity` /
+    `LoadCommunityFullInfo` / `SetCommunityName`;
+    `PendingRequest::community_id` + `Session::request_for_community`
+    + `Requests::has_purpose_for_community`; `ok` on
+    `SetCommunityName` drops the cached pack (the error path keeps it).
+  - `src/telegram/requests.rs`: `create_community(extra, name, chat_id,
+    is_chat_hidden)`, `load_community_full_info(extra, community_id)`,
+    `set_community_name(extra, community_id, name)`.
+  - `src/connect.rs`: `create_community` (empty/whitespace name →
+    `Err(InvalidRequest)`; unknown chat → `Ok(None)`; in-flight dedup
+    per chat), `load_community_full_info` (cached or in-flight →
+    `Ok(None)`), `set_community_name` (empty name → `Err`; in-flight
+    dedup per community). Ingest chains: the `communityId` answer
+    resolves into `loadCommunityFullInfo`; a confirmed
+    `setCommunityName` refetches the dropped full-info pack (same
+    pattern as welcome-message mutations — a dropped cache is the
+    success signal).
+  - Tests: `community_updates_parsed` (envelope fixtures for
+    `updateCommunity` / `updateCommunityFullInfo` / `communityId`),
+    `community_request_shapes` (3 builders), state
+    update-application tests (create, rename replace, full-info
+    replace, ok-drops-pack / error-keeps-pack),
+    `driver_community_create_rename_refetch_chain` (gates, shapes,
+    dedup, communityId→load chain, rename→refetch chain).
+- **Out of this slice:** `parity:communities-create`,
+  `parity:communities-hub`, `parity:communities-chat-visibility`,
+  `parity:communities-chatlist-mode`, and `parity:communities-info`
+  stay UNCHECKED — no Quill UI until post-Phase-9. No new checklist
+  items (the area was already itemized; this slice only narrows the
+  "no Quill UI" notes to "backend landed, no Quill UI").
+
 ## Slice: GROUP/CHANNEL TITLE + DESCRIPTION + PHOTO EDITING, BACKEND (2026-09-29)
 
 - **Task:** checklist gap — title/description/photo editing had no README
