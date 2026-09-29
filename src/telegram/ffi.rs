@@ -6,6 +6,11 @@ use thiserror::Error;
 
 const ENV_PATH: &str = "QUILL_TDJSON_PATH";
 
+/// Verbosity ceiling for TDLib's native logging. Matches the callback's
+/// max_verbosity in `install_redacted_log`; the stream itself is emptied
+/// by `secure_native_logging`, this is defense in depth.
+pub const MAX_NATIVE_LOG_VERBOSITY: i32 = 1;
+
 #[derive(Debug, Error)]
 pub enum TdJsonError {
     #[error("tdjson library not found")]
@@ -16,6 +21,8 @@ pub enum TdJsonError {
     MissingSymbol(&'static str),
     #[error("request is not valid UTF-8 / CString")]
     InvalidRequest,
+    #[error("TDLib native log stream could not be secured")]
+    LogStreamNotSecured,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +127,26 @@ impl TdJson {
         }
     }
 
+    /// Point TDLib's *native* log stream at nothing and drop its verbosity
+    /// before any client exists. `install_redacted_log` only registers a
+    /// callback; TDLib still writes every message to its default stream
+    /// (stderr) via do_append first. Fails closed: callers must not create
+    /// a client when this returns Err.
+    pub fn secure_native_logging(&self) -> Result<(), TdJsonError> {
+        let stream = r#"{"@type":"setLogStream","log_stream":{"@type":"logStreamEmpty"}}"#;
+        let verbosity = format!(
+            r#"{{"@type":"setLogVerbosityLevel","new_verbosity_level":{}}}"#,
+            MAX_NATIVE_LOG_VERBOSITY
+        );
+        for request in [stream, verbosity.as_str()] {
+            match self.execute(request)? {
+                Some(body) if is_ok_response(&body) => {}
+                _ => return Err(TdJsonError::LogStreamNotSecured),
+            }
+        }
+        Ok(())
+    }
+
     pub fn native_log_count() -> u64 {
         NATIVE_LOG_COUNT.load(Ordering::Relaxed)
     }
@@ -172,6 +199,15 @@ impl Drop for TdJson {
 
 static NATIVE_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
 
+fn is_ok_response(body: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    v.get("@type")
+        .and_then(|t| t.as_str())
+        .is_some_and(|t| t == "ok")
+}
+
 unsafe extern "C" fn redacted_native_log(_verbosity: c_int, _message: *const c_char) {
     // Do not call any TDLib function from this callback.
     // Do not inspect `_message`; native logs can contain account data.
@@ -190,5 +226,77 @@ mod tests {
             assert!(!rendered.contains("/opt/homebrew"));
             assert!(!rendered.contains("/usr/local/opt"));
         }
+    }
+
+    /// Synthetic canary, never a real credential.
+    const LOG_CANARY: &str = "QUILL_CANARY_7f3a9c2e5b1d4a6f";
+
+    /// Exercises the REAL native log stream (stderr), not just the callback.
+    /// Re-execs the test binary as a child so the child's stderr can be
+    /// captured; skips gracefully when no tdjson library is present.
+    #[test]
+    fn native_log_stream_swallows_canary() {
+        if let Ok(mode) = std::env::var("QUILL_TEST_NATIVE_LOG_CHILD") {
+            native_log_child_main(&mode);
+        }
+        let exe = std::env::current_exe().expect("test executable");
+        for mode in ["control", "secured"] {
+            let out = std::process::Command::new(&exe)
+                .env("QUILL_TEST_NATIVE_LOG_CHILD", mode)
+                .args([
+                    "--exact",
+                    "telegram::ffi::tests::native_log_stream_swallows_canary",
+                    // Bypass libtest's output capture so the child's real
+                    // stderr (TDLib's native stream) reaches the parent.
+                    "--nocapture",
+                ])
+                .output()
+                .expect("spawn child test");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if stderr.contains("QUILL_TEST_NO_TDJSON") {
+                eprintln!("skipping native log stream test: no tdjson library");
+                return;
+            }
+            assert!(out.status.success(), "child {mode} exited badly: {stderr}");
+            let leaked = stderr.contains(LOG_CANARY);
+            match mode {
+                // Default stream (stderr) + default verbosity: the canary
+                // must appear, proving the test exercises the real stream.
+                "control" => assert!(
+                    leaked,
+                    "control child did not log the canary — test is vacuous"
+                ),
+                "secured" => assert!(
+                    !leaked,
+                    "canary leaked to native stderr despite secure_native_logging"
+                ),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn native_log_child_main(mode: &str) -> ! {
+        let api = match TdJson::load_default() {
+            Ok(api) => api,
+            Err(_) => {
+                eprintln!("QUILL_TEST_NO_TDJSON");
+                std::process::exit(0);
+            }
+        };
+        if mode == "secured" {
+            // The exact sequence LiveTdJson::connect runs.
+            if api.secure_native_logging().is_err() {
+                eprintln!("QUILL_TEST_SETUP_FAILED");
+                std::process::exit(2);
+            }
+            api.install_redacted_log(MAX_NATIVE_LOG_VERBOSITY);
+        }
+        let client_id = api.create_client_id();
+        let request =
+            format!(r#"{{"@type":"getTextEntities","text":"{LOG_CANARY}","@extra":"canary"}}"#);
+        let _ = api.send(client_id, &request);
+        // td_send is async; give TDLib's logging a moment to reach stderr.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        std::process::exit(0);
     }
 }
