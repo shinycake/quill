@@ -322,7 +322,8 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         photo: Option<ParsedFile>,
     },
-    /// `updateChatAction` — peer activity (`chatActionTyping` / `chatActionCancel`).
+    /// `updateChatAction` — peer activity (`chatActionTyping` /
+    /// `chatActionChoosingSticker` / `chatActionCancel`).
     UpdateChatAction {
         chat_id: ChatId,
         sender: MessageSender,
@@ -3074,6 +3075,8 @@ pub struct ChatDraft {
 pub enum ChatAction {
     /// `chatActionTyping`
     Typing,
+    /// `chatActionChoosingSticker` (TDLib 1.8.67, line 6380).
+    ChoosingSticker,
     /// `chatActionCancel`, or a null action (schema: null cancels).
     Cancel,
     Other,
@@ -9958,6 +9961,7 @@ fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
 fn parse_chat_action(value: Option<&Value>) -> ChatAction {
     match value.and_then(|v| v.get("@type")).and_then(Value::as_str) {
         Some("chatActionTyping") => ChatAction::Typing,
+        Some("chatActionChoosingSticker") => ChatAction::ChoosingSticker,
         None | Some("chatActionCancel") => ChatAction::Cancel,
         Some(_) => ChatAction::Other,
     }

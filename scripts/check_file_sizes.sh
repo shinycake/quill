@@ -15,11 +15,20 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:49090"
+  "src/ui/mod.rs:49100"
   "src/connect.rs:24898"
-  "src/state.rs:21658"
-  "src/telegram/envelope.rs:18600"
+  "src/state.rs:21730"
+  "src/telegram/envelope.rs:18610"
   "src/telegram/requests.rs:10477"
+  # Slice S17 (2026-09-29, rebased post-S15): type-coherent extensions only
+  # — ui/mod.rs +8 (peer-activity label lookup on `conversation_header` +
+  # 3 "typing…" label swaps to `activity_label.unwrap_or("typing…")`);
+  # state.rs +63 (`choosing_sticker_senders` field + init on `ChatSummary`,
+  # `set_sender_action` routing match, `peer_activity_label` method,
+  # `sidebar_preview` label swap, `chat_action_choosing_sticker_label`
+  # test); envelope.rs +4 (`ChatAction::ChoosingSticker` variant + parse
+  # arm). Re-derived from the post-S15 baselines (48852/21654/18600) plus
+  # the S17 deltas (+8/+63/+4).
   # Slice A10 (2026-09-29): type-coherent extensions only — ui/mod.rs +3
   # (`mod auth_recovery` decl, `QuillApp` recovery fields + ctor init,
   # `recovery_mode` reset + wait-password screen arms); connect.rs +44

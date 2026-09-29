@@ -2120,6 +2120,8 @@ pub struct ChatSummary {
     pub last_preview: String,
     /// Senders with an active `chatActionTyping` (`updateChatAction`).
     pub typing_senders: Vec<MessageSender>,
+    /// Senders with an active `chatActionChoosingSticker` (`updateChatAction`).
+    pub choosing_sticker_senders: Vec<MessageSender>,
     /// `chat.draft_message` text draft. Voice/rich drafts are not stored.
     pub draft: Option<ChatDraft>,
     /// Own `chatMemberStatus*` in a broadcast channel (`getChatMember` /
@@ -2492,8 +2494,25 @@ impl ChatSummary {
 
     pub fn set_sender_action(&mut self, sender: MessageSender, action: ChatAction) {
         self.typing_senders.retain(|existing| *existing != sender);
-        if action == ChatAction::Typing {
-            self.typing_senders.push(sender);
+        self.choosing_sticker_senders
+            .retain(|existing| *existing != sender);
+        match action {
+            ChatAction::Typing => self.typing_senders.push(sender),
+            ChatAction::ChoosingSticker => self.choosing_sticker_senders.push(sender),
+            ChatAction::Cancel | ChatAction::Other => {}
+        }
+    }
+
+    /// Slice S17: the peer-activity label for the header and sidebar —
+    /// "choosing a sticker…" wins over "typing…" while a peer is picking a
+    /// sticker (`chatActionChoosingSticker`, schema 1.8.67 line 6380).
+    pub fn peer_activity_label(&self) -> Option<&'static str> {
+        if !self.choosing_sticker_senders.is_empty() {
+            Some("choosing a sticker…")
+        } else if self.is_peer_typing() {
+            Some("typing…")
+        } else {
+            None
         }
     }
 
@@ -2501,8 +2520,8 @@ impl ChatSummary {
         if let Some(reason) = self.kind.gate_reason() {
             return reason.to_string();
         }
-        if self.is_peer_typing() {
-            return "typing…".into();
+        if let Some(label) = self.peer_activity_label() {
+            return label.into();
         }
         if let Some(draft) = &self.draft {
             let text = draft.text.replace('\n', " ");
@@ -2574,6 +2593,7 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         notification_settings: ChatNotificationSettings::default(),
         last_preview: String::new(),
         typing_senders: Vec::new(),
+        choosing_sticker_senders: Vec::new(),
         draft: None,
         my_member_status: None,
         my_admin_can_post_messages: None,
@@ -14682,6 +14702,49 @@ mod tests {
             r#"{"@type":"updateChatAction","chat_id":7,"sender_id":{"@type":"messageSenderUser","user_id":9},"action":{"@type":"chatActionRecordingVoiceNote"}}"#,
         );
         assert!(!session.chats.get(&7).unwrap().is_peer_typing());
+    }
+
+    #[test]
+    fn chat_action_choosing_sticker_label() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatAction","chat_id":7,"sender_id":{"@type":"messageSenderUser","user_id":7},"action":{"@type":"chatActionChoosingSticker"}}"#,
+        );
+        let chat = session.chats.get(&7).unwrap();
+        assert!(!chat.is_peer_typing());
+        assert_eq!(chat.peer_activity_label(), Some("choosing a sticker…"));
+        assert_eq!(chat.sidebar_preview(), "choosing a sticker…");
+        // A typing peer alongside keeps the sticker label (more specific wins).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatAction","chat_id":7,"sender_id":{"@type":"messageSenderUser","user_id":9},"action":{"@type":"chatActionTyping"}}"#,
+        );
+        assert_eq!(
+            session.chats.get(&7).unwrap().peer_activity_label(),
+            Some("choosing a sticker…")
+        );
+        // Cancel clears only the sticker sender; the typer remains.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateChatAction","chat_id":7,"sender_id":{"@type":"messageSenderUser","user_id":7},"action":{"@type":"chatActionCancel"}}"#,
+        );
+        let chat = session.chats.get(&7).unwrap();
+        assert_eq!(chat.peer_activity_label(), Some("typing…"));
+        assert_eq!(chat.sidebar_preview(), "typing…");
     }
 
     #[test]
