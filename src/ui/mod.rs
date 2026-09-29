@@ -1,3 +1,4 @@
+mod appearance;
 mod chat_theme;
 mod story_areas;
 mod synthetic;
@@ -39,6 +40,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::table::{Table, TableBody, TableCell, TableRow};
+use gpui_kit::component::theme::ThemeMode;
 use gpui_kit::component::*;
 // kit Phase 3: the geometry `Size` (row sizes for the kit `VirtualList`),
 // aliased because the `gpui_kit::*` glob also brings the component `Size`
@@ -83,7 +85,8 @@ use quill::poll::{
 use quill::rich::RichBlock;
 use quill::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
-    AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, CallPrefs, MediaPrefs,
+    AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, AppearancePrefs, CallPrefs,
+    MediaPrefs, ThemeChoice,
 };
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
@@ -138,7 +141,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use synthetic::{MessageChrome, SyntheticChat, session_bubble_quoted, session_bubble_rich};
+use synthetic::{
+    BubbleLook, MessageChrome, SyntheticChat, session_bubble_quoted, session_bubble_rich,
+};
 use zeroize::Zeroize;
 
 actions!(
@@ -670,6 +675,16 @@ pub struct QuillApp {
     inline_bot_alert_shown: bool,
     /// Phase S2: storage-usage overlay (TGX Settings → Data and Storage).
     storage_usage_open: bool,
+    /// Settings → Appearance slice: client-side look-and-feel
+    /// (theme/auto-night/accent/wallpaper/font-size/bubbles), persisted
+    /// to `appearance_prefs.json`.
+    appearance: AppearancePrefs,
+    /// Settings → Appearance slice: the dialog is on screen.
+    appearance_open: bool,
+    /// Settings → Appearance slice: last `(theme mode, accent)` pushed
+    /// into the global component theme, so `apply_appearance` only
+    /// notifies (re-renders) when something actually changed.
+    appearance_applied: Option<(ThemeMode, u32)>,
     /// Slice A2: two-step verification overlay. `twofa_view` picks the
     /// status screen or one of the forms; the four textareas back the
     /// enable/change/disable/recovery-email forms. Passwords live in the
@@ -1359,6 +1374,9 @@ pub enum ScreenshotDemo {
     /// fixture `getStorageStatistics` stats with the "Secret media and
     /// files" category, dialog open.
     ReadyStorageUsage,
+    /// Settings → Appearance: the Appearance dialog open over the
+    /// ReadyChats fixture (injected, no live Telegram).
+    ReadyAppearance,
     /// Slice A3: Active Sessions overlay (injected, no live Telegram) —
     /// fixture `getActiveSessions` sessions (current device + two other
     /// sessions + one incomplete login attempt), dialog open.
@@ -1861,7 +1879,11 @@ impl QuillApp {
                     link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
                 },
             ),
-            Some(ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer) => {
+            Some(
+                ScreenshotDemo::ReadyChats
+                | ScreenshotDemo::ReadyChatsComposer
+                | ScreenshotDemo::ReadyAppearance,
+            ) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
                     ConnectUiStatus::DemoReadyChats,
@@ -2978,6 +3000,9 @@ impl QuillApp {
             event_log_search: None,
             event_log_admin_filter: None,
             storage_usage_open: false,
+            appearance: Self::load_appearance(),
+            appearance_open: false,
+            appearance_applied: None,
             sessions_open: false,
             sessions_confirm: None,
             websites_open: false,
@@ -3555,6 +3580,20 @@ impl QuillApp {
             }
             app.storage_usage_open = true;
             app.status_note = "screenshot demo — storage usage".into();
+        }
+        // Settings → Appearance: the Appearance dialog open over the
+        // ReadyChats fixture (injected, no live Telegram). Non-default
+        // values so the screenshot shows the slice live: dark theme,
+        // blue accent, dark wallpaper, 16px message text. They are only
+        // in-memory for the demo — `apply_appearance` (end of this fn)
+        // picks them up; nothing is persisted.
+        if matches!(demo, Some(ScreenshotDemo::ReadyAppearance)) {
+            app.appearance.theme = ThemeChoice::Dark;
+            app.appearance.accent_rgb = 0x2f81f7;
+            app.appearance.wallpaper_rgb = Some(0x0e1621);
+            app.appearance.font_size_px = 16;
+            app.appearance_open = true;
+            app.status_note = "screenshot demo — appearance settings".into();
         }
         // Slice A2: 2FA overlay fixture — password set with recovery
         // email (injected `passwordState`, no live Telegram).
@@ -4365,6 +4404,26 @@ impl QuillApp {
         if app.live.is_some() {
             app.spawn_poll_loop(cx);
         }
+        // Settings → Appearance: apply the persisted prefs (theme +
+        // accent) before the first frame, then re-evaluate auto-night
+        // (scheduled/system) once a minute. `apply_appearance` only
+        // notifies when the effective theme actually changed, so the
+        // tick is free when idle.
+        app.apply_appearance(cx);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(60))
+                    .await;
+                let alive = this
+                    .update(cx, |this, cx| this.apply_appearance(cx))
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+            }
+        })
+        .detach();
         app
     }
 
@@ -5533,9 +5592,17 @@ impl QuillApp {
                 .max_h(px(320.))
                 .overflow_y_scroll();
             for (index, block) in blocks.iter().enumerate() {
-                if let Some(child) =
-                    rich_block_element(index, block, (0, 0), ChatId(0), MessageId(0), &empty, cx)
-                {
+                if let Some(child) = rich_block_element(
+                    index,
+                    block,
+                    (0, 0),
+                    ChatId(0),
+                    MessageId(0),
+                    &empty,
+                    // Settings → Appearance: message font size.
+                    self.msg_font(),
+                    cx,
+                ) {
                     preview = preview.child(child);
                 }
             }
@@ -6415,6 +6482,8 @@ impl QuillApp {
                             MessageId(0),
                             &page.rich,
                             &std::collections::HashSet::new(),
+                            // Settings → Appearance: message font size.
+                            self.msg_font(),
                             cx,
                         )),
                 )
@@ -8588,6 +8657,13 @@ impl QuillApp {
         if self.notification_defaults_open {
             self.notification_defaults_open = false;
             self.defaults_sound_picker = None;
+            cx.notify();
+            return;
+        }
+        // Settings → Appearance: Esc closes the dialog (backdrop click
+        // also closes; changes already applied live).
+        if self.appearance_open {
+            self.appearance_open = false;
             cx.notify();
             return;
         }
@@ -16318,7 +16394,12 @@ impl QuillApp {
     /// first; this closes the kit dialog only when the flag is actually
     /// cleared — validation failures and non-closing actions keep the
     /// dialog open.
-    fn close_kit_dialog_if_done(&self, kind: DialogKind, window: &mut Window, cx: &mut App) {
+    pub(crate) fn close_kit_dialog_if_done(
+        &self,
+        kind: DialogKind,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
         }
@@ -33605,6 +33686,8 @@ impl QuillApp {
                 (item.chat_id.0, row_id),
                 true,
                 &self.spoiler_revealed,
+                // Settings → Appearance: captions follow the message font size.
+                self.msg_font(),
                 cx,
             )
         });
@@ -34790,6 +34873,8 @@ impl QuillApp {
                 (item.chat_id.0, item.story_id as u64),
                 true,
                 &self.spoiler_revealed,
+                // Settings → Appearance: captions follow the message font size.
+                self.msg_font(),
                 cx,
             )
         });
@@ -36859,17 +36944,17 @@ impl Render for QuillApp {
                 let _ = this;
                 window.toggle_fullscreen();
             }))
-            .on_action(cx.listener(|this, _: &ToggleTheme, window, cx| {
-                let _ = this;
-                // kit Phase 8: one call flips the kit theme and the Quill
-                // token palette together; `Theme::change` refreshes the
-                // window so every surface repaints in the new mode.
-                let next = if theme_mode().is_dark() {
-                    gpui_kit::component::ThemeMode::Light
+            .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| {
+                // Write through the appearance funnel (persist + re-apply)
+                // so the 60s auto-night tick can't silently revert the
+                // flip. Auto-night, when enabled, still overrides the
+                // manual choice while active — same as the dialog.
+                let next = if this.appearance.theme == ThemeChoice::Dark {
+                    ThemeChoice::Light
                 } else {
-                    gpui_kit::component::ThemeMode::Dark
+                    ThemeChoice::Dark
                 };
-                set_theme_mode(next, Some(window), cx);
+                this.set_appearance(cx, |a| a.theme = next);
             }))
             .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
                 let _ = this;
@@ -37039,6 +37124,8 @@ impl Render for QuillApp {
             // the shell sync — render wiring deleted.
             // kit Phase 2 (redo): archive settings now hosted in a kit
             // Dialog via the shell sync — render wiring deleted.
+            // kit Phase 2 (redo): appearance now hosted in a kit Dialog via
+            // the shell sync — render wiring deleted.
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             // Phase C3a: group-call (voice chat) overlay above the call
@@ -38413,6 +38500,11 @@ impl QuillApp {
             // kit Phase 7: screen-reader landmark for the message history.
             .role(Role::Log)
             .aria_label(format!("Message history — {sender_name}"))
+            // Settings → Appearance: chat wallpaper (solid color behind
+            // the message list; None keeps the theme background).
+            .when_some(self.appearance.wallpaper_rgb, |this, color| {
+                this.bg(rgb(color))
+            })
             .child(
                 MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
                     if ix == 0 {
@@ -38444,6 +38536,8 @@ impl QuillApp {
             return div().into_any_element();
         };
         let shared = &self.history_shared;
+        // Settings → Appearance: font size + bubble/plain style.
+        let look = self.bubble_look(cx);
         match row {
             HistoryRow::Album {
                 album_id,
@@ -38462,6 +38556,8 @@ impl QuillApp {
                     sender.clone(),
                     *receipt,
                     sender_avatar.clone(),
+                    // Settings → Appearance: font size + bubble/plain style.
+                    look,
                     cx,
                 )
             }
@@ -38488,6 +38584,8 @@ impl QuillApp {
                     &self.spoiler_revealed,
                     inputs.is_secret,
                     self.session(),
+                    // Settings → Appearance: font size + bubble/plain style.
+                    look,
                     cx,
                 );
                 // M1: `cx.listener` closures must be `'static`, so the
@@ -38808,6 +38906,8 @@ impl QuillApp {
     /// its `getChatSponsoredMessages` rows with Sponsored / Recommended labels
     /// instead of history.
     fn sponsored_rows_pane(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        // Settings → Appearance: font size + bubble/plain style.
+        let look = self.bubble_look(cx);
         let session = self.session();
         let open = session.and_then(|s| s.open_chat);
         let rows: Vec<SponsoredMessage> = session
@@ -38877,6 +38977,8 @@ impl QuillApp {
                 &failed,
                 &media_roots,
                 &self.spoiler_revealed,
+                // Settings → Appearance: font size + bubble/plain style.
+                look,
                 cx,
             ));
         }
@@ -39191,6 +39293,16 @@ impl QuillApp {
                                 cx.notify();
                             })),
                     );
+                    // Settings → Appearance slice: theme, auto-night,
+                    // accent, wallpaper, font size, bubble style
+                    // (client-side only — no TDLib setting exists for
+                    // any of it).
+                    list = list.child(Button::new("appearance").label("🎨 Appearance").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.appearance_open = true;
+                            cx.notify();
+                        }),
+                    ));
                     // Slice A2: two-step verification overlay entry (TGX
                     // `TwoStepVerification`). Quill has no settings
                     // screen, so it sits next to the storage entry; it
@@ -43727,6 +43839,8 @@ fn sponsored_message_row(
     failed: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    // Settings → Appearance: font size + bubble/plain style.
+    look: BubbleLook,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message.message_id as u64;
@@ -43755,6 +43869,8 @@ fn sponsored_message_row(
             downloading,
             media_roots,
             revealed,
+            // Settings → Appearance: message font size.
+            look.font,
             cx,
         )),
         MessageContent::Photo(photo) => Some(photo_attachment(
@@ -43990,6 +44106,8 @@ fn album_history_row(
     sender: Option<String>,
     receipt: OutboxReceipt,
     sender_avatar: Option<(String, Option<PathBuf>)>,
+    // Settings → Appearance: font size + bubble/plain style.
+    look: BubbleLook,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let Some(first) = messages.first() else {
@@ -44057,6 +44175,8 @@ fn album_history_row(
         first.is_outgoing,
         Some(extra),
         None,
+        // Settings → Appearance: font size + bubble/plain style.
+        look,
     )
 }
 
@@ -44925,6 +45045,8 @@ fn session_history_row(
     // Phase C2i: session for `messageCall` peer resolution ("Call
     // again" only for 1:1 chats).
     session: Option<&Session>,
+    // Settings → Appearance: font size + bubble/plain style.
+    look: BubbleLook,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // Phase B4: timer-change service rows (`messageChatSetMessageAutoDeleteTime`,
@@ -45240,6 +45362,8 @@ fn session_history_row(
             downloading,
             media_roots,
             revealed,
+            // Settings → Appearance: message font size.
+            look.font,
             cx,
         )),
         _ => None,
@@ -45411,6 +45535,8 @@ fn session_history_row(
                 (message.chat_id.0, message.id.0 as u64),
                 true,
                 revealed,
+                // Settings → Appearance: caption follows the message font size.
+                look.font,
                 cx,
             )
         });
@@ -45472,6 +45598,8 @@ fn session_history_row(
             message.id,
             rich,
             revealed,
+            // Settings → Appearance: message font size.
+            look.font,
             cx,
         )),
         _ => None,
@@ -45484,6 +45612,8 @@ fn session_history_row(
             rich_body,
             extra,
             header,
+            // Settings → Appearance: font size + bubble/plain style.
+            look,
         );
     }
     if let Some(text_body) = text_body {
@@ -45494,6 +45624,8 @@ fn session_history_row(
             text_body,
             extra,
             header,
+            // Settings → Appearance: font size + bubble/plain style.
+            look,
         );
     }
     // MED4: caption above the media → bubble body. Caption below the
@@ -45507,6 +45639,8 @@ fn session_history_row(
             caption_el,
             extra,
             header,
+            // Settings → Appearance: font size + bubble/plain style.
+            look,
         );
     }
     session_bubble_quoted(
@@ -45516,6 +45650,8 @@ fn session_history_row(
         message.is_outgoing,
         extra,
         header,
+        // Settings → Appearance: font size + bubble/plain style.
+        look,
     )
 }
 
@@ -45537,11 +45673,13 @@ fn rich_text_line(
     msg_key: (i64, u64),
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    // Settings → Appearance: message font size (was hardcoded text_sm).
+    font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let mut line = div()
         .id(("msg-rich-text", msg_key.1 * 2 + is_caption as u64))
-        .text_sm()
+        .text_size(font)
         .flex()
         .flex_wrap()
         .gap_0();
@@ -45620,14 +45758,24 @@ fn message_text_block(
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    // Settings → Appearance: message font size.
+    font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = msg_key.1;
-    let line = rich_text_line(&text.text, &text.entities, msg_key, false, revealed, cx);
+    let line = rich_text_line(
+        &text.text,
+        &text.entities,
+        msg_key,
+        false,
+        revealed,
+        font,
+        cx,
+    );
     let card = text.link_preview.as_ref().and_then(|preview| {
         preview
             .has_card()
-            .then(|| link_preview_card(row_id, preview, files, downloading, media_roots, cx))
+            .then(|| link_preview_card(row_id, preview, files, downloading, media_roots, font, cx))
     });
     let above = text
         .link_preview
@@ -45655,6 +45803,8 @@ fn link_preview_card(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
+    // Settings → Appearance: message font size.
+    font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let site_empty = preview.site_name.is_empty();
@@ -45743,6 +45893,10 @@ fn link_preview_card(
         }
         _ => None,
     };
+    // Settings → Appearance: the card copy scales with the message
+    // font size — the title keeps body size, the meta lines stay one
+    // step smaller (12px vs 14px at the default).
+    let small = font * (12.0 / 14.0);
     let mut copy = div()
         .id(("link-preview-copy", row_id))
         .flex()
@@ -45752,25 +45906,25 @@ fn link_preview_card(
     if !site_empty {
         copy = copy.child(
             div()
-                .text_xs()
+                .text_size(small)
                 .font_medium()
                 .text_color(accent())
                 .child(site),
         );
     }
     if !title_empty {
-        copy = copy.child(div().text_sm().font_medium().child(title));
+        copy = copy.child(div().text_size(font).font_medium().child(title));
     }
     if !description_empty {
         copy = copy.child(
             div()
-                .text_xs()
+                .text_size(small)
                 .text_color(text_primary())
                 .child(description),
         );
     }
     if site_empty && title_empty && description_empty && !display.is_empty() {
-        copy = copy.child(div().text_xs().text_color(accent()).child(display));
+        copy = copy.child(div().text_size(small).text_color(accent()).child(display));
     }
     let body = if preview.show_large_media {
         let mut column = div()
@@ -45841,6 +45995,8 @@ fn message_rich_block(
     message_id: MessageId,
     rich: &quill::telegram::envelope::RichMessageContent,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    // Settings → Appearance: message font size.
+    font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = msg_key.1;
@@ -45850,9 +46006,9 @@ fn message_rich_block(
         .flex_col()
         .gap_2();
     for (index, block) in rich.blocks.iter().enumerate() {
-        if let Some(child) =
-            rich_block_element(index, block, msg_key, chat_id, message_id, revealed, cx)
-        {
+        if let Some(child) = rich_block_element(
+            index, block, msg_key, chat_id, message_id, revealed, font, cx,
+        ) {
             stack = stack.child(child);
         }
     }
@@ -45886,6 +46042,8 @@ fn rich_block_element(
     chat_id: ChatId,
     message_id: MessageId,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    // Settings → Appearance: message font size.
+    font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
     let row_id = msg_key.1;
@@ -45901,7 +46059,9 @@ fn rich_block_element(
                 .flex_col()
                 .gap_1();
             if !text.is_empty() {
-                col = col.child(rich_text_line(text, entities, msg_key, false, revealed, cx));
+                col = col.child(rich_text_line(
+                    text, entities, msg_key, false, revealed, font, cx,
+                ));
             }
             for (button_index, button) in buttons.iter().enumerate() {
                 col = col.child(
@@ -45939,7 +46099,9 @@ fn rich_block_element(
             };
             Some(
                 heading
-                    .child(rich_text_line(text, entities, msg_key, false, revealed, cx))
+                    .child(rich_text_line(
+                        text, entities, msg_key, false, revealed, font, cx,
+                    ))
                     .into_any_element(),
             )
         }
@@ -47917,6 +48079,7 @@ pub enum DialogKind {
     ForumManage,
     CommentThread,
     Welcome,
+    Appearance,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -47978,6 +48141,7 @@ impl QuillShell {
             DialogKind::ForumManage => app.forum_manage_dialog.is_some(),
             DialogKind::CommentThread => app.comment_thread_dialog.is_some(),
             DialogKind::Welcome => app.welcome_dialog.is_some(),
+            DialogKind::Appearance => app.appearance_open,
         }
     }
 
@@ -48013,12 +48177,13 @@ impl QuillShell {
             DialogKind::ForumManage => QuillApp::build_forum_manage_dialog,
             DialogKind::CommentThread => QuillApp::build_comment_thread_dialog,
             DialogKind::Welcome => QuillApp::build_welcome_dialog,
+            DialogKind::Appearance => QuillApp::build_appearance_dialog,
         }
     }
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 30] = [
+    const KINDS: [DialogKind; 31] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -48049,6 +48214,7 @@ impl QuillShell {
         DialogKind::ImportContacts,
         DialogKind::EditProfile,
         DialogKind::AddContact,
+        DialogKind::Appearance,
     ];
 
     /// Keep the single kit dialog in sync with the app-side open flags.
@@ -48098,7 +48264,7 @@ impl QuillShell {
     /// already closed the dialog (Esc / backdrop / ✕), so this clears
     /// the app-side open flag and drops the tracked kind — it must NOT
     /// call `close_dialog` again.
-    fn on_close_kind(
+    pub(crate) fn on_close_kind(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,
         kind: DialogKind,

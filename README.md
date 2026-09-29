@@ -517,12 +517,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Settings
 
-- [ ] Light/dark theme switcher <!-- parity:settings-theme-switch -->
-- [ ] Auto-night mode (system/scheduled) <!-- parity:settings-auto-night -->
-- [ ] Accent color picker <!-- parity:settings-accent-color -->
-- [ ] Chat background / wallpaper <!-- parity:settings-chat-wallpaper -->
-- [ ] Message font size <!-- parity:settings-font-size -->
-- [ ] Bubble vs plain chat style <!-- parity:settings-bubble-style -->
+- [x] Light/dark theme switcher, live via `Theme::change` (🎨 Appearance dialog, `src/ui/appearance.rs` `apply_appearance`) <!-- parity:settings-theme-switch -->
+- [x] Auto-night mode: Off / System (OS appearance) / Scheduled (local-time window, 1-min re-check; `night_active`, `src/settings.rs`) <!-- parity:settings-auto-night -->
+- [x] Accent color picker (presets + Default), live via theme accent override <!-- parity:settings-accent-color -->
+- [x] Chat wallpaper (solid-color presets + Default), painted behind the message list <!-- parity:settings-chat-wallpaper -->
+- [x] Message font size (12–20 px), live across message text and captions (`BubbleLook`) <!-- parity:settings-font-size -->
+- [x] Bubble vs plain chat style, live (`BubbleLook.plain` drops bubble bg/rounding) <!-- parity:settings-bubble-style -->
 - [x] Per-chat mute presets (1h / 8h / 2d / forever), live via chat panel (src/ui/mod.rs:11564; connect.rs:5424 `set_chat_mute_for` → `setChatNotificationSettings`) <!-- parity:settings-chat-mute -->
 - [x] Per-chat message preview toggle, live (src/ui/mod.rs:13028 `apply_chat_preview`) <!-- parity:settings-chat-preview -->
 - [x] Per-chat custom notification sound picker, live (src/ui/mod.rs:12844; `getSavedNotificationSounds`) <!-- parity:settings-chat-sound -->

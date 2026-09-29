@@ -42,15 +42,6 @@ fn dark() -> bool {
     MODE_DARK.load(Ordering::Relaxed) == 1
 }
 
-/// Current theme mode for the Quill token palette (mirrors the kit theme).
-pub fn theme_mode() -> ThemeMode {
-    if dark() {
-        ThemeMode::Dark
-    } else {
-        ThemeMode::Light
-    }
-}
-
 /// kit Phase 8: switch the whole app between light and dark. Drives the kit
 /// theme (`Theme::change`, so kit components re-theme) and the Quill token
 /// palette in one call — callers never touch one without the other.
