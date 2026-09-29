@@ -1,6 +1,6 @@
 use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
-pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 use super::story_areas::parse_story_areas;
+pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use crate::rich::{RichBlock, parse_rich_message};
 use crate::telegram::envelope_story::{ParsedStoryAlbum, parse_story_album};
