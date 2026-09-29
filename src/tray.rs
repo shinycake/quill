@@ -270,6 +270,7 @@ mod tests {
             notification_settings: ChatNotificationSettings::default(),
             last_preview: String::new(),
             typing_senders: Vec::new(),
+            choosing_sticker_senders: Vec::new(),
             draft: None,
             my_member_status: None,
             my_admin_can_post_messages: None,
