@@ -94,8 +94,8 @@ use quill::poll::{
 use quill::rich::RichBlock;
 use quill::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
-    AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, AppearancePrefs, CallPrefs,
-    MediaPrefs, ThemeChoice,
+    AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, AppearancePrefs,
+    BadgePrefs, CallPrefs, MediaPrefs, ThemeChoice,
 };
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
@@ -9351,6 +9351,27 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice parity:chatlist-badge-settings: update one badge-counter
+    /// pref in the session and persist it to the account dir (via
+    /// `ConnectDriver::save_badge_prefs`).
+    fn set_badge_pref(&mut self, update: impl FnOnce(&mut BadgePrefs), cx: &mut Context<Self>) {
+        let mut prefs = self
+            .session()
+            .map(|session| session.badge_prefs)
+            .unwrap_or_default();
+        update(&mut prefs);
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.badge_prefs = prefs;
+            if let Err(err) = live.driver.save_badge_prefs() {
+                self.status_note = format!("couldn’t save badge settings: {err}");
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.badge_prefs = prefs;
+            self.status_note = "demo: badge settings are not saved".into();
+        }
+        cx.notify();
+    }
+
     fn toggle_call_mute(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let muted = live
@@ -18331,6 +18352,9 @@ impl QuillApp {
             // Parity slice: reaction + poll-vote notification settings
             // (`setReactionNotificationSettings`).
             body = body.child(this.reaction_settings_section(cx, &saved_sounds));
+            // Slice parity:chatlist-badge-settings: app badge counter
+            // preferences (include muted/archived, messages vs chats).
+            body = body.child(this.badge_counter_section(cx));
             let footer = div().flex().justify_end().child(
                 Button::new("close-notif-defaults")
                     .label("Close")
@@ -20272,6 +20296,92 @@ impl QuillApp {
             );
         }
         section.into_any_element()
+    }
+
+    /// Slice parity:chatlist-badge-settings: one labeled kit Switch row
+    /// for the app badge counter section.
+    fn badge_switch_row(
+        &self,
+        cx: &mut Context<Self>,
+        id: &str,
+        label: &str,
+        checked: bool,
+        apply: fn(&mut BadgePrefs, bool),
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(label),
+            )
+            .child(
+                Switch::new(format!("badge-{id}"))
+                    .checked(checked)
+                    .accessibility_label(label)
+                    .on_click(cx.listener(move |this, &on, _, cx| {
+                        this.set_badge_pref(|p| apply(p, on), cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// Slice parity:chatlist-badge-settings: app badge counter
+    /// preferences (include muted / include archived / messages vs
+    /// chats) as kit Switch rows in the notification defaults dialog.
+    /// Toggling persists via `set_badge_pref`; the tray picks the new
+    /// count up on its next 1s sync.
+    fn badge_counter_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let prefs = self.session().map(|s| s.badge_prefs).unwrap_or_default();
+        div()
+            .id("badge-counter-section")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().text_sm().child("App badge counter"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Tray icon badge"),
+                    ),
+            )
+            .child(self.badge_switch_row(
+                cx,
+                "include-muted",
+                "Include muted chats",
+                prefs.include_muted,
+                |p, on| p.include_muted = on,
+            ))
+            .child(self.badge_switch_row(
+                cx,
+                "include-archived",
+                "Include archived chats",
+                prefs.include_archived,
+                |p, on| p.include_archived = on,
+            ))
+            .child(self.badge_switch_row(
+                cx,
+                "count-messages",
+                "Count unread messages (off: count chats)",
+                prefs.count_messages,
+                |p, on| p.count_messages = on,
+            ))
+            .into_any_element()
     }
 
     /// Slice A6: set the local "Sync contacts" switch to the requested

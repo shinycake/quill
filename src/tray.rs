@@ -2,17 +2,19 @@
 //!
 //! The icon is drawn programmatically as 64x64 RGBA (no asset files): a blue
 //! rounded square with a white paper-plane glyph, plus a red pill badge with
-//! the unread count (capped at "99+") whenever any chat is unread. The badge
-//! sums every chat's `unread_count` except archived chats. Muted chats ARE
-//! included — that is Telegram Desktop's actual default: its Notifications
-//! toggle "Include muted chats" (`lng_settings_include_muted`) is ON by
-//! default (`_includeMutedCounter = true`, tdesktop
-//! `Telegram/SourceFiles/core/core_settings.h`), i.e. excluding muted is the
-//! opt-out, not the opt-in. (Telegram X's launcher badge excludes muted by
-//! default, but this is a desktop tray icon — Telegram Desktop is the
-//! platform-appropriate reference.) Archived chats are excluded, matching
-//! both clients (TD badges the main chats list; TGX's `BADGE_FLAG_ARCHIVED`
-//! is off by default). The sum saturates instead of overflowing.
+//! the unread count (capped at "99+") whenever any chat is unread.
+//!
+//! What counts is governed by [`BadgePrefs`]
+//! (parity:chatlist-badge-settings), edited in the notification defaults
+//! dialog and persisted to `badge_prefs.json`:
+//! - muted chats are included unless `include_muted` is off (Telegram
+//!   Desktop's default: `_includeMutedCounter = true`, tdesktop
+//!   `Telegram/SourceFiles/core/core_settings.h`, i.e. excluding muted is
+//!   the opt-out, not the opt-in; muteness is [`Session::effective_muted`]);
+//! - archived chats are excluded unless `include_archived` is on (both
+//!   clients exclude the archive by default);
+//! - the badge shows either the unread-message sum or the unread-chat count
+//!   (`count_messages`). The sum saturates instead of overflowing.
 //!
 //! The OS tray itself is managed behind `#[cfg(feature = "ui")]` with the
 //! `tray-icon` crate. [`sync_tray`] is called from a 1s timer in `main.rs`;
@@ -20,20 +22,30 @@
 //! has no system tray (a tray appearing later is picked up on the next sync —
 //! the handle is re-created until it succeeds).
 
+use crate::settings::BadgePrefs;
 use crate::state::Session;
 
 /// Icon edge length in pixels.
 pub const ICON_SIZE: u32 = 64;
 
-/// Total unread messages across non-archived chats. Negative per-chat counts
-/// (shouldn't happen) are ignored; muted chats are included (Telegram
-/// Desktop's default — `_includeMutedCounter = true`); the sum saturates.
-pub fn total_unread(session: &Session) -> u32 {
+/// Badge count honoring [`BadgePrefs`]: archived chats are skipped unless
+/// `include_archived`; muted chats are skipped unless `include_muted`;
+/// the count is the unread-message sum when `count_messages` is on, else
+/// the number of unread chats. Negative per-chat counts (shouldn't happen)
+/// are ignored; the sum saturates.
+pub fn badge_count(session: &Session, prefs: &BadgePrefs) -> u32 {
     session
         .chats
         .values()
-        .filter(|chat| !chat.in_archive)
-        .map(|chat| chat.unread_count.max(0) as u32)
+        .filter(|chat| prefs.include_archived || !chat.in_archive)
+        .filter(|chat| prefs.include_muted || !session.effective_muted(chat))
+        .map(|chat| {
+            if prefs.count_messages {
+                chat.unread_count.max(0) as u32
+            } else {
+                u32::from(chat.unread_count > 0)
+            }
+        })
         .fold(0u32, u32::saturating_add)
 }
 
@@ -228,7 +240,7 @@ thread_local! {
 /// unchanged or no system tray exists.
 #[cfg(feature = "ui")]
 pub fn sync_tray(session: Option<&Session>) {
-    let unread = session.map(total_unread).unwrap_or(0);
+    let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
@@ -247,6 +259,7 @@ mod tests {
     use super::*;
     use crate::diagnostics::MemorySink;
     use crate::ids::{AccountKey, ChatId, MessageId};
+    use crate::settings::BadgePrefs;
     use crate::state::{ChatSummary, Session};
     use crate::telegram::envelope::{ChatKind, ChatNotificationSettings};
     use std::collections::BTreeMap;
@@ -318,13 +331,13 @@ mod tests {
     }
 
     #[test]
-    fn total_unread_sums_and_ignores_negative() {
+    fn badge_count_sums_and_ignores_negative() {
         let session = session_with(&[3, 0, 7, -5]);
-        assert_eq!(total_unread(&session), 10);
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 10);
     }
 
     #[test]
-    fn total_unread_includes_muted_chats() {
+    fn badge_count_includes_muted_chats_by_default() {
         // Muted chats count: Telegram Desktop's badge includes them by
         // default (`_includeMutedCounter = true`).
         let mut session = Session::new(
@@ -333,11 +346,26 @@ mod tests {
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, muted_chat(1, 9));
-        assert_eq!(total_unread(&session), 14);
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 14);
     }
 
     #[test]
-    fn total_unread_excludes_archived_chats() {
+    fn badge_count_excludes_muted_when_opted_out() {
+        let mut session = Session::new(
+            AccountKey("tray-test-no-muted".into()),
+            Arc::new(MemorySink::new()),
+        );
+        session.chats.insert(0, chat(0, 5));
+        session.chats.insert(1, muted_chat(1, 9));
+        let prefs = BadgePrefs {
+            include_muted: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &prefs), 5);
+    }
+
+    #[test]
+    fn badge_count_excludes_archived_chats_by_default() {
         // Archived chats never count (both official clients exclude them
         // from the badge by default).
         let mut session = Session::new(
@@ -346,13 +374,38 @@ mod tests {
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, archived_chat(1, 9));
-        assert_eq!(total_unread(&session), 5);
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 5);
     }
 
     #[test]
-    fn total_unread_saturates() {
+    fn badge_count_includes_archived_when_opted_in() {
+        let mut session = Session::new(
+            AccountKey("tray-test-archived-in".into()),
+            Arc::new(MemorySink::new()),
+        );
+        session.chats.insert(0, chat(0, 5));
+        session.chats.insert(1, archived_chat(1, 9));
+        let prefs = BadgePrefs {
+            include_archived: true,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &prefs), 14);
+    }
+
+    #[test]
+    fn badge_count_can_count_chats_instead_of_messages() {
+        let session = session_with(&[3, 0, 7, -5]);
+        let prefs = BadgePrefs {
+            count_messages: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &prefs), 2);
+    }
+
+    #[test]
+    fn badge_count_saturates() {
         let session = session_with(&[i32::MAX, i32::MAX, i32::MAX]);
-        assert_eq!(total_unread(&session), u32::MAX);
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), u32::MAX);
     }
 
     #[test]

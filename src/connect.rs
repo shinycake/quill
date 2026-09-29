@@ -25,8 +25,8 @@ use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
 use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use crate::rich::RichBlock;
 use crate::settings::{
-    AccountPaths, InstantViewMode, load_call_prefs, load_contact_prefs, load_media_prefs,
-    safe_app_root, save_call_prefs, save_contact_prefs,
+    AccountPaths, InstantViewMode, load_badge_prefs, load_call_prefs, load_contact_prefs,
+    load_media_prefs, safe_app_root, save_badge_prefs, save_call_prefs, save_contact_prefs,
 };
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
@@ -13806,6 +13806,9 @@ pub fn start_live_connect(
     session.media_prefs = load_media_prefs(&prepared.paths);
     // Slice A6: local contacts prefs (sync toggle) load the same way.
     session.contact_prefs = load_contact_prefs(&prepared.paths);
+    // Slice parity:chatlist-badge-settings: local badge-counter prefs
+    // load the same way.
+    session.badge_prefs = load_badge_prefs(&prepared.paths);
     // Slice S4: local per-network auto-download settings load the same
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
@@ -13848,6 +13851,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// MED1: persist media prefs (`media_prefs.json`) next to the account.
     pub fn save_media_prefs(&mut self) -> std::io::Result<()> {
         crate::settings::save_media_prefs(&self.paths, &self.session.media_prefs)
+    }
+
+    /// Slice parity:chatlist-badge-settings: persist badge-counter prefs
+    /// (`badge_prefs.json`) next to the account.
+    pub fn save_badge_prefs(&mut self) -> std::io::Result<()> {
+        save_badge_prefs(&self.paths, &self.session.badge_prefs)
     }
 }
 
