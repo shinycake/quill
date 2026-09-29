@@ -51,10 +51,6 @@ impl CreateCommunityDialog {
             hide_chat: false,
         }
     }
-
-    pub(crate) fn text(entity: &Entity<TextareaState>, cx: &App) -> String {
-        entity.read(cx).value().to_string()
-    }
 }
 
 /// Slice G10: (chat_id, title) rows for the base-chat picker, filtered
@@ -93,7 +89,7 @@ pub fn build_create_community_dialog(
         let Some(dialog_state) = this.community_ui.create_dialog.as_ref() else {
             return dialog.title("New community").on_close(on_close);
         };
-        let query = CreateCommunityDialog::text(&dialog_state.search_input, cx);
+        let query = EditProfileDialog::text(&dialog_state.search_input, cx);
         let rows = this
             .session()
             .map(|session| community_chat_rows(session, &query))
@@ -198,7 +194,7 @@ pub fn build_create_community_dialog(
             .content({
                 // `content` needs an `Fn` closure, but the body is built once
                 // per dialog render — hand it over through a one-shot cell.
-                let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                let body = Rc::new(RefCell::new(Some(body)));
                 move |content, _, _| {
                     let body = body
                         .borrow_mut()
@@ -274,7 +270,7 @@ pub fn build_community_hub_dialog(
         dialog
             .title("Communities")
             .content({
-                let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                let body = Rc::new(RefCell::new(Some(body)));
                 move |content, _, _| {
                     let body = body
                         .borrow_mut()

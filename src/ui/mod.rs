@@ -14412,26 +14412,24 @@ impl QuillApp {
             return;
         };
         let name = dialog.name_input.read(cx).value().trim().to_string();
-        let chat_id = dialog.chat_id;
         let hide_chat = dialog.hide_chat;
-        let problem = if name.is_empty() {
-            Some("Name cannot be empty")
-        } else if chat_id.is_none() {
-            Some("Pick a chat for the community")
-        } else {
-            None
-        };
-        if let Some(problem) = problem {
+        if name.is_empty() {
             self.community_ui.create_dialog = Some(dialog);
-            self.status_note = problem.into();
+            self.status_note = "Name cannot be empty".into();
             cx.notify();
             return;
         }
+        let Some(chat_id) = dialog.chat_id else {
+            self.community_ui.create_dialog = Some(dialog);
+            self.status_note = "Pick a chat for the community".into();
+            cx.notify();
+            return;
+        };
         let note = match self.live.as_mut() {
             Some(live) => {
                 match live
                     .driver
-                    .create_community(ChatId(chat_id.unwrap_or(0)), &name, hide_chat)
+                    .create_community(ChatId(chat_id), &name, hide_chat)
                 {
                     Ok(Some(_)) => "Community created".to_string(),
                     _ => {

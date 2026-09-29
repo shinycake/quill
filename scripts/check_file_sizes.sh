@@ -77,6 +77,14 @@ WAIVERS=(
   # dialog_builder / KINDS match arms, info-panel fetch/render arms,
   # username-dialog submit/title-hint arms, demo-scenario dispatch arms,
   # new methods on QuillApp + one bundled `community_ui` field,
+  # side-menu entries, 3 screenshot scenarios; merge-pipeline dedupe
+  # fixup removed the duplicated `open_community_info` in favor of the
+  # shared `open_info_panel_target` — net −12; exact counts set post-rebase);
+  # state.rs (`InfoPanelTarget::Community` variant; exact count set post-rebase).
+>>>>>>> f451e74 (G10: review fixups — dedupe text helper, waiver off-by-one, doc wording, dead fallback, double conversion)
+  # dialog_builder / KINDS match arms, info-panel fetch/render arms,
+  # username-dialog submit/title-hint arms, demo-scenario dispatch arms,
+  # new methods on QuillApp + one bundled `community_ui` field,
   # side-menu entries, 3 screenshot scenarios; exact count set post-rebase);
   # state.rs (`InfoPanelTarget::Community` variant; exact count set post-rebase).
   "src/calls/engine.rs:3212"
