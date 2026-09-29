@@ -315,12 +315,12 @@ pub enum RequestPurpose {
     /// Slice S9: `getInlineQueryResults` against the animation search
     /// bot for the GIF panel search. The bot is resolved via
     /// `getOption("animation_search_bot_username")` + `searchPublicChat`
-    /// (schema 1.8.67, lines 6483, 11063); `getInlineQueryResults` takes
-    /// `bot_user_id:int53` (:13019), so the search ships with an
-    /// already-resolved bot id. Response is `inlineQueryResults`; stored
-    /// in `GifPanel` (never the composer's `inline_query` slot).
+    /// (schema 1.8.67, lines 6483, 11063); the driver slice will carry the
+    /// resolved id when it issues searches.
+    /// ponytail: no query identity — two concurrent searches can race and
+    /// a stale first page can clobber newer results; the UI slice must
+    /// debounce/serialize searches.
     GetGifSearchResults {
-        bot_user_id: i64,
         first_page: bool,
     },
     /// Slice S9: `addSavedAnimation` (schema 1.8.67, line 14769).
@@ -13154,10 +13154,7 @@ mod tests {
         // First search page lands in `GifPanel` under GetGifSearchResults
         // (not the composer's inline_query slot).
         let extra = with_purpose.request(
-            RequestPurpose::GetGifSearchResults {
-                bot_user_id: 42,
-                first_page: true,
-            },
+            RequestPurpose::GetGifSearchResults { first_page: true },
             None,
         );
         apply_json(
@@ -13177,10 +13174,7 @@ mod tests {
         // Second page appends new entries (deduped by file id) and
         // refreshes the offset.
         let extra = with_purpose.request(
-            RequestPurpose::GetGifSearchResults {
-                bot_user_id: 42,
-                first_page: false,
-            },
+            RequestPurpose::GetGifSearchResults { first_page: false },
             None,
         );
         apply_json(
