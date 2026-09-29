@@ -2966,6 +2966,12 @@ pub struct SearchState {
     /// `chat_ids` (offline `searchChats`) with its own done/error flags so
     /// the status waits for all three requests.
     pub public_chat_ids: Vec<ChatId>,
+    /// Slice (communities-search-filter): community id picked via the
+    /// search-panel filter chips (`None` = "All chats"). Feeds
+    /// `searchMessagesChatTypeFilterCommunity` in `searchMessages` (set by
+    /// `ConnectDriver::set_search_community_filter`). Kept across re-queries;
+    /// cleared on close and query-clear.
+    pub community_filter: Option<i64>,
     /// Empty-query surface: `searchRecentlyFoundChats` (official Recent).
     pub recents: bool,
     chats_done: bool,
@@ -2986,6 +2992,7 @@ impl Default for SearchState {
             chat_ids: Vec::new(),
             messages: Vec::new(),
             public_chat_ids: Vec::new(),
+            community_filter: None,
             recents: false,
             chats_done: false,
             messages_done: false,
@@ -3013,6 +3020,7 @@ impl SearchState {
         self.open = false;
         self.query.clear();
         self.recents = false;
+        self.community_filter = None;
         self.status = SearchStatus::Closed;
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
@@ -3021,6 +3029,7 @@ impl SearchState {
     pub fn clear_query(&mut self) {
         self.query.clear();
         self.recents = true;
+        self.community_filter = None;
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
         self.status = if self.open {

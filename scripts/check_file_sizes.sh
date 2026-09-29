@@ -15,11 +15,11 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:49204"
-  "src/connect.rs:24922"
-  "src/state.rs:21854"
+  "src/ui/mod.rs:49279"
+  "src/connect.rs:24952"
+  "src/state.rs:21863"
   "src/telegram/envelope.rs:18722"
-  "src/telegram/requests.rs:10517"
+  "src/telegram/requests.rs:10539"
   # Slice S17 (2026-09-29, merge-pipeline rebase post-#177): type-coherent
   # extensions only — ui/mod.rs +11 (49090 → 49101: peer-activity label
   # lookup on `conversation_header` + 3 "typing…" label swaps to
@@ -121,6 +121,18 @@ WAIVERS=(
   # module `src/telegram/profile_accent.rs` (93 lines) holds the palette
   # types, parser, and 3 tests — the waived files grow only where the code
   # must attach to existing types/matches.
+  # Slice communities-search-filter (2026-09-29, merge-pipeline rebase
+  # post-#180): type-coherent extensions only — requests.rs +22
+  # (10517 → 10539: `search_messages_chat_type_filter_json` builder next to
+  # its sibling `search_messages_filter_json` + `search_messages`
+  # `chat_type_filter` param); connect.rs +30 (24922 → 24952:
+  # `set_search_community_filter` driver method on the existing `Connect`
+  # type + import + call-site wiring); state.rs +9 (21854 → 21863:
+  # `SearchState::community_filter` field + Default init + resets);
+  # ui/mod.rs +75 (49204 → 49279: `search_community_filter_chips` render fn
+  # + `set_search_community_filter` handler methods on the existing app type
+  # + chips-row hook in `search_results`). All new tests live in
+  # `tests/community_search_filter.rs`.
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )

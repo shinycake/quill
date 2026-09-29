@@ -16918,6 +16918,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice (communities-search-filter): route a community-filter chip click
+    /// to the driver (re-runs the current query with the new filter); in demo
+    /// mode just records the selection for the panel to display.
+    fn set_search_community_filter(&mut self, community_id: Option<i64>, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.set_search_community_filter(community_id) {
+                self.status_note = format!("community filter failed: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.search.community_filter = community_id;
+        }
+        cx.notify();
+    }
+
     /// Slice CL2: open the archive auto-settings dialog (TGX
     /// `SettingsArchiveChatListController` fetches
     /// `getArchiveChatListSettings` on open).
@@ -37238,6 +37252,64 @@ impl QuillApp {
             })
     }
 
+    /// Slice (communities-search-filter): community filter chips at the top of
+    /// the typed-search panel — "All chats" (null filter) plus one chip per
+    /// accessible community from `SessionState.communities` (fed by
+    /// `updateCommunity`; TDLib 1.8.67 has no list-communities method, and
+    /// `searchMessagesChatTypeFilterCommunity` requires a `community_id`,
+    /// schema line 6344). Omitted when there is nothing to filter by.
+    /// Same kit-Button chip pattern as the event-log filters.
+    fn search_community_filter_chips(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        let selected = session.search.community_filter;
+        let mut communities: Vec<(i64, String)> = session
+            .communities
+            .iter()
+            .filter(|(_, community)| community.have_access)
+            .map(|(id, community)| (*id, community.name.clone()))
+            .collect();
+        if communities.is_empty() {
+            return None;
+        }
+        communities.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        let mut chips = div()
+            .id("search-community-filter")
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .w_full()
+            .gap_1();
+        let all_label = if selected.is_none() {
+            "✓ All chats"
+        } else {
+            "All chats"
+        };
+        chips = chips.child(
+            Button::new("search-community-filter-all")
+                .label(all_label)
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.set_search_community_filter(None, cx);
+                })),
+        );
+        for (id, name) in communities {
+            let label = if selected == Some(id) {
+                format!("✓ {name}")
+            } else {
+                name
+            };
+            chips = chips.child(
+                Button::new(("search-community-filter", id as u64))
+                    .label(label)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_search_community_filter(Some(id), cx);
+                    })),
+            );
+        }
+        Some(chips.into_any_element())
+    }
+
     fn search_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let status = session
@@ -37310,6 +37382,9 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
+            .when_some(self.search_community_filter_chips(cx), |this, chips| {
+                this.child(chips)
+            })
             .when(!hint.is_empty(), |this| {
                 this.child(
                     div()
