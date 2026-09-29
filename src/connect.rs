@@ -12177,10 +12177,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Slice S4: push one network's auto-download settings
-    /// (`setAutoDownloadSettings`, schema 1.8.67, :15820). Applied
-    /// optimistically to the local prefs (the sent value is what the
-    /// server stores — the setAccountTtl precedent) and persisted; the
-    /// `ok` / error response clears or flags it.
+    /// (`setAutoDownloadSettings`, schema 1.8.67, :15820). Never
+    /// applied optimistically: the reducer applies the sent settings
+    /// only on the confirmed `ok` (the `ok` carries none, so they ride
+    /// the request purpose — the setAccountTtl precedent, state.rs:8383,
+    /// which applies on `ok` too), and the driver persists via
+    /// `data_storage_dirty` on the next ingest. A send failure or
+    /// TDLib error leaves the local prefs untouched.
     pub fn set_auto_download_settings(
         &mut self,
         network: NetworkKind,
@@ -12200,9 +12203,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some("Couldn't save auto-download settings.".to_string());
             return Err(err);
         }
-        // Slice S4: applied on the confirmed `ok` (the reducer applies
-        // the purpose's settings) — never optimistically, so a TDLib
-        // error can't leave a phantom value on screen.
         Ok(extra)
     }
 
@@ -12210,7 +12210,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`autoDownloadSettings.use_less_data_for_calls`, schema 1.8.67,
     /// :9856). One toggle drives all three networks' settings (TGX
     /// keeps a single switch); each network keeps its own caps.
+    /// Refuses while the local prefs are unseeded — pushing the
+    /// all-off defaults would silently disable the user's
+    /// auto-downloads account-wide.
     pub fn set_less_data_for_calls(&mut self, on: bool) -> Result<(), ConnectSendError> {
+        if !self.session.data_storage.seeded {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }

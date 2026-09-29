@@ -308,11 +308,17 @@ impl QuillApp {
                 let top: Vec<(String, i64, i32)> = top_chats_by_size(&chat_rows, 10)
                     .into_iter()
                     .map(|(chat_id, size, count)| {
-                        let title = session
-                            .as_ref()
-                            .and_then(|s| s.chats.get(&chat_id))
-                            .map(|c| c.title.clone())
-                            .unwrap_or_else(|| format!("Chat {chat_id}"));
+                        // Slice S4 fix-up: chat_id 0 is the schema's
+                        // "all other chats grouped" bucket, not a chat.
+                        let title = if chat_id == 0 {
+                            "Other chats".to_string()
+                        } else {
+                            session
+                                .as_ref()
+                                .and_then(|s| s.chats.get(&chat_id))
+                                .map(|c| c.title.clone())
+                                .unwrap_or_else(|| format!("Chat {chat_id}"))
+                        };
                         (title, size, count)
                     })
                     .collect();
