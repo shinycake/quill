@@ -303,6 +303,42 @@ pub fn log_out(extra: RequestId) -> String {
     .to_string()
 }
 
+/// Slice A7: `deleteAccount reason:string password:string = Ok;` (TDLib
+/// 1.8.67, `schema/td_api.tl:15675`): "Deletes the account of the current
+/// user, deleting all information associated with the user from the
+/// server."
+pub fn delete_account(extra: RequestId, reason: &str, password: &str) -> String {
+    json!({
+        "@type": "deleteAccount",
+        "@extra": extra.as_extra(),
+        "reason": reason,
+        "password": password,
+    })
+    .to_string()
+}
+
+/// Slice A7: `getAccountTtl = AccountTtl;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15669`).
+pub fn get_account_ttl(extra: RequestId) -> String {
+    json!({
+        "@type": "getAccountTtl",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Slice A7: `setAccountTtl ttl:accountTtl = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15666`): "Changes the period of inactivity after
+/// which the account of the current user will automatically be deleted."
+pub fn set_account_ttl(extra: RequestId, days: i32) -> String {
+    json!({
+        "@type": "setAccountTtl",
+        "@extra": extra.as_extra(),
+        "ttl": { "@type": "accountTtl", "days": days },
+    })
+    .to_string()
+}
+
 pub fn load_chats(extra: RequestId, limit: i32) -> String {
     load_chats_list(extra, json!({ "@type": "chatListMain" }), limit)
 }
@@ -6064,6 +6100,30 @@ mod tests {
             serde_json::from_str(&terminate_all_other_sessions(RequestId(73))).unwrap();
         assert_eq!(v["@type"], "terminateAllOtherSessions");
         assert_eq!(v["@extra"], "73");
+    }
+
+    #[test]
+    fn a7_account_lifecycle_request_shapes_match_1_8_67() {
+        // Slice A7: `deleteAccount reason:string password:string = Ok;`
+        // (line 15675), `getAccountTtl = AccountTtl;` (line 15669),
+        // `setAccountTtl ttl:accountTtl = Ok;` (line 15666).
+        let v: serde_json::Value =
+            serde_json::from_str(&delete_account(RequestId(74), "switching", "s3cret")).unwrap();
+        assert_eq!(v["@type"], "deleteAccount");
+        assert_eq!(v["@extra"], "74");
+        assert_eq!(v["reason"], "switching");
+        assert_eq!(v["password"], "s3cret");
+
+        let v: serde_json::Value = serde_json::from_str(&get_account_ttl(RequestId(75))).unwrap();
+        assert_eq!(v["@type"], "getAccountTtl");
+        assert_eq!(v["@extra"], "75");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&set_account_ttl(RequestId(76), 90)).unwrap();
+        assert_eq!(v["@type"], "setAccountTtl");
+        assert_eq!(v["@extra"], "76");
+        assert_eq!(v["ttl"]["@type"], "accountTtl");
+        assert_eq!(v["ttl"]["days"], 90);
     }
 
     #[test]

@@ -61,22 +61,22 @@ use crate::telegram::requests::{
     close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
     create_chat_folder, create_chat_invite_link, create_community, create_forum_topic,
     create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
-    create_private_chat, create_video_chat, decline_group_call_invitation, delete_chat,
-    delete_chat_folder, delete_chat_history,
+    create_private_chat, create_video_chat, decline_group_call_invitation, delete_account,
+    delete_chat, delete_chat_folder, delete_chat_history,
     delete_chat_reply_markup as delete_chat_reply_markup_request, delete_chat_welcome_message,
     delete_forum_topic, delete_messages, delete_profile_photo, delete_story,
     discard_call as discard_call_request, disconnect_all_websites, disconnect_website,
     download_file as download_file_request, edit_chat_folder, edit_chat_invite_link,
     edit_chat_welcome_message, edit_forum_topic, edit_message_caption, edit_message_text,
     edit_story as edit_story_request, edit_story_cover as edit_story_cover_request, end_group_call,
-    end_group_call_recording, end_group_call_screen_sharing, forward_messages, get_active_sessions,
-    get_archive_chat_list_settings, get_authorization_state, get_available_chat_boost_slots,
-    get_basic_group_full_info, get_bot_similar_bots, get_callback_query_answer,
-    get_callback_query_answer_game, get_callback_query_answer_with_password,
-    get_chat_active_stories, get_chat_administrators, get_chat_boost_status, get_chat_event_log,
-    get_chat_folder, get_chat_history, get_chat_invite_links, get_chat_join_requests,
-    get_chat_lists_to_add_chat, get_chat_member, get_chat_scheduled_messages,
-    get_chat_sponsored_messages, get_chat_statistics,
+    end_group_call_recording, end_group_call_screen_sharing, forward_messages, get_account_ttl,
+    get_active_sessions, get_archive_chat_list_settings, get_authorization_state,
+    get_available_chat_boost_slots, get_basic_group_full_info, get_bot_similar_bots,
+    get_callback_query_answer, get_callback_query_answer_game,
+    get_callback_query_answer_with_password, get_chat_active_stories, get_chat_administrators,
+    get_chat_boost_status, get_chat_event_log, get_chat_folder, get_chat_history,
+    get_chat_invite_links, get_chat_join_requests, get_chat_lists_to_add_chat, get_chat_member,
+    get_chat_scheduled_messages, get_chat_sponsored_messages, get_chat_statistics,
     get_chats_to_post_stories as get_chats_to_post_stories_request, get_commands,
     get_connected_websites, get_contacts, get_forum_topics, get_full_rich_message, get_group_call,
     get_inline_query_results, get_installed_sticker_sets, get_link_preview, get_login_url,
@@ -106,8 +106,8 @@ use crate::telegram::requests::{
     send_chat_action_kind, send_document, send_group_call_message, send_message_album,
     send_payment_form as send_payment_form_request, send_photo, send_poll, send_rich_message,
     send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_archive_chat_list_settings, set_authentication_phone_number, set_bio, set_chat_description,
-    set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
+    set_account_ttl, set_archive_chat_list_settings, set_authentication_phone_number, set_bio,
+    set_chat_description, set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
     set_chat_photo, set_chat_slow_mode_delay, set_chat_title, set_community_name,
     set_group_call_participant_volume_level, set_message_sender_block_list, set_name, set_password,
@@ -11806,6 +11806,80 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.sessions_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A7: send `deleteAccount` (schema 1.8.67, line 15675).
+    /// Guarded on the authorized chats path; one mutation at a time.
+    /// The password rides the request JSON only — never stored on the
+    /// session or diagnostics (the A2 `password_op_send` rule).
+    pub fn delete_account(
+        &mut self,
+        reason: &str,
+        password: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.account_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.account_error = None;
+        let extra = self.session.request(RequestPurpose::DeleteAccount, None);
+        self.session.account_mutating = true;
+        match self
+            .sender
+            .send_json(&delete_account(extra, reason, password))
+        {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.account_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A7: send `getAccountTtl` (schema 1.8.67, line 15669). The
+    /// cached value is reused and an in-flight fetch is never duplicated
+    /// (`Ok(None)` = no request needed). The `password_op_send` fetch
+    /// pattern, minus the password bookkeeping.
+    pub fn get_account_ttl(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.account_ttl_days.is_some() || self.session.account_ttl_loading {
+            return Ok(None);
+        }
+        self.session.account_error = None;
+        let extra = self.session.request(RequestPurpose::GetAccountTtl, None);
+        self.session.account_ttl_loading = true;
+        match self.sender.send_json(&get_account_ttl(extra)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.account_ttl_loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A7: send `setAccountTtl` (schema 1.8.67, line 15666). One
+    /// mutation at a time; the confirmed days land from the
+    /// authoritative `ok` (never an optimistic write).
+    pub fn set_account_ttl(&mut self, days: i32) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.account_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.account_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::SetAccountTtl { days }, None);
+        self.session.account_mutating = true;
+        match self.sender.send_json(&set_account_ttl(extra, days)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.account_mutating = false;
                 Err(err)
             }
         }

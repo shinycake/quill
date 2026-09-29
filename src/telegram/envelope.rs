@@ -771,6 +771,12 @@ pub enum EnvelopePayload {
     Sessions {
         sessions: Vec<ParsedSession>,
     },
+    /// Slice A7: `accountTtl` — `getAccountTtl` response (schema 1.8.67,
+    /// line 9053). Stored in `Session::account_ttl_days` when the
+    /// pending purpose is `GetAccountTtl`.
+    AccountTtl {
+        days: i32,
+    },
     /// Slice A4: `connectedWebsites` — `getConnectedWebsites` response
     /// (schema 1.8.67, lines 9171/15124). Stored in
     /// `Session::connected_websites` when the pending purpose is
@@ -8015,6 +8021,18 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                         .clamp(0, i32::MAX as i64) as i32,
                 },
             })
+        }
+        // Slice A7: `accountTtl` — the `getAccountTtl` answer (schema
+        // 1.8.67, line 9053). A missing/invalid `days` degrades to 0
+        // rather than failing the parse; the authoritative refetch
+        // decides.
+        "accountTtl" => {
+            let days = value
+                .get("days")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .clamp(0, i32::MAX as i64) as i32;
+            Ok(EnvelopePayload::AccountTtl { days })
         }
         // Slice A3: `sessions` — the `getActiveSessions` answer (schema
         // 1.8.67, lines 9144/9147). Malformed entries are dropped rather
@@ -16785,6 +16803,51 @@ mod password_state_tests {
             "setRecoveryEmailAddress password:string new_recovery_email_address:string = PasswordState;",
             "resendRecoveryEmailAddressCode = PasswordState;",
             "cancelRecoveryEmailAddressVerification = PasswordState;",
+        ] {
+            assert!(
+                schema.lines().any(|l| l == line),
+                "schema pin missing: {line}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod account_ttl_tests {
+    use super::*;
+
+    /// Slice A7: `accountTtl` answer (schema 1.8.67, line 9053).
+    #[test]
+    fn account_ttl_parses_days() {
+        let json = r#"{"@type":"accountTtl","days":180}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::AccountTtl { days } => assert_eq!(days, 180),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Slice A7: a missing `days` degrades to 0, never a parse error.
+    #[test]
+    fn account_ttl_missing_days_defaults_zero() {
+        let json = r#"{"@type":"accountTtl"}"#;
+        let env = parse_envelope(json).unwrap();
+        match env.payload {
+            EnvelopePayload::AccountTtl { days } => assert_eq!(days, 0),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Slice A7: every account-lifecycle constructor this slice relies
+    /// on must exist verbatim in the pinned schema (1.8.67).
+    #[test]
+    fn schema_pins_account_lifecycle_constructors() {
+        let schema = include_str!("../../schema/td_api.tl");
+        for line in [
+            "accountTtl days:int32 = AccountTtl;",
+            "setAccountTtl ttl:accountTtl = Ok;",
+            "getAccountTtl = AccountTtl;",
+            "deleteAccount reason:string password:string = Ok;",
         ] {
             assert!(
                 schema.lines().any(|l| l == line),
