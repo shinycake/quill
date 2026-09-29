@@ -267,6 +267,24 @@ mod tests {
     }
 
     #[test]
+    fn secure_create_dir_rejects_parent_traversal() {
+        // `temp/quill-media-cache/../evil` strips to an under-temp path, but
+        // `..` must never reach symlink_metadata's resolution.
+        let traversal = std::env::temp_dir()
+            .join("quill-media-cache")
+            .join("..")
+            .join("quill-evil-traversal");
+        assert!(
+            secure_create_dir(&traversal).is_err(),
+            "parent traversal must fail closed"
+        );
+        assert!(
+            !std::env::temp_dir().join("quill-evil-traversal").exists(),
+            "traversal must not create anything outside the cache tree"
+        );
+    }
+
+    #[test]
     #[cfg(unix)]
     fn restrict_file_is_owner_only() {
         let dir = scratch("restrict");
