@@ -2760,6 +2760,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyCallScreenShareReceive) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — connected video call, peer screen-share receive (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyCallDevices) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
