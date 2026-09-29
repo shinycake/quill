@@ -7,6 +7,17 @@ pub(crate) use chat_theme::*;
 mod dialogs;
 
 pub(crate) use dialogs::*;
+mod format_helpers;
+mod history_row;
+mod keybindings;
+mod menu_states;
+mod playback;
+
+pub(crate) use format_helpers::*;
+pub(crate) use history_row::*;
+pub(crate) use keybindings::*;
+pub(crate) use menu_states::*;
+pub(crate) use playback::*;
 mod story_page;
 
 pub(crate) use story_page::{StoryPage, apply_ready_story_albums};
@@ -216,108 +227,6 @@ impl PressableDiv for gpui_kit::Stateful<Div> {
     }
 }
 
-pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("cmd-q", QuitApp, None),
-        KeyBinding::new("ctrl-q", QuitApp, None),
-        // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
-        // minimize; F11 / Cmd+Ctrl+F fullscreen).
-        KeyBinding::new("cmd-w", CloseWindow, None),
-        KeyBinding::new("ctrl-w", CloseWindow, None),
-        KeyBinding::new("cmd-m", MinimizeWindow, None),
-        KeyBinding::new("ctrl-m", MinimizeWindow, None),
-        KeyBinding::new("f11", ToggleFullscreen, None),
-        KeyBinding::new("cmd-ctrl-f", ToggleFullscreen, None),
-        KeyBinding::new("cmd-1", FocusSidebar, None),
-        KeyBinding::new("ctrl-1", FocusSidebar, None),
-        KeyBinding::new("cmd-l", FocusComposer, None),
-        KeyBinding::new("ctrl-l", FocusComposer, None),
-        KeyBinding::new("cmd-up", LoadOlder, None),
-        KeyBinding::new("ctrl-up", LoadOlder, None),
-        KeyBinding::new("cmd-k", OpenSearch, None),
-        KeyBinding::new("ctrl-k", OpenSearch, None),
-        KeyBinding::new("cmd-f", OpenChatSearch, None),
-        KeyBinding::new("ctrl-f", OpenChatSearch, None),
-        KeyBinding::new("cmd-g", ChatSearchNewer, None),
-        KeyBinding::new("ctrl-g", ChatSearchNewer, None),
-        KeyBinding::new("cmd-shift-g", ChatSearchOlder, None),
-        KeyBinding::new("ctrl-shift-g", ChatSearchOlder, None),
-        KeyBinding::new("escape", CancelSearch, None),
-        // Parity slice 5: the handlers no-op (and let the keystroke reach
-        // text inputs) unless the media viewer is open.
-        KeyBinding::new("left", ViewerPrev, None),
-        KeyBinding::new("right", ViewerNext, None),
-        KeyBinding::new("0", ViewerZoomReset, None),
-        KeyBinding::new("=", ViewerZoomIn, None),
-        KeyBinding::new("-", ViewerZoomOut, None),
-        // M1: composer formatting shortcuts; the handlers no-op unless
-        // the composer textarea has focus.
-        KeyBinding::new("ctrl-b", FormatBold, None),
-        KeyBinding::new("ctrl-i", FormatItalic, None),
-        KeyBinding::new("ctrl-u", FormatUnderline, None),
-    ]);
-}
-
-/// kit Phase 7: the application menus — File / Edit / View / Window / Help,
-/// every item wired to a working action. `setup_app_menus` installs them
-/// twice from this one definition: `cx.set_menus` drives the native menu bar
-/// on macOS, and `GlobalState::set_app_menus` feeds kit's `AppMenuBar`,
-/// rendered in-window on Linux/Windows.
-fn app_menus() -> Vec<Menu> {
-    // Local aliases: `Copy` would shadow the derive macro's `Copy` at
-    // module scope.
-    use gpui_kit::component::input::{
-        Copy as CopyAction, Cut as CutAction, Paste as PasteAction, Redo as RedoAction,
-        SelectAll as SelectAllAction, Undo as UndoAction,
-    };
-    let mut file_items = vec![MenuItem::action("Close Window", CloseWindow)];
-    // HIG: on macOS Quit lives in the app menu, not File.
-    #[cfg(not(target_os = "macos"))]
-    {
-        file_items.push(MenuItem::separator());
-        file_items.push(MenuItem::action("Quit Quill", QuitApp));
-    }
-    let mut menus = Vec::new();
-    // HIG: on macOS Quit lives in the app menu, not File.
-    #[cfg(target_os = "macos")]
-    menus.push(Menu::new("Quill").items([MenuItem::action("Quit Quill", QuitApp)]));
-    menus.extend([
-        Menu::new("File").items(file_items),
-        Menu::new("Edit").items([
-            MenuItem::action("Undo", UndoAction),
-            MenuItem::action("Redo", RedoAction),
-            MenuItem::separator(),
-            MenuItem::os_action("Cut", CutAction, OsAction::Cut),
-            MenuItem::os_action("Copy", CopyAction, OsAction::Copy),
-            MenuItem::os_action("Paste", PasteAction, OsAction::Paste),
-            MenuItem::separator(),
-            MenuItem::os_action("Select All", SelectAllAction, OsAction::SelectAll),
-        ]),
-        Menu::new("View").items([
-            MenuItem::action("Quick Switch", OpenSearch),
-            MenuItem::action("Find in Chat", OpenChatSearch),
-            MenuItem::separator(),
-            MenuItem::action("Enter Full Screen", ToggleFullscreen),
-            // kit Phase 8: light/dark switch for the whole app.
-            MenuItem::action("Toggle Theme", ToggleTheme),
-        ]),
-        Menu::new("Window").items([
-            MenuItem::action("Minimize", MinimizeWindow),
-            MenuItem::action("Zoom", ZoomWindow),
-        ]),
-        Menu::new("Help").items([MenuItem::action("Quill on GitHub", OpenHelp)]),
-    ]);
-    menus
-}
-
-/// kit Phase 7: install the app menus — native on macOS, kit `AppMenuBar`
-/// data on Linux/Windows. Call once after `gpui_kit::init` + `bind_keys`.
-pub fn setup_app_menus(cx: &mut App) {
-    let owned: Vec<OwnedMenu> = app_menus().into_iter().map(Menu::owned).collect();
-    cx.set_menus(app_menus());
-    GlobalState::global_mut(cx).set_app_menus(owned);
-}
-
 /// Startup connect classification for the status bar (no secrets).
 #[derive(Clone, PartialEq, Eq)]
 pub enum ConnectUiStatus {
@@ -507,82 +416,6 @@ fn looks_like_emoji(c: char) -> bool {
     )
 }
 
-/// Phase 9.5: current Unix timestamp (seconds) — stealth active /
-/// cooldown predicates and relative viewer times compare against this.
-fn now_unix_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-/// Phase C2h: "in 3h" / "in 2d 4h" countdown for a scheduled video
-/// chat — relative only, no timezone math.
-fn format_starts_in(start_date: i64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let mut secs = (start_date - now).max(0);
-    if secs < 3600 {
-        return format!("in {}m", (secs / 60).max(1));
-    }
-    secs /= 3600;
-    if secs < 48 {
-        format!("in {}h", secs)
-    } else {
-        format!("in {}d {}h", secs / 24, secs % 24)
-    }
-}
-
-/// Phase C2h: mm:ss / h:mm:ss for the recording indicator.
-fn format_record_duration(secs: i32) -> String {
-    let secs = secs.max(0);
-    if secs < 3600 {
-        format!("{:02}:{:02}", secs / 60, secs % 60)
-    } else {
-        format!("{}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60)
-    }
-}
-
-/// Slice A3: relative "last active" for a session unix timestamp
-/// (TGX `SessionLastActiveDate`) — relative only, no timezone math,
-/// the `format_starts_in` precedent.
-fn format_session_last_active(last_active_date: i32) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let secs = (now - last_active_date as i64).max(0);
-    if secs < 60 {
-        "just now".to_string()
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86400 {
-        format!("{}h ago", secs / 3600)
-    } else {
-        format!("{}d ago", secs / 86400)
-    }
-}
-
-/// M1: right-click context menu state — the target message plus the
-/// window position where the menu opens (`MouseDownEvent.position` is in
-/// window coordinates, so the panel renders absolute at that point).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MessageMenuState {
-    pub chat_id: ChatId,
-    pub message_id: MessageId,
-    pub position: Point<Pixels>,
-}
-
-/// Slice CL1: right-click chat-row context menu target + window
-/// position (same pattern as `MessageMenuState`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ChatMenuState {
-    pub chat_id: ChatId,
-    pub position: Point<Pixels>,
-}
-
 /// Slice CL: floating chat-list peek preview — the chat being previewed
 /// plus where it floated from (`MouseDownEvent.position` is in window
 /// coordinates, same as the overlay's `.left()`/`.top()`).
@@ -613,33 +446,6 @@ fn chat_preview_line(
     let body = effective_content(content, ephemeral).preview();
     (name, body, id)
 }
-
-/// Phase C2i: the nine `CallProblem` constructors (TDLib 1.8.67,
-/// `schema/td_api.tl:7253`-`:7277`) with their schema descriptions,
-/// in schema order. Index-aligned with `RatingDetail::problems`.
-pub const CALL_PROBLEMS: [(&str, &str); 9] = [
-    ("callProblemEcho", "Echo — I heard my own voice"),
-    ("callProblemNoise", "Noise — background noise"),
-    (
-        "callProblemInterruptions",
-        "Interruptions — the other side kept disappearing",
-    ),
-    ("callProblemDistortedSpeech", "Distorted speech"),
-    (
-        "callProblemSilentLocal",
-        "Silent — I couldn't hear the other side",
-    ),
-    (
-        "callProblemSilentRemote",
-        "Silent — the other side couldn't hear me",
-    ),
-    (
-        "callProblemDropped",
-        "Dropped — the call ended unexpectedly",
-    ),
-    ("callProblemDistortedVideo", "Distorted video"),
-    ("callProblemPixelatedVideo", "Pixelated video"),
-];
 
 /// Phase 9.5: the viewer privacy editor's state — the story plus the
 /// picked level/users. Prefilled from the story's `privacy_settings`.
@@ -676,79 +482,6 @@ struct HistoryShared {
     downloading: std::collections::HashSet<i32>,
     failed: std::collections::HashSet<i32>,
     media_roots: Vec<PathBuf>,
-}
-
-/// kit Phase 3: everything `session_history_row` needs for one message,
-/// snapshotted per render so the `MessageScroller` renderer can build
-/// visible rows without re-deriving per frame.
-#[derive(Clone)]
-struct HistoryRowInputs {
-    message: HistoryMessage,
-    /// kit Phase 4: incoming sender name for the kit `MessageHeader`;
-    /// `None` for outgoing rows and when the header collapses (same
-    /// direction as the previous row). Replaces the old `"You · sent"`
-    /// label — delivery state now lives in the in-bubble footer.
-    sender: Option<String>,
-    /// kit Phase 4: outbox delivery state for the in-bubble footer
-    /// (`✓` sent, `✓✓` read, `…` while pending).
-    receipt: OutboxReceipt,
-    /// kit Phase 4: `(name, photo)` for the kit `Message` avatar slot.
-    /// `None` where the sender can't be identified (groups) or the row is
-    /// outgoing — never invented.
-    sender_avatar: Option<(String, Option<PathBuf>)>,
-    highlighted: bool,
-    selected_forward: bool,
-    quote_preview: Option<String>,
-    forward_from: Option<String>,
-    reaction_open: bool,
-    seek_bar: Option<SeekBarView>,
-    animation_playing: bool,
-    animation_frame: Option<PathBuf>,
-    video_playing: bool,
-    video_frame: Option<PathBuf>,
-    is_secret: bool,
-}
-
-/// kit Phase 3: one virtualized history row — a single message or a media
-/// album group (albums render as one row, as before).
-#[derive(Clone)]
-enum HistoryRow {
-    // Boxed: the per-row inputs are ~880 bytes; the album variant is
-    // small (clippy `large_enum_variant`).
-    Single(Box<HistoryRowInputs>),
-    Album {
-        album_id: i64,
-        messages: Vec<HistoryMessage>,
-        // kit Phase 4: precomputed per-row chrome (sender header /
-        // outbox receipt / avatar) — keeps the large `ChatSummary` out
-        // of the variant.
-        sender: Option<String>,
-        receipt: OutboxReceipt,
-        sender_avatar: Option<(String, Option<PathBuf>)>,
-    },
-}
-
-impl HistoryRow {
-    fn first_id(&self) -> Option<MessageId> {
-        match self {
-            HistoryRow::Single(inputs) => Some(inputs.message.id),
-            HistoryRow::Album { messages, .. } => messages.first().map(|m| m.id),
-        }
-    }
-
-    fn last_id(&self) -> Option<MessageId> {
-        match self {
-            HistoryRow::Single(inputs) => Some(inputs.message.id),
-            HistoryRow::Album { messages, .. } => messages.last().map(|m| m.id),
-        }
-    }
-
-    fn contains(&self, id: MessageId) -> bool {
-        match self {
-            HistoryRow::Single(inputs) => inputs.message.id == id,
-            HistoryRow::Album { messages, .. } => messages.iter().any(|m| m.id == id),
-        }
-    }
 }
 
 pub struct QuillApp {
@@ -1751,34 +1484,6 @@ enum ChatListFilter {
     Archived,
 }
 
-/// Which kind of track the shared ffplay child is playing (Phase 4.6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PlaybackKind {
-    Voice,
-    Audio,
-}
-
-/// Seek-bar view model for one audio/voice history row (Phase 4.6).
-#[derive(Clone)]
-struct SeekBarView {
-    /// Interactive slider entity — `Some` only on the active (playing or
-    /// paused) row. Inactive rows render a static bar instead.
-    slider: Option<Entity<SliderState>>,
-    /// Seconds shown in the time label and as bar fill: live elapsed, scrub
-    /// preview, paused offset, or the remembered position for inactive rows.
-    display_secs: f64,
-    /// Total track length in seconds (TDLib `duration`).
-    duration_secs: f64,
-    /// True while the active row's player is actually running (vs paused).
-    is_playing: bool,
-    /// MED1: current playback speed (for the speed button on active rows).
-    speed: f64,
-    /// MED1: true when the shared playback volume is muted.
-    muted: bool,
-    /// MED1: honest playback error for the active row, if any.
-    error: Option<String>,
-}
-
 /// Parity slice: data for the channel/supergroup conversation header —
 /// photo, description snippet, primary @username, subscriber/member count,
 /// and the linked discussion chat id (`linked_chat_id`, 0 = none).
@@ -1789,15 +1494,6 @@ struct SupergroupHeaderExtras {
     member_count: Option<i32>,
     description_snippet: Option<String>,
     discussion_chat_id: Option<i64>,
-}
-
-impl SeekBarView {
-    fn fraction(&self) -> f64 {
-        if self.duration_secs <= 0.0 {
-            return 0.0;
-        }
-        (self.display_secs / self.duration_secs).clamp(0.0, 1.0)
-    }
 }
 
 /// MED2: the record button's mode (TGX `preferVideoMode`, persisted in
@@ -47330,38 +47026,6 @@ fn seek_bar_element(row_key: u64, seek: &SeekBarView) -> AnyElement {
             )
             .into_any_element()
     }
-}
-
-/// MED1: speed + mute buttons and the honest playback error line for an
-/// active voice/audio row. `kind` disambiguates the button ids.
-fn row_playback_controls(
-    row_key: u64,
-    kind: &str,
-    seek: &SeekBarView,
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(
-            Button::new(format!("{kind}-speed-{row_key}"))
-                .label(QuillApp::speed_label(seek.speed))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.cycle_playback_speed(cx);
-                })),
-        )
-        .child(
-            Button::new(format!("{kind}-mute-{row_key}"))
-                .label(if seek.muted { "Unmute" } else { "Mute" })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_playback_mute(cx);
-                })),
-        )
-        .when_some(seek.error.clone(), |this, err| {
-            this.child(div().text_xs().text_color(danger_bright()).child(err))
-        })
-        .into_any_element()
 }
 
 fn voice_note_row(
