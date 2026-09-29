@@ -339,6 +339,61 @@ pub fn set_account_ttl(extra: RequestId, days: i32) -> String {
     .to_string()
 }
 
+/// Slice A8: `sendPhoneNumberCode phone_number:string
+/// settings:phoneNumberAuthenticationSettings type:PhoneNumberCodeType =
+/// AuthenticationCodeInfo;` (TDLib 1.8.67, `schema/td_api.tl:14877`):
+/// "Sends a code to the specified phone number. Aborts previous phone
+/// number verification if there was one." Sent while authorized with
+/// `phoneNumberCodeTypeChange` (schema 1.8.67, `schema/td_api.tl:10384`) —
+/// the while-authorized change-number flow, NOT the auth flow. Callers
+/// must not log `phone_number`.
+pub fn send_phone_number_code(extra: RequestId, phone_number: &str) -> String {
+    json!({
+        "@type": "sendPhoneNumberCode",
+        "@extra": extra.as_extra(),
+        "phone_number": phone_number,
+        "settings": {
+            "@type": "phoneNumberAuthenticationSettings",
+            "allow_flash_call": false,
+            "allow_missed_call": false,
+            "is_current_phone_number": false,
+            "has_unknown_phone_number": false,
+            "allow_sms_retriever_api": false,
+            "firebase_authentication_settings": Value::Null,
+            "authentication_tokens": []
+        },
+        "type": { "@type": "phoneNumberCodeTypeChange" },
+    })
+    .to_string()
+}
+
+/// Slice A8: `resendPhoneNumberCode reason:ResendCodeReason =
+/// AuthenticationCodeInfo;` (TDLib 1.8.67, `schema/td_api.tl:14888`).
+/// "Works only if the previously received authenticationCodeInfo
+/// next_code_type was not null and the server-specified timeout has
+/// passed." A manual resend is a user request.
+pub fn resend_phone_number_code(extra: RequestId) -> String {
+    json!({
+        "@type": "resendPhoneNumberCode",
+        "@extra": extra.as_extra(),
+        "reason": { "@type": "resendCodeReasonUserRequest" },
+    })
+    .to_string()
+}
+
+/// Slice A8: `checkPhoneNumberCode code:string = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:14891`): "Checks the authentication code and
+/// completes the request for which the code was sent if appropriate."
+/// Callers must not log `code`.
+pub fn check_phone_number_code(extra: RequestId, code: &str) -> String {
+    json!({
+        "@type": "checkPhoneNumberCode",
+        "@extra": extra.as_extra(),
+        "code": code,
+    })
+    .to_string()
+}
+
 pub fn load_chats(extra: RequestId, limit: i32) -> String {
     load_chats_list(extra, json!({ "@type": "chatListMain" }), limit)
 }
@@ -6100,6 +6155,36 @@ mod tests {
             serde_json::from_str(&terminate_all_other_sessions(RequestId(73))).unwrap();
         assert_eq!(v["@type"], "terminateAllOtherSessions");
         assert_eq!(v["@extra"], "73");
+    }
+
+    #[test]
+    fn a8_change_number_request_shapes_match_1_8_67() {
+        // Slice A8: `sendPhoneNumberCode phone_number:string
+        // settings:phoneNumberAuthenticationSettings
+        // type:PhoneNumberCodeType = AuthenticationCodeInfo;` (line
+        // 14877), `resendPhoneNumberCode reason:ResendCodeReason =
+        // AuthenticationCodeInfo;` (line 14888),
+        // `checkPhoneNumberCode code:string = Ok;` (line 14891),
+        // `phoneNumberCodeTypeChange = PhoneNumberCodeType;` (line 10384).
+        let v: serde_json::Value =
+            serde_json::from_str(&send_phone_number_code(RequestId(77), "+15550199")).unwrap();
+        assert_eq!(v["@type"], "sendPhoneNumberCode");
+        assert_eq!(v["@extra"], "77");
+        assert_eq!(v["phone_number"], "+15550199");
+        assert_eq!(v["settings"]["@type"], "phoneNumberAuthenticationSettings");
+        assert_eq!(v["type"]["@type"], "phoneNumberCodeTypeChange");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&resend_phone_number_code(RequestId(78))).unwrap();
+        assert_eq!(v["@type"], "resendPhoneNumberCode");
+        assert_eq!(v["@extra"], "78");
+        assert_eq!(v["reason"]["@type"], "resendCodeReasonUserRequest");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&check_phone_number_code(RequestId(79), "12345")).unwrap();
+        assert_eq!(v["@type"], "checkPhoneNumberCode");
+        assert_eq!(v["@extra"], "79");
+        assert_eq!(v["code"], "12345");
     }
 
     #[test]

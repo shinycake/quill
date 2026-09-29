@@ -1113,6 +1113,19 @@ pub enum RequestPurpose {
     /// `updateAuthorizationState` → `Closed` (already handled by
     /// `set_auth`) — never faked client-side.
     DeleteAccount,
+    /// Slice A8: `sendPhoneNumberCode` with `phoneNumberCodeTypeChange`.
+    /// Response is `authenticationCodeInfo`, stored in
+    /// `Session::change_number_phone` / `change_number_timeout`.
+    SendPhoneNumberCode,
+    /// Slice A8: `resendPhoneNumberCode`. Response is
+    /// `authenticationCodeInfo`; same storage as `SendPhoneNumberCode`.
+    ResendPhoneNumberCode,
+    /// Slice A8: `checkPhoneNumberCode`. Response is `ok`; the server
+    /// completed the number change, so the own user's `phone_number` is
+    /// updated to the confirmed `Session::change_number_phone` target
+    /// (not an optimistic guess — the `ok` confirms the change of
+    /// exactly the number the code was sent to).
+    CheckPhoneNumberCode,
     Close,
     LogOut,
     Other,
@@ -4081,6 +4094,23 @@ pub struct Session {
     /// op (classified from the TDLib error code, never the native
     /// message). Cleared on the next attempt and on success.
     pub account_error: Option<String>,
+    /// Slice A8: the target number a change-number code was sent to
+    /// (`authenticationCodeInfo` answer) — drives the code-entry step of
+    /// the change-number flow. The code itself is never stored (the A2
+    /// rule: secrets ride the request JSON only).
+    pub change_number_phone: Option<String>,
+    /// Slice A8: server-specified timeout (seconds) before a resend is
+    /// allowed, from the same `authenticationCodeInfo` answer.
+    pub change_number_timeout: Option<i32>,
+    /// Slice A8: a `sendPhoneNumberCode` / `resendPhoneNumberCode` round
+    /// trip is in flight.
+    pub change_number_loading: bool,
+    /// Slice A8: a `checkPhoneNumberCode` round trip is in flight.
+    pub change_number_checking: bool,
+    /// Slice A8: honest one-line failure of the last change-number op
+    /// (classified, never the native message). Cleared on the next
+    /// attempt and on success.
+    pub change_number_error: Option<String>,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
     /// overlay.
@@ -5096,6 +5126,11 @@ impl Session {
             account_ttl_loading: false,
             account_mutating: false,
             account_error: None,
+            change_number_phone: None,
+            change_number_timeout: None,
+            change_number_loading: false,
+            change_number_checking: false,
+            change_number_error: None,
             connected_websites: None,
             connected_websites_loading: false,
             websites_mutating: false,
@@ -8154,6 +8189,27 @@ impl Session {
                     self.sessions_stale = false;
                 }
             }
+            EnvelopePayload::AuthenticationCodeInfo {
+                phone_number,
+                timeout,
+            } => {
+                // Slice A8: the `sendPhoneNumberCode` /
+                // `resendPhoneNumberCode` answer — only our own in-flight
+                // request writes the pending number/timeout (matched by
+                // `@extra`); a late answer for a superseded send has no
+                // pending entry and is ignored.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode
+                    )
+                ) {
+                    self.change_number_phone = Some(phone_number);
+                    self.change_number_timeout = Some(timeout);
+                    self.change_number_loading = false;
+                    self.change_number_error = None;
+                }
+            }
             EnvelopePayload::AccountTtl { days } => {
                 // Slice A7: `getAccountTtl` answer — only our own
                 // in-flight request writes the cache (matched by
@@ -8331,6 +8387,37 @@ impl Session {
                 ) {
                     self.account_mutating = false;
                     self.account_error = None;
+                }
+                // Slice A8: a `checkPhoneNumberCode` succeeded — the
+                // server completed the number change of the number the
+                // code was sent to, so the own user's `phone_number` is
+                // updated directly (not an optimistic guess — the `ok`
+                // confirms it; the authoritative `updateUser` that
+                // follows lands the same value idempotently). The
+                // code-entry step clears and any stale error goes with
+                // it.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::CheckPhoneNumberCode)
+                ) {
+                    if let Some(target) = self.change_number_phone.clone()
+                        && let Some(my_id) = self.my_user_id
+                        && let Some(me) = self.users.get_mut(&my_id)
+                    {
+                        me.phone_number = target;
+                    }
+                    self.change_number_phone = None;
+                    self.change_number_timeout = None;
+                    self.change_number_checking = false;
+                    self.change_number_error = None;
+                    // A8: drop any stale in-flight send/resend purposes —
+                    // a late resend answer must not resurrect the
+                    // completed flow (re-write phone/timeout or park a
+                    // phantom error after the number already changed).
+                    self.requests
+                        .take_purpose(RequestPurpose::SendPhoneNumberCode);
+                    self.requests
+                        .take_purpose(RequestPurpose::ResendPhoneNumberCode);
                 }
                 // Slice A4: a `disconnectWebsite` /
                 // `disconnectAllWebsites` succeeded — same stale pattern
@@ -9511,6 +9598,27 @@ impl Session {
                     Some(RequestPurpose::SetAccountTtl { .. } | RequestPurpose::DeleteAccount) => {
                         self.account_mutating = false;
                         self.account_error = Some(sessions_error_line("update the account", &err));
+                    }
+                    // Slice A8: a refused change-number op (code send /
+                    // resend, code check) clears the in-flight flags and
+                    // parks the honest, classified error line — never a
+                    // fake success. The pending number and timeout stay
+                    // put: a failed send never reached the server
+                    // (transport error), and a refused resend does not
+                    // abort the existing verification, so the pending
+                    // code is still valid — the user can retry or resend.
+                    // A failed check likewise keeps the pending number.
+                    Some(
+                        RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode,
+                    ) => {
+                        self.change_number_loading = false;
+                        self.change_number_error =
+                            Some(sessions_error_line("send the verification code", &err));
+                    }
+                    Some(RequestPurpose::CheckPhoneNumberCode) => {
+                        self.change_number_checking = false;
+                        self.change_number_error =
+                            Some(sessions_error_line("check the verification code", &err));
                     }
                     // Slice A4: a failed websites fetch or disconnect
                     // clears the in-flight flags and parks the honest,
@@ -20369,6 +20477,158 @@ mod tests {
         assert_eq!(
             session.account_error.as_deref(),
             Some("Could not update the account: Telegram refused the request")
+        );
+    }
+
+    /// Slice A8: the `authenticationCodeInfo` answer stores the pending
+    /// number + timeout — but only for our own in-flight send/resend
+    /// (matched by `@extra`).
+    #[test]
+    fn code_info_answer_stores_pending_number_for_matching_request() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.change_number_loading = true;
+        session.change_number_error = Some("stale".into());
+        let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"authenticationCodeInfo","@extra":"{}","phone_number":"+15550199","type":{{"@type":"authenticationCodeTypeSms","length":5}},"next_type":null,"timeout":60}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.change_number_phone.as_deref(), Some("+15550199"));
+        assert_eq!(session.change_number_timeout, Some(60));
+        assert!(!session.change_number_loading);
+        assert!(session.change_number_error.is_none());
+    }
+
+    /// Slice A8: an `authenticationCodeInfo` answer whose `@extra`
+    /// matches no in-flight request (a late answer for a superseded
+    /// send — the driver never has two change-number sends in flight)
+    /// writes nothing.
+    #[test]
+    fn code_info_answer_ignores_unknown_extra() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.change_number_loading = true;
+        let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"authenticationCodeInfo","@extra":"{}","phone_number":"+15550199","type":{{"@type":"authenticationCodeTypeSms","length":5}},"next_type":null,"timeout":60}}"#,
+                extra.0 + 1000
+            ),
+        );
+        assert!(session.change_number_phone.is_none());
+        assert!(session.change_number_loading);
+    }
+
+    /// Slice A8: a `checkPhoneNumberCode` ok updates the own user's phone
+    /// number (the server confirmed the change of exactly the sent
+    /// number), clears the code-entry state, and drops any stale
+    /// in-flight send/resend purpose — a late resend answer landing after
+    /// the number changed must not resurrect the code-entry state.
+    #[test]
+    fn check_code_ok_updates_own_phone_number() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.my_user_id = Some(31);
+        session.users.insert(
+            31,
+            ParsedUser {
+                id: 31,
+                phone_number: "+15550131".into(),
+                ..Default::default()
+            },
+        );
+        session.change_number_phone = Some("+15550199".into());
+        session.change_number_checking = true;
+        session.change_number_error = Some("stale".into());
+        let resend_extra = session.request(RequestPurpose::ResendPhoneNumberCode, None);
+        let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert_eq!(session.users.get(&31).unwrap().phone_number, "+15550199");
+        assert!(session.change_number_phone.is_none());
+        assert!(!session.change_number_checking);
+        assert!(session.change_number_error.is_none());
+        // The stale resend purpose is gone: its late answer writes nothing.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"authenticationCodeInfo","@extra":"{}","phone_number":"+15550199","type":{{"@type":"authenticationCodeTypeSms","length":5}},"next_type":null,"timeout":60}}"#,
+                resend_extra.0
+            ),
+        );
+        assert!(session.change_number_phone.is_none());
+        assert!(session.change_number_error.is_none());
+    }
+
+    /// Slice A8: a refused code send clears the spinner and parks an
+    /// honest classified error — but the pending number and timeout
+    /// survive: the failed send never reached the server, so the
+    /// previous verification (if any) is still valid.
+    #[test]
+    fn code_send_error_surfaces_honestly() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.change_number_phone = Some("+15550199".into());
+        session.change_number_timeout = Some(60);
+        session.change_number_loading = true;
+        let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"PHONE_NUMBER_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.change_number_loading);
+        assert_eq!(session.change_number_phone.as_deref(), Some("+15550199"));
+        assert_eq!(session.change_number_timeout, Some(60));
+        assert_eq!(
+            session.change_number_error.as_deref(),
+            Some("Could not send the verification code: Telegram refused the request")
+        );
+    }
+
+    /// Slice A8: a refused code check clears the spinner but keeps the
+    /// pending number (the user can retry or resend), with an honest
+    /// classified error.
+    #[test]
+    fn code_check_error_keeps_pending_number() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.change_number_phone = Some("+15550199".into());
+        session.change_number_checking = true;
+        let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"PHONE_CODE_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.change_number_checking);
+        assert_eq!(session.change_number_phone.as_deref(), Some("+15550199"));
+        assert_eq!(
+            session.change_number_error.as_deref(),
+            Some("Could not check the verification code: Telegram refused the request")
         );
     }
 

@@ -56,8 +56,8 @@ use crate::telegram::requests::{
     cancel_recovery_email_address_verification, chat_member_status_administrator_json,
     chat_member_status_banned_json, chat_member_status_member_json,
     chat_member_status_restricted_json, check_authentication_code, check_authentication_password,
-    check_chat_username, clear_imported_contacts, clear_recently_found_chats,
-    click_chat_sponsored_message, close_chat, close_request,
+    check_chat_username, check_phone_number_code, clear_imported_contacts,
+    clear_recently_found_chats, click_chat_sponsored_message, close_chat, close_request,
     close_secret_chat as close_secret_chat_request, close_story, create_call_with_protocol,
     create_chat_folder, create_chat_invite_link, create_community, create_forum_topic,
     create_new_basic_group_chat, create_new_secret_chat, create_new_supergroup_chat,
@@ -97,22 +97,22 @@ use crate::telegram::requests::{
     reorder_active_usernames, reorder_chat_folders, replace_primary_chat_invite_link,
     replace_video_chat_rtmp_url, report_chat, report_chat_sponsored_message,
     report_story as report_story_request, request_qr_code_authentication,
-    resend_authentication_code, resend_messages, resend_recovery_email_address_code,
-    revoke_chat_invite_link, revoke_group_call_invite_link, search_call_messages,
-    search_chat_messages, search_chats, search_messages, search_messages_filter_json,
-    search_public_chats, search_recently_found_chats, send_animation,
+    resend_authentication_code, resend_messages, resend_phone_number_code,
+    resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
+    search_call_messages, search_chat_messages, search_chats, search_messages,
+    search_messages_filter_json, search_public_chats, search_recently_found_chats, send_animation,
     send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
     send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
     send_chat_action_kind, send_document, send_group_call_message, send_message_album,
-    send_payment_form as send_payment_form_request, send_photo, send_poll, send_rich_message,
-    send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_account_ttl, set_archive_chat_list_settings, set_authentication_phone_number, set_bio,
-    set_chat_description, set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
-    set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
-    set_chat_photo, set_chat_slow_mode_delay, set_chat_title, set_community_name,
-    set_group_call_participant_volume_level, set_message_sender_block_list, set_name, set_password,
-    set_pinned_chats, set_poll_answer, set_profile_photo, set_recovery_email_address,
-    set_scope_notification_settings,
+    send_payment_form as send_payment_form_request, send_phone_number_code, send_photo, send_poll,
+    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
+    send_voice_note, set_account_ttl, set_archive_chat_list_settings,
+    set_authentication_phone_number, set_bio, set_chat_description, set_chat_draft_message,
+    set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
+    set_chat_notification_settings, set_chat_permissions, set_chat_photo, set_chat_slow_mode_delay,
+    set_chat_title, set_community_name, set_group_call_participant_volume_level,
+    set_message_sender_block_list, set_name, set_password, set_pinned_chats, set_poll_answer,
+    set_profile_photo, set_recovery_email_address, set_scope_notification_settings,
     set_story_privacy_settings as set_story_privacy_settings_request, set_story_reaction,
     set_supergroup_username, set_user_privacy_setting_rules, set_username, set_video_chat_title,
     start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
@@ -11880,6 +11880,100 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.account_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A8: send `sendPhoneNumberCode` with
+    /// `phoneNumberCodeTypeChange` (schema 1.8.67, line 14877) — the
+    /// while-authorized change-number flow, NOT the auth flow. Guarded on
+    /// the authorized chats path; one change-number op at a time (the
+    /// server aborts the previous verification anyway). The phone number
+    /// and any later code ride the request JSON only — never stored on
+    /// the session or diagnostics (the A2 rule; the target number lives
+    /// in `change_number_phone` because the code-entry UI needs it).
+    pub fn send_phone_number_code(
+        &mut self,
+        phone_number: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active()
+            || self.session.change_number_loading
+            || self.session.change_number_checking
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.change_number_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::SendPhoneNumberCode, None);
+        self.session.change_number_loading = true;
+        match self
+            .sender
+            .send_json(&send_phone_number_code(extra, phone_number))
+        {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.change_number_loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A8: send `resendPhoneNumberCode` (schema 1.8.67, line
+    /// 14888). Requires a code already sent (the timeout in
+    /// `change_number_timeout` gates the UI); one change-number op at a
+    /// time.
+    pub fn resend_phone_number_code(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active()
+            || self.session.change_number_phone.is_none()
+            || self.session.change_number_loading
+            || self.session.change_number_checking
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.change_number_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::ResendPhoneNumberCode, None);
+        self.session.change_number_loading = true;
+        match self.sender.send_json(&resend_phone_number_code(extra)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.change_number_loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A8: send `checkPhoneNumberCode` (schema 1.8.67, line 14891).
+    /// Requires a code already sent; one check at a time. The code rides
+    /// the request JSON only — never stored on the session or
+    /// diagnostics (the A2 rule).
+    pub fn check_phone_number_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
+        // Intentional asymmetry with the send guard: a check may run during a
+        // send/resend because resend is number-stable, a fresh send aborts the
+        // previous verification server-side (a stale check gets an honest
+        // server refusal), and a user may verify an already-received code
+        // while a resend round-trips.
+        if !self.chats_path_active() || self.session.change_number_checking {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.change_number_phone.is_none() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.change_number_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::CheckPhoneNumberCode, None);
+        self.session.change_number_checking = true;
+        match self.sender.send_json(&check_phone_number_code(extra, code)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.change_number_checking = false;
                 Err(err)
             }
         }
