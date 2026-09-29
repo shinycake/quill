@@ -4999,7 +4999,7 @@ impl QuillApp {
         }
     }
 
-    fn session(&self) -> Option<&Session> {
+    pub(crate) fn session(&self) -> Option<&Session> {
         self.live
             .as_ref()
             .map(|live| &live.driver.session)
