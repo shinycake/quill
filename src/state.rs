@@ -2,6 +2,7 @@ use crate::auth::{AuthView, view_for};
 use crate::calls::engine::{RemoteVideoState, TransportState};
 use crate::composer::{CommandMenuItem, merge_command_menu_items};
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
+use crate::emoji::EmojiPanel;
 use crate::ids::{
     AccountGeneration, AccountKey, ChatId, FileId, MessageId, RequestId, ViewGeneration,
 };
@@ -311,6 +312,40 @@ pub enum RequestPurpose {
     /// Slice S8: `reorderInstalledStickerSets`. Response is `ok`; same
     /// installed-sets invalidation as change.
     ReorderInstalledStickerSets,
+    /// Slice S10: `setEmojiStatus` (td_api.tl:14850). Response is `ok`.
+    SetEmojiStatus,
+    /// Slice S10: `getRecentEmojiStatuses` (td_api.tl:13957). Response is `emojiStatuses`.
+    GetRecentEmojiStatuses,
+    /// Slice S10: `getThemedEmojiStatuses` (td_api.tl:13954). Response is `emojiStatusCustomEmojis`.
+    GetThemedEmojiStatuses,
+    /// Slice S10: `getDefaultEmojiStatuses` (td_api.tl:13963). Response is `emojiStatusCustomEmojis`.
+    GetDefaultEmojiStatuses,
+    /// Slice S10: `getUpgradedGiftEmojiStatuses` (td_api.tl:13960). Response is `emojiStatuses`.
+    GetUpgradedGiftEmojiStatuses,
+    /// Slice S10: `clearRecentEmojiStatuses` (td_api.tl:13966). Response is `ok`.
+    ClearRecentEmojiStatuses,
+    /// Slice S10: `getAnimatedEmoji` (td_api.tl:14743). Response is `animatedEmoji`.
+    GetAnimatedEmoji,
+    /// Slice S10: `getCustomEmojiStickers` (td_api.tl:14751). Response is `stickers`.
+    GetCustomEmojiStickers,
+    /// Slice S10: `searchEmojis` (td_api.tl:14732). Response is `emojiKeywords`.
+    SearchEmojis,
+    /// Slice S10: `getEmojiCategories` (td_api.tl:14738). Response is `emojiCategories`.
+    GetEmojiCategories,
+    /// Slice S10: `getInstalledStickerSets` with `stickerTypeEmoji` (td_api.tl:14657). Response is `stickerSets`.
+    GetInstalledEmojiSets,
+    /// Slice S10: `getArchivedStickerSets` with `stickerTypeEmoji` (td_api.tl:14663). Response is `stickerSets`.
+    GetArchivedEmojiSets {
+        first_page: bool,
+    },
+    /// Slice S10: `getTrendingStickerSets` with `stickerTypeEmoji` (td_api.tl:14669). Response is `trendingStickerSets`.
+    GetTrendingEmojiSets,
+    /// Slice S10: `searchStickerSets` with `stickerTypeEmoji` (td_api.tl:14689). Response is `stickerSets`.
+    SearchEmojiSets,
+    /// Slice S10: `changeStickerSet` on an emoji set (td_api.tl:14692). Response is `ok`.
+    ChangeEmojiSet,
+    /// Slice S10: `reorderInstalledStickerSets` with `stickerTypeEmoji` (td_api.tl:14698). Response is `ok`.
+    ReorderInstalledEmojiSets,
     /// `getSavedAnimations`. Response is `animations`.
     GetSavedAnimations,
     /// Slice S9: `getInlineQueryResults` against the animation search
@@ -4156,6 +4191,7 @@ pub struct Session {
     pub shared_media: SharedMediaState,
     /// Installed regular sticker sets + the loaded `stickerSet` for the picker.
     pub stickers: StickerPanel,
+    pub emoji: EmojiPanel,
     /// Saved animations (`getSavedAnimations`) for the GIF picker.
     pub gifs: GifPanel,
     /// `userTypeBot` ids from `updateUser`. Private chats with these users skip drafts.
@@ -5005,6 +5041,7 @@ impl Session {
             chat_search: ChatSearchState::default(),
             shared_media: SharedMediaState::default(),
             stickers: StickerPanel::default(),
+            emoji: EmojiPanel::default(),
             gifs: GifPanel::default(),
             bot_user_ids: HashSet::new(),
             bot_info: HashMap::new(),
@@ -7500,6 +7537,16 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
                     // Slice S8: `searchStickerSets` answers with `stickerSets`.
                     self.accept_found_sticker_sets(sets);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledEmojiSets)
+                {
+                    // Slice S10: emoji `stickerSets` land in the emoji panel (see emoji.rs).
+                    self.accept_installed_emoji_sets(sets);
+                } else if let Some(RequestPurpose::GetArchivedEmojiSets { first_page }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.accept_archived_emoji_sets(sets, first_page);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchEmojiSets) {
+                    self.accept_found_emoji_sets(sets);
                 }
             }
             // Slice S8: `getTrendingStickerSets` answers with
@@ -7509,6 +7556,9 @@ impl Session {
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
                     self.accept_trending_sticker_sets(sets, is_premium);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
+                    // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).
+                    self.accept_trending_emoji_sets(sets, is_premium);
                 }
             }
             // Slice S8: `searchStickers` / `getFavoriteStickers` /
@@ -7522,7 +7572,18 @@ impl Session {
                     self.accept_favorite_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
                     self.accept_recent_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
+                    // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
+                    self.accept_custom_emoji_stickers(stickers);
                 }
+            }
+            // Slice S10: emoji payloads — purpose-gated dispatch lives in emoji.rs.
+            payload @ (EnvelopePayload::EmojiStatuses { .. }
+            | EnvelopePayload::EmojiStatusCustomEmojis { .. }
+            | EnvelopePayload::AnimatedEmoji { .. }
+            | EnvelopePayload::EmojiKeywords { .. }
+            | EnvelopePayload::EmojiCategories { .. }) => {
+                self.dispatch_emoji_payload(pending.map(|p| p.purpose), payload);
             }
             EnvelopePayload::StickerSet {
                 id,
@@ -8038,6 +8099,8 @@ impl Session {
                 ) {
                     self.invalidate_installed_sticker_sets();
                 }
+                // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
+                self.invalidate_emoji_caches(pending.map(|p| p.purpose));
                 // Slice S9: a saved-GIF mutation (`addSavedAnimation` /
                 // `removeSavedAnimation`) succeeded — drop the saved list so
                 // the panel refetches the server-confirmed list instead of
@@ -9499,7 +9562,7 @@ impl Session {
         }
     }
 
-    fn remember_files(&mut self, files: &[ParsedFile]) {
+    pub(crate) fn remember_files(&mut self, files: &[ParsedFile]) {
         for file in files {
             // Nested message files can still be idle while a download is in flight.
             self.upsert_file(file.clone(), false);

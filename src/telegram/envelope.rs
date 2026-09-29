@@ -1,3 +1,4 @@
+use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use crate::rich::{RichBlock, parse_rich_message};
 use crate::telegram::requests::ArchiveChatListSettings;
@@ -678,6 +679,28 @@ pub enum EnvelopePayload {
     /// `getRecentStickers`. Files on each sticker are in `files`.
     Stickers {
         stickers: Vec<StickerItem>,
+        files: Vec<ParsedFile>,
+    },
+    /// Slice S10: `emojiStatuses` — `getRecentEmojiStatuses` / `getUpgradedGiftEmojiStatuses`.
+    EmojiStatuses {
+        statuses: Vec<EmojiStatusItem>,
+    },
+    /// Slice S10: `emojiStatusCustomEmojis` — `getThemedEmojiStatuses` / `getDefaultEmojiStatuses`.
+    EmojiStatusCustomEmojis {
+        custom_emoji_ids: Vec<i64>,
+    },
+    /// Slice S10: `animatedEmoji` — `getAnimatedEmoji` (sticker + `sound` file).
+    AnimatedEmoji {
+        sticker: Option<StickerItem>,
+        files: Vec<ParsedFile>,
+    },
+    /// Slice S10: `emojiKeywords` — `searchEmojis` answers for the picker.
+    EmojiKeywords {
+        keywords: Vec<EmojiKeyword>,
+    },
+    /// Slice S10: `emojiCategories` — `getEmojiCategories` answers for the picker.
+    EmojiCategories {
+        categories: Vec<EmojiCategory>,
         files: Vec<ParsedFile>,
     },
     /// `animations` — `getSavedAnimations`.
@@ -7721,6 +7744,14 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "stickerSet" => Ok(parse_sticker_set(&value)),
         "trendingStickerSets" => Ok(parse_trending_sticker_sets(&value)),
         "stickers" => Ok(parse_stickers(&value)),
+        // Slice S10: emoji backend payloads (parsers live in envelope_emoji).
+        "emojiStatuses" => Ok(super::envelope_emoji::parse_emoji_statuses(&value)),
+        "emojiStatusCustomEmojis" => Ok(super::envelope_emoji::parse_emoji_status_custom_emojis(
+            &value,
+        )),
+        "animatedEmoji" => Ok(super::envelope_emoji::parse_animated_emoji(&value)),
+        "emojiKeywords" => Ok(super::envelope_emoji::parse_emoji_keywords(&value)),
+        "emojiCategories" => Ok(super::envelope_emoji::parse_emoji_categories(&value)),
         "animations" => Ok(parse_animations(&value)),
         "sponsoredMessages" => Ok(parse_sponsored_messages(&value)?),
         "reportSponsoredResultOk" => Ok(EnvelopePayload::ReportSponsoredResult(
@@ -10815,7 +10846,7 @@ fn parse_link_preview_photo(preview_type: &Value) -> (Option<PhotoContent>, Vec<
     (None, Vec::new())
 }
 
-fn json_field_str(value: &Value, key: &str) -> String {
+pub(crate) fn json_field_str(value: &Value, key: &str) -> String {
     value
         .get(key)
         .and_then(Value::as_str)
@@ -11515,7 +11546,7 @@ fn parse_sticker_format(value: Option<&Value>) -> StickerFormat {
     }
 }
 
-fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>, Vec<ParsedFile>) {
+pub(crate) fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>, Vec<ParsedFile>) {
     let Some(value) = value else {
         return (None, Vec::new());
     };
@@ -11736,7 +11767,7 @@ fn parse_photo_sizes(photo: &Value) -> (Vec<PhotoSizeView>, Vec<ParsedFile>) {
     (sizes, files)
 }
 
-fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError> {
+pub(crate) fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError> {
     let value = value.ok_or(ParseError::MissingField)?;
     let id = i32::try_from(int53(value.get("id"))?).map_err(|_| ParseError::BadInt)?;
     let local = value.get("local");
@@ -11776,7 +11807,7 @@ fn parse_error(value: Option<&Value>) -> TdError {
     )
 }
 
-fn int53(value: Option<&Value>) -> Result<i64, ParseError> {
+pub(crate) fn int53(value: Option<&Value>) -> Result<i64, ParseError> {
     match value {
         Some(Value::Number(n)) => n.as_i64().ok_or(ParseError::BadInt),
         Some(Value::String(s)) => s.parse().map_err(|_| ParseError::BadInt),
@@ -13596,6 +13627,7 @@ mod tests {
             other => panic!("{other:?}"),
         }
     }
+
     /// Slice S9: `inlineQueryResults` carrying `inlineQueryResultAnimation`
     /// entries (schema 1.8.67, line 7658) — the summaries keep the
     /// `animation` kind mapping (Loop 3's filter), and the page additionally

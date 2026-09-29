@@ -1,7 +1,9 @@
 pub mod client;
 pub mod envelope;
+pub mod envelope_emoji;
 pub mod ffi;
 pub mod requests;
+pub mod requests_emoji;
 
 pub use client::{BridgeCommand, LiveTdJson, OwnedEnvelope, ReceiveBridge, ordered_receive_loop};
 pub use envelope::{
@@ -15,6 +17,7 @@ pub use envelope::{
     StickerItem, StickerSetInfo, TdError, UnknownKind, VoiceNoteContent, effective_content,
     parse_chat_admin_rights, parse_chat_permissions, parse_envelope, toggle_chosen_emoji_reaction,
 };
+pub use envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem, UpgradedGiftEmojiStatus};
 pub use ffi::{LibraryOrigin, TdJson, loaded_library_origin, resolve_tdjson_path};
 pub use requests::{
     PollSend, SendReply, SetTdlibParameters, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
@@ -37,4 +40,11 @@ pub use requests::{
     supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
     supergroup_members_filter_search_json, toggle_supergroup_is_broadcast_group,
     toggle_supergroup_join_by_request, view_messages,
+};
+pub use requests_emoji::{
+    clear_recent_emoji_statuses, get_animated_emoji, get_archived_emoji_sets,
+    get_custom_emoji_stickers, get_default_emoji_statuses, get_emoji_categories,
+    get_installed_emoji_sets, get_recent_emoji_statuses, get_themed_emoji_statuses,
+    get_trending_emoji_sets, get_upgraded_gift_emoji_statuses, reorder_installed_emoji_sets,
+    search_emoji_sets, search_emojis, set_emoji_status,
 };
