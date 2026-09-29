@@ -74,6 +74,23 @@ pub struct MemorySecretStore {
     pub locked: Arc<Mutex<bool>>,
 }
 
+/// Secret store that always fails: used when no safe platform data directory
+/// exists, so live startup refuses instead of writing keys under the working
+/// directory.
+pub struct UnavailableSecretStore;
+
+impl SecretStore for UnavailableSecretStore {
+    fn get(&self, _account: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        Err(SecretStoreError::Locked)
+    }
+    fn put(&self, _account: &AccountKey, _key: &DatabaseKey) -> Result<(), SecretStoreError> {
+        Err(SecretStoreError::Locked)
+    }
+    fn delete(&self, _account: &AccountKey) -> Result<(), SecretStoreError> {
+        Err(SecretStoreError::Locked)
+    }
+}
+
 impl MemorySecretStore {
     pub fn new() -> Self {
         Self::default()
@@ -264,7 +281,13 @@ pub fn live_secret_store() -> Box<dyn SecretStore> {
     }
     #[cfg(target_os = "linux")]
     {
-        Box::new(FileSecretStore::new(crate::settings::default_app_root()))
+        // Fail closed: with no platform data directory there is no safe
+        // home for the database key — every operation errors instead of
+        // falling back to a committable ./quill-data.
+        match crate::settings::safe_app_root() {
+            Some(root) => Box::new(FileSecretStore::new(root)),
+            None => Box::new(UnavailableSecretStore),
+        }
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -403,6 +426,17 @@ mod tests {
         let err = load_or_create_key(&store, &account, true).unwrap_err();
         assert_eq!(err, KeyDecision::MissingAgainstExistingDb);
         assert!(store.get(&account).unwrap().is_none());
+    }
+
+    #[test]
+    fn unavailable_store_fails_closed() {
+        // With no safe platform data dir, every secret-store operation must
+        // error — never fall back to writing keys under the working dir.
+        let store = UnavailableSecretStore;
+        let account = AccountKey::primary();
+        assert!(store.get(&account).is_err());
+        assert!(store.delete(&account).is_err());
+        assert!(load_or_create_key(&store, &account, false).is_err());
     }
 
     #[test]

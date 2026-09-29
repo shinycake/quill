@@ -21,8 +21,8 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
 use crate::rich::RichBlock;
 use crate::settings::{
-    AccountPaths, InstantViewMode, default_app_root, load_call_prefs, load_contact_prefs,
-    load_media_prefs, save_call_prefs, save_contact_prefs,
+    AccountPaths, InstantViewMode, load_call_prefs, load_contact_prefs, load_media_prefs,
+    safe_app_root, save_call_prefs, save_contact_prefs,
 };
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
@@ -229,6 +229,9 @@ pub enum ConnectBlocker {
     LockedStore,
     StoreError,
     TdjsonLoad,
+    /// No platform data directory could be resolved; refusing to scatter
+    /// account state under the working directory.
+    NoSafeDataDir,
 }
 
 impl ConnectBlocker {
@@ -248,6 +251,9 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => {
                 "tdjson library found but failed to load (missing symbols or wrong arch)"
             }
+            ConnectBlocker::NoSafeDataDir => {
+                "no platform data directory — refusing to write account state under the working directory"
+            }
         }
     }
 
@@ -260,6 +266,7 @@ impl ConnectBlocker {
             ConnectBlocker::LockedStore => "locked-store",
             ConnectBlocker::StoreError => "store-error",
             ConnectBlocker::TdjsonLoad => "tdjson-load",
+            ConnectBlocker::NoSafeDataDir => "no-safe-data-dir",
         }
     }
 }
@@ -12632,7 +12639,7 @@ pub fn start_live_connect(
         ConnectGate::Blocked(b) => return Err(b),
         ConnectGate::Ready { .. } => {}
     }
-    let app_root = default_app_root();
+    let app_root = safe_app_root().ok_or(ConnectBlocker::NoSafeDataDir)?;
     let prepared = prepare_connect(&app_root, AccountKey::primary(), store, &credentials)?;
     let live = LiveTdJson::connect().map_err(|e| match e {
         TdJsonError::NotFound => ConnectBlocker::MissingTdjson,
@@ -12706,6 +12713,14 @@ mod tests {
     use serde_json::Value;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::AtomicU64;
+
+    #[test]
+    fn no_safe_data_dir_blocker_is_descriptive() {
+        // Fail-closed refusal must tell the user why, with a stable slug.
+        let b = ConnectBlocker::NoSafeDataDir;
+        assert!(!b.user_message().is_empty());
+        assert_eq!(b.slug(), "no-safe-data-dir");
+    }
 
     static TDJSON_ENV_LOCK: StdMutex<()> = StdMutex::new(());
 
