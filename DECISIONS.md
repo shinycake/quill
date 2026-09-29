@@ -6020,6 +6020,55 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   items (the area was already itemized; this slice only narrows the
   "no Quill UI" notes to "backend landed, no Quill UI").
 
+## Slice G9: COMMUNITY SERVICE MESSAGE ROWS (2026-09-29)
+
+- **Task:** render the three community service messages as centered
+  service rows (envelope parsing existed for two of them; row rendering
+  was deferred post-Phase-9, now unblocked):
+  - `messageChatAddedToCommunity community_id:int53` (:5360) —
+    `MessageContent::ChatAddedToCommunity { community_id }` (already
+    parsed by slice C2k; this slice renders it).
+  - `messageChatRemovedFromCommunity` (:5363) —
+    `MessageContent::ChatRemovedFromCommunity` (already parsed by slice
+    C2k; this slice renders it).
+  - `messageChatJoinFromCommunity community_id:int53` (:5354) — "A new
+    member joined the chat from a community" — NEW parse arm here:
+    `MessageContent::ChatJoinFromCommunity { community_id }`
+    (missing `community_id` defaults to 0, like sibling arms).
+- **Reference (Telegram X, `~/workspace/telegram-x`):** TGMessageService
+  renders these as centered service rows via
+  `tdlib.cache().community(id).name` with nameless fallbacks:
+  `ActionChatAddedToCommunity` = `This chat was added to community "%1$s"`,
+  `ActionChatAddedToCommunityUnknown` = `This chat was added to community`,
+  `ActionChatRemovedFromCommunity` = `This chat was removed from community`,
+  `group_user_join_from_community{,_self}{,_name}` = `{sender}/You joined
+  the group from the community` (+ ` "%2$s"` when known). Quill copies
+  all of them verbatim; community names resolve from
+  `Session::communities` (fed by `updateCommunity`, schema :10726 —
+  "guaranteed to come before the community identifier is returned to
+  the application", so the cache is the faithful equivalent of
+  TGX's `tdlib.cache().community()`).
+- **Built:**
+  - `src/telegram/envelope.rs`: `ChatJoinFromCommunity { community_id }`
+    variant + parse arm + chat-list preview (`Joined the group from the
+    community`, TGX `ChatContentGroupJoinCommunity`); tests
+    `service_message_chat_join_from_community_parsed` +
+    `_missing_id_defaults_to_zero`.
+  - `src/ui/mod.rs` (`session_history_row`): three early-return
+    centered neutral rows (same chrome as the screenshot/call service
+    rows — no bubble, no reply/react/edit/delete); `ChatJoinFromCommunity`
+    joins the `row_chrome` show-sender exception (sender attribution
+    matters, like `ScreenshotTaken`); "no extra media" match arm added.
+  - `src/composer.rs`: `ChatJoinFromCommunity` is not caption-editable
+    (same arm as the other community service rows).
+- **Checklist:** `parity:groups-added-to-community`,
+  `parity:groups-removed-from-community`,
+  `parity:communities-join-service-message` — all checked.
+- **Out of this slice:** no community-name fallback beyond the session
+  cache (a `getCommunity`-style refresh on unknown ids has no schema
+  method to call); `parity:communities-chatlist-mode` (community
+  chat-list mode UI) and the remaining community UI items stay open.
+
 ## Slice: GROUP/CHANNEL TITLE + DESCRIPTION + PHOTO EDITING, BACKEND (2026-09-29)
 
 - **Task:** checklist gap — title/description/photo editing had no README

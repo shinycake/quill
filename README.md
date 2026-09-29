@@ -270,10 +270,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.67 method) <!-- parity:communities-add-chat -->
 - [ ] Communities: admin-rights management (blocked: no TDLib 1.8.67 method) <!-- parity:communities-admin-rights -->
 - [ ] Communities: info panel (partial: Quill backend landed — loadFullInfo/setName builders + drivers + state sync; no Quill UI) <!-- parity:communities-info -->
-- [ ] Communities: "chat added to community" service message (partial: envelope parsing done — MessageContent::ChatAddedToCommunity { community_id } + preview; row rendering deferred post-Phase-9) <!-- parity:groups-added-to-community -->
-- [ ] Communities: "chat removed from community" service message (partial: envelope parsing done — MessageContent::ChatRemovedFromCommunity + preview; row rendering deferred post-Phase-9) <!-- parity:groups-removed-from-community -->
+- [x] Communities: "chat added to community" service message (`messageChatAddedToCommunity`; TGX `ActionChatAddedToCommunity`/`ActionChatAddedToCommunityUnknown` verbatim — `This chat was added to community "NAME"` with the name from the session `updateCommunity` cache, nameless fallback when unknown) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:groups-added-to-community -->
+- [x] Communities: "chat removed from community" service message (`messageChatRemovedFromCommunity`; TGX `ActionChatRemovedFromCommunity` verbatim — `This chat was removed from community`) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:groups-removed-from-community -->
 - [ ] Communities: community search filter (searchMessagesChatTypeFilterCommunity) <!-- parity:communities-search-filter -->
-- [ ] Communities: community join service message <!-- parity:communities-join-service-message -->
+- [x] Communities: community join service message (`messageChatJoinFromCommunity`; TGX `group_user_join_from_community*` verbatim — `{name} joined the group from the community "NAME"` / `You joined the group from the community "NAME"`, nameless fallbacks; sender kept uncollapsed so incoming rows attribute the join) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:communities-join-service-message -->
 
 ### Secret chats
 

@@ -15,10 +15,10 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:48818"
+  "src/ui/mod.rs:48884"
   "src/connect.rs:24754"
   "src/state.rs:21517"
-  "src/telegram/envelope.rs:18465"
+  "src/telegram/envelope.rs:18520"
   "src/telegram/requests.rs:10470"
   # Slice A10 (2026-09-29): type-coherent extensions only — ui/mod.rs +3
   # (`mod auth_recovery` decl, `QuillApp` recovery fields + ctor init,
@@ -50,6 +50,13 @@ WAIVERS=(
   # +39 / requests.rs +36 (custom-emoji + paid chosen-reaction parse arms
   # on the existing matches; ~85 lines of public-API-only tests moved to
   # `tests/story_reactions.rs`).
+  # Slice G9 (2026-09-29, rebased post-S3/S13): type-coherent extensions only —
+  # ui/mod.rs +66 (community service-message row dispatch arms +
+  # `show_sender` arms on the existing service-row match); envelope.rs +55
+  # (`messageChatJoinFromCommunity` / `messageChatAddedToCommunity` /
+  # `messageChatRemovedFromCommunity` parse arms on the existing
+  # `EnvelopePayload` match + 2 tests in the existing
+  # `mod channel_envelope_tests` — `parse_message` is private).
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )
