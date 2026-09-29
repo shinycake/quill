@@ -889,9 +889,11 @@ pub enum EnvelopePayload {
     /// 1.8.67 lines 2758–2759; `my_boost_count` / `unrestrict_boost_count`,
     /// lines 2779–2780) that drive composer slow-mode enforcement, plus
     /// Phase D2's `can_get_statistics` (line 2792) gating the statistics
-    /// entry point. Dropped: admin/restricted/banned counts, invite link,
-    /// sticker sets, gift fields, paid-message and other statistics flags,
-    /// location.
+    /// entry point. Slice S11: `can_set_sticker_set` (line 2765),
+    /// `sticker_set_id` / `custom_emoji_sticker_set_id` (line 2792) for
+    /// group sticker-set management. Dropped: admin/restricted/banned
+    /// counts, invite link, gift fields, paid-message and other statistics
+    /// flags, location.
     SupergroupFullInfo {
         description: String,
         member_count: i32,
@@ -910,6 +912,17 @@ pub enum EnvelopePayload {
         /// Slice G2: `supergroupFullInfo.can_toggle_aggressive_anti_spam`
         /// (schema 1.8.67, line 2792) — gates the anti-spam toggle.
         can_toggle_aggressive_anti_spam: bool,
+        /// Slice S11: `supergroupFullInfo.can_set_sticker_set` (schema
+        /// 1.8.67, line 2765) — true when the supergroup sticker set can
+        /// be changed; gates the group sticker-set affordance.
+        can_set_sticker_set: bool,
+        /// Slice S11: `supergroupFullInfo.sticker_set_id` (schema 1.8.67,
+        /// line 2792) — the installed group sticker set; 0 when none.
+        sticker_set_id: i64,
+        /// Slice S11: `supergroupFullInfo.custom_emoji_sticker_set_id`
+        /// (schema 1.8.67, line 2792) — the group's custom-emoji set; 0
+        /// when none.
+        custom_emoji_sticker_set_id: i64,
     },
     /// Slice (communities backend core): `updateCommunity` (schema 1.8.67,
     /// line 10726) — the update carries the full `community` object and is
@@ -1079,6 +1092,11 @@ pub enum EnvelopePayload {
         /// Slice G2: `supergroupFullInfo.can_toggle_aggressive_anti_spam`
         /// (schema 1.8.67, line 2792) — gates the anti-spam toggle.
         can_toggle_aggressive_anti_spam: bool,
+        /// Slice S11: sticker-set fields (schema 1.8.67, lines 2765 and
+        /// 2792), nested like the other fields.
+        can_set_sticker_set: bool,
+        sticker_set_id: i64,
+        custom_emoji_sticker_set_id: i64,
     },
     /// `botCommands` — `getCommands` response (TDLib 1.8.67,
     /// `schema/td_api.tl:829`): the bot's commands for the requested scope
@@ -8253,6 +8271,15 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .get("can_toggle_aggressive_anti_spam")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            // Slice S11: sticker-set fields (schema 1.8.67, lines 2765 and
+            // 2792); int64 ids arrive as JSON strings.
+            can_set_sticker_set: value
+                .get("can_set_sticker_set")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            sticker_set_id: int64(value.get("sticker_set_id")).unwrap_or(0),
+            custom_emoji_sticker_set_id: int64(value.get("custom_emoji_sticker_set_id"))
+                .unwrap_or(0),
         }),
         // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line
         // 10750) — same fields as the `supergroupFullInfo` response, with
@@ -8317,6 +8344,25 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .and_then(|info| info.get("can_toggle_aggressive_anti_spam"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            // Slice S11: sticker-set fields (schema 1.8.67, lines 2765 and
+            // 2792), nested like the other fields.
+            can_set_sticker_set: value
+                .get("supergroup_full_info")
+                .and_then(|info| info.get("can_set_sticker_set"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            sticker_set_id: int64(
+                value
+                    .get("supergroup_full_info")
+                    .and_then(|info| info.get("sticker_set_id")),
+            )
+            .unwrap_or(0),
+            custom_emoji_sticker_set_id: int64(
+                value
+                    .get("supergroup_full_info")
+                    .and_then(|info| info.get("custom_emoji_sticker_set_id")),
+            )
+            .unwrap_or(0),
         }),
         // Slice (communities backend core): `updateCommunity` (schema
         // 1.8.67, line 10726) — the update carries the full `community`
@@ -15071,11 +15117,18 @@ mod channel_envelope_tests {
                 can_get_statistics,
                 has_aggressive_anti_spam_enabled: _,
                 can_toggle_aggressive_anti_spam: _,
+                // Slice S11: absent → false / 0.
+                can_set_sticker_set,
+                sticker_set_id,
+                custom_emoji_sticker_set_id,
             } => {
                 assert_eq!(description, "CANARY group description");
                 assert_eq!(member_count, 1234);
                 // Parity slice: no `linked_chat_id` → 0 (no discussion group).
                 assert_eq!(linked_chat_id, 0);
+                assert!(!can_set_sticker_set);
+                assert_eq!(sticker_set_id, 0);
+                assert_eq!(custom_emoji_sticker_set_id, 0);
                 // Phase A1: slow-mode fields default to 0 when absent.
                 assert_eq!(slow_mode_delay, 0);
                 assert_eq!(slow_mode_delay_expires_in, 0.0);

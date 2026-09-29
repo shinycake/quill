@@ -457,7 +457,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order --> (partial: backend wired — reorderInstalledStickerSets with stickerTypeEmoji; the dynamic toggle itself is client-side recency ordering, settings UI pending)
 - [ ] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
 - [ ] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
-- [ ] Group sticker set management (setSupergroupStickerSet / setSupergroupCustomEmojiStickerSet) <!-- parity:stickers-group-set -->
+- [ ] Group sticker set management (setSupergroupStickerSet / setSupergroupCustomEmojiStickerSet) <!-- parity:stickers-group-set --> (partial: backend landed — both builders + drivers, `can_set_sticker_set` / `sticker_set_id` / `custom_emoji_sticker_set_id` parsed into cached full info; group settings UI deferred post-Phase-9)
 
 ### Bots, polls & payments
 
