@@ -437,7 +437,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Video sticker (WebM) playback (partial: format parsed, static thumb only) <!-- parity:stickers-video-playback -->
 - [ ] "Loop Animated Stickers" setting <!-- parity:stickers-loop-setting -->
 - [ ] Premium sticker gating ("Sending this sticker requires Telegram Premium") <!-- parity:stickers-premium-gate -->
-- [ ] Show "choosing a sticker" chat action of others <!-- parity:stickers-typing-action -->
+- [x] Show "choosing a sticker" chat action of others <!-- parity:stickers-typing-action --> (S17: `chatActionChoosingSticker` parsed to `ChatAction::ChoosingSticker`, per-sender tracking in `ChatSummary`, "choosing a sticker…" label in header + sidebar preview, winning over "typing…")
 - [ ] GIF search + trending GIFs (inline bot path searchInlineBots/getInlineQueryResults) <!-- parity:gifs-search-trending --> (partial: backend wired — getInlineQueryResults search + AnimationItem results + next_offset paging + updateAnimationSearchParameters state; search UI pending. Note: `searchInlineBots` does not exist in TDLib 1.8.67 — the bot resolves via the `animation_search_bot_username` option, see DECISIONS.md S9)
 - [ ] Save GIF to media keyboard (addSavedAnimation) <!-- parity:gifs-save --> (partial: backend wired — addSavedAnimation + cache invalidation; picker UI pending)
 - [ ] Delete saved GIF (removeSavedAnimation + confirm) <!-- parity:gifs-delete --> (partial: backend wired — removeSavedAnimation + cache invalidation; confirm dialog pending)

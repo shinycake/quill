@@ -28843,6 +28843,17 @@ impl QuillApp {
                 .and_then(|s| s.chats.get(&chat_id.0))
                 .and_then(|chat| chat.ttl_status_line())
         });
+        // Slice S17: peer activity label — "choosing a sticker…" wins over
+        // "typing…" while a peer picks a sticker (`chatActionChoosingSticker`,
+        // schema 1.8.67 line 6380).
+        let activity_label: Option<&'static str> = actions.and_then(|(chat_id, _, _, _)| {
+            self.session()
+                .and_then(|s| s.chats.get(&chat_id.0))
+                .and_then(|chat| chat.peer_activity_label())
+        });
+        // S17: widen the gate — sticker-picking sets no typing senders, so
+        // `typing` alone would hide the "choosing a sticker…" label.
+        let typing = typing || activity_label.is_some();
         // Status lines kept for every chat kind (typing / muted).
         let identity: AnyElement = match (info_target, extras) {
             (Some(InfoPanelTarget::Supergroup(supergroup_id)), Some(ex)) => {
@@ -28901,7 +28912,7 @@ impl QuillApp {
                                         .id("peer-typing")
                                         .text_sm()
                                         .text_color(cx.theme().accent)
-                                        .child("typing…"),
+                                        .child(activity_label.unwrap_or("typing…")),
                                 )
                             })
                             .when(muted && !typing, |this| {
@@ -28957,7 +28968,7 @@ impl QuillApp {
                             .id("peer-typing")
                             .text_sm()
                             .text_color(cx.theme().accent)
-                            .child("typing…"),
+                            .child(activity_label.unwrap_or("typing…")),
                     )
                 })
                 .when(muted && !typing, |this| {
@@ -28990,7 +29001,7 @@ impl QuillApp {
                             .id("peer-typing")
                             .text_sm()
                             .text_color(cx.theme().accent)
-                            .child("typing…"),
+                            .child(activity_label.unwrap_or("typing…")),
                     )
                 })
                 .when(muted && !typing, |this| {
