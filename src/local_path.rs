@@ -1,6 +1,7 @@
 //! Path sandbox: display only under allowed roots; send only via explicit user pick.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Canonicalize `candidate` and return it only if it is an existing file under an allowed root.
 ///
@@ -50,6 +51,116 @@ fn canonical_file(path: &Path) -> Option<PathBuf> {
     canon.is_file().then_some(canon)
 }
 
+/// Account scope for private media caches. The app runs one Telegram account
+/// per process; `prepare_connect` sets the real scope, default is "primary".
+static MEDIA_CACHE_SCOPE: OnceLock<String> = OnceLock::new();
+
+/// Set the account scope used by [`media_cache_base`]. Called from
+/// `plan_restore` once per connect; later calls are ignored.
+pub fn set_media_cache_scope(scope: &str) {
+    let _ = MEDIA_CACHE_SCOPE.set(scope.to_owned());
+}
+
+fn media_cache_scope() -> &'static str {
+    // Non-initializing read: a startup sweep must not poison the scope
+    // before `prepare_connect` sets it.
+    static FALLBACK: &str = "primary";
+    MEDIA_CACHE_SCOPE.get().map_or(FALLBACK, String::as_str)
+}
+
+/// Account-scoped base for decrypted media scratch (GIF/video/viewer frames,
+/// video-note thumbnails): `{temp}/quill-media-cache/{account}`. Create with
+/// [`secure_create_dir`] — never world-readable, never through a symlink.
+pub fn media_cache_base() -> PathBuf {
+    std::env::temp_dir()
+        .join("quill-media-cache")
+        .join(media_cache_scope())
+}
+
+/// Remove every account's media cache plus the legacy pre-fix layouts
+/// (world-readable). Startup sweep, logout, media expiry. Best-effort; the
+/// directories are regenerable scratch. Sweeps the whole parent without
+/// reading the account scope, so a startup sweep can never poison it.
+pub fn sweep_media_caches() {
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join("quill-media-cache"));
+    for legacy in [
+        "quill-gif-frames",
+        "quill-video-frames",
+        "quill-viewer-frames",
+        "quill-video-note-thumbs",
+    ] {
+        let _ = std::fs::remove_dir_all(std::env::temp_dir().join(legacy));
+    }
+}
+
+/// Create a private directory: mode 0700 on unix, repairing pre-existing
+/// directories that are too permissive. Only manages components strictly
+/// below the temp dir; each is checked with `symlink_metadata` so a planted
+/// symlink is removed, never followed. Rejects paths outside the temp dir.
+pub fn secure_create_dir(path: &Path) -> std::io::Result<()> {
+    let temp = std::env::temp_dir();
+    let rel = path.strip_prefix(&temp).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "media cache must live under the temp dir",
+        )
+    })?;
+    let mut cur = temp;
+    for component in rel.components() {
+        // Only plain names are allowed: `..`/prefixes/root would resolve
+        // outside the cache tree via `symlink_metadata`'s `..` handling.
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "media cache path must be plain components",
+            ));
+        }
+        cur.push(component);
+        match std::fs::symlink_metadata(&cur) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                std::fs::remove_file(&cur)?;
+                std::fs::create_dir(&cur)?;
+            }
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "media cache path occupied by non-directory",
+                ));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&cur)?;
+            }
+            Err(e) => return Err(e),
+        }
+        restrict_dir(&cur)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn restrict_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn restrict_dir(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Owner-only file permissions for decrypted media (defense in depth; the
+/// 0700 parent directory is the real barrier). No-op off unix.
+pub fn restrict_file(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,6 +180,119 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn secure_create_dir_is_owner_only() {
+        let target = std::env::temp_dir().join(format!(
+            "quill-secure-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        secure_create_dir(&target).unwrap();
+        assert_eq!(mode_of(&target), 0o700, "cache dir must be 0700");
+        let _ = fs::remove_dir_all(&target);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn secure_create_dir_repairs_loose_permissions() {
+        let target = std::env::temp_dir().join(format!(
+            "quill-repair-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        // Pre-existing world-readable dir (the old 0755 layout).
+        fs::create_dir_all(&target).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+        secure_create_dir(&target).unwrap();
+        assert_eq!(mode_of(&target), 0o700, "pre-existing dir is tightened");
+        let _ = fs::remove_dir_all(&target);
+    }
+
+    #[test]
+    fn secure_create_dir_replaces_symlink_without_following() {
+        #[cfg(not(unix))]
+        return;
+        let victim = scratch("victim");
+        let link = std::env::temp_dir().join(format!(
+            "quill-link-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+        secure_create_dir(&link).unwrap();
+        assert!(
+            fs::symlink_metadata(&link).unwrap().is_dir()
+                && !fs::symlink_metadata(&link)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink(),
+            "planted symlink is replaced by a real directory"
+        );
+        assert!(
+            fs::read_dir(&victim).unwrap().next().is_none(),
+            "symlink target is never written through"
+        );
+        let _ = fs::remove_dir_all(&link);
+        let _ = fs::remove_dir_all(&victim);
+    }
+
+    #[test]
+    fn secure_create_dir_rejects_paths_outside_temp() {
+        for outside in ["/quill-secure-outside-temp-test", "/"] {
+            assert!(
+                secure_create_dir(Path::new(outside)).is_err(),
+                "must not manage directories outside the temp dir: {outside}"
+            );
+        }
+    }
+
+    #[test]
+    fn secure_create_dir_rejects_parent_traversal() {
+        // `temp/quill-media-cache/../evil` strips to an under-temp path, but
+        // `..` must never reach symlink_metadata's resolution.
+        let traversal = std::env::temp_dir()
+            .join("quill-media-cache")
+            .join("..")
+            .join("quill-evil-traversal");
+        assert!(
+            secure_create_dir(&traversal).is_err(),
+            "parent traversal must fail closed"
+        );
+        assert!(
+            !std::env::temp_dir().join("quill-evil-traversal").exists(),
+            "traversal must not create anything outside the cache tree"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn restrict_file_is_owner_only() {
+        let dir = scratch("restrict");
+        let file = dir.join("frame.png");
+        fs::write(&file, b"png").unwrap();
+        restrict_file(&file).unwrap();
+        assert_eq!(mode_of(&file), 0o600, "frame file must be 0600");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

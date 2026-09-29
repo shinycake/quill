@@ -42,6 +42,8 @@ pub fn plan_restore<S: SecretStore + ?Sized>(
     if !credentials_ready(api_id, api_hash) {
         return Err(RestoreBlocker::MissingCredentials);
     }
+    // Account-scope the private media caches before any extraction runs.
+    crate::local_path::set_media_cache_scope(&account.0);
     let paths = AccountPaths::for_root(app_root, &account);
     let database_exists = paths.database_exists();
     match load_or_create_key(store, &account, database_exists) {

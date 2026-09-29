@@ -4,16 +4,17 @@
 //! duration, and a play control, then plays inline. Unigram does the same with
 //! TDLib `video`. GPUI has no video surface, so Quill extracts a short preview
 //! with `ffmpeg` — the same approach as GIF frames — and loops those frames
-//! until Pause. Frames live under `quill-video-frames/{file_id}`. That cache
-//! root is on the display allowlist; other temp paths stay blocked.
+//! until Pause. Frames live under `quill-media-cache/{account}/video-frames/{file_id}`.
+//! That cache root is on the display allowlist; other temp paths stay blocked.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Parent of every ffmpeg frame directory. `media_display_roots` must include this
-/// path; a random file under the system temp dir stays outside the allowlist.
+/// Parent of every ffmpeg frame directory: `{media_cache_base}/video-frames`,
+/// created 0700. That cache root is on the display allowlist; other temp
+/// paths stay blocked.
 pub fn video_frame_cache_root() -> PathBuf {
-    std::env::temp_dir().join("quill-video-frames")
+    crate::local_path::media_cache_base().join("video-frames")
 }
 
 /// Per-file frame directory: `{video_frame_cache_root}/{file_id}`.
@@ -21,11 +22,12 @@ pub fn video_frame_cache_dir(file_id: i32) -> PathBuf {
     video_frame_cache_root().join(file_id.to_string())
 }
 
-/// Parent of every viewer frame directory. The media viewer extracts
-/// full-clip frames at viewer resolution, separate from the row preview's
-/// 12-frame cache, so the two never share a directory.
+/// Parent of every viewer frame directory: `{media_cache_base}/viewer-frames`,
+/// created 0700. The media viewer extracts full-clip frames at viewer
+/// resolution, separate from the row preview's 12-frame cache, so the two
+/// never share a directory.
 pub fn viewer_frame_cache_root() -> PathBuf {
-    std::env::temp_dir().join("quill-viewer-frames")
+    crate::local_path::media_cache_base().join("viewer-frames")
 }
 
 /// Per-file viewer frame directory: `{viewer_frame_cache_root}/{file_id}`.
@@ -34,10 +36,10 @@ pub fn viewer_frame_cache_dir(file_id: i32) -> PathBuf {
 }
 
 /// Account or demo roots plus the viewer frame cache. Creates the cache root
-/// so `sandboxed_display_path` can canonicalize it.
+/// (0700, symlink-safe) so `sandboxed_display_path` can canonicalize it.
 pub fn with_viewer_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let root = viewer_frame_cache_root();
-    let _ = std::fs::create_dir_all(&root);
+    let _ = crate::local_path::secure_create_dir(&root);
     roots.push(root);
     roots
 }
@@ -47,18 +49,11 @@ pub fn discard_viewer_frame_cache(file_id: i32) {
     let _ = std::fs::remove_dir_all(viewer_frame_cache_dir(file_id));
 }
 
-/// Remove leftover viewer frame caches from previous runs (abandoned
-/// extractions, unclean exits). Called once at startup, before any new
-/// extraction creates the root again.
-pub fn sweep_stale_viewer_frame_caches() {
-    let _ = std::fs::remove_dir_all(viewer_frame_cache_root());
-}
-
-/// Account or demo roots plus the video frame cache. Creates the cache root so
-/// `sandboxed_display_path` can canonicalize it.
+/// Account or demo roots plus the video frame cache. Creates the cache root
+/// (0700, symlink-safe) so `sandboxed_display_path` can canonicalize it.
 pub fn with_video_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let root = video_frame_cache_root();
-    let _ = std::fs::create_dir_all(&root);
+    let _ = crate::local_path::secure_create_dir(&root);
     roots.push(root);
     roots
 }
@@ -121,11 +116,17 @@ pub fn probe_local_video_note(path: &Path) -> Result<VideoNoteProbe, String> {
     })
 }
 
+/// Parent of video-note thumbnail scratch: `{media_cache_base}/video-note-thumbs`,
+/// created 0700.
+fn video_note_thumbnail_dir() -> PathBuf {
+    crate::local_path::media_cache_base().join("video-note-thumbs")
+}
+
 /// First frame as JPEG, 240×240. `None` when ffmpeg is missing or the file
 /// cannot be read — the schema says pass null to skip thumbnail uploading.
 pub fn write_video_note_thumbnail(src: &Path) -> Option<VideoNoteThumbnail> {
-    let dir = std::env::temp_dir().join("quill-video-note-thumbs");
-    std::fs::create_dir_all(&dir).ok()?;
+    let dir = video_note_thumbnail_dir();
+    crate::local_path::secure_create_dir(&dir).ok()?;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
@@ -142,6 +143,8 @@ pub fn write_video_note_thumbnail(src: &Path) -> Option<VideoNoteThumbnail> {
         let _ = std::fs::remove_file(&dest);
         return None;
     }
+    // Owner-only thumbnail (defense in depth; the 0700 parent is the barrier).
+    let _ = crate::local_path::restrict_file(&dest);
     Some(VideoNoteThumbnail {
         path: dest,
         width: 240,
@@ -583,7 +586,7 @@ fn extract_frames(
         &std::sync::atomic::AtomicBool,
     )>,
 ) -> Result<Vec<PathBuf>, String> {
-    std::fs::create_dir_all(cache_dir).map_err(|err| err.to_string())?;
+    crate::local_path::secure_create_dir(cache_dir).map_err(|err| err.to_string())?;
     let pattern = cache_dir.join("frame-%03d.png");
     let mut command = Command::new("ffmpeg");
     command.args(["-y", "-hide_banner", "-loglevel", "error"]);
@@ -623,6 +626,10 @@ fn extract_frames(
         })
         .collect();
     frames.sort();
+    // Owner-only frame files (defense in depth; the 0700 parent is the barrier).
+    for frame in &frames {
+        let _ = crate::local_path::restrict_file(frame);
+    }
     Ok(frames)
 }
 
@@ -1019,11 +1026,19 @@ mod tests {
         let dir = viewer_frame_cache_dir(424242);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("frame-001.png"), b"stale").unwrap();
-        sweep_stale_viewer_frame_caches();
+        // Legacy pre-fix world-readable layout must be migrated away too.
+        let legacy = std::env::temp_dir().join("quill-gif-frames");
+        std::fs::create_dir_all(&legacy).unwrap();
+        crate::local_path::sweep_media_caches();
         assert!(
             !viewer_frame_cache_root().exists(),
             "stale viewer frame caches are swept at startup"
         );
+        assert!(
+            !crate::local_path::media_cache_base().exists(),
+            "whole account media cache base is swept"
+        );
+        assert!(!legacy.exists(), "legacy world-readable cache is removed");
     }
 
     #[test]

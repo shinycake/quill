@@ -9,10 +9,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Parent of every ffmpeg frame directory. `media_display_roots` must include this
-/// path; a random file under the system temp dir stays outside the allowlist.
+/// Parent of every ffmpeg frame directory: `{media_cache_base}/gif-frames`,
+/// created 0700 — decrypted frames are never world-readable. `roots` passed
+/// to `sandboxed_display_path` must include this path; a random file under
+/// the system temp dir stays outside the allowlist.
 pub fn gif_frame_cache_root() -> PathBuf {
-    std::env::temp_dir().join("quill-gif-frames")
+    crate::local_path::media_cache_base().join("gif-frames")
 }
 
 /// Per-file frame directory: `{gif_frame_cache_root}/{file_id}`.
@@ -20,11 +22,11 @@ pub fn gif_frame_cache_dir(file_id: i32) -> PathBuf {
     gif_frame_cache_root().join(file_id.to_string())
 }
 
-/// Account or demo roots plus the GIF frame cache. Creates the cache root so
-/// `sandboxed_display_path` can canonicalize it.
+/// Account or demo roots plus the GIF frame cache. Creates the cache root
+/// (0700, symlink-safe) so `sandboxed_display_path` can canonicalize it.
 pub fn with_gif_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let root = gif_frame_cache_root();
-    let _ = std::fs::create_dir_all(&root);
+    let _ = crate::local_path::secure_create_dir(&root);
     roots.push(root);
     roots
 }
@@ -78,7 +80,7 @@ pub fn playback_frames(src: &Path, mime: &str, cache_dir: &Path) -> Result<Vec<P
 }
 
 fn extract_frames(src: &Path, cache_dir: &Path) -> Result<Vec<PathBuf>, String> {
-    std::fs::create_dir_all(cache_dir).map_err(|err| err.to_string())?;
+    crate::local_path::secure_create_dir(cache_dir).map_err(|err| err.to_string())?;
     let pattern = cache_dir.join("frame-%02d.png");
     let status = Command::new("ffmpeg")
         .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
@@ -101,6 +103,10 @@ fn extract_frames(src: &Path, cache_dir: &Path) -> Result<Vec<PathBuf>, String> 
         })
         .collect();
     frames.sort();
+    // Owner-only frame files (defense in depth; the 0700 parent is the barrier).
+    for frame in &frames {
+        let _ = crate::local_path::restrict_file(frame);
+    }
     Ok(frames)
 }
 
