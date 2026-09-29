@@ -8410,6 +8410,14 @@ impl Session {
                     self.change_number_timeout = None;
                     self.change_number_checking = false;
                     self.change_number_error = None;
+                    // A8: drop any stale in-flight send/resend purposes —
+                    // a late resend answer must not resurrect the
+                    // completed flow (re-write phone/timeout or park a
+                    // phantom error after the number already changed).
+                    self.requests
+                        .take_purpose(RequestPurpose::SendPhoneNumberCode);
+                    self.requests
+                        .take_purpose(RequestPurpose::ResendPhoneNumberCode);
                 }
                 // Slice A4: a `disconnectWebsite` /
                 // `disconnectAllWebsites` succeeded — same stale pattern
@@ -20549,6 +20557,46 @@ mod tests {
         assert_eq!(session.users.get(&31).unwrap().phone_number, "+15550199");
         assert!(session.change_number_phone.is_none());
         assert!(!session.change_number_checking);
+        assert!(session.change_number_error.is_none());
+    }
+
+    /// Slice A8: a `checkPhoneNumberCode` ok drops any stale in-flight
+    /// send/resend purpose — a late resend answer landing after the
+    /// number changed must not resurrect the code-entry state.
+    #[test]
+    fn check_code_ok_drops_stale_resend_purpose() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.my_user_id = Some(31);
+        session.users.insert(
+            31,
+            ParsedUser {
+                id: 31,
+                phone_number: "+15550131".into(),
+                ..Default::default()
+            },
+        );
+        session.change_number_phone = Some("+15550199".into());
+        session.change_number_checking = true;
+        let resend_extra = session.request(RequestPurpose::ResendPhoneNumberCode, None);
+        let check_extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, check_extra.0),
+        );
+        // The stale resend purpose is gone: its late answer writes nothing.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"authenticationCodeInfo","@extra":"{}","phone_number":"+15550199","type":{{"@type":"authenticationCodeTypeSms","length":5}},"next_type":null,"timeout":60}}"#,
+                resend_extra.0
+            ),
+        );
+        assert!(session.change_number_phone.is_none());
         assert!(session.change_number_error.is_none());
     }
 
