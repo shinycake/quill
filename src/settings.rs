@@ -30,14 +30,16 @@ impl Default for Preferences {
 /// Phase C2i: local-only call preferences, persisted as JSON next to
 /// the account root (`call_prefs.json`). These are client-side (no
 /// TDLib setting exists for them):
-/// - `confirm_before_calling`: ask before placing an outgoing call;
-/// - `less_data_for_calls`: stored and shown; the native call engine
-///   (ntgcalls) exposes no data-saving API, so it currently has no
-///   media effect — the settings UI says so honestly.
+/// - `confirm_before_calling`: ask before placing an outgoing call.
+///
+/// Slice S4: the old `less_data_for_calls` flag was deleted — "Use less
+/// data for calls" is a real TDLib setting now
+/// (`autoDownloadSettings.use_less_data_for_calls`, schema 1.8.67
+/// :9856), surfaced in Data & Storage and the call settings; the stale
+/// local-only flag would have been a second, divergent toggle.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CallPrefs {
     pub confirm_before_calling: bool,
-    pub less_data_for_calls: bool,
 }
 
 /// Shared load: a missing or corrupt prefs file falls back to defaults —
@@ -465,7 +467,6 @@ mod tests {
         assert_eq!(load_call_prefs(&paths), CallPrefs::default());
         let prefs = CallPrefs {
             confirm_before_calling: true,
-            less_data_for_calls: true,
         };
         save_call_prefs(&paths, &prefs).expect("save works");
         assert_eq!(load_call_prefs(&paths), prefs);

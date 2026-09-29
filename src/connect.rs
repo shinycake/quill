@@ -12,6 +12,9 @@ use crate::composer::{
     schedule_draft_save,
 };
 use crate::credentials::TelegramCredentials;
+use crate::data_settings::{
+    AutoDownloadNetSettings, NetworkKind, load_data_storage_prefs, save_data_storage_prefs,
+};
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::folders::spec_without_chat;
 use crate::ids::{AccountKey, ChatId, FileId, MessageId, RequestId, TopicId};
@@ -138,6 +141,8 @@ use crate::telegram::requests::{
 };
 use crate::telegram::requests_group_stickers::{
     set_supergroup_custom_emoji_sticker_set, set_supergroup_sticker_set,
+use crate::telegram::requests_data_settings::{
+    get_auto_download_settings_presets, remove_all_files_from_downloads, set_auto_download_settings,
 };
 use crate::telegram::requests_privacy::{
     PrivacySettingKey, get_blocked_message_senders, get_privacy_rules,
@@ -1230,7 +1235,27 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .then_some(pending.community_id)
                     .flatten()
             });
+        // Slice S4: a confirmed `removeAllFilesFromDownloads` drops the
+        // cached storage stats (see `Session::apply`) — capture before
+        // apply so the post-apply refetch shows the post-clear numbers.
+        // A dropped cache is the success signal: on a TDLib error the
+        // cache stays and nothing refetches.
+        let cleared_download_cache = matches!(&owned.envelope.payload, EnvelopePayload::Ok)
+            && owned.envelope.extra.is_some_and(|id| {
+                self.session.requests.purpose(id)
+                    == Some(RequestPurpose::RemoveAllFilesFromDownloads)
+            });
         self.session.apply(owned);
+        // Slice S4: persist per-network settings seeded from
+        // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
+        // filesystem, so it marks them dirty instead).
+        if self.session.data_storage_dirty {
+            self.session.data_storage_dirty = false;
+            let _ = self.save_data_storage_prefs();
+        }
+        if cleared_download_cache {
+            let _ = self.maybe_fetch_storage_statistics();
+        }
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;
         self.maybe_send_parameters()?;
@@ -12072,9 +12097,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
     /// once per session unless forced (guarded by the cache and the
-    /// in-flight purpose). `chat_limit` 0: the overlay aggregates by file
-    /// type across chats, so per-chat splits are not needed (schema
-    /// 1.8.67 line 15781).
+    /// in-flight purpose). Slice S4: `chat_limit` 50 — the Data &
+    /// Storage screen's per-chat breakdown needs the per-chat rows
+    /// (schema 1.8.67 line 15781).
     pub fn maybe_fetch_storage_statistics(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
@@ -12093,7 +12118,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetStorageStatistics, None);
         self.session.storage_stats_loading = true;
-        match self.sender.send_json(&get_storage_statistics(extra, 0)) {
+        match self.sender.send_json(&get_storage_statistics(extra, 50)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
@@ -12115,6 +12140,114 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .requests
             .take_purpose(RequestPurpose::GetStorageStatistics);
+    }
+
+    /// Slice S4: fetch `getAutoDownloadSettingsPresets` once — only when
+    /// no local `data_storage.json` was loaded (guarded by the seeded
+    /// flag and the in-flight purpose). The reducer seeds the local
+    /// per-network settings from the answer; TDLib has no getter for
+    /// the *current* values, so this is the only server read.
+    pub fn fetch_auto_download_presets(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.data_storage.seeded
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetAutoDownloadSettingsPresets)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetAutoDownloadSettingsPresets, None);
+        self.session.auto_download_presets_loading = true;
+        if let Err(err) = self
+            .sender
+            .send_json(&get_auto_download_settings_presets(extra))
+        {
+            self.session.requests.take(extra);
+            self.session.auto_download_presets_loading = false;
+            self.session.data_storage_error =
+                Some("Couldn't load auto-download settings.".to_string());
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Slice S4: push one network's auto-download settings
+    /// (`setAutoDownloadSettings`, schema 1.8.67, :15820). Applied
+    /// optimistically to the local prefs (the sent value is what the
+    /// server stores — the setAccountTtl precedent) and persisted; the
+    /// `ok` / error response clears or flags it.
+    pub fn set_auto_download_settings(
+        &mut self,
+        network: NetworkKind,
+        settings: AutoDownloadNetSettings,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::SetAutoDownloadSettings { network, settings },
+            None,
+        );
+        let payload = set_auto_download_settings(extra, settings.to_json(), network.td_type());
+        if let Err(err) = self.sender.send_json(&payload) {
+            self.session.requests.take(extra);
+            self.session.data_storage_error =
+                Some("Couldn't save auto-download settings.".to_string());
+            return Err(err);
+        }
+        // Slice S4: applied on the confirmed `ok` (the reducer applies
+        // the purpose's settings) — never optimistically, so a TDLib
+        // error can't leave a phantom value on screen.
+        Ok(extra)
+    }
+
+    /// Slice S4: the "Use less data for calls" toggle
+    /// (`autoDownloadSettings.use_less_data_for_calls`, schema 1.8.67,
+    /// :9856). One toggle drives all three networks' settings (TGX
+    /// keeps a single switch); each network keeps its own caps.
+    pub fn set_less_data_for_calls(&mut self, on: bool) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        for network in NetworkKind::ALL {
+            let mut settings = *self.session.data_storage.for_network(network);
+            settings.use_less_data_for_calls = on;
+            self.set_auto_download_settings(network, settings)?;
+        }
+        Ok(())
+    }
+
+    /// Slice S4: "Clear cache" (`removeAllFilesFromDownloads`, schema
+    /// 1.8.67, :14056 — completed downloads dropped from the filesystem
+    /// cache, in-flight downloads left alone). The confirmed `ok` drops
+    /// the cached stats and refetches the post-clear numbers.
+    pub fn clear_download_cache(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::RemoveAllFilesFromDownloads, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&remove_all_files_from_downloads(extra))
+        {
+            self.session.requests.take(extra);
+            self.session.data_storage_error = Some("Couldn't clear the cache.".to_string());
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Slice S4: persist the per-network auto-download settings
+    /// (`data_storage.json`) next to the account.
+    pub fn save_data_storage_prefs(&mut self) -> std::io::Result<()> {
+        save_data_storage_prefs(&self.paths, &self.session.data_storage)
     }
 
     /// Slice A3: `getActiveSessions` (schema 1.8.67, line 15102) — once
@@ -13590,6 +13723,10 @@ pub fn start_live_connect(
     session.media_prefs = load_media_prefs(&prepared.paths);
     // Slice A6: local contacts prefs (sync toggle) load the same way.
     session.contact_prefs = load_contact_prefs(&prepared.paths);
+    // Slice S4: local per-network auto-download settings load the same
+    // way (seeded from `getAutoDownloadSettingsPresets` on first open
+    // when no file exists).
+    session.data_storage = load_data_storage_prefs(&prepared.paths);
     let mut driver = ConnectDriver::new(session, sender, credentials, prepared);
     match crate::calls::engine::NtgcallsEngine::load() {
         Ok(engine) => {

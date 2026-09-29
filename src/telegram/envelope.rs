@@ -1,6 +1,7 @@
 use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use super::story_areas::parse_story_areas;
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
+use crate::data_settings::{AutoDownloadNetSettings, StorageChatStats};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use crate::privacy::PrivacyRule;
 use crate::rich::{RichBlock, parse_rich_message};
@@ -777,6 +778,20 @@ pub enum EnvelopePayload {
     StorageStatistics {
         total_size: i64,
         by_file_type: Vec<StorageFileTypeStats>,
+        /// Slice S4: per-chat rows (`chat_limit` > 0).
+        by_chat: Vec<StorageChatStats>,
+    },
+    /// Slice S4: `autoDownloadSettingsPresets` — the
+    /// `getAutoDownloadSettingsPresets` response (schema 1.8.67, line
+    /// 9862: `autoDownloadSettingsPresets low:autoDownloadSettings
+    /// medium:autoDownloadSettings high:autoDownloadSettings =
+    /// AutoDownloadSettingsPresets;`). Seeds the local per-network
+    /// settings once (the reducer marks them dirty for the driver to
+    /// persist).
+    AutoDownloadSettingsPresets {
+        low: AutoDownloadNetSettings,
+        medium: AutoDownloadNetSettings,
+        high: AutoDownloadNetSettings,
     },
     /// Slice A2: `passwordState` — the `getPasswordState` /
     /// `setPassword` / `setRecoveryEmailAddress` /
@@ -3157,6 +3172,12 @@ pub struct StorageFileTypeStats {
 pub struct StorageStats {
     pub total_size: i64,
     pub by_file_type: Vec<StorageFileTypeStats>,
+    /// Slice S4: per-chat entries (`storageStatisticsByChat
+    /// chat_id:int53 size:int53 count:int32
+    /// by_file_type:vector<storageStatisticsByFileType> =
+    /// StorageStatisticsByChat;`, schema 1.8.67, line 9787) — the usage
+    /// screen's per-chat breakdown. Empty when `chat_limit` was 0.
+    pub by_chat: Vec<StorageChatStats>,
 }
 
 /// Slice A3: one `session` from a `getActiveSessions` answer
@@ -8085,15 +8106,30 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         // into per-`fileType` totals (TGX `TGStorageStats` aggregates the
         // same way; schema 1.8.67 lines 9780/9787/9793). Zero-size entries
         // are kept: the UI orders by a fixed category list, not by size.
+        // Slice S4: per-chat rows are also kept verbatim (the usage
+        // screen's per-chat breakdown; present when `chat_limit` > 0).
         "storageStatistics" => {
             let total_size = int53_or_zero(value.get("size"));
             let mut totals: Vec<StorageFileTypeStats> = Vec::new();
+            let mut by_chat: Vec<StorageChatStats> = Vec::new();
             for chat in value
                 .get("by_chat")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
             {
+                let chat_id = chat.get("chat_id").and_then(Value::as_i64).unwrap_or(0);
+                let chat_size = int53_or_zero(chat.get("size"));
+                let chat_count = chat
+                    .get("count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .clamp(0, i32::MAX as i64) as i32;
+                by_chat.push(StorageChatStats {
+                    chat_id,
+                    size: chat_size,
+                    count: chat_count,
+                });
                 for entry in chat
                     .get("by_file_type")
                     .and_then(Value::as_array)
@@ -8129,7 +8165,18 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
             Ok(EnvelopePayload::StorageStatistics {
                 total_size,
                 by_file_type: totals,
+                by_chat,
             })
+        }
+        // Slice S4: `autoDownloadSettingsPresets` — the
+        // `getAutoDownloadSettingsPresets` response (schema 1.8.67, line
+        // 9862). Missing low/medium/high is a malformed answer, not a
+        // default — the reducer never sees it.
+        "autoDownloadSettingsPresets" => {
+            let Some((low, medium, high)) = AutoDownloadNetSettings::parse_presets(&value) else {
+                return Err(ParseError::MissingField);
+            };
+            Ok(EnvelopePayload::AutoDownloadSettingsPresets { low, medium, high })
         }
         // Slice A2: `passwordState` — the `getPasswordState` /
         // `setPassword` / `setRecoveryEmailAddress` /
@@ -16941,6 +16988,7 @@ mod storage_statistics_tests {
             EnvelopePayload::StorageStatistics {
                 total_size,
                 by_file_type,
+                by_chat,
             } => {
                 assert_eq!(total_size, 7000);
                 let secret = by_file_type
@@ -16955,6 +17003,12 @@ mod storage_statistics_tests {
                     .expect("photo category present");
                 assert_eq!(photo.size, 1000);
                 assert_eq!(photo.count, 1);
+                // Slice S4: per-chat rows are kept verbatim.
+                assert_eq!(by_chat.len(), 2);
+                assert_eq!(by_chat[0].chat_id, 11);
+                assert_eq!(by_chat[0].size, 5000);
+                assert_eq!(by_chat[0].count, 2);
+                assert_eq!(by_chat[1].chat_id, 0);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -16991,6 +17045,7 @@ mod storage_statistics_tests {
         };
         let stats = StorageStats {
             total_size: 1000,
+            by_chat: Vec::new(),
             by_file_type: vec![
                 entry("fileTypeSecret", 200, 2),
                 entry("fileTypeBogus", 50, 5),

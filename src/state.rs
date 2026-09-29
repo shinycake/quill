@@ -1,6 +1,7 @@
 use crate::auth::{AuthView, view_for};
 use crate::calls::engine::{RemoteVideoState, TransportState};
 use crate::composer::{CommandMenuItem, merge_command_menu_items};
+use crate::data_settings::{AutoDownloadNetSettings, DataStoragePrefs, NetworkKind};
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::emoji::EmojiPanel;
 use crate::ids::{
@@ -1129,8 +1130,27 @@ pub enum RequestPurpose {
     /// Phase S2: `getStorageStatistics`. Response is `storageStatistics`;
     /// aggregated by file type into `Session::storage_stats` (TGX
     /// `SettingsCacheController` / `TGStorageStats` style, including the
-    /// "Secret media and files" category for `fileTypeSecret`).
+    /// "Secret media and files" category for `fileTypeSecret`). Slice S4:
+    /// requested with `chat_limit` 50 — per-chat rows feed the usage
+    /// screen's per-chat breakdown.
     GetStorageStatistics,
+    /// Slice S4: `setAutoDownloadSettings` for one network type.
+    /// Response is `ok`; the confirmed sent settings are applied then
+    /// (the setAccountTtl precedent — the server confirmed the write of
+    /// exactly this value, not an optimistic guess). Carries the sent
+    /// settings because the `ok` carries none.
+    SetAutoDownloadSettings {
+        network: NetworkKind,
+        settings: AutoDownloadNetSettings,
+    },
+    /// Slice S4: `removeAllFilesFromDownloads` ("Clear cache").
+    /// Response is `ok`; the cached stats are dropped and refetched so
+    /// the screen shows the post-clear numbers.
+    RemoveAllFilesFromDownloads,
+    /// Slice S4: `getAutoDownloadSettingsPresets`. Response is
+    /// `autoDownloadSettingsPresets`; seeds the local per-network
+    /// settings once (TDLib has no getter for the current values).
+    GetAutoDownloadSettingsPresets,
     /// Slice A2: a 2FA management request (`getPasswordState` /
     /// `setPassword` / `setRecoveryEmailAddress` /
     /// `resendRecoveryEmailAddressCode` /
@@ -4141,6 +4161,23 @@ pub struct Session {
     pub storage_stats: Option<StorageStats>,
     /// Phase S2: a `getStorageStatistics` round trip is in flight.
     pub storage_stats_loading: bool,
+    /// Slice S4: per-network auto-download settings, the local source of
+    /// truth (TDLib has no getter for the current values). Loaded from
+    /// `data_storage.json` at session setup; seeded once from
+    /// `getAutoDownloadSettingsPresets` when unseeded.
+    pub data_storage: DataStoragePrefs,
+    /// Slice S4: the presets answer seeded `data_storage` — the driver
+    /// persists it on the next ingest (the reducer cannot touch the
+    /// filesystem).
+    pub data_storage_dirty: bool,
+    /// Slice S4: a `getAutoDownloadSettingsPresets` round trip is in flight.
+    pub auto_download_presets_loading: bool,
+    /// Slice S4: last Data & Storage failure, shown on the screen
+    /// (failures surface there, never as toasts — the S3 pattern).
+    pub data_storage_error: Option<String>,
+    /// Slice S4: a `removeAllFilesFromDownloads` was confirmed — the
+    /// screen shows the "Cache cleared" confirmation until reopened.
+    pub cache_cleared: bool,
     /// Slice A2: cached `getPasswordState` / `setPassword` /
     /// `setRecoveryEmailAddress` answer; drives the two-step
     /// verification overlay. Replaced only by our own
@@ -5239,6 +5276,11 @@ impl Session {
             scope_settings_loading: HashSet::new(),
             storage_stats: None,
             storage_stats_loading: false,
+            data_storage: DataStoragePrefs::default(),
+            data_storage_dirty: false,
+            auto_download_presets_loading: false,
+            data_storage_error: None,
+            cache_cleared: false,
             password_state: None,
             password_state_loading: false,
             password_op_error: None,
@@ -8373,6 +8415,7 @@ impl Session {
             EnvelopePayload::StorageStatistics {
                 total_size,
                 by_file_type,
+                by_chat,
             } => {
                 // Phase S2: `getStorageStatistics` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
@@ -8380,8 +8423,25 @@ impl Session {
                     self.storage_stats = Some(StorageStats {
                         total_size,
                         by_file_type,
+                        by_chat,
                     });
                     self.storage_stats_loading = false;
+                }
+            }
+            EnvelopePayload::AutoDownloadSettingsPresets { low, medium, high } => {
+                // Slice S4: `getAutoDownloadSettingsPresets` answer —
+                // only our own in-flight request seeds the local
+                // per-network settings (matched by `@extra`), and only
+                // when nothing was loaded from disk. The driver persists
+                // the seed on the next ingest (`data_storage_dirty`).
+                if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
+                    && !self.data_storage.seeded
+                {
+                    self.data_storage.seed_from_presets(low, medium, high);
+                    self.data_storage_dirty = true;
+                    self.auto_download_presets_loading = false;
+                    self.data_storage_error = None;
                 }
             }
             EnvelopePayload::PasswordState { state } => {
@@ -8641,6 +8701,31 @@ impl Session {
                         .take_purpose(RequestPurpose::SendPhoneNumberCode);
                     self.requests
                         .take_purpose(RequestPurpose::ResendPhoneNumberCode);
+                // Slice S4: a `setAutoDownloadSettings` succeeded — apply
+                // the confirmed sent settings (the `ok` carries none, so
+                // they ride the purpose); the error clears and the driver
+                // persists on this ingest via `data_storage_dirty`.
+                if let Some(RequestPurpose::SetAutoDownloadSettings { network, settings }) =
+                    pending.map(|p| p.purpose)
+                {
+                    *self.data_storage.for_network_mut(network) = settings;
+                    self.data_storage.seeded = true;
+                    self.data_storage_error = None;
+                    self.data_storage_dirty = true;
+                }
+                // Slice S4: a `removeAllFilesFromDownloads` ("Clear
+                // cache") succeeded — drop the cached stats so the driver
+                // refetches the post-clear numbers on this same ingest
+                // (the G2 stale pattern); the screen shows the
+                // confirmation until reopened.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::RemoveAllFilesFromDownloads)
+                ) {
+                    self.storage_stats = None;
+                    self.storage_stats_loading = false;
+                    self.cache_cleared = true;
+                    self.data_storage_error = None;
                 }
                 // Slice A4: a `disconnectWebsite` /
                 // `disconnectAllWebsites` succeeded — same stale pattern
@@ -9030,6 +9115,25 @@ impl Session {
                 // Phase 9.3: a `postStory` / `canPostStory` error — the
                 // composer shows it instead of spinning forever.
                 match pending.map(|p| p.purpose) {
+                    // Slice S4: Data & Storage request failures surface
+                    // on the screen (the S3 pattern) — never as toasts.
+                    Some(RequestPurpose::SetAutoDownloadSettings { .. }) => {
+                        self.data_storage_error = Some(format!(
+                            "Couldn't save auto-download settings: {}",
+                            error_reason(&err)
+                        ));
+                    }
+                    Some(RequestPurpose::RemoveAllFilesFromDownloads) => {
+                        self.data_storage_error =
+                            Some(format!("Couldn't clear the cache: {}", error_reason(&err)));
+                    }
+                    Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
+                        self.auto_download_presets_loading = false;
+                        self.data_storage_error = Some(format!(
+                            "Couldn't load auto-download settings: {}",
+                            error_reason(&err)
+                        ));
+                    }
                     Some(RequestPurpose::PostStory) => {
                         self.story_post.outcome = StoryPostOutcome::Failed(format!(
                             "Posting failed: {}",

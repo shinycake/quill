@@ -70,6 +70,7 @@ use quill::connect::{
     USER_DOWNLOAD_PRIORITY, evaluate_gate, start_live_connect,
 };
 use quill::credentials::TelegramCredentials;
+use quill::data_settings::{AutoDownloadNetSettings, NetworkKind, StorageChatStats};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::folders::FolderEditor;
 use quill::ids::{AccountKey, ChatId, FileId, MessageId, RequestId};
@@ -717,6 +718,13 @@ pub struct QuillApp {
     block_picker_open: bool,
     /// Slice S3: two-step Unblock confirm on the Privacy screen.
     unblock_confirm: Option<i64>,
+    /// Slice S4: the Data & Storage per-network editor — the network
+    /// being edited plus its draft settings (saved or discarded
+    /// explicitly, never applied optimistically).
+    data_storage_editor: Option<(NetworkKind, AutoDownloadNetSettings)>,
+    /// Slice S4: the "Clear cache" button is awaiting its second,
+    /// confirming tap.
+    data_storage_confirm_clear: bool,
     /// Slice A2: two-step verification overlay. `twofa_view` picks the
     /// status screen or one of the forms; the four textareas back the
     /// enable/change/disable/recovery-email forms. Passwords live in the
@@ -2704,13 +2712,13 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
-            // Phase S2: storage-usage fixture (injected, no live Telegram).
+            // Slice S4: Data & Storage fixture (injected, no live Telegram).
             Some(ScreenshotDemo::ReadyStorageUsage) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
                     ConnectUiStatus::DemoReadyChats,
                     None,
-                    "screenshot demo — storage usage (injected, no live Telegram)".into(),
+                    "screenshot demo — data & storage (injected, no live Telegram)".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -3106,6 +3114,8 @@ impl QuillApp {
             appearance: Self::load_appearance(),
             appearance_open: false,
             appearance_applied: None,
+            data_storage_editor: None,
+            data_storage_confirm_clear: false,
             sessions_open: false,
             sessions_confirm: None,
             websites_open: false,
@@ -3672,17 +3682,19 @@ impl QuillApp {
             app.pending_inline_bot_alert = Some("@gif cats".to_string());
             app.status_note = "screenshot demo — inline-bot warning in secret chat".into();
         }
-        // Phase S2: storage-usage fixture — fixture stats (including the
-        // secret category) with the overlay open (injected, no live
+        // Slice S4: Data & Storage fixture — fixture stats (including the
+        // secret category and per-chat rows) plus seeded per-network
+        // download settings, with the dialog open (injected, no live
         // Telegram).
         if matches!(demo, Some(ScreenshotDemo::ReadyStorageUsage)) {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 session.storage_stats = Some(demo_storage_stats());
                 session.storage_stats_loading = false;
+                session.data_storage = demo_data_storage_prefs();
             }
             app.storage_usage_open = true;
-            app.status_note = "screenshot demo — storage usage".into();
+            app.status_note = "screenshot demo — data & storage".into();
         }
         // Settings → Appearance: the Appearance dialog open over the
         // ReadyChats fixture (injected, no live Telegram). Non-default
@@ -16490,6 +16502,11 @@ impl QuillApp {
             if let Err(err) = live.driver.fetch_call_privacy() {
                 self.status_note = format!("call privacy request failed: {err:?}");
             }
+            // Slice S4: the call-settings "Use less data for calls"
+            // toggle reads the TDLib-backed per-network settings —
+            // fetch the presets so it shows the true value (guarded:
+            // once per session).
+            let _ = live.driver.fetch_auto_download_presets();
         }
         cx.notify();
     }
@@ -18043,118 +18060,8 @@ impl QuillApp {
     /// Phase 6: put arbitrary content in a static kit [`TableCell`]. The
     /// cell's inherent `.child()` only accepts kit table parts (it shadows
     /// [`ParentElement::child`]), so content goes through the trait method.
-    fn table_cell(content: impl IntoElement) -> TableCell {
+    pub(crate) fn table_cell(content: impl IntoElement) -> TableCell {
         ParentElement::child(TableCell::new(), content)
-    }
-
-    fn build_storage_usage_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::StorageUsage, |this, _, cx| {
-                this.storage_usage_open = false;
-                cx.notify();
-            });
-        app.update(cx, |this, cx| {
-            let session = this.session();
-            let stats = session.as_ref().and_then(|s| s.storage_stats.clone());
-            let loading = session.is_some_and(|s| s.storage_stats_loading);
-            let mut body = div().flex().flex_col().gap_2();
-            match stats {
-                None => {
-                    body = body.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(if loading {
-                                "Loading…"
-                            } else {
-                                "No storage data yet."
-                            }),
-                    );
-                }
-                Some(stats) => {
-                    // Phase 6: a static kit Table (was: hand-rolled
-                    // justify-between rows).
-                    let mut table_body = TableBody::new().child(
-                        TableRow::new()
-                            .child(Self::table_cell(
-                                div().font_semibold().text_sm().child("Total"),
-                            ))
-                            .child(
-                                Self::table_cell(
-                                    div().text_sm().child(format_bytes(stats.total_size)),
-                                )
-                                .text_right(),
-                            ),
-                    );
-                    for (label, size, count) in
-                        quill::telegram::envelope::storage_category_rows(&stats)
-                    {
-                        table_body = table_body.child(
-                            TableRow::new()
-                                .child(Self::table_cell(div().text_sm().child(label)))
-                                .child(
-                                    Self::table_cell(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(format!(
-                                                "{count} files · {}",
-                                                format_bytes(size)
-                                            )),
-                                    )
-                                    .text_right(),
-                                ),
-                        );
-                    }
-                    body = body.child(Table::new().w_full().child(table_body));
-                }
-            }
-            let footer = div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                    Button::new("storage-refresh")
-                        .label("Refresh")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.refresh_storage_usage(cx);
-                            this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("close-storage-usage")
-                        .label("Close")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.storage_usage_open = false;
-                            cx.notify();
-                            this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
-                        })),
-                );
-            dialog
-                .overlay(true)
-                .title("Storage usage")
-                .content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                })
-                .footer(footer)
-                .on_close(on_close)
-        })
     }
 
     /// kit Phase 2 (redo): two-step verification hosted in a kit `Dialog`
@@ -20570,13 +20477,60 @@ impl QuillApp {
                 "Ask before placing a call",
                 |prefs, on| prefs.confirm_before_calling = on,
             ))
-            .child(pref_row(
-                "call-pref-less-data",
-                prefs.less_data_for_calls,
-                "Use less data for calls",
-                "Saved here — the call engine doesn’t support it yet",
-                |prefs, on| prefs.less_data_for_calls = on,
-            ))
+            .child({
+                // Slice S4: "Use less data for calls" is a real TDLib
+                // setting (`autoDownloadSettings.use_less_data_for_calls`,
+                // schema 1.8.67 :9856) — one toggle driving all three
+                // networks — replacing the old local-only CallPrefs flag.
+                let on = self.session().is_some_and(|s| {
+                    s.data_storage.seeded
+                        && NetworkKind::ALL
+                            .iter()
+                            .all(|n| s.data_storage.for_network(*n).use_less_data_for_calls)
+                });
+                div()
+                    .id("call-pref-less-data")
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(
+                        Switch::new("call-pref-less-data-switch")
+                            .checked(on)
+                            .accessibility_label("Use less data for calls")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    if live.driver.set_less_data_for_calls(on).is_err() {
+                                        this.status_note = "Couldn't update call settings.".into();
+                                    }
+                                } else if let Some(demo) = this.demo_session.as_mut() {
+                                    // Demo: show the chosen value immediately
+                                    // (no live TDLib to confirm it).
+                                    for n in NetworkKind::ALL {
+                                        demo.data_storage
+                                            .for_network_mut(n)
+                                            .use_less_data_for_calls = on;
+                                    }
+                                    demo.data_storage.seeded = true;
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(div().text_sm().child("Use less data for calls"))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Lower data usage during Telegram calls"),
+                            ),
+                    )
+            })
             .child(
                 div()
                     .text_xs()
@@ -39751,20 +39705,16 @@ impl QuillApp {
                                 this.open_create_chat_dialog(CreateChatKind::Channel, window, cx);
                             })),
                     );
-                    // Phase S2: storage-usage overlay entry (TGX Settings →
-                    // Data and Storage → Storage Usage). Quill has no
-                    // settings screen, so it sits next to the secret-chat
-                    // entry; it fetches `getStorageStatistics` on open
-                    // (guarded: once per session).
+                    // Slice S4: Data & Storage dialog entry (TGX Settings →
+                    // Data and Storage). Quill has no settings screen, so
+                    // it sits next to the secret-chat entry; it fetches
+                    // `getStorageStatistics` and the auto-download
+                    // presets on open (both guarded: once per session).
                     list = list.child(
                         Button::new("storage-usage")
-                            .label("💾 Storage usage")
+                            .label("💾 Data & Storage")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.storage_usage_open = true;
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.maybe_fetch_storage_statistics();
-                                }
-                                cx.notify();
+                                this.open_data_storage(cx);
                             })),
                     );
                     // Settings → Appearance slice: theme, auto-night,
@@ -48315,6 +48265,23 @@ fn demo_websites() -> Vec<ParsedWebsite> {
 fn demo_storage_stats() -> StorageStats {
     StorageStats {
         total_size: 1_234_567_890,
+        by_chat: vec![
+            StorageChatStats {
+                chat_id: 11,
+                size: 600_000_000,
+                count: 800,
+            },
+            StorageChatStats {
+                chat_id: 13,
+                size: 400_000_000,
+                count: 300,
+            },
+            StorageChatStats {
+                chat_id: 12,
+                size: 150_000_000,
+                count: 143,
+            },
+        ],
         by_file_type: vec![
             StorageFileTypeStats {
                 file_type: "fileTypePhoto".to_string(),
