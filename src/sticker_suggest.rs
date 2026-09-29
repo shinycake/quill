@@ -179,10 +179,13 @@ mod tests {
         );
     }
 
-    /// Slice S12: the clear path (composer text with no trailing emoji)
-    /// drops the pending suggest purpose and the cached slot, so a late
-    /// answer for the taken request is ignored instead of landing in
-    /// `suggestions` while `suggest_for` is `None`.
+    /// Slice S12: the session primitives used by the driver's clear path
+    /// (composer text with no trailing emoji) — `take_purpose` drops the
+    /// pending suggest purpose and `clear_sticker_suggestions` empties the
+    /// slot, so a late answer for the taken request is ignored instead of
+    /// landing in `suggestions` while `suggest_for` is `None`.
+    /// The driver (`ConnectDriver::update_sticker_suggestions`) invokes
+    /// exactly these two primitives on its clear path.
     #[test]
     fn s12_clear_path_drops_pending_suggest_so_late_answer_is_ignored() {
         let (mut session, sink) = session();
