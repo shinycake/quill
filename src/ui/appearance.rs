@@ -13,8 +13,8 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::AccountKey;
 use quill::settings::{
-    AccountPaths, AppearancePrefs, AutoNight, ThemeChoice, clamp_font_size, default_app_root,
-    load_appearance_prefs, local_minutes_since_midnight, night_active, save_appearance_prefs,
+    AccountPaths, AppearancePrefs, AutoNight, ThemeChoice, clamp_font_size, load_appearance_prefs,
+    local_minutes_since_midnight, night_active, safe_app_root, save_appearance_prefs,
 };
 
 /// Accent presets (0xRRGGBB); the "Default" chip keeps the theme accent.
@@ -43,7 +43,11 @@ impl QuillApp {
     /// Telegram's locally stored theme choice), so it lives under the
     /// primary account's root rather than per-account data.
     pub(crate) fn appearance_paths() -> AccountPaths {
-        AccountPaths::for_root(&default_app_root(), &AccountKey::primary())
+        // `safe_app_root` has no `./quill-data` fallback (security: never
+        // scatter account state under the launch directory); without a
+        // platform data dir the prefs fall back to the temp dir.
+        let root = safe_app_root().unwrap_or_else(|| std::env::temp_dir().join("quill-appearance"));
+        AccountPaths::for_root(&root, &AccountKey::primary())
     }
 
     /// Load persisted prefs (defaults when the file is missing/corrupt).
