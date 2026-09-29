@@ -3,14 +3,33 @@ use super::envelope::{
 };
 use serde_json::Value;
 
+/// Slice S10: the `emojiStatusTypeUpgradedGift` row detail (schema 1.8.67,
+/// line 2352) — gift identity plus the model/symbol/backdrop custom emojis
+/// the UI slice renders. Carried on the backend item so the future
+/// status-picker slice gets the full payload from
+/// `getUpgradedGiftEmojiStatuses`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpgradedGiftEmojiStatus {
+    pub upgraded_gift_id: i64,
+    pub gift_title: String,
+    pub gift_name: String,
+    pub model_custom_emoji_id: i64,
+    pub symbol_custom_emoji_id: i64,
+    pub backdrop_center_color: i32,
+    pub backdrop_edge_color: i32,
+    pub backdrop_symbol_color: i32,
+    pub backdrop_text_color: i32,
+}
+
 /// Slice S10: one `emojiStatus` row (schema 1.8.67, line 2358) from an
-/// `emojiStatuses` list. Only the custom-emoji id is kept — the
-/// upgraded-gift type carries render detail the UI slice owns, and the
-/// `expiration_date` drives the timed-status presets (1h/2h/8h/2d/custom).
+/// `emojiStatuses` list. `custom_emoji_id` is 0 for upgraded-gift rows —
+/// the gift detail rides in `gift`. `expiration_date` drives the
+/// timed-status presets (1h/2h/8h/2d/custom).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmojiStatusItem {
     pub custom_emoji_id: i64,
     pub expiration_date: i32,
+    pub gift: Option<UpgradedGiftEmojiStatus>,
 }
 
 /// Slice S10: one `emojiKeyword` row (schema 1.8.67, line 6426) from
@@ -33,7 +52,8 @@ pub struct EmojiCategory {
 
 /// Slice S10: `emojiStatuses` — `getRecentEmojiStatuses` /
 /// `getUpgradedGiftEmojiStatuses` (schema 1.8.67, lines 2361, 13957, 13960).
-/// Only the custom-emoji id is kept per row (0 for the upgraded-gift type).
+/// Custom-emoji rows keep the id; upgraded-gift rows keep id 0 plus the
+/// gift payload in `gift`.
 pub(crate) fn parse_emoji_statuses(value: &Value) -> EnvelopePayload {
     let statuses = value
         .get("emoji_statuses")
@@ -42,9 +62,10 @@ pub(crate) fn parse_emoji_statuses(value: &Value) -> EnvelopePayload {
         .flatten()
         .filter_map(|entry| {
             let type_ = entry.get("type")?;
-            let custom_emoji_id = match type_.get("@type")?.as_str()? {
-                "emojiStatusTypeCustomEmoji" => int53(type_.get("custom_emoji_id")).ok()?,
-                _ => 0,
+            let (custom_emoji_id, gift) = match type_.get("@type")?.as_str()? {
+                "emojiStatusTypeCustomEmoji" => (int53(type_.get("custom_emoji_id")).ok()?, None),
+                "emojiStatusTypeUpgradedGift" => (0, Some(parse_upgraded_gift_status(type_))),
+                _ => (0, None),
             };
             Some(EmojiStatusItem {
                 custom_emoji_id,
@@ -52,10 +73,35 @@ pub(crate) fn parse_emoji_statuses(value: &Value) -> EnvelopePayload {
                     .get("expiration_date")
                     .and_then(Value::as_i64)
                     .unwrap_or(0) as i32,
+                gift,
             })
         })
         .collect();
     EnvelopePayload::EmojiStatuses { statuses }
+}
+
+/// Slice S10: the `emojiStatusTypeUpgradedGift` fields (schema 1.8.67, line
+/// 2352); `backdrop_colors` is `upgradedGiftBackdropColors` (line 1553).
+/// Never fails — missing fields fall back to empty/zero.
+fn parse_upgraded_gift_status(type_: &Value) -> UpgradedGiftEmojiStatus {
+    let color = |key: &str| {
+        type_
+            .get("backdrop_colors")
+            .and_then(|c| c.get(key))
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32
+    };
+    UpgradedGiftEmojiStatus {
+        upgraded_gift_id: int53(type_.get("upgraded_gift_id")).unwrap_or(0),
+        gift_title: json_field_str(type_, "gift_title"),
+        gift_name: json_field_str(type_, "gift_name"),
+        model_custom_emoji_id: int53(type_.get("model_custom_emoji_id")).unwrap_or(0),
+        symbol_custom_emoji_id: int53(type_.get("symbol_custom_emoji_id")).unwrap_or(0),
+        backdrop_center_color: color("center_color"),
+        backdrop_edge_color: color("edge_color"),
+        backdrop_symbol_color: color("symbol_color"),
+        backdrop_text_color: color("text_color"),
+    }
 }
 
 /// Slice S10: `emojiStatusCustomEmojis` — `getThemedEmojiStatuses` /
@@ -144,7 +190,7 @@ mod tests {
     #[test]
     fn s10_emoji_payloads_parse_1_8_67() {
         // `emojiStatuses`: custom-emoji rows keep the id + expiration; the
-        // upgraded-gift type keeps 0 (render detail lives in the UI slice).
+        // upgraded-gift type keeps id 0 and carries the gift payload.
         let recent = parse_envelope(
             r#"{"@type":"emojiStatuses","emoji_statuses":[{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"12345"},"expiration_date":3600},{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeUpgradedGift","upgraded_gift_id":"9","gift_title":"t","gift_name":"n","model_custom_emoji_id":"1","symbol_custom_emoji_id":"2","backdrop_colors":{"@type":"upgradedGiftBackdropColors","colors":[]}},"expiration_date":0}]}"#,
         )
@@ -155,6 +201,12 @@ mod tests {
                 assert_eq!(statuses[0].custom_emoji_id, 12345);
                 assert_eq!(statuses[0].expiration_date, 3600);
                 assert_eq!(statuses[1].custom_emoji_id, 0);
+                let gift = statuses[1].gift.as_ref().expect("upgraded gift");
+                assert_eq!(gift.upgraded_gift_id, 9);
+                assert_eq!(gift.gift_title, "t");
+                assert_eq!(gift.gift_name, "n");
+                assert_eq!(gift.model_custom_emoji_id, 1);
+                assert_eq!(gift.symbol_custom_emoji_id, 2);
             }
             other => panic!("{other:?}"),
         }

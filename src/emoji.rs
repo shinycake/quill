@@ -8,7 +8,6 @@ use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusIt
 /// two panels must never share a slot.
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
-    pub open: bool,
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
     /// `stickerTypeEmoji`) — the "Emoji Sets" settings list.
     pub installed_sets: Vec<StickerSetInfo>,
@@ -36,21 +35,11 @@ pub struct EmojiPanel {
     pub keyword_results: Vec<EmojiKeyword>,
     /// Slice S10: `getEmojiCategories` rows for the picker.
     pub categories: Vec<EmojiCategory>,
-    pub loading_sets: bool,
-    pub failed: bool,
-}
-
-impl EmojiPanel {
-    pub fn close(&mut self) {
-        self.open = false;
-    }
 }
 
 impl Session {
     /// Slice S10: store the installed emoji sets.
     pub fn accept_installed_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        self.emoji.loading_sets = false;
-        self.emoji.failed = false;
         self.emoji.installed_sets = sets;
     }
 
@@ -437,6 +426,7 @@ mod tests {
         with_purpose.emoji.recent_statuses = vec![EmojiStatusItem {
             custom_emoji_id: 1,
             expiration_date: 0,
+            gift: None,
         }];
         let extra = with_purpose.request(RequestPurpose::SetEmojiStatus, None);
         apply_json(

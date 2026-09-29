@@ -17,7 +17,7 @@ pub use envelope::{
     StickerItem, StickerSetInfo, TdError, UnknownKind, VoiceNoteContent, effective_content,
     parse_chat_admin_rights, parse_chat_permissions, parse_envelope, toggle_chosen_emoji_reaction,
 };
-pub use envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
+pub use envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem, UpgradedGiftEmojiStatus};
 pub use ffi::{LibraryOrigin, TdJson, loaded_library_origin, resolve_tdjson_path};
 pub use requests::{
     PollSend, SendReply, SetTdlibParameters, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
