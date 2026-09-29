@@ -8701,6 +8701,7 @@ impl Session {
                         .take_purpose(RequestPurpose::SendPhoneNumberCode);
                     self.requests
                         .take_purpose(RequestPurpose::ResendPhoneNumberCode);
+                }
                 // Slice S4: a `setAutoDownloadSettings` succeeded — apply
                 // the confirmed sent settings (the `ok` carries none, so
                 // they ride the purpose); the error clears and the driver
