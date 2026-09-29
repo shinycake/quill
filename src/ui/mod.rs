@@ -10,6 +10,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -128,6 +129,17 @@ actions!(
         ChatSearchOlder,
         CancelSearch,
         QuitApp,
+        /// kit Phase 7: close the window (Cmd/Ctrl+W, File menu). Quits on
+        /// Linux/Windows; on macOS the app stays alive for its menu bar.
+        CloseWindow,
+        /// kit Phase 7: minimize the window (Cmd/Ctrl+M, Window menu).
+        MinimizeWindow,
+        /// kit Phase 7: zoom (maximize/restore) the window (Window menu).
+        ZoomWindow,
+        /// kit Phase 7: toggle fullscreen (F11 / Cmd+Ctrl+F, View menu).
+        ToggleFullscreen,
+        /// kit Phase 7: open the Quill repo in the browser (Help menu).
+        OpenHelp,
         SubmitPhone,
         SubmitCode,
         SubmitPassword,
@@ -176,6 +188,14 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-q", QuitApp, None),
         KeyBinding::new("ctrl-q", QuitApp, None),
+        // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
+        // minimize; F11 / Cmd+Ctrl+F fullscreen).
+        KeyBinding::new("cmd-w", CloseWindow, None),
+        KeyBinding::new("ctrl-w", CloseWindow, None),
+        KeyBinding::new("cmd-m", MinimizeWindow, None),
+        KeyBinding::new("ctrl-m", MinimizeWindow, None),
+        KeyBinding::new("f11", ToggleFullscreen, None),
+        KeyBinding::new("cmd-ctrl-f", ToggleFullscreen, None),
         KeyBinding::new("cmd-1", FocusSidebar, None),
         KeyBinding::new("ctrl-1", FocusSidebar, None),
         KeyBinding::new("cmd-l", FocusComposer, None),
@@ -204,6 +224,64 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-i", FormatItalic, None),
         KeyBinding::new("ctrl-u", FormatUnderline, None),
     ]);
+}
+
+/// kit Phase 7: the application menus — File / Edit / View / Window / Help,
+/// every item wired to a working action. `setup_app_menus` installs them
+/// twice from this one definition: `cx.set_menus` drives the native menu bar
+/// on macOS, and `GlobalState::set_app_menus` feeds kit's `AppMenuBar`,
+/// rendered in-window on Linux/Windows.
+fn app_menus() -> Vec<Menu> {
+    // Local aliases: `Copy` would shadow the derive macro's `Copy` at
+    // module scope.
+    use gpui_kit::component::input::{
+        Copy as CopyAction, Cut as CutAction, Paste as PasteAction, Redo as RedoAction,
+        SelectAll as SelectAllAction, Undo as UndoAction,
+    };
+    let mut file_items = vec![MenuItem::action("Close Window", CloseWindow)];
+    // HIG: on macOS Quit lives in the app menu, not File.
+    #[cfg(not(target_os = "macos"))]
+    {
+        file_items.push(MenuItem::separator());
+        file_items.push(MenuItem::action("Quit Quill", QuitApp));
+    }
+    let mut menus = Vec::new();
+    // HIG: on macOS Quit lives in the app menu, not File.
+    #[cfg(target_os = "macos")]
+    menus.push(Menu::new("Quill").items([MenuItem::action("Quit Quill", QuitApp)]));
+    menus.extend([
+        Menu::new("File").items(file_items),
+        Menu::new("Edit").items([
+            MenuItem::action("Undo", UndoAction),
+            MenuItem::action("Redo", RedoAction),
+            MenuItem::separator(),
+            MenuItem::os_action("Cut", CutAction, OsAction::Cut),
+            MenuItem::os_action("Copy", CopyAction, OsAction::Copy),
+            MenuItem::os_action("Paste", PasteAction, OsAction::Paste),
+            MenuItem::separator(),
+            MenuItem::os_action("Select All", SelectAllAction, OsAction::SelectAll),
+        ]),
+        Menu::new("View").items([
+            MenuItem::action("Quick Switch", OpenSearch),
+            MenuItem::action("Find in Chat", OpenChatSearch),
+            MenuItem::separator(),
+            MenuItem::action("Enter Full Screen", ToggleFullscreen),
+        ]),
+        Menu::new("Window").items([
+            MenuItem::action("Minimize", MinimizeWindow),
+            MenuItem::action("Zoom", ZoomWindow),
+        ]),
+        Menu::new("Help").items([MenuItem::action("Quill on GitHub", OpenHelp)]),
+    ]);
+    menus
+}
+
+/// kit Phase 7: install the app menus — native on macOS, kit `AppMenuBar`
+/// data on Linux/Windows. Call once after `gpui_kit::init` + `bind_keys`.
+pub fn setup_app_menus(cx: &mut App) {
+    let owned: Vec<OwnedMenu> = app_menus().into_iter().map(Menu::owned).collect();
+    cx.set_menus(app_menus());
+    GlobalState::global_mut(cx).set_app_menus(owned);
 }
 
 /// Startup connect classification for the status bar (no secrets).
@@ -1668,6 +1746,10 @@ impl HistoryRow {
 pub struct QuillApp {
     chat: Entity<SyntheticChat>,
     composer: Entity<TextareaState>,
+    /// kit Phase 7: the in-window menu bar (Linux/Windows; macOS uses the
+    /// native menu bar via `cx.set_menus`). Entity-owned so it survives
+    /// re-renders.
+    menu_bar: Entity<AppMenuBar>,
     /// kit Phase 3: chat-list virtualization — scroll handle owned by the
     /// app so scroll position survives re-renders (scroll restoration).
     chat_list_scroll: VirtualListScrollHandle,
@@ -4146,6 +4228,9 @@ impl QuillApp {
         let mut app = Self {
             chat,
             composer,
+            // kit Phase 7: in-window menu bar (menus installed by
+            // `setup_app_menus` at startup).
+            menu_bar: AppMenuBar::new(cx),
             // kit Phase 3: chat list + message history virtualization.
             chat_list_scroll: VirtualListScrollHandle::new(),
             chat_list_items: Vec::new(),
@@ -18324,7 +18409,7 @@ impl QuillApp {
                                 ),
                         );
                     }
-                    body = body.child(Table::new().child(table_body));
+                    body = body.child(Table::new().w_full().child(table_body));
                 }
             }
             let footer = div()
@@ -18524,7 +18609,7 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child("Current session"),
                         )
-                        .child(Table::new().child(TableBody::new().child(
+                        .child(Table::new().w_full().child(TableBody::new().child(
                             TableRow::new().child(Self::table_cell(
                                 this.session_row(current, mutating, true, cx),
                             )),
@@ -18552,7 +18637,7 @@ impl QuillApp {
                             )),
                         );
                     }
-                    body = body.child(Table::new().child(incomplete_body));
+                    body = body.child(Table::new().w_full().child(incomplete_body));
                 }
                 if !others.is_empty() {
                     body = body.child(
@@ -18570,7 +18655,7 @@ impl QuillApp {
                             )),
                         );
                     }
-                    body = body.child(Table::new().child(others_body));
+                    body = body.child(Table::new().w_full().child(others_body));
                 }
                 let any_other = sessions.iter().any(|s| !s.is_current);
                 body = body.child(
@@ -18716,7 +18801,7 @@ impl QuillApp {
                             .child(Self::table_cell(this.website_row(w, mutating, cx))),
                     );
                 }
-                body = body.child(Table::new().child(websites_body));
+                body = body.child(Table::new().w_full().child(websites_body));
                 body = body.child(
                     div()
                         .text_xs()
@@ -30509,6 +30594,7 @@ impl QuillApp {
         let mut row = div()
             .id(format!("session-row-{}", s.id))
             .flex()
+            .w_full()
             .items_center()
             .justify_between()
             .gap_2()
@@ -30521,6 +30607,7 @@ impl QuillApp {
                 div()
                     .flex()
                     .flex_col()
+                    .flex_1()
                     .min_w_0()
                     .child(
                         div()
@@ -30556,7 +30643,7 @@ impl QuillApp {
         // non-current-only.
         let session_id = s.id;
         let incomplete = s.is_password_pending;
-        let mut actions = div().flex().flex_col().items_end().gap_1();
+        let mut actions = div().flex().flex_col().flex_shrink_0().items_end().gap_1();
         // Phase 6: kit Switches (were: "Accept/Reject" ghost buttons).
         // The flip handlers are unchanged (TGX toggles directly, the value
         // refreshes from the authoritative response); the switch only
@@ -30794,6 +30881,7 @@ impl QuillApp {
         div()
             .id(format!("website-row-{website_id}"))
             .flex()
+            .w_full()
             .items_center()
             .justify_between()
             .gap_2()
@@ -30806,6 +30894,7 @@ impl QuillApp {
                 div()
                     .flex()
                     .flex_col()
+                    .flex_1()
                     .min_w_0()
                     .child(div().text_sm().font_medium().child(title))
                     .child(
@@ -30817,13 +30906,15 @@ impl QuillApp {
             )
             .child(
                 // TGX `DisconnectWebsiteAction` "Disconnect Website".
-                Button::new(format!("disconnect-website-{website_id}"))
-                    .label("Disconnect")
-                    .danger()
-                    .disabled(mutating)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.begin_disconnect_website(website_id, cx);
-                    })),
+                div().flex_shrink_0().child(
+                    Button::new(format!("disconnect-website-{website_id}"))
+                        .label("Disconnect")
+                        .danger()
+                        .disabled(mutating)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.begin_disconnect_website(website_id, cx);
+                        })),
+                ),
             )
             .into_any_element()
     }
@@ -36917,6 +37008,32 @@ impl Render for QuillApp {
                 window.remove_window();
                 cx.quit();
             }))
+            // kit Phase 7: window-chrome actions behind the File / Window /
+            // View / Help menus (same dispatch path as the key bindings).
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                let _ = this;
+                window.remove_window();
+                // macOS keeps a windowless app alive for its menu bar;
+                // elsewhere closing the only window quits.
+                #[cfg(not(target_os = "macos"))]
+                cx.quit();
+            }))
+            .on_action(cx.listener(|this, _: &MinimizeWindow, window, _| {
+                let _ = this;
+                window.minimize_window();
+            }))
+            .on_action(cx.listener(|this, _: &ZoomWindow, window, _| {
+                let _ = this;
+                window.zoom_window();
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFullscreen, window, _| {
+                let _ = this;
+                window.toggle_fullscreen();
+            }))
+            .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
+                let _ = this;
+                cx.open_url("https://github.com/shinycake/quill");
+            }))
             .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                 this.composer
                     .update(cx, |input, cx| input.focus(window, cx));
@@ -37003,6 +37120,20 @@ impl Render for QuillApp {
                     this.apply_composer_format(FormatAction::Underline, window, cx);
                 }
             }))
+            // kit Phase 7: in-window menu bar on Linux/Windows (macOS uses
+            // the native menu bar installed by `setup_app_menus`).
+            .when(cfg!(not(target_os = "macos")), |this| {
+                this.child(
+                    div()
+                        .h(px(30.))
+                        .w_full()
+                        .flex_none()
+                        .bg(cx.theme().title_bar)
+                        .border_b_1()
+                        .border_color(cx.theme().title_bar_border)
+                        .child(self.menu_bar.clone()),
+                )
+            })
             .child(title_bar(
                 self.pane_mode(),
                 self.live.is_some(),
@@ -37105,6 +37236,8 @@ impl QuillApp {
                 .flex_1()
                 .min_h_0()
                 .min_w_0()
+                .role(Role::Log)
+                .aria_label("Message history")
                 .child(self.chat.clone())
                 .into_any_element(),
             PaneMode::Connecting => pane_placeholder(
@@ -38419,10 +38552,14 @@ impl QuillApp {
         // actually sent, so this cannot notify-loop while pinned at top).
         let weak = cx.weak_entity();
         div()
+            .id(id)
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
+            // kit Phase 7: screen-reader landmark for the message history.
+            .role(Role::Log)
+            .aria_label(format!("Message history — {sender_name}"))
             .child(
                 MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
                     if ix == 0 {
@@ -42964,16 +43101,16 @@ fn title_bar(
         PaneMode::Ready => "Quill — chats (demo)",
     };
     let show_cycle = mode == PaneMode::Synthetic;
-    div()
-        .id("title")
-        .h(px(44.))
-        .px_4()
-        .flex()
-        .items_center()
-        .justify_between()
-        .border_b_1()
-        .border_color(cx.theme().border)
-        .child(div().font_semibold().child(title))
+    // kit Phase 7: kit `TitleBar` — native-feel chrome (drag, double-click
+    // zoom, Linux min/max/close, macOS traffic-light inset) in theme tokens,
+    // replacing the hand-rolled 44px bar. The caption + action buttons ride
+    // as its children.
+    TitleBar::new()
+        .on_close_window(|_, window, cx| {
+            window.remove_window();
+            cx.quit();
+        })
+        .child(div().font_semibold().text_sm().child(title))
         .child(
             div()
                 .flex()
@@ -43068,6 +43205,8 @@ fn static_chat_row(
         .px_2()
         .py_2()
         .rounded_md()
+        .role(Role::Button)
+        .aria_label(title)
         .bg(if selected {
             cx.theme().accent.opacity(0.15)
         } else {
@@ -43350,12 +43489,16 @@ fn session_chat_row(
         None
     };
     let has_reactions = chat.unread_reaction_count > 0;
+    // kit Phase 7: screen-reader label for the row.
+    let row_label = format!("{title} — {preview}");
     // kit Phase 3: tag chips via the shared helper — the row height
     // (declared to the `VirtualList`) is derived from the same list.
     let tags = chat_row_tags(chat, folders, show_tags);
     div()
         .id(("chat-row", id.0 as u64))
         .px_2()
+        .role(Role::Button)
+        .aria_label(row_label)
         // kit Phase 3: fixed height (see `chat_row_height`) — the
         // `VirtualList` positions rows from declared sizes, so the row
         // enforces the same height and centers its content. Title and

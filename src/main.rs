@@ -81,6 +81,9 @@ fn ui_main(args: &[String]) {
         .run(move |cx| {
             gpui_kit::init(cx);
             ui::bind_keys(cx);
+            // kit Phase 7: File / Edit / View / Window / Help — native on
+            // macOS, kit `AppMenuBar` data on Linux/Windows.
+            ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {
                 cx.open_window(
                     WindowOptions {
@@ -89,11 +92,7 @@ fn ui_main(args: &[String]) {
                             size: size(px(1200.), px(740.)),
                         })),
                         app_id: Some("org.shinycake.quill".into()),
-                        titlebar: Some(TitlebarOptions {
-                            title: Some("Quill".into()),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
+                        ..quill_window_options("Quill")
                     },
                     move |window, cx| {
                         let view = cx.new(|cx| ui::QuillApp::new(window, cx, credentials.clone()));
@@ -107,6 +106,23 @@ fn ui_main(args: &[String]) {
             })
             .detach();
         });
+}
+
+/// kit Phase 7: window options compatible with kit's `TitleBar` — the title
+/// bar owns dragging (double-click zoom included), so the platform must not
+/// also treat it as a system move region.
+#[cfg(feature = "ui")]
+fn quill_window_options(title: &str) -> gpui_kit::WindowOptions {
+    use gpui_kit::component::TitleBar;
+    use gpui_kit::{TitlebarOptions, WindowOptions};
+    WindowOptions {
+        titlebar: Some(TitlebarOptions {
+            title: Some(title.into()),
+            ..TitleBar::title_bar_options()
+        }),
+        app_owns_titlebar_drag: true,
+        ..Default::default()
+    }
 }
 
 #[cfg(feature = "ui")]
@@ -382,6 +398,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         .run(move |cx| {
             gpui_kit::init(cx);
             ui::bind_keys(cx);
+            ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {
                 cx.open_window(
                     WindowOptions {
@@ -390,15 +407,11 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             size: size(px(demo_w), px(demo_h)),
                         })),
                         app_id: Some("org.shinycake.quill".into()),
-                        titlebar: Some(TitlebarOptions {
-                            title: Some(if kind == ScreenshotDemo::ReadyCallDevices {
-                                "Quill — Call audio devices".into()
-                            } else {
-                                "Quill".into()
-                            }),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
+                        ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
+                            "Quill — Call audio devices"
+                        } else {
+                            "Quill"
+                        })
                     },
                     move |window, cx| {
                         let view =
