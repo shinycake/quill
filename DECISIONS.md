@@ -5478,3 +5478,60 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - A blocked-users list screen (`getBlockedMessageSenders` is schema-ready at :14505; no UI yet).
   - File-picker for `.vcf` import (paste-box only; the parser is file-format-agnostic).
   - Unblock from anywhere except the user panel (row-menu unblock already exists via CL3's chat-scoped flow).
+
+## Slice C2j — 1:1 CALL SCREEN-SHARE RECEIVE, BACKEND (2026-09-29)
+
+- **Task:** README `parity:calls-screen-share` — the 1:1 receive path, named
+  as the open gap in slice C2i ("the native P2P frames callback drops
+  `PLAYBACK+SCREEN` frames, so a peer's screen share in a 1:1 call is not
+  rendered").
+- **Schema (pinned TDLib 1.8.67, concept-level):** unchanged from C2i — no
+  1:1 screen-share constructor exists; `startGroupCallScreenSharing`
+  (:14303) / `endGroupCallScreenSharing` (:14309) are group-call only; all
+  other `screen`-related constructors (`GroupCallParticipant`
+  screen-sharing fields, `groupCallDataChannelScreenSharing` :7236) are
+  group-call scoped. Raw MTProto `telegram_api.tl` is not vendored in
+  `schema/`, so the negative claim rests on the TDLib layer (verified
+  there). 1:1 screen share is purely a tgcalls/ntgcalls stream-source
+  switch, no TDLib traffic — the receive side is purely the native frames
+  callback.
+- **Built:**
+  - Engine (`src/calls/engine.rs`): the P2P branch of `frames_trampoline`
+    now accepts `PLAYBACK+SCREEN` and marks the frame `is_screen` (pure
+    helper `p2p_frame_kind` returns `Some(is_screen)` for local preview /
+    peer camera / peer screen share, `None` for everything else — unit
+    tested). `remote_source_trampoline` forwards `SCREEN`-device remote
+    source states to a new `set_remote_screen_state_callback` hook
+    (camera keeps its existing hook; same `RemoteVideoState` enum);
+    `MockEngine` gains `remote_screen_hook` + `emit_remote_screen_state`.
+  - Driver (`src/connect.rs`): `VideoFrameSlots` keyed
+    `(call_id, is_local, is_screen)` so the peer's share never clobbers
+    the peer camera frame. `latest_video_frame(call_id, is_local)` keeps
+    its signature and reads the camera slot (no UI breakage);
+    `latest_screen_frame(call_id)` exposes the peer's share. A new
+    `screen_state_outbox` drains in `pump_call_engine`: when the peer's
+    share goes `Inactive` the retained screen frames are dropped (no
+    stale picture can render); while active the frames themselves carry
+    the picture, so no persistent screen state is kept.
+  - Tests: `p2p_frame_kind_accepts_screen_share`,
+    `mock_remote_screen_state_emission` (engine); `p2p_screen_frame_routes_to_own_slot`,
+    `remote_screen_state_inactive_clears_screen_slot` (driver: slot
+    isolation, latest-wins, inactive-clear keeps camera frame, paused
+    leaves the slot alone).
+- **Not verifiable without live Telegram:** real `PLAYBACK+SCREEN` frames
+  from a peer's ntgcalls desktop capturer, real remote-source SCREEN
+  state transitions. Tested instead: acceptance predicate, hook wiring,
+  slot routing/clearing, and the mock state machine. Test seam note:
+  `p2p_screen_frame_routes_to_own_slot` injects `VideoFrame`s directly and
+  bypasses the `frames_trampoline` P2P branch — the PLAYBACK+SCREEN →
+  `is_screen=true` glue is covered by the pure-classifier unit test plus
+  reading, not at integration level (acceptable for unsafe FFI).
+- **Out of this slice (box stays UNCHECKED):** rendering the peer's share
+  in the 1:1 call card — that is `src/ui/mod.rs`, frozen for kit Phase 9.
+  `latest_screen_frame` is the post-Phase-9 UI's accessor; the backend
+  keeps the slot warm and self-clearing until then. Future-UI flag: frames
+  and remote-source callbacks are unordered across ntgcalls threads — a
+  late PLAYBACK+SCREEN frame arriving after an Inactive drain repopulates
+  the slot (no generation fencing). Benign today (no consumer); the
+  rendering slice should decide whether to re-check share state on frame
+  arrival.

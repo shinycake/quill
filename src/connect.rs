@@ -446,9 +446,11 @@ type SignalingOutbox = Arc<Mutex<VecDeque<(i32, Vec<u8>)>>>;
 type TransportOutbox = Arc<Mutex<VecDeque<(i32, TransportState)>>>;
 /// Phase C2e: worker-safe queue for engine-emitted peer camera states.
 type VideoStateOutbox = Arc<Mutex<VecDeque<(i32, RemoteVideoState)>>>;
-/// Phase C2e: latest decoded video frame per (call id, is_local); only
-/// the newest frame is kept, so the UI never sees a backlog.
-type VideoFrameSlots = Arc<Mutex<HashMap<(i32, bool), VideoFrame>>>;
+/// Phase C2e: latest decoded video frame per (call id, is_local,
+/// is_screen); only the newest frame is kept, so the UI never sees a
+/// backlog. The peer's screen share lives in its own slot so it can
+/// never clobber the peer camera frame (Phase C2j).
+type VideoFrameSlots = Arc<Mutex<HashMap<(i32, bool, bool), VideoFrame>>>;
 
 /// Phase C2g: latest decoded group video frame per (group call id,
 /// participant user id, is_screen).
@@ -464,7 +466,13 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Phase C2e: engine-emitted peer camera states (worker thread ->
     /// driver pump).
     video_state_outbox: VideoStateOutbox,
-    /// Phase C2e: latest decoded video frame per (call id, is_local).
+    /// Phase C2j: engine-emitted peer 1:1 screen-share states (worker
+    /// thread -> driver pump). When the peer's share goes inactive the
+    /// pump drops the retained screen frames so no stale picture can
+    /// render.
+    screen_state_outbox: VideoStateOutbox,
+    /// Phase C2e: latest decoded video frame per (call id, is_local,
+    /// is_screen).
     video_frame_slots: VideoFrameSlots,
     /// Phase C2g: latest decoded group video frame per (group call id,
     /// participant user id, is_screen); only the newest frame is kept.
@@ -583,6 +591,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             signaling_outbox: Arc::new(Mutex::new(VecDeque::new())),
             transport_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
+            screen_state_outbox: Arc::new(Mutex::new(VecDeque::new())),
             video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
             group_video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
             group_camera_state: HashMap::new(),
@@ -643,6 +652,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .expect("call video state outbox")
                 .push_back((call_id, state));
         }));
+        // Phase C2j: the peer's 1:1 screen-share state rides the same
+        // worker-thread -> driver-pump path as the camera state.
+        let screen_state_outbox = self.screen_state_outbox.clone();
+        engine.set_remote_screen_state_callback(Arc::new(move |call_id, state| {
+            screen_state_outbox
+                .lock()
+                .expect("call screen state outbox")
+                .push_back((call_id, state));
+        }));
         let video_frame_slots = self.video_frame_slots.clone();
         let group_video_frame_slots = self.group_video_frame_slots.clone();
         engine.set_video_frame_callback(Arc::new(move |call_id, frame| {
@@ -655,10 +673,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .expect("group video frame slots")
                     .insert((call_id, user_id, frame.is_screen), frame);
             } else {
+                // Phase C2j: the screen share gets its own slot keyed on
+                // `is_screen` so it never clobbers the peer camera frame.
                 video_frame_slots
                     .lock()
                     .expect("call video frame slots")
-                    .insert((call_id, frame.is_local), frame);
+                    .insert((call_id, frame.is_local, frame.is_screen), frame);
             }
         }));
         self.call_engine = Some(engine);
@@ -799,12 +819,26 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2e: newest decoded frame for a call; `is_local` selects the
     /// local preview (`true`) or the peer camera (`false`). `None` when
-    /// no frame has arrived yet.
+    /// no frame has arrived yet. The peer's screen share lives in its
+    /// own slot — see `latest_screen_frame`.
     pub fn latest_video_frame(&self, call_id: i32, is_local: bool) -> Option<VideoFrame> {
         self.video_frame_slots
             .lock()
             .expect("call video frame slots")
-            .get(&(call_id, is_local))
+            .get(&(call_id, is_local, false))
+            .cloned()
+    }
+
+    /// Phase C2j: newest decoded frame of the peer's 1:1 screen share;
+    /// `None` when the peer is not sharing (or no frame has arrived yet).
+    /// Post-Phase-9 UI renders this as the screen-share tile; until
+    /// then the backend keeps the slot warm and drops it when the
+    /// peer's share goes inactive.
+    pub fn latest_screen_frame(&self, call_id: i32) -> Option<VideoFrame> {
+        self.video_frame_slots
+            .lock()
+            .expect("call video frame slots")
+            .get(&(call_id, false, true))
             .cloned()
     }
 
@@ -1366,7 +1400,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.video_frame_slots
                 .lock()
                 .expect("call video frame slots")
-                .retain(|(slot_call_id, _), _| *slot_call_id != call_id);
+                .retain(|(slot_call_id, _, _), _| *slot_call_id != call_id);
             self.call_connect_params = None;
             self.reconnect_attempts = 0;
         }
@@ -1543,6 +1577,31 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
 
+        // Phase C2j: the peer's 1:1 screen-share state follows the same
+        // gate as the camera state. When the share goes inactive the
+        // retained screen frames are dropped so a stale picture can
+        // never render; while active the frames themselves carry the
+        // picture, so no persistent state is kept.
+        loop {
+            let update = self
+                .screen_state_outbox
+                .lock()
+                .expect("call screen state outbox")
+                .pop_front();
+            let Some((call_id, state)) = update else {
+                break;
+            };
+            if state != RemoteVideoState::Inactive {
+                continue;
+            }
+            self.video_frame_slots
+                .lock()
+                .expect("call video frame slots")
+                .retain(|(slot_call_id, _, slot_is_screen), _| {
+                    *slot_call_id != call_id || !slot_is_screen
+                });
+        }
+
         loop {
             let emitted = self
                 .signaling_outbox
@@ -1596,12 +1655,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .expect("group video frame slots")
                 .retain(|(slot_call_id, _, _), _| *slot_call_id != before_id);
             // Slice calls-group-self-tile: the self tile lives in the
-            // shared (call id, is_local) slots — clear it too so a stale
-            // local preview can't render after the call ends.
+            // shared (call id, is_local, is_screen) slots — clear it too so
+            // a stale local preview can't render after the call ends.
             self.video_frame_slots
                 .lock()
                 .expect("call video frame slots")
-                .retain(|(slot_call_id, _), _| *slot_call_id != before_id);
+                .retain(|(slot_call_id, _, _), _| *slot_call_id != before_id);
             self.group_camera_state.remove(&before_id);
         }
         let Some(group_call_id) = active_group_call_after else {
@@ -3387,7 +3446,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.video_frame_slots
             .lock()
             .expect("call video frame slots")
-            .retain(|(slot_call_id, _), _| *slot_call_id != group_call_id);
+            .retain(|(slot_call_id, _, _), _| *slot_call_id != group_call_id);
         self.group_camera_state.remove(&group_call_id);
     }
 
@@ -20319,6 +20378,62 @@ mod tests {
         let latest = driver.latest_video_frame(77, false).unwrap();
         assert_eq!(latest.seq, 1);
         assert!(driver.latest_video_frame(77, true).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2j: the peer's 1:1 screen share lands in its own slot and
+    /// never clobbers the peer camera frame; latest-wins holds per slot.
+    #[test]
+    fn p2p_screen_frame_routes_to_own_slot() {
+        let (dir, driver, handle, _sink, _seq) = ready_call_driver();
+        let frame = |screen: bool| VideoFrame {
+            seq: 0,
+            width: 2,
+            height: 2,
+            rgba: vec![0u8; 16],
+            is_local: false,
+            participant_user_id: None,
+            is_screen: screen,
+        };
+        handle.emit_video_frame(77, frame(false));
+        handle.emit_video_frame(77, frame(true));
+        handle.emit_video_frame(77, frame(true));
+        let camera = driver.latest_video_frame(77, false).unwrap();
+        assert!(!camera.is_screen);
+        assert_eq!(camera.seq, 0);
+        let screen = driver.latest_screen_frame(77).unwrap();
+        assert!(screen.is_screen);
+        assert_eq!(screen.seq, 2);
+        assert!(driver.latest_video_frame(77, true).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C2j: when the peer's 1:1 screen share goes inactive the
+    /// pump drops the retained screen frames (no stale picture can
+    /// render) while the peer camera frame is untouched; a non-inactive
+    /// state leaves the slot alone.
+    #[test]
+    fn remote_screen_state_inactive_clears_screen_slot() {
+        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+        let frame = |screen: bool| VideoFrame {
+            seq: 0,
+            width: 2,
+            height: 2,
+            rgba: vec![0u8; 16],
+            is_local: false,
+            participant_user_id: None,
+            is_screen: screen,
+        };
+        let pump = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+        handle.emit_video_frame(77, frame(false));
+        handle.emit_video_frame(77, frame(true));
+        handle.emit_remote_screen_state(77, RemoteVideoState::Paused);
+        ingest_call_json(&mut driver, &seq, &sink, pump);
+        assert!(driver.latest_screen_frame(77).is_some());
+        handle.emit_remote_screen_state(77, RemoteVideoState::Inactive);
+        ingest_call_json(&mut driver, &seq, &sink, pump);
+        assert!(driver.latest_screen_frame(77).is_none());
+        assert!(driver.latest_video_frame(77, false).is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
