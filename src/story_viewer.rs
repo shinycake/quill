@@ -346,6 +346,7 @@ mod tests {
             privacy_settings: None,
             area_link_url: None,
             area_reaction_emojis: Vec::new(),
+            can_be_added_to_album: false,
         }
     }
 
@@ -382,6 +383,7 @@ mod tests {
             privacy_settings: None,
             area_link_url: None,
             area_reaction_emojis: Vec::new(),
+            can_be_added_to_album: false,
         }
     }
 

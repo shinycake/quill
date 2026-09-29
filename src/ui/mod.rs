@@ -6,6 +6,9 @@ pub(crate) use chat_theme::*;
 mod dialogs;
 
 pub(crate) use dialogs::*;
+mod story_page;
+
+pub(crate) use story_page::{StoryPage, apply_ready_story_albums};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::avatar::Avatar;
@@ -81,6 +84,7 @@ use quill::state::{
     message_time_hhmm, unix_ms_now,
 };
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
+use quill::story_page::{StoryPageOpState, parse_story_id_list};
 use quill::story_viewer::{
     StoryPlayback, StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items,
 };
@@ -1624,6 +1628,9 @@ pub struct QuillApp {
     /// Phase 9.5: report details draft (the
     /// `reportStoryResultTextRequired` step).
     story_report_text_input: Entity<TextareaState>,
+    /// Phase 9.7: the chat story page overlay (albums / chat-page
+    /// stories / archive); `None` when closed.
+    story_page: Option<StoryPage>,
     /// Phase 9.3: story posting composer state (pure) + its path /
     /// caption / user-search inputs.
     story_composer: StoryComposer,
@@ -1908,6 +1915,11 @@ pub enum ScreenshotDemo {
     /// composer opens in edit mode with caption + area inputs prefilled
     /// and the media path empty (keep current content).
     ReadyStoryEdit,
+    /// Phase 9.7: story albums / chat page / archive (injected, no live
+    /// Telegram) — the `ReadyStories` seed plus `storyAlbums`,
+    /// chat-page `stories` (one pinned) and archive `stories` for chat
+    /// 11, with the story page overlay open.
+    ReadyStoryAlbums,
     /// MED3 downloads-manager demo (injected, no live Telegram): the
     /// `ReadyMedia` seed plus an actively downloading document (file 24,
     /// 42% through `notes.txt`), a failed document (file 26, "Retry"
@@ -3218,6 +3230,18 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Phase 9.7: story albums / chat page / archive (injected, no
+            // live Telegram) — seeded albums + chat-page stories + archive
+            // for chat 11, the story page open.
+            Some(ScreenshotDemo::ReadyStoryAlbums) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — story albums / chat page / archive".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             // Phase 9.3: story posting composer (injected, no live
             // Telegram) — ReadyStories fixture plus the composer overlay.
             Some(ScreenshotDemo::ReadyStoryComposer) => {
@@ -3668,6 +3692,7 @@ impl QuillApp {
             story_viewers_open: false,
             story_report_open: false,
             story_report_text_input,
+            story_page: None,
             story_composer: StoryComposer::default(),
             story_composer_path,
             story_composer_caption,
@@ -4855,6 +4880,17 @@ impl QuillApp {
             app.open_story_viewer(ChatId(11), 5, cx);
             app.story_viewers_open = true;
             app.status_note = "screenshot demo — story viewers list".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryAlbums)) {
+            // Phase 9.7: seed the albums / chat-page / archive fixtures,
+            // then open the story page on chat 11 (demo mode — the live
+            // notice renders as the status note).
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_story_albums(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.open_story_page(ChatId(11), window, cx);
+            app.status_note = "screenshot demo — story albums / chat page / archive".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyStoryComposer)) {
             // Phase 9.3: the composer opens with a seeded photo path (the
@@ -11430,6 +11466,402 @@ impl QuillApp {
         self.viewer_zoom.reset();
         self.viewer_drag = None;
         cx.notify();
+    }
+
+    /// Phase 9.7: open the chat story page — story albums, chat-page
+    /// stories (pin/unpin), and the archive list. The three loads fire
+    /// through TDLib; in demo mode the live-TDLib-required notice shows
+    /// instead of a silent no-op.
+    fn open_story_page(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
+        self.story_page = Some(StoryPage::new(chat_id, window, cx));
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
+                self.status_note = format!("could not load story albums: {err:?}");
+            }
+            if let Err(err) = live
+                .driver
+                .get_chat_posted_to_chat_page_stories(chat_id, 0, 50)
+            {
+                self.status_note = format!("could not load chat page stories: {err:?}");
+            }
+            if let Err(err) = live.driver.get_chat_archived_stories(chat_id, 0, 50) {
+                self.status_note = format!("could not load archived stories: {err:?}");
+            }
+        } else {
+            self.status_note =
+                "demo — story albums, chat-page stories and the archive load with live TDLib"
+                    .into();
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.7: close the chat story page.
+    fn close_story_page(&mut self, cx: &mut Context<Self>) {
+        self.story_page = None;
+        cx.notify();
+    }
+
+    /// Phase 9.7: open one album — the story grid loads via
+    /// `getStoryAlbumStories` (offset = already-cached ids so reopening
+    /// after a mutation refetches).
+    fn open_story_album(&mut self, album_id: i32, window: &mut Window, cx: &mut Context<Self>) {
+        let chat_id = match self.story_page.as_mut() {
+            Some(page) => {
+                page.open_album = Some(album_id);
+                page.delete_confirm = None;
+                page.chat_id
+            }
+            None => return,
+        };
+        let name = self
+            .session()
+            .and_then(|s| s.story_albums.get(&chat_id.0))
+            .and_then(|albums| albums.iter().find(|a| a.id == album_id))
+            .map(|a| a.name.clone())
+            .unwrap_or_default();
+        if let Some(page) = self.story_page.as_mut() {
+            page.rename_input.update(cx, |input, cx| {
+                input.set_value(&name, window, cx);
+            });
+        }
+        let offset = self
+            .session()
+            .and_then(|s| s.story_album_stories.get(&(chat_id.0, album_id)))
+            .map(|ids| ids.len() as i32)
+            .unwrap_or(0);
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live
+                .driver
+                .get_story_album_stories(chat_id, album_id, offset, 50)
+            {
+                self.status_note = format!("could not load album stories: {err:?}");
+            }
+        } else {
+            self.status_note = "demo — album stories load with live TDLib".into();
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.7: back from the opened album to the album list.
+    fn back_to_story_albums(&mut self, cx: &mut Context<Self>) {
+        if let Some(page) = self.story_page.as_mut() {
+            page.open_album = None;
+            page.delete_confirm = None;
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.7: run a story-page mutation against the driver; demo mode
+    /// shows the live-TDLib-required notice, driver rejections surface in
+    /// `status_note`. The honest Sending/Succeeded/Failed states ride on
+    /// `Session::story_page_op`.
+    fn story_page_mutate(
+        &mut self,
+        what: &str,
+        f: impl FnOnce(&mut LiveConnect) -> Result<(), quill::connect::ConnectSendError>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = format!("demo — {what} runs with live TDLib").into();
+            cx.notify();
+            return;
+        };
+        if let Err(err) = f(live) {
+            self.status_note = format!("could not {what}: {err:?}");
+        }
+        cx.notify();
+    }
+
+    /// Phase 9.7: create an album from the page's name + story-ids inputs
+    /// (`createStoryAlbum`). Ids the server marks as not addable to albums
+    /// (`story.can_be_added_to_album`, `schema/td_api.tl:6724`) are skipped
+    /// up front instead of being sent to fail.
+    fn create_story_album(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, name, story_ids) = match self.story_page.as_ref() {
+            Some(page) => {
+                let name = page.new_album_name.read(cx).value().trim().to_string();
+                let story_ids =
+                    parse_story_id_list(&page.new_album_story_ids.read(cx).value().to_string());
+                (page.chat_id, name, story_ids)
+            }
+            None => return,
+        };
+        let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
+        if !skipped.is_empty() {
+            self.status_note =
+                format!("skipped stories that can't be added to albums: {skipped:?}");
+        }
+        self.story_page_mutate(
+            "create story album",
+            |live| {
+                live.driver
+                    .create_story_album(chat_id, &name, &story_ids)
+                    .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// Phase 9.7: rename the opened album (`setStoryAlbumName`).
+    fn rename_story_album(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, album_id, name) = match self.story_page.as_ref() {
+            Some(page) => match page.open_album {
+                Some(album_id) => (
+                    page.chat_id,
+                    album_id,
+                    page.rename_input.read(cx).value().trim().to_string(),
+                ),
+                None => return,
+            },
+            None => return,
+        };
+        self.story_page_mutate(
+            "rename story album",
+            |live| {
+                live.driver
+                    .set_story_album_name(chat_id, album_id, &name)
+                    .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// Phase 9.7: two-click album delete — first click arms the confirm,
+    /// second click sends `deleteStoryAlbum`.
+    fn delete_story_album(&mut self, album_id: i32, cx: &mut Context<Self>) {
+        let chat_id = match self.story_page.as_mut() {
+            Some(page) if page.delete_confirm == Some(album_id) => page.chat_id,
+            Some(page) => {
+                page.delete_confirm = Some(album_id);
+                cx.notify();
+                return;
+            }
+            None => return,
+        };
+        self.story_page_mutate(
+            "delete story album",
+            |live| {
+                live.driver
+                    .delete_story_album(chat_id, album_id)
+                    .map(|_| ())
+            },
+            cx,
+        );
+        if let Some(page) = self.story_page.as_mut() {
+            page.delete_confirm = None;
+            if page.open_album == Some(album_id) {
+                page.open_album = None;
+            }
+        }
+    }
+
+    /// Phase 9.7: move an album up/down in the list
+    /// (`reorderStoryAlbums` with the full new order).
+    fn move_story_album(&mut self, album_id: i32, up: bool, cx: &mut Context<Self>) {
+        let (chat_id, order) = match self.session().zip(self.story_page.as_ref()) {
+            Some((session, page)) => {
+                let mut ids: Vec<i32> = session
+                    .story_albums
+                    .get(&page.chat_id.0)
+                    .map(|albums| albums.iter().map(|a| a.id).collect())
+                    .unwrap_or_default();
+                let pos = ids.iter().position(|id| *id == album_id);
+                let Some(pos) = pos else { return };
+                let swap = if up {
+                    pos.checked_sub(1)
+                } else {
+                    Some(pos + 1)
+                };
+                let Some(swap) = swap else { return };
+                if swap >= ids.len() {
+                    return;
+                }
+                ids.swap(pos, swap);
+                (page.chat_id, ids)
+            }
+            None => return,
+        };
+        self.story_page_mutate(
+            "reorder story albums",
+            |live| {
+                live.driver
+                    .reorder_story_albums(chat_id, &order)
+                    .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// Phase 9.7: split story ids into (addable, skipped) using the parsed
+    /// `story.can_be_added_to_album` (`schema/td_api.tl:6724`). Ids not in
+    /// the local story cache are treated as addable — the server still
+    /// validates them.
+    fn partition_addable_stories(
+        &self,
+        chat_id: ChatId,
+        story_ids: &[i32],
+    ) -> (Vec<i32>, Vec<i32>) {
+        let stories = self.live.as_ref().map(|live| &live.driver.session.stories);
+        story_ids.iter().copied().partition(|id| {
+            stories
+                .and_then(|cached| cached.get(&(chat_id.0, *id)))
+                .map(|story| story.can_be_added_to_album)
+                .unwrap_or(true)
+        })
+    }
+
+    /// Phase 9.7: add the ids from the album's input to the opened album
+    /// (`addStoryAlbumStories`). Ids the server marks as not addable to
+    /// albums are skipped up front (see `partition_addable_stories`).
+    fn add_stories_to_album(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, album_id, story_ids) = match self.story_page.as_ref() {
+            Some(page) => match page.open_album {
+                Some(album_id) => (
+                    page.chat_id,
+                    album_id,
+                    parse_story_id_list(&page.add_story_ids.read(cx).value().to_string()),
+                ),
+                None => return,
+            },
+            None => return,
+        };
+        if story_ids.is_empty() {
+            self.status_note = "enter at least one story id".into();
+            cx.notify();
+            return;
+        }
+        let (story_ids, skipped) = self.partition_addable_stories(chat_id, &story_ids);
+        if story_ids.is_empty() {
+            self.status_note =
+                format!("none of these stories can be added to an album (skipped: {skipped:?})");
+            cx.notify();
+            return;
+        }
+        if !skipped.is_empty() {
+            self.status_note =
+                format!("skipped stories that can't be added to albums: {skipped:?}");
+        }
+        self.story_page_mutate(
+            "add stories to album",
+            |live| {
+                live.driver
+                    .add_story_album_stories(chat_id, album_id, &story_ids)
+                    .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// Phase 9.7: remove one story from the opened album
+    /// (`removeStoryAlbumStories`).
+    fn remove_story_from_album(&mut self, album_id: i32, story_id: i32, cx: &mut Context<Self>) {
+        let chat_id = match self.story_page.as_ref() {
+            Some(page) => page.chat_id,
+            None => return,
+        };
+        self.story_page_mutate(
+            "remove story from album",
+            |live| {
+                live.driver
+                    .remove_story_album_stories(chat_id, album_id, &[story_id])
+                    .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// Phase 9.7: move one story to the beginning of the opened album
+    /// (`reorderStoryAlbumStories` — the listed ids move to the front).
+    fn move_story_to_album_top(&mut self, album_id: i32, story_id: i32, cx: &mut Context<Self>) {
+        let chat_id = match self.story_page.as_ref() {
+            Some(page) => page.chat_id,
+            None => return,
+        };
+        self.story_page_mutate(
+            "reorder album stories",
+            |live| {
+                live.driver
+                    .reorder_story_album_stories(chat_id, album_id, &[story_id])
+                    .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// Phase 9.7: next archive page (`getChatArchivedStories` from the
+    /// smallest loaded id).
+    fn load_more_archived_stories(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, from_story_id) = match self.story_page.as_ref().zip(self.session()) {
+            Some((page, session)) => match session.archived_stories.get(&page.chat_id.0) {
+                Some(archived) => (page.chat_id, archived.next_from_story_id.unwrap_or(0)),
+                None => (page.chat_id, 0),
+            },
+            None => return,
+        };
+        self.story_page_mutate(
+            "load archived stories",
+            |live| {
+                live.driver
+                    .get_chat_archived_stories(chat_id, from_story_id, 50)
+                    .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// Phase 9.7: next chat-page-stories page (from the smallest loaded
+    /// id).
+    fn load_more_chat_page_stories(&mut self, cx: &mut Context<Self>) {
+        let (chat_id, from_story_id) = match self.story_page.as_ref().zip(self.session()) {
+            Some((page, session)) => match session.chat_page_stories.get(&page.chat_id.0) {
+                Some(chat_page) => (
+                    page.chat_id,
+                    chat_page.story_ids.iter().copied().min().unwrap_or(0),
+                ),
+                None => (page.chat_id, 0),
+            },
+            None => return,
+        };
+        self.story_page_mutate(
+            "load chat page stories",
+            |live| {
+                live.driver
+                    .get_chat_posted_to_chat_page_stories(chat_id, from_story_id, 50)
+                    .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// Phase 9.7: pin/unpin one story — `setChatPinnedStories` takes the
+    /// full new list, so the current pinned ids are adjusted locally and
+    /// the `ok` answer applies them (correlated via the pending request).
+    fn toggle_story_pin(&mut self, story_id: i32, cx: &mut Context<Self>) {
+        let (chat_id, pinned) = match self.story_page.as_ref().zip(self.session()) {
+            Some((page, session)) => {
+                let mut pinned: Vec<i32> = session
+                    .chat_page_stories
+                    .get(&page.chat_id.0)
+                    .map(|state| state.pinned_story_ids.clone())
+                    .unwrap_or_default();
+                if pinned.contains(&story_id) {
+                    pinned.retain(|id| *id != story_id);
+                } else {
+                    pinned.push(story_id);
+                }
+                (page.chat_id, pinned)
+            }
+            None => return,
+        };
+        self.story_page_mutate(
+            "pin stories",
+            |live| {
+                live.driver
+                    .set_chat_pinned_stories(chat_id, &pinned)
+                    .map(|_| ())
+            },
+            cx,
+        );
     }
 
     /// Phase 9.1: open the fullscreen story viewer on `(chat_id, story_id)`.
@@ -34165,6 +34597,21 @@ impl QuillApp {
                     this.quick_react_story(cx);
                 })),
         );
+        // Phase 9.7: entry point to the chat story page (albums, chat-page
+        // stories, archive) for the current story's chat.
+        row = row.child(
+            Button::new("story-open-page")
+                .label("Stories")
+                .ghost()
+                .text_color(rgb(0xffffff))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if let Some(item) = this.story_viewer.current() {
+                        let chat_id = item.chat_id;
+                        this.close_story_viewer(cx);
+                        this.open_story_page(chat_id, window, cx);
+                    }
+                })),
+        );
         row = row.child(
             Button::new("story-react-picker")
                 .label("React…")
@@ -35501,6 +35948,395 @@ impl QuillApp {
             )
     }
 
+    /// Phase 9.7: the chat story page overlay — story albums (list +
+    /// opened album), chat-page stories with pin/unpin, and the paginated
+    /// archive list. The status line renders the honest
+    /// `Session::story_page_op` state (Sending / Succeeded / Failed).
+    fn story_page_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(page) = self.story_page.as_ref() else {
+            return div().into_any_element();
+        };
+        let chat_id = page.chat_id;
+        let open_album = page.open_album;
+        let delete_confirm = page.delete_confirm;
+        let new_album_name = page.new_album_name.clone();
+        let new_album_story_ids = page.new_album_story_ids.clone();
+        let rename_input = page.rename_input.clone();
+        let add_story_ids = page.add_story_ids.clone();
+        let title = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .map(|c| c.title.clone())
+            .unwrap_or_else(|| format!("Chat {}", chat_id.0));
+        // Honest operation state: Checking shows as `Sending` (the load
+        // already fired), mutations label their action, failures carry
+        // the TDLib reason.
+        let op_status = self
+            .session()
+            .and_then(|s| s.story_page_op.clone())
+            .map(|op| match op.state {
+                StoryPageOpState::Checking => format!("{}…", op.label),
+                StoryPageOpState::Sending => format!("{}…", op.label),
+                StoryPageOpState::Succeeded => format!("{} — done", op.label),
+                StoryPageOpState::Failed(reason) => format!("{} — failed: {reason}", op.label),
+            });
+        let label_for = |story_id: i32| {
+            let caption = self
+                .session()
+                .and_then(|s| s.stories.get(&(chat_id.0, story_id)))
+                .map(|story| story.caption.clone())
+                .unwrap_or_default();
+            let snippet: String = caption.chars().take(40).collect();
+            if snippet.is_empty() {
+                format!("Story {story_id}")
+            } else {
+                format!("Story {story_id} — {snippet}")
+            }
+        };
+
+        let mut body = div().flex().flex_col().gap_3();
+        if let Some(album_id) = open_album {
+            // ---- Opened album: rename, delete, stories, add. ----
+            let name = self
+                .session()
+                .and_then(|s| s.story_albums.get(&chat_id.0))
+                .and_then(|albums| albums.iter().find(|a| a.id == album_id))
+                .map(|a| a.name.clone())
+                .unwrap_or_else(|| format!("Album {album_id}"));
+            let story_ids: Vec<i32> = self
+                .session()
+                .and_then(|s| s.story_album_stories.get(&(chat_id.0, album_id)))
+                .cloned()
+                .unwrap_or_default();
+            let mut detail = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            Button::new("story-page-back")
+                                .label("← Albums")
+                                .ghost()
+                                .text_color(rgb(0xffffff))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.back_to_story_albums(cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .font_semibold()
+                                .text_color(rgb(0xffffff))
+                                .child(name.clone()),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(Textarea::new(&rename_input).h(px(36.)).flex_1())
+                        .child(Button::new("story-page-rename").label("Rename").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.rename_story_album(cx);
+                            }),
+                        )),
+                )
+                .child(
+                    Button::new("story-page-delete")
+                        .label(if delete_confirm == Some(album_id) {
+                            "Confirm delete"
+                        } else {
+                            "Delete album"
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.delete_story_album(album_id, cx);
+                        })),
+                );
+            for story_id in story_ids {
+                let label = label_for(story_id);
+                detail = detail.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .bg(rgb(0x21262d))
+                        .child(div().text_sm().text_color(rgb(0xffffff)).child(label))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    Button::new(("story-page-album-top", story_id as u64))
+                                        .label("↑ Top")
+                                        .ghost()
+                                        .text_color(rgb(0xffffff))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.move_story_to_album_top(album_id, story_id, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new(("story-page-album-remove", story_id as u64))
+                                        .label("Remove")
+                                        .ghost()
+                                        .text_color(rgb(0xffffff))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.remove_story_from_album(album_id, story_id, cx);
+                                        })),
+                                ),
+                        ),
+                );
+            }
+            detail = detail.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(Textarea::new(&add_story_ids).h(px(36.)).flex_1())
+                    .child(Button::new("story-page-add-stories").label("Add").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.add_stories_to_album(cx);
+                        }),
+                    )),
+            );
+            body = body.child(detail);
+        } else {
+            // ---- Album list + create form. ----
+            let albums: Vec<(i32, String)> = self
+                .session()
+                .and_then(|s| s.story_albums.get(&chat_id.0))
+                .map(|albums| albums.iter().map(|a| (a.id, a.name.clone())).collect())
+                .unwrap_or_default();
+            let mut list = div().flex().flex_col().gap_2().child(
+                div()
+                    .font_semibold()
+                    .text_color(rgb(0xffffff))
+                    .child("Albums"),
+            );
+            for (index, (album_id, name)) in albums.iter().enumerate() {
+                let album_id = *album_id;
+                let at_top = index == 0;
+                let at_bottom = index + 1 == albums.len();
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .bg(rgb(0x21262d))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(rgb(0xffffff))
+                                .child(name.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    Button::new(("story-page-open", album_id as u64))
+                                        .label("Open")
+                                        .ghost()
+                                        .text_color(rgb(0xffffff))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.open_story_album(album_id, window, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new(("story-page-up", album_id as u64))
+                                        .label("↑")
+                                        .ghost()
+                                        .text_color(rgb(0xffffff))
+                                        .disabled(at_top)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.move_story_album(album_id, true, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new(("story-page-down", album_id as u64))
+                                        .label("↓")
+                                        .ghost()
+                                        .text_color(rgb(0xffffff))
+                                        .disabled(at_bottom)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.move_story_album(album_id, false, cx);
+                                        })),
+                                ),
+                        ),
+                );
+            }
+            list = list.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(div().text_sm().text_color(rgb(0x9aa0a6)).child("New album"))
+                    .child(Textarea::new(&new_album_name).h(px(36.)))
+                    .child(Textarea::new(&new_album_story_ids).h(px(36.)))
+                    .child(
+                        Button::new("story-page-create")
+                            .label("Create album")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.create_story_album(cx);
+                            })),
+                    ),
+            );
+            // ---- Chat-page stories with pin/unpin. ----
+            let (pinned, chat_page_ids): (Vec<i32>, Vec<i32>) = self
+                .session()
+                .and_then(|s| s.chat_page_stories.get(&chat_id.0))
+                .map(|state| (state.pinned_story_ids.clone(), state.story_ids.clone()))
+                .unwrap_or_default();
+            let mut chat_page = div().flex().flex_col().gap_2().child(
+                div()
+                    .font_semibold()
+                    .text_color(rgb(0xffffff))
+                    .child("Chat page stories"),
+            );
+            for story_id in &chat_page_ids {
+                let story_id = *story_id;
+                let label = label_for(story_id);
+                let is_pinned = pinned.contains(&story_id);
+                chat_page = chat_page.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .bg(rgb(0x21262d))
+                        .child(div().text_sm().text_color(rgb(0xffffff)).child(label))
+                        .child(
+                            Button::new(("story-page-pin", story_id as u64))
+                                .label(if is_pinned { "Unpin" } else { "Pin" })
+                                .ghost()
+                                .text_color(rgb(0xffffff))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.toggle_story_pin(story_id, cx);
+                                })),
+                        ),
+                );
+            }
+            chat_page = chat_page.child(
+                Button::new("story-page-load-chat-page")
+                    .label("Load more")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.load_more_chat_page_stories(cx);
+                    })),
+            );
+            // ---- Archive. ----
+            let archived_ids: Vec<i32> = self
+                .session()
+                .and_then(|s| s.archived_stories.get(&chat_id.0))
+                .map(|state| state.story_ids.clone())
+                .unwrap_or_default();
+            let mut archive = div().flex().flex_col().gap_2().child(
+                div()
+                    .font_semibold()
+                    .text_color(rgb(0xffffff))
+                    .child("Archive"),
+            );
+            for story_id in &archived_ids {
+                let label = label_for(*story_id);
+                archive = archive.child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .bg(rgb(0x21262d))
+                        .child(div().text_sm().text_color(rgb(0xffffff)).child(label)),
+                );
+            }
+            archive = archive.child(
+                Button::new("story-page-load-archive")
+                    .label("Load more")
+                    .ghost()
+                    .text_color(rgb(0xffffff))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.load_more_archived_stories(cx);
+                    })),
+            );
+            body = body.child(list).child(chat_page).child(archive);
+        }
+
+        div()
+            .id("story-page-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .id("story-page-backdrop")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .bg(rgba(0x000000e6))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_story_page(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("story-page-panel")
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .p_4()
+                    .max_w(px(560.))
+                    .max_h_full()
+                    .overflow_y_scroll()
+                    .rounded_lg()
+                    .bg(rgb(0x161b22))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .text_color(rgb(0xffffff))
+                                    .child(format!("{title} — Stories")),
+                            )
+                            .child(
+                                Button::new("story-page-close")
+                                    .label("Close")
+                                    .ghost()
+                                    .text_color(rgb(0xffffff))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.close_story_page(cx);
+                                    })),
+                            ),
+                    )
+                    .when_some(op_status, |this, status| {
+                        this.child(div().text_sm().text_color(rgb(0x9aa0a6)).child(status))
+                    })
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
     fn forward_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.forward_search_input.read(cx).value().to_string();
         let draft = self.pending_forward.clone();
@@ -36763,6 +37599,11 @@ impl Render for QuillApp {
             // Phase 9.3: story composer overlay above the story viewer.
             .when(self.story_composer.open, |this| {
                 this.child(self.story_composer_overlay(cx))
+            })
+            // Phase 9.7: chat story page overlay (albums / chat page /
+            // archive) above the story composer.
+            .when(self.story_page.is_some(), |this| {
+                this.child(self.story_page_overlay(cx))
             })
             // kit Phase 2 (redo): add-contact now hosted in a kit Dialog
             // via the shell sync — render wiring deleted.

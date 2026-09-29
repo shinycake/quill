@@ -1885,6 +1885,195 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   stealth-mode periods display (the raw `storiesStealthMode` periods
   come from `getAllStories`, not yet parsed — the button shows
   active/cooldown only).
+## Phase 9.7 — Story albums, archive, and chat-page pinned stories (2026-09-28)
+
+- **Rationale:** phases 9.1–9.4 covered viewing, reactions/replies,
+  posting, and composer options. This slice completes the story
+  management surface: story albums (list/open/create/rename/delete,
+  add/remove/reorder stories, reorder albums), the paginated archive
+  (`getChatArchivedStories`), and chat-page pinned stories
+  (`getChatPostedToChatPageStories` + `setChatPinnedStories`).
+- **Schema (1.8.67, verified in `schema/td_api.tl` — no invented
+  constructors/fields):**
+  - `storyAlbum id:int32 name:string photo_icon:photo video_icon:video = StoryAlbum` (line 6758);
+    `storyAlbums albums:vector<storyAlbum> = StoryAlbums` (line 6761).
+    `story.can_be_added_to_album` — "True, if the story can be added to
+    an album using createStoryAlbum and addStoryAlbumStories" (line
+    6724). The parser keeps only `id` and `name` — the `photo_icon` /
+    `video_icon` fields exist in the schema but are not parsed (a future
+    slice can add covers).
+  - `stories.pinned_story_ids` — comment at line 6747: "Identifiers of
+    the pinned stories; returned only in getChatPostedToChatPageStories
+    with from_story_id == 0". The driver clears the chat's page list on
+    a fresh first-page fetch (`from_story_id == 0`) so stale pins never
+    survive a refetch; later pages accumulate ids and preserve pins.
+  - `getChatStoryAlbums chat_id:int53 = StoryAlbums` — "Returns the
+    list of story albums owned by the given chat" (line 13850).
+  - `getStoryAlbumStories chat_id:int53 story_album_id:int32
+    offset:int32 limit:int32 = Stories` — "Returns the list of stories
+    added to the given story album. For optimal performance, the number
+    of returned stories is chosen by TDLib" (line 13857).
+  - `createStoryAlbum story_poster_chat_id:int53 name:string
+    story_ids:vector<int32> = StoryAlbum` (line 13863) — "@name Name of
+    the album; 1-12 characters"; "@story_ids Identifiers of stories to
+    add to the album; 0-getOption(\"story_album_size_max\")
+    identifiers"; "Creates an album of stories; requires
+    can_edit_stories administrator right for supergroup and channel
+    chats". The driver rejects names outside 1–12 Unicode scalar
+    characters with `InvalidRequest` before sending.
+  - `reorderStoryAlbums chat_id:int53 story_album_ids:vector<int32> =
+    Ok` (line 13868); `deleteStoryAlbum chat_id:int53
+    story_album_id:int32 = Ok` (line 13873); `setStoryAlbumName
+    chat_id:int53 story_album_id:int32 name:string = StoryAlbum` —
+    "Changes name of an album of stories. … Returns the changed album"
+    (line 13879, name also 1-12 characters).
+  - `addStoryAlbumStories chat_id:int53 story_album_id:int32
+    story_ids:vector<int32> = StoryAlbum` — "Adds stories to the
+    beginning of a previously created story album. … Returns the changed
+    album" (line 13887); `removeStoryAlbumStories … = StoryAlbum` —
+    "Removes stories from an album. … Returns the changed album" (line
+    13894); `reorderStoryAlbumStories chat_id:int53
+    story_album_id:int32 story_ids:vector<int32> = StoryAlbum` —
+    "Changes order of stories in an album. … story_ids: Identifier of
+    the stories to move to the beginning of the album. All other
+    stories are placed in the current order after the specified
+    stories" (line 13901). The UI's "↑ Top" sends `[story_id]`, moving
+    that story to the beginning.
+  - `getChatArchivedStories chat_id:int53 from_story_id:int32
+    limit:int32 = Stories` (line 13784) — "Identifier of the story
+    starting from which stories must be returned; use 0 to get results
+    from the last story". The reducer stores `next_from_story_id` as
+    the smallest loaded id; the UI's "Load more" passes it straight
+    through (stories below it are returned).
+  - `getChatPostedToChatPageStories chat_id:int53 from_story_id:int32
+    limit:int32 = Stories` (line 13776).
+  - `setChatPinnedStories chat_id:int53 story_ids:vector<int32> = Ok`
+    (line 13789) — "Changes the list of pinned stories on a chat page;
+    requires can_edit_stories administrator right in the chat";
+    "@story_ids New list of pinned stories. All stories must be posted
+    to the chat page first. There can be up to
+    getOption(\"pinned_story_count_max\") pinned stories on a chat
+    page". It takes the FULL new list (not a delta): the UI adjusts the
+    current pinned ids locally (pin/unpin) and sends the whole list;
+    the sent ids ride on `PendingRequest::story_ids` so the `ok`
+    answer applies them.
+- **Raw layer (concept-level, pinned `telegram_api.tl` at
+  `d1085f9cebc5a62379991ae1652673954f229c1f`, verified 2026-09-28):**
+  `storyAlbum#9325705a flags:# album_id:int title:string
+  icon_photo:flags.0?Photo icon_video:flags.1?Document = StoryAlbum`
+  (line 3499); `stories.albums#c3987a3a hash:long
+  albums:Vector<StoryAlbum> = stories.Albums` (line 3503);
+  `stories.stories#63c3dd0a flags:# count:int stories:Vector<StoryItem>
+  pinned_to_top:flags.0?Vector<int> chats:Vector<Chat> users:Vector<User>
+  = stories.Stories` (line 3004) — the raw `pinned_to_top` field that
+  TDLib surfaces as `stories.pinned_story_ids`;
+  `stories.togglePinned#9a75a1ef peer:InputPeer id:Vector<int>
+  pinned:Bool = Vector<int>` (line 5366); `stories.getPinnedStories
+  #5821a5dc peer:InputPeer offset_id:int limit:int = stories.Stories`
+  (line 5370); `stories.getStoriesArchive#b4352016 peer:InputPeer
+  offset_id:int limit:int = stories.Stories` (line 5372);
+  `stories.createAlbum#a36396e5 peer:InputPeer title:string
+  stories:Vector<int> = StoryAlbum` (line 5412);
+  `stories.updateAlbum#5e5259b6 flags:# peer:InputPeer album_id:int
+  title:flags.0?string delete_stories:flags.1?Vector<int>
+  add_stories:flags.2?Vector<int> order:flags.3?Vector<int> =
+  StoryAlbum` (line 5414); `stories.reorderAlbums#8535fbd9
+  peer:InputPeer order:Vector<int> = Bool` (line 5417);
+  `stories.deleteAlbum#8d3456d0 peer:InputPeer album_id:int = Bool`
+  (line 5419); `stories.getAlbums#25b3eac7 peer:InputPeer hash:long =
+  stories.Albums` (line 5421); `stories.getAlbumStories#ac806d61
+  peer:InputPeer album_id:int offset:int limit:int = stories.Stories`
+  (line 5423). No raw "unarchive" constructor exists — expiry moves
+  stories to the archive automatically and `getStoriesArchive` is the
+  archive accessor.
+- **TDLib source (pinned commit `d1085f9`, verified 2026-09-28):** all 12
+  S5 requests dispatch in `td/telegram/Requests.cpp` —
+  `getChatStoryAlbums` (5183), `getStoryAlbumStories` (5193),
+  `createStoryAlbum` (5198), `reorderStoryAlbums` (5204),
+  `deleteStoryAlbum` (5209), `setStoryAlbumName` (5214),
+  `addStoryAlbumStories` (5219), `removeStoryAlbumStories` (5224),
+  `reorderStoryAlbumStories` (5229), `getChatPostedToChatPageStories`
+  (7319), `getChatArchivedStories` (7324), `setChatPinnedStories`
+  (7329). Notably `getChatPostedToChatPageStories` routes to
+  `StoryManager::get_dialog_pinned_stories` (Requests.cpp:7319-7322),
+  i.e. the chat page IS the pinned-stories surface, served by the raw
+  `stories.getPinnedStories` query; `getChatArchivedStories` routes to
+  `StoryManager::get_story_archive` (7324-7327), served by raw
+  `stories.getStoriesArchive`. The raw→TDLib pinned-ids mapping is in
+  `td/telegram/StoryManager.cpp:5242`:
+  `auto pinned_story_ids = StoryId::get_story_ids(stories->pinned_to_top_);`
+  `create_story_album` (StoryManager.cpp:6810-6826) rejects only an
+  empty title at runtime ("Story album name must be non-empty"); the
+  1-12 character bound is schema-level (`td_api.tl` `@name` comments),
+  enforced client-side by the driver.
+- **Behavioral reference:** Telegram X source could not be inspected
+  directly (GitHub code search requires authentication); behavior was
+  instead confirmed against Telegram's official blog ("Public Post
+  Search, Story Albums, Gift Collections and More", July 2025): "Your
+  favorite vacation stories, pet pictures and more can now be organized
+  into story albums on your profile … To add stories to an album, go to
+  the 'Posts' tab in your profile or channel and tap 'Add Album'."
+  Quill has no profile Posts tab yet, so the story page opens from the
+  story viewer's "Stories" action for the current story's chat — same
+  data, nearest available entry point. Raw-API docs: "After an active
+  story expires, it is automatically added to the story archive:
+  stories in the story archive are only visible to the poster, or to
+  channel/supergroup admins with edit_stories admin rights" — the
+  archive list is owner/admin-only by server design, and there is no
+  unarchive action (expiry is one-way into the archive).
+- **Parser (`src/telegram/envelope.rs`).** `ParsedStoryAlbum { id,
+  name }` (the album icon is intentionally dropped — the page shows
+  names only); `ParsedStory.can_be_added_to_album` (defaults false);
+  payloads `StoryAlbums`, `StoryAlbum`, and `Stories { total_count,
+  stories, pinned_story_ids }` with dispatch for `storyAlbums`,
+  `storyAlbum`, `stories`. `ParsedStory` constructors in
+  `src/story_viewer.rs` (2) and `src/state.rs` (1) updated for the new
+  field.
+- **Requests (`src/telegram/requests.rs`).** Builders for all 12
+  constructors, each doc-commented with the verbatim schema signature
+  and line; one broad JSON-shape test covers all builders.
+- **Reducer (`src/state.rs`).** `RequestPurpose` variants for every S5
+  operation; `PendingRequest::{story_ids, story_album_id}` for
+  correlating id-less answers; `Session::{story_albums,
+  story_album_stories, chat_page_stories, archived_stories,
+  story_page_op}`. All arms are purpose-gated (a stray `storyAlbums`
+  never flips the UI — pinned by test). Album lists replace on fetch;
+  album-story/chat-page/archive id lists accumulate and dedupe across
+  pages. `StoryPageOp { label, state }` with `Checking` (reads) /
+  `Sending` (mutations) / `Succeeded` / `Failed(reason)` — the honest
+  Checking/Sending/Succeeded/Failed states; TDLib `error` answers for
+  any S5 purpose fail the op with the server reason instead of spinning
+  forever. Tests: album replace + stray ignored, album-story
+  accumulate/dedupe, pinned first-page-only, archive cursor, mutation
+  op lifecycle (Sending→Succeeded→Failed), `parse_story_id_list` cases.
+- **Driver (`src/connect.rs`).** One method per constructor; validates
+  chat exists/authorized, album names 1–12 chars, non-empty
+  add/remove/reorder lists, non-negative offsets and positive limits;
+  in-flight fetches dedupe per (purpose, chat, album) (`Ok(None)`);
+  transport failure removes the pending request and fails the op
+  ("could not send").
+- **UI (`src/ui/mod.rs`).** The story viewer's action row gains a
+  "Stories" button opening the chat story page overlay: Albums section
+  (list with Open/↑/↓ reorder, new-album form with name + ids inputs),
+  opened-album detail (Back, rename row, two-click Delete, story rows
+  with "↑ Top" + Remove, add-stories input), Chat page stories (Pin/
+  Unpin per row, Load more), Archive (Load more). The status line
+  renders `story_page_op` honestly. Every demo-mode action shows the
+  explicit "demo — … runs with live TDLib" notice; nothing silently
+  no-ops. Screenshot proof:
+  `docs/screenshots/ready-story-albums.png` (seeded via the new
+  `ReadyStoryAlbums` demo: two albums, chat-page stories with one
+  pinned, archive stories for chat 11, page open).
+- **Out of this slice (→ future):** story notification settings,
+  story restriction notices, clickable story areas, live stories,
+  custom/paid reactions (`setStoryReaction` stays emoji-only);
+  `toggleStoryIsPostedToChatPage` for already-posted stories (line
+  13749 — still deferred from 9.4); album cover icons
+  (`storyAlbum.photo_icon`/`video_icon` are schema fields but not
+  parsed — the page lists albums by name);
+  posting directly into an album (`postStory.album_ids` is fixed `[]`
+  since 9.4 — the create form takes story ids instead).
+
 ## Phase 9.8 — Story viewer playback: segmented progress bar + auto-advance (2026-09-28)
 
 - **Rationale:** the Phase 9.1 viewer had no progress indication and no
@@ -1950,7 +2139,6 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 - **Out of this slice (→ future):** live stories (join/play), custom/paid
   reactions, clickable story areas, story notification settings,
   restriction notices — carried forward from the slice brief.
-
 ## Parity slice — Forum-topic posting (2026-09-26)
 
 - **Rationale:** Phase 5.1 made forum topics read-only (composer hidden

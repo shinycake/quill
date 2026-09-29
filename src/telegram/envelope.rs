@@ -1,6 +1,7 @@
 use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
 use crate::rich::{RichBlock, parse_rich_message};
+use crate::telegram::envelope_story::{ParsedStoryAlbum, parse_story_album};
 use crate::telegram::requests::ArchiveChatListSettings;
 use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
 use base64::Engine;
@@ -1139,6 +1140,34 @@ pub enum EnvelopePayload {
     Story {
         story: ParsedStory,
         files: Vec<ParsedFile>,
+    },
+    /// Phase 9.7: `storyAlbums` — the `getChatStoryAlbums` response
+    /// (TDLib 1.8.67, `schema/td_api.tl:13850`). The reducer replaces the
+    /// chat's album list (`Session::story_albums`), correlated via
+    /// `PendingRequest::chat_id`.
+    StoryAlbums {
+        albums: Vec<ParsedStoryAlbum>,
+    },
+    /// Phase 9.7: `storyAlbum` — the `createStoryAlbum` /
+    /// `setStoryAlbumName` / `addStoryAlbumStories` /
+    /// `removeStoryAlbumStories` / `reorderStoryAlbumStories` response
+    /// (schema `td_api.tl:13863` / `13879` / `13887` / `13894` / `13901`;
+    /// each returns "the changed album"). The reducer upserts it into
+    /// the chat's album list.
+    StoryAlbum {
+        album: ParsedStoryAlbum,
+    },
+    /// Phase 9.7: `stories` — the `getStoryAlbumStories` /
+    /// `getChatArchivedStories` / `getChatPostedToChatPageStories`
+    /// response (schema `td_api.tl:13857` / `13784` / `13776`).
+    /// `pinned_story_ids` is populated only by
+    /// `getChatPostedToChatPageStories` with `from_story_id == 0`
+    /// (schema comment at `td_api.tl:6747`). Stories are cached in
+    /// `Session::stories`; the reducer accumulates the ids per purpose.
+    Stories {
+        total_count: i32,
+        stories: Vec<(ParsedStory, Vec<ParsedFile>)>,
+        pinned_story_ids: Vec<i32>,
     },
     /// Phase 9.2: `updateStoryDeleted` (TDLib 1.8.67, `schema/td_api.tl:10898`)
     /// — a story was deleted. The reducer drops it from `Session::stories`
@@ -4931,6 +4960,11 @@ pub struct ParsedStory {
     /// `reactionTypeEmoji` only) — prefills the edit surface's reaction
     /// input.
     pub area_reaction_emojis: Vec<String>,
+    /// Phase 9.7: `story.can_be_added_to_album` — gates the "Add to album"
+    /// affordances (`createStoryAlbum`, `addStoryAlbumStories`,
+    /// schema `td_api.tl:6724` comment: "True, if the story can be added
+    /// to an album using createStoryAlbum and addStoryAlbumStories").
+    pub can_be_added_to_album: bool,
 }
 
 fn parse_story_list(value: Option<&Value>) -> Option<StoryListView> {
@@ -5070,6 +5104,10 @@ fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
             privacy_settings: value.get("privacy_settings").cloned(),
             area_link_url,
             area_reaction_emojis,
+            can_be_added_to_album: value
+                .get("can_be_added_to_album")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         },
         files,
     ))
@@ -6924,6 +6962,43 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
         "story" => {
             let (story, files) = parse_story(&value).ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::Story { story, files })
+        }
+        "storyAlbums" => {
+            let albums = value
+                .get("albums")
+                .and_then(Value::as_array)
+                .map(|albums| albums.iter().filter_map(parse_story_album).collect())
+                .unwrap_or_default();
+            Ok(EnvelopePayload::StoryAlbums { albums })
+        }
+        "storyAlbum" => {
+            let album = parse_story_album(&value).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::StoryAlbum { album })
+        }
+        "stories" => {
+            let total_count = value
+                .get("total_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32;
+            let stories = value
+                .get("stories")
+                .and_then(Value::as_array)
+                .map(|stories| stories.iter().filter_map(parse_story).collect())
+                .unwrap_or_default();
+            let pinned_story_ids = value
+                .get("pinned_story_ids")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(|id| id.as_i64().map(|id| id as i32))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(EnvelopePayload::Stories {
+                total_count,
+                stories,
+                pinned_story_ids,
+            })
         }
         "updateStory" => {
             let story = value.get("story").ok_or(ParseError::MissingField)?;
