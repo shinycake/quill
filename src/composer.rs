@@ -256,6 +256,8 @@ impl ComposerEdit {
             // Slice C2k: community service rows are not editable.
             | MessageContent::ChatAddedToCommunity { .. }
             | MessageContent::ChatRemovedFromCommunity
+            // Slice G9: community service rows are not editable.
+            | MessageContent::ChatJoinFromCommunity { .. }
             // M2: rich messages are edited in the rich editor, not here.
             | MessageContent::RichMessage(_)
             // B1: games are not editable.

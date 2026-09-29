@@ -5468,6 +5468,14 @@ pub enum MessageContent {
     /// Slice C2k: `messageChatRemovedFromCommunity` (TDLib 1.8.67,
     /// `schema/td_api.tl:5363`) — the chat was removed from a community.
     ChatRemovedFromCommunity,
+    /// Slice G9: `messageChatJoinFromCommunity` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5354`) — a new member joined the chat from a
+    /// community. Only `community_id` is kept; the renderer resolves the
+    /// community name from the `updateCommunity` cache (the envelope
+    /// layer has no name lookup).
+    ChatJoinFromCommunity {
+        community_id: i64,
+    },
     /// M2: `messageRichMessage` (TDLib 1.8.67, `schema/td_api.tl:5143`) —
     /// an anniversary rich message; `blocks` are the parsed `pageBlock*`
     /// list (possibly partial when `is_full` is false — the renderer
@@ -6293,6 +6301,12 @@ impl MessageContent {
             }
             MessageContent::ChatRemovedFromCommunity => {
                 "This chat was removed from a community".to_string()
+            }
+            // Slice G9: chat-list preview for `messageChatJoinFromCommunity`
+            // (TGX ChatContentGroupJoinCommunity; no name lookup in the
+            // envelope layer, so no sender/community-name form).
+            MessageContent::ChatJoinFromCommunity { .. } => {
+                "Joined the group from the community".to_string()
             }
             // Slice P1: chat-list previews for payments (TGX shows the
             // invoice title / "Payment successful").
@@ -10432,6 +10446,18 @@ fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<ParsedFile>) {
         Some("messageChatRemovedFromCommunity") => {
             (MessageContent::ChatRemovedFromCommunity, Vec::new())
         }
+        // Slice G9: `messageChatJoinFromCommunity` (schema 1.8.67, line
+        // 5354) — keep only `community_id`; name resolution is the
+        // renderer's job (session `communities` cache).
+        Some("messageChatJoinFromCommunity") => (
+            MessageContent::ChatJoinFromCommunity {
+                community_id: value
+                    .get("community_id")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+            },
+            Vec::new(),
+        ),
         // M2: `messageRichMessage` (schema 1.8.67, line 5143).
         Some("messageRichMessage") => parse_message_rich_message(value),
         // B1: `messageGame` (schema 1.8.67, line 5234) — keep only
@@ -15891,6 +15917,35 @@ mod channel_envelope_tests {
             parsed.content.preview(),
             "This chat was removed from a community"
         );
+    }
+
+    #[test]
+    fn service_message_chat_join_from_community_parsed() {
+        // Slice G9: `messageChatJoinFromCommunity` (schema 1.8.67, line
+        // 5354) keeps only the community id; the preview carries no name
+        // because the envelope layer has no name lookup.
+        let json = r#"{"id":506,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageChatJoinFromCommunity","community_id":123}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(matches!(
+            parsed.content,
+            MessageContent::ChatJoinFromCommunity { community_id: 123 }
+        ));
+        assert_eq!(
+            parsed.content.preview(),
+            "Joined the group from the community"
+        );
+    }
+
+    #[test]
+    fn service_message_chat_join_from_community_missing_id_defaults_to_zero() {
+        // Slice G9: a missing `community_id` must not panic — the parse
+        // arm defaults it to 0.
+        let json = r#"{"id":507,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageChatJoinFromCommunity"}}"#;
+        let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+        assert!(matches!(
+            parsed.content,
+            MessageContent::ChatJoinFromCommunity { community_id: 0 }
+        ));
     }
 
     #[test]

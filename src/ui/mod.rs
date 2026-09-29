@@ -7006,7 +7006,10 @@ impl QuillApp {
                         // Slice C2k: community service rows carry no
                         // editable caption.
                         | MessageContent::ChatAddedToCommunity { .. }
-                        | MessageContent::ChatRemovedFromCommunity => {}
+                        | MessageContent::ChatRemovedFromCommunity
+                        // Slice G9: the join-from-community service row
+                        // carries no editable caption either.
+                        | MessageContent::ChatJoinFromCommunity { .. } => {}
                     }
                 }
             }
@@ -38762,8 +38765,15 @@ impl QuillApp {
             // Service rows (e.g. screenshot notices) must never collapse the
             // sender: the row chrome renders "{sender} took a screenshot",
             // and collapsing to None would show "Someone" instead.
+            // Slice G9: the join-from-community row attributes the join
+            // to the sender ("{name} joined the group from the
+            // community"), so it keeps the sender too.
             let show_sender = prev_outgoing != Some(message.is_outgoing)
-                || matches!(message.content, MessageContent::ScreenshotTaken);
+                || matches!(message.content, MessageContent::ScreenshotTaken)
+                || matches!(
+                    message.content,
+                    MessageContent::ChatJoinFromCommunity { .. }
+                );
             prev_outgoing = Some(message.is_outgoing);
             let sender = if !message.is_outgoing && show_sender {
                 Some(sender_name.to_string())
@@ -45610,6 +45620,59 @@ fn session_history_row(
             )
             .into_any_element();
     }
+    // Slice G9: community service rows (`messageChatAddedToCommunity`,
+    // `messageChatRemovedFromCommunity`, `messageChatJoinFromCommunity`,
+    // schema 1.8.67 lines 5353–5363) — centered neutral notices, no
+    // bubble, no reply/react/edit/delete controls. Wording is TGX
+    // verbatim (strings.xml: ActionChatAddedToCommunity{,Unknown} /
+    // ActionChatRemovedFromCommunity / group_user_join_from_community*).
+    // The community name resolves from the session's `updateCommunity`
+    // cache; unknown communities fall back to the nameless TGX forms.
+    let community_name = |community_id: i64| {
+        session.and_then(|s| s.communities.get(&community_id).map(|c| c.name.clone()))
+    };
+    let community_service_row = |text: String| {
+        div()
+            .id(("community-service-row", message.id.0 as u64))
+            .flex()
+            .justify_center()
+            .py_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text),
+            )
+            .into_any_element()
+    };
+    if let MessageContent::ChatAddedToCommunity { community_id } = &message.content {
+        let text = match community_name(*community_id) {
+            Some(name) => format!("This chat was added to community \"{name}\""),
+            None => "This chat was added to community".to_string(),
+        };
+        return community_service_row(text);
+    }
+    if matches!(message.content, MessageContent::ChatRemovedFromCommunity) {
+        return community_service_row("This chat was removed from community".to_string());
+    }
+    if let MessageContent::ChatJoinFromCommunity { community_id } = &message.content {
+        let community = community_name(*community_id);
+        let text = match (message.is_outgoing, community) {
+            (true, Some(name)) => {
+                format!("You joined the group from the community \"{name}\"")
+            }
+            (true, None) => "You joined the group from the community".to_string(),
+            (false, Some(name)) => format!(
+                "{} joined the group from the community \"{name}\"",
+                sender.as_deref().unwrap_or("Someone")
+            ),
+            (false, None) => format!(
+                "{} joined the group from the community",
+                sender.as_deref().unwrap_or("Someone")
+            ),
+        };
+        return community_service_row(text);
+    }
     // Phase C2f: `messageGroupCall` invitation service row (schema
     // 1.8.67, line 5288) — incoming and pending: Accept / Decline.
     if let MessageContent::GroupCallInvitation {
@@ -45994,6 +46057,9 @@ fn session_history_row(
         // Slice C2k: community service rows render no extra media.
         | MessageContent::ChatAddedToCommunity { .. }
         | MessageContent::ChatRemovedFromCommunity
+        // Slice G9: the join-from-community service row renders no extra
+        // media either (the name ships in the centered row text).
+        | MessageContent::ChatJoinFromCommunity { .. }
         | MessageContent::Unsupported { .. } => None,
     };
     let keyboard = inline_keyboard(message, cx);
