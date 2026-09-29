@@ -279,10 +279,14 @@ fn directory_nonempty(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-pub fn default_app_root() -> PathBuf {
+/// Platform data directory, or `None` when the OS provides none. There is
+/// deliberately no `./quill-data` fallback: live startup must refuse rather
+/// than scatter account databases and encryption keys under whatever
+/// directory the process was launched from (a broad `git add` there would
+/// commit them).
+pub fn safe_app_root() -> Option<PathBuf> {
     directories::ProjectDirs::from("org", "shinycake", APP_DIR_NAME)
         .map(|dirs| dirs.data_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".").join("quill-data"))
 }
 
 #[cfg(test)]
@@ -412,5 +416,28 @@ mod tests {
         let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
         assert!(!paths.database_exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gitignore_backstops_account_data() {
+        // The .gitignore entries are the last line of defense against a
+        // broad `git add` committing live account state. If someone edits
+        // them away, this fails loudly.
+        let ignore =
+            fs::read(format!("{}/.gitignore", env!("CARGO_MANIFEST_DIR"))).expect(".gitignore");
+        let ignore = String::from_utf8(ignore).expect("utf8");
+        for entry in [
+            "quill-data/",
+            "db-encryption.key",
+            "td.binlog",
+            "db.sqlite",
+            "db.sqlite-wal",
+            "db.sqlite-shm",
+        ] {
+            assert!(
+                ignore.lines().any(|line| line.trim() == entry),
+                ".gitignore must contain exact entry: {entry}"
+            );
+        }
     }
 }

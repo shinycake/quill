@@ -21,8 +21,8 @@ use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key}
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
 use crate::rich::RichBlock;
 use crate::settings::{
-    AccountPaths, InstantViewMode, default_app_root, load_call_prefs, load_contact_prefs,
-    load_media_prefs, save_call_prefs, save_contact_prefs,
+    AccountPaths, InstantViewMode, load_call_prefs, load_contact_prefs, load_media_prefs,
+    safe_app_root, save_call_prefs, save_contact_prefs,
 };
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
@@ -12632,7 +12632,7 @@ pub fn start_live_connect(
         ConnectGate::Blocked(b) => return Err(b),
         ConnectGate::Ready { .. } => {}
     }
-    let app_root = default_app_root();
+    let app_root = safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
     let prepared = prepare_connect(&app_root, AccountKey::primary(), store, &credentials)?;
     let live = LiveTdJson::connect().map_err(|e| match e {
         TdJsonError::NotFound => ConnectBlocker::MissingTdjson,

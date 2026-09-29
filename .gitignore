@@ -17,3 +17,13 @@ quill.local.env
 
 # ntgcalls prebuilt engine (125MB .so) — procured by scripts/vendor-ntgcalls.sh, NEVER committed
 vendor/
+
+# Quill account data — live session state and keys must never be committed.
+# (The ./quill-data fallback is gone; startup refuses without a platform data
+# dir. These entries are the backstop against a broad `git add`.)
+quill-data/
+db-encryption.key
+td.binlog
+db.sqlite
+db.sqlite-wal
+db.sqlite-shm
