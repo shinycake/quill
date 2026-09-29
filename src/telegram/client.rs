@@ -178,7 +178,10 @@ pub struct LiveTdJson {
 impl LiveTdJson {
     pub fn connect() -> Result<Self, crate::telegram::ffi::TdJsonError> {
         let api = Arc::new(TdJson::load_default()?);
-        api.install_redacted_log(1);
+        // Fail closed: no client until the native log stream is emptied.
+        // install_redacted_log alone does not stop TDLib writing to stderr.
+        api.secure_native_logging()?;
+        api.install_redacted_log(crate::telegram::ffi::MAX_NATIVE_LOG_VERBOSITY);
         let client_id = api.create_client_id();
         Ok(Self { api, client_id })
     }
