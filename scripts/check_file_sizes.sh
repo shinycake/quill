@@ -15,9 +15,9 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:48852"
+  "src/ui/mod.rs:49086"
   "src/connect.rs:24898"
-  "src/state.rs:21654"
+  "src/state.rs:21658"
   "src/telegram/envelope.rs:18600"
   "src/telegram/requests.rs:10477"
   # Slice A10 (2026-09-29): type-coherent extensions only — ui/mod.rs +3
@@ -72,21 +72,15 @@ WAIVERS=(
   # (`..SendOptions::default()` in the existing `composer_send_options`
   # literal — required to cover the new field, text sends keep default
   # false). All S15 tests moved to `tests/sticker_dynamic_order.rs`.
-  # Slice G10 (2026-09-29, review fixup + rebase post-S16): type-coherent
-  # extensions only — ui/mod.rs (DialogKind variants + dialog_is_open /
-  # dialog_builder / KINDS match arms, info-panel fetch/render arms,
-  # username-dialog submit/title-hint arms, demo-scenario dispatch arms,
-  # new methods on QuillApp + one bundled `community_ui` field,
-  # side-menu entries, 3 screenshot scenarios; merge-pipeline dedupe
-  # fixup removed the duplicated `open_community_info` in favor of the
-  # shared `open_info_panel_target` — net −12; exact counts set post-rebase);
-  # state.rs (`InfoPanelTarget::Community` variant; exact count set post-rebase).
->>>>>>> f451e74 (G10: review fixups — dedupe text helper, waiver off-by-one, doc wording, dead fallback, double conversion)
-  # dialog_builder / KINDS match arms, info-panel fetch/render arms,
-  # username-dialog submit/title-hint arms, demo-scenario dispatch arms,
-  # new methods on QuillApp + one bundled `community_ui` field,
-  # side-menu entries, 3 screenshot scenarios; exact count set post-rebase);
-  # state.rs (`InfoPanelTarget::Community` variant; exact count set post-rebase).
+  # Slice G10 (2026-09-29, merge-pipeline review fixup + rebase post-S16):
+  # type-coherent extensions only — ui/mod.rs +234 (48852 → 49086:
+  # DialogKind variants + dialog_is_open / dialog_builder / KINDS match
+  # arms, info-panel fetch/render arms, username-dialog submit/title-hint
+  # arms, demo-scenario dispatch arms, new methods on QuillApp + one
+  # bundled `community_ui` field, side-menu entries, 3 screenshot
+  # scenarios; the duplicated `open_community_info` was removed in favor
+  # of the shared `open_info_panel_target` — net −15); state.rs +4
+  # (21654 → 21658: `InfoPanelTarget::Community` variant).
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )
