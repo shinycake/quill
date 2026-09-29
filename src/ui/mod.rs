@@ -1,8 +1,10 @@
+mod account_lifecycle;
 mod appearance;
 mod chat_theme;
 mod story_areas;
 mod synthetic;
 
+pub(crate) use account_lifecycle::*;
 pub(crate) use chat_theme::*;
 
 mod dialogs;
@@ -706,6 +708,10 @@ pub struct QuillApp {
     /// your current password") — the driver rejects doomed requests
     /// silently, so the form must speak before sending.
     twofa_notice: Option<String>,
+    /// Slice A9: account lifecycle dialog (delete account + self-destruct
+    /// TTL). Working state lives in the named module; this is the one
+    /// field the dialog machinery reads.
+    account_lifecycle: AccountLifecycleState,
     /// Slice A3: Active Sessions overlay (TGX Settings → Devices /
     /// `SettingsSessionsController`).
     sessions_open: bool,
@@ -1481,6 +1487,10 @@ pub enum ScreenshotDemo {
     /// confirmation (injected `passwordState` with
     /// `recovery_email_address_code_info`, no live Telegram).
     ReadyRecoveryEmail,
+    /// Slice A9: account lifecycle dialog — injected `accountTtl` (180
+    /// days) + `passwordState` with a password set, dialog open (no live
+    /// Telegram).
+    ReadyAccountLifecycle,
     /// M2: rich message demo (injected, no live Telegram) — the demo bot
     /// chat with an injected `messageRichMessage` (headings, styled
     /// paragraphs, list, collapsible, inline document, table, divider,
@@ -2702,6 +2712,17 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Slice A9: account lifecycle fixture (injected, no live
+            // Telegram).
+            Some(ScreenshotDemo::ReadyAccountLifecycle) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — account lifecycle (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             // Slice A4: Connected Websites fixture (injected, no live
             // Telegram).
             Some(ScreenshotDemo::ReadyWebSessions) => {
@@ -2944,6 +2965,7 @@ impl QuillApp {
             twofa_hint,
             twofa_email,
             twofa_notice: None,
+            account_lifecycle: AccountLifecycleState::new(window, cx),
             search_input,
             chat_search_input,
             forward_search_input,
@@ -3646,6 +3668,20 @@ impl QuillApp {
             }
             app.twofa_open = true;
             app.status_note = "screenshot demo — recovery email pending".into();
+        }
+        // Slice A9: account lifecycle fixture — injected `accountTtl`
+        // (180 days) + `passwordState` with a password set (no live
+        // Telegram), dialog open.
+        if matches!(demo, Some(ScreenshotDemo::ReadyAccountLifecycle)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.account_ttl_days = Some(180);
+                session.account_ttl_loading = false;
+                session.password_state = Some(demo_password_state_manage());
+                session.password_state_loading = false;
+            }
+            app.account_lifecycle.open = true;
+            app.status_note = "screenshot demo — account lifecycle".into();
         }
         // Slice A3: Active Sessions fixture — fixture sessions (current
         // device, two other sessions, one incomplete login attempt) with
@@ -39689,6 +39725,19 @@ impl QuillApp {
                                 this.open_websites(cx);
                             })),
                     );
+                    // Slice A9: account lifecycle — delete account +
+                    // self-destruct TTL (TGX Settings → Privacy). The
+                    // backend shipped in slice A7; this entry opens the
+                    // UI half. Fetches `getAccountTtl` + `getPasswordState`
+                    // on open (guarded: cached state reused, in-flight
+                    // fetches deduped).
+                    list = list.child(
+                        Button::new("account-lifecycle")
+                            .label("🗑️ Account")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_account_lifecycle(cx);
+                            })),
+                    );
                     // Phase 9.1/9.3: tdesktop-style active-stories tray above
                     // the chat rows (leading "+" tile opens the story
                     // composer); omitted for the contacts tab.
@@ -48479,6 +48528,8 @@ pub enum DialogKind {
     CommentThread,
     Welcome,
     Appearance,
+    /// Slice A9: account lifecycle (delete account + self-destruct TTL).
+    AccountLifecycle,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -48541,6 +48592,7 @@ impl QuillShell {
             DialogKind::CommentThread => app.comment_thread_dialog.is_some(),
             DialogKind::Welcome => app.welcome_dialog.is_some(),
             DialogKind::Appearance => app.appearance_open,
+            DialogKind::AccountLifecycle => app.account_lifecycle.open,
         }
     }
 
@@ -48577,12 +48629,13 @@ impl QuillShell {
             DialogKind::CommentThread => QuillApp::build_comment_thread_dialog,
             DialogKind::Welcome => QuillApp::build_welcome_dialog,
             DialogKind::Appearance => QuillApp::build_appearance_dialog,
+            DialogKind::AccountLifecycle => QuillApp::build_account_lifecycle_dialog,
         }
     }
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 31] = [
+    const KINDS: [DialogKind; 32] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -48614,6 +48667,7 @@ impl QuillShell {
         DialogKind::EditProfile,
         DialogKind::AddContact,
         DialogKind::Appearance,
+        DialogKind::AccountLifecycle,
     ];
 
     /// Keep the single kit dialog in sync with the app-side open flags.
