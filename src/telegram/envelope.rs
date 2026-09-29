@@ -128,10 +128,13 @@ pub enum EnvelopePayload {
     /// `schema/td_api.tl:10424`) — the secret-chat ephemeral content of a
     /// message refreshed over time; replaces `message.ephemeral_content`
     /// in place (secret-chat lane, `parity:msg-ephemeral-updates`).
+    /// `None` = schema-legal explicit null ("no ephemeral content anymore"),
+    /// which clears the stored content; only a missing/mistyped field is a
+    /// parse error.
     UpdateMessageEphemeralContent {
         chat_id: ChatId,
         message_id: MessageId,
-        ephemeral: EphemeralMessageContent,
+        ephemeral: Option<EphemeralMessageContent>,
     },
     /// `updateMessageContentOpened` — voice note listened (`is_listened`) or
     /// video note viewed (`is_viewed`).
@@ -7054,12 +7057,23 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 files,
             })
         }
-        "updateMessageEphemeralContent" => Ok(EnvelopePayload::UpdateMessageEphemeralContent {
-            chat_id: ChatId(int53(value.get("chat_id"))?),
-            message_id: MessageId(int53(value.get("message_id"))?),
-            ephemeral: parse_ephemeral_message_content(value.get("ephemeral_content"))
-                .ok_or(ParseError::MissingField)?,
-        }),
+        "updateMessageEphemeralContent" => {
+            // Schema: `ephemeral_content` may be explicit null ("none") —
+            // that clears the stored ephemeral content. Only a missing or
+            // mistyped field is a parse error.
+            let ephemeral = match value.get("ephemeral_content") {
+                None => return Err(ParseError::MissingField),
+                Some(v) if v.is_null() => None,
+                Some(v) => {
+                    Some(parse_ephemeral_message_content(Some(v)).ok_or(ParseError::MissingField)?)
+                }
+            };
+            Ok(EnvelopePayload::UpdateMessageEphemeralContent {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                message_id: MessageId(int53(value.get("message_id"))?),
+                ephemeral,
+            })
+        }
         "updateMessageContentOpened" => Ok(EnvelopePayload::UpdateMessageContentOpened {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),

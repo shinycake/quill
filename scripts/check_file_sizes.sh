@@ -17,8 +17,8 @@ HARD_CAP=2000
 WAIVERS=(
   "src/ui/mod.rs:49101"
   "src/connect.rs:24898"
-  "src/state.rs:21768"
-  "src/telegram/envelope.rs:18619"
+  "src/state.rs:21773"
+  "src/telegram/envelope.rs:18633"
   "src/telegram/requests.rs:10477"
   # Slice S17 (2026-09-29, merge-pipeline rebase post-#177): type-coherent
   # extensions only — ui/mod.rs +11 (49090 → 49101: peer-activity label
@@ -99,11 +99,12 @@ WAIVERS=(
   # other logic lives in the new named modules `src/force_reply.rs` and
   # `src/ui/force_reply.rs`).
   # Slice ephemeral-updates (2026-09-29, merge-pipeline rebase post-#178):
-  # type-coherent extensions only — state.rs +47 (21721 → 21768:
-  # `update_ephemeral` method on the existing `HistoryState` type +
-  # `UpdateMessageEphemeralContent` reducer match arm); envelope.rs +15
-  # (18604 → 18619: `UpdateMessageEphemeralContent` enum variant + parse
-  # arm on the existing `parse_payload` match). Slice tests live in
+  # type-coherent extensions only — state.rs +52 (21721 → 21773:
+  # `update_ephemeral` method on the existing `HistoryState` type (takes
+  # `Option`, clears on schema-legal null) + `UpdateMessageEphemeralContent`
+  # reducer match arm); envelope.rs +29 (18604 → 18633:
+  # `UpdateMessageEphemeralContent` enum variant + parse arm on the existing
+  # `parse_payload` match (null-distinguishing block)). Slice tests live in
   # `tests/ephemeral_updates.rs`, never in the waived files.
   # (Waiver deltas are post-fmt exact line counts.)
   "src/calls/engine.rs:3212"

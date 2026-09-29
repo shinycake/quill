@@ -2805,10 +2805,15 @@ impl HistoryState {
 
     /// `parity:msg-ephemeral-updates`: `updateMessageEphemeralContent`
     /// refreshes the ephemeral content in place (schema 1.8.67 line 10424,
-    /// secret-chat lane).
-    fn update_ephemeral(&mut self, id: MessageId, ephemeral: EphemeralMessageContent) -> bool {
+    /// secret-chat lane). `None` clears the stored ephemeral content
+    /// (schema-legal explicit null).
+    fn update_ephemeral(
+        &mut self,
+        id: MessageId,
+        ephemeral: Option<EphemeralMessageContent>,
+    ) -> bool {
         if let Some(message) = self.messages.get_mut(&id.0) {
-            message.ephemeral = Some(ephemeral);
+            message.ephemeral = ephemeral;
             true
         } else {
             false

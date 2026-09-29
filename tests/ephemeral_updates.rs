@@ -43,6 +43,7 @@ fn update_message_ephemeral_content_is_typed() {
         } => {
             assert_eq!(chat_id.0, 11);
             assert_eq!(message_id.0, 102);
+            let ephemeral = ephemeral.expect("ephemeral content present");
             assert_eq!(
                 ephemeral.content.as_ref(),
                 &MessageContent::Text("CANARY_EPHEMERAL".into())
@@ -105,4 +106,76 @@ fn update_message_ephemeral_content_refreshes_stored_content_and_preview() {
         &MessageContent::Text("secret v2".into())
     );
     assert_eq!(session.chats.get(&7).unwrap().last_preview, "secret v2");
+}
+
+#[test]
+fn update_message_ephemeral_content_null_clears_stored_content() {
+    // Schema-legal explicit null ("no ephemeral content anymore") must clear
+    // the stored content — not drop the update as a parse error.
+    let env = parse_envelope(
+        r#"{"@type":"updateMessageEphemeralContent","chat_id":11,"message_id":102,"ephemeral_content":null}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateMessageEphemeralContent { ephemeral, .. } => {
+            assert!(ephemeral.is_none());
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // End to end: a message with stored ephemeral content falls back to the
+    // regular content (and preview) once the null update lands.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"c","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    );
+    apply(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}}}}"#,
+    );
+    apply(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatLastMessage","chat_id":7,"last_message":{"id":44,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"public","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
+    );
+    apply(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageEphemeralContent","chat_id":7,"message_id":44,"ephemeral_content":{"@type":"ephemeralMessageContent","content":{"@type":"messageText","text":{"@type":"formattedText","text":"secret v2","entities":[]}},"reply_markup":null}}"#,
+    );
+    assert!(
+        session
+            .histories
+            .get(&7)
+            .unwrap()
+            .messages
+            .get(&44)
+            .unwrap()
+            .ephemeral
+            .is_some()
+    );
+    assert_eq!(session.chats.get(&7).unwrap().last_preview, "secret v2");
+    apply(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageEphemeralContent","chat_id":7,"message_id":44,"ephemeral_content":null}"#,
+    );
+    let message = session
+        .histories
+        .get(&7)
+        .unwrap()
+        .messages
+        .get(&44)
+        .unwrap();
+    assert!(message.ephemeral.is_none());
+    assert_eq!(session.chats.get(&7).unwrap().last_preview, "public");
 }
