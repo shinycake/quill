@@ -19,6 +19,7 @@ use crate::lifecycle::{RestoreBlocker, plan_restore};
 use crate::notify::NotificationSoundKind;
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
+use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use crate::rich::RichBlock;
 use crate::settings::{
     AccountPaths, InstantViewMode, load_call_prefs, load_contact_prefs, load_media_prefs,
@@ -136,6 +137,10 @@ use crate::telegram::requests::{
 };
 use crate::telegram::requests_group_stickers::{
     set_supergroup_custom_emoji_sticker_set, set_supergroup_sticker_set,
+};
+use crate::telegram::requests_privacy::{
+    PrivacySettingKey, get_blocked_message_senders, get_privacy_rules,
+    get_read_date_privacy_settings, set_privacy_rules, set_read_date_privacy_settings,
 };
 use crate::telegram::requests_story::{
     add_story_album_stories, create_story_album, delete_story_album, get_chat_archived_stories,
@@ -3203,6 +3208,195 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.call_privacy_loading = true;
         self.session.call_privacy_pending += 1;
+        Ok(extra)
+    }
+
+    /// Slice S3: fetch one Privacy-screen rule
+    /// (`getUserPrivacySettingRules`, schema 1.8.67, :15620).
+    pub fn fetch_privacy_rules(&mut self, key: PrivacySettingKey) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.privacy.insert(key, PrivacyKeyState::Loading);
+        let extra = self
+            .session
+            .request(RequestPurpose::GetPrivacyRules { key }, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_privacy_rules(extra, key.td_type()))
+        {
+            self.session.requests.take(extra);
+            self.session.privacy.insert(key, PrivacyKeyState::Failed);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Slice S3: change one Privacy-screen rule
+    /// (`setUserPrivacySettingRules`, schema 1.8.67, :15617). Applied
+    /// optimistically; the `ok` / error response confirms or fails it.
+    pub fn set_privacy_rules(
+        &mut self,
+        key: PrivacySettingKey,
+        detail: PrivacyRuleDetail,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetPrivacyRules { key }, None);
+        let rules = detail.recompose();
+        if let Err(err) = self
+            .sender
+            .send_json(&set_privacy_rules(extra, key.td_type(), rules))
+        {
+            self.session.requests.take(extra);
+            self.session.privacy.insert(key, PrivacyKeyState::Failed);
+            return Err(err);
+        }
+        self.session
+            .privacy
+            .insert(key, PrivacyKeyState::Ready(detail));
+        Ok(extra)
+    }
+
+    /// Slice S3: fetch the read-date privacy setting
+    /// (`getReadDatePrivacySettings`, schema 1.8.67, :15626).
+    pub fn fetch_read_date_privacy(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.read_date_loading = true;
+        self.session.read_date_error = false;
+        let extra = self
+            .session
+            .request(RequestPurpose::GetReadDatePrivacy, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_read_date_privacy_settings(extra))
+        {
+            self.session.requests.take(extra);
+            self.session.read_date_loading = false;
+            self.session.read_date_error = true;
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Slice S3: change the read-date privacy setting
+    /// (`setReadDatePrivacySettings`, schema 1.8.67, :15623). Applied
+    /// optimistically.
+    pub fn set_read_date_privacy(&mut self, show: bool) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetReadDatePrivacy, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&set_read_date_privacy_settings(extra, show))
+        {
+            self.session.requests.take(extra);
+            self.session.read_date_loading = false;
+            self.session.read_date_error = true;
+            return Err(err);
+        }
+        self.session.read_date_show = Some(show);
+        self.session.read_date_loading = true;
+        Ok(extra)
+    }
+
+    /// Slice S3: fetch the blocked-senders list
+    /// (`getBlockedMessageSenders`, schema 1.8.67, :14505). Pages of
+    /// 100; a later page continues from the loaded list length.
+    pub fn fetch_blocked_senders(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let offset = self
+            .session
+            .blocked_senders
+            .as_ref()
+            .map(|list| list.len())
+            .unwrap_or(0);
+        self.session.blocked_loading = true;
+        self.session.blocked_error = false;
+        let extra = self.session.request(
+            RequestPurpose::GetBlockedSenders {
+                offset: offset as i32,
+            },
+            None,
+        );
+        if let Err(err) =
+            self.sender
+                .send_json(&get_blocked_message_senders(extra, offset as i32, 100))
+        {
+            self.session.requests.take(extra);
+            self.session.blocked_loading = false;
+            self.session.blocked_error = true;
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Slice S3: unblock a user (`setMessageSenderBlockList` with a null
+    /// block list, schema 1.8.67, :14492 — TGX `Tdlib.unblockSender`).
+    /// Applied optimistically: the user leaves the list at send time.
+    pub fn unblock_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::SetSenderBlockList {
+                user_id,
+                block: false,
+            },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&set_message_sender_block_list(extra, user_id, false))
+        {
+            self.session.requests.take(extra);
+            self.session.blocked_error = true;
+            return Err(err);
+        }
+        if let Some(list) = self.session.blocked_senders.as_mut() {
+            list.retain(|id| *id != user_id);
+            self.session.blocked_total = self.session.blocked_total.saturating_sub(1);
+        }
+        Ok(extra)
+    }
+
+    /// Slice S3: block a user (`setMessageSenderBlockList` with
+    /// `blockListMain`, schema 1.8.67, :14492). Applied optimistically:
+    /// the user joins the list at send time.
+    pub fn block_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::SetSenderBlockList {
+                user_id,
+                block: true,
+            },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&set_message_sender_block_list(extra, user_id, true))
+        {
+            self.session.requests.take(extra);
+            self.session.blocked_error = true;
+            return Err(err);
+        }
+        let list = self.session.blocked_senders.get_or_insert_with(Vec::new);
+        if !list.contains(&user_id) {
+            list.push(user_id);
+            self.session.blocked_total += 1;
+        }
         Ok(extra)
     }
 

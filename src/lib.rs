@@ -23,6 +23,7 @@ pub mod pins;
 pub mod platform;
 pub mod playback;
 pub mod poll;
+pub mod privacy;
 pub mod rich;
 pub mod settings;
 pub mod state;

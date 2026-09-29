@@ -7,6 +7,7 @@ use crate::ids::{
     AccountGeneration, AccountKey, ChatId, FileId, MessageId, RequestId, ViewGeneration,
 };
 use crate::notify::{self, OsNotification, QueuedNotification};
+use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use crate::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MAX_BYTES, AUTO_DOWNLOAD_MUSIC,
     AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE,
@@ -43,6 +44,7 @@ use crate::telegram::envelope_story::ParsedStoryAlbum;
 use crate::telegram::requests::{
     ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
 };
+use crate::telegram::requests_privacy::PrivacySettingKey;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
@@ -944,6 +946,34 @@ pub enum RequestPurpose {
     /// new value is applied optimistically at send time.
     SetCallPrivacyRules {
         setting: CallPrivacySetting,
+    },
+    /// Slice S3: `getUserPrivacySettingRules` for a Privacy-screen key.
+    /// Response is `userPrivacySettingRules`.
+    GetPrivacyRules {
+        key: PrivacySettingKey,
+    },
+    /// Slice S3: `setUserPrivacySettingRules` for a Privacy-screen key.
+    /// Response is `ok`; the new detail is applied optimistically at
+    /// send time.
+    SetPrivacyRules {
+        key: PrivacySettingKey,
+    },
+    /// Slice S3: `getReadDatePrivacySettings`. Response is
+    /// `readDatePrivacySettings`.
+    GetReadDatePrivacy,
+    /// Slice S3: `setReadDatePrivacySettings`. Response is `ok`;
+    /// applied optimistically at send time.
+    SetReadDatePrivacy,
+    /// Slice S3: `getBlockedMessageSenders` page. Response is
+    /// `messageSenders`.
+    GetBlockedSenders {
+        offset: i32,
+    },
+    /// Slice S3: `setMessageSenderBlockList`. Response is `ok`; an
+    /// unblock is applied optimistically at send time.
+    SetSenderBlockList {
+        user_id: i64,
+        block: bool,
     },
     /// Phase C2i: `sendCallLog` for the ended call. Response is `ok`.
     SendCallLog,
@@ -4258,6 +4288,29 @@ pub struct Session {
     pub call_privacy_pending: u8,
     /// The last privacy get/set failed.
     pub call_privacy_error: bool,
+    /// Slice S3: per-key rule state for the Privacy screen
+    /// (`userPrivacySettingShowStatus`, `ShowPhoneNumber`,
+    /// `ShowProfilePhoto`, `ShowLinkInForwardedMessages`,
+    /// `AllowChatInvites`; schema 1.8.67, :8981-:9003). Present only
+    /// after a fetch was attempted — absent means never requested.
+    pub privacy: HashMap<PrivacySettingKey, PrivacyKeyState>,
+    /// Slice S3: `readDatePrivacySettings.show_read_date` (schema 1.8.67,
+    /// :9026) — `None` while never fetched.
+    pub read_date_show: Option<bool>,
+    /// A read-date get/set round-trip is in flight.
+    pub read_date_loading: bool,
+    /// The last read-date get/set failed.
+    pub read_date_error: bool,
+    /// Slice S3: blocked user ids from `getBlockedMessageSenders`
+    /// (schema 1.8.67, :14505); `None` while never fetched.
+    pub blocked_senders: Option<Vec<i64>>,
+    /// `total_count` from the last `messageSenders` answer; more pages
+    /// exist while `blocked_senders.len() < blocked_total`.
+    pub blocked_total: i32,
+    /// A blocked-senders page is in flight.
+    pub blocked_loading: bool,
+    /// The last blocked-senders get/set failed.
+    pub blocked_error: bool,
     /// Phase C2i: local call preferences (confirm-before-calling,
     /// less-data), persisted via `settings::CallPrefs`. The driver
     /// loads them at startup; the UI saves on toggle.
@@ -5228,6 +5281,14 @@ impl Session {
             call_privacy_loading: false,
             call_privacy_pending: 0,
             call_privacy_error: false,
+            privacy: HashMap::new(),
+            read_date_show: None,
+            read_date_loading: false,
+            read_date_error: false,
+            blocked_senders: None,
+            blocked_total: 0,
+            blocked_loading: false,
+            blocked_error: false,
             call_prefs: CallPrefs::default(),
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
@@ -7576,16 +7637,78 @@ impl Session {
             // rule list to the simple Everybody / Contacts / Nobody
             // choice (`None` when the account has custom rules the UI
             // cannot represent; the radios then show nothing selected).
+            // Slice S3: the Privacy-screen keys keep the full parsed
+            // detail (exception lists) instead.
             EnvelopePayload::UserPrivacySettingRules { rules } => {
-                if let Some(RequestPurpose::GetCallPrivacyRules { setting }) =
+                if let Some(purpose) = pending.map(|p| p.purpose) {
+                    match purpose {
+                        RequestPurpose::GetCallPrivacyRules { setting } => {
+                            let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
+                            let who = PrivacyWho::from_rule_names(&names);
+                            match setting {
+                                CallPrivacySetting::AllowCalls => {
+                                    self.call_privacy_allow_calls = who
+                                }
+                                CallPrivacySetting::PeerToPeer => self.call_privacy_p2p = who,
+                            }
+                            self.privacy_roundtrip_done();
+                        }
+                        RequestPurpose::GetPrivacyRules { key } => {
+                            self.privacy.insert(
+                                key,
+                                PrivacyKeyState::Ready(PrivacyRuleDetail::from_rules(&rules)),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Slice S3: `updateUserPrivacySettingRules` (:10871) — rules
+            // changed on another device; only refresh keys the Privacy
+            // screen (or the C2i calls UI) owns.
+            EnvelopePayload::UpdateUserPrivacySettingRules { setting, rules } => {
+                let detail = PrivacyRuleDetail::from_rules(&rules);
+                if let Some(key) = PrivacySettingKey::all()
+                    .into_iter()
+                    .find(|k| k.td_type() == setting)
+                {
+                    self.privacy.insert(key, PrivacyKeyState::Ready(detail));
+                } else if setting == CallPrivacySetting::AllowCalls.td_type() {
+                    let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
+                    self.call_privacy_allow_calls = PrivacyWho::from_rule_names(&names);
+                } else if setting == CallPrivacySetting::PeerToPeer.td_type() {
+                    let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
+                    self.call_privacy_p2p = PrivacyWho::from_rule_names(&names);
+                }
+            }
+            // Slice S3: `readDatePrivacySettings` answer.
+            EnvelopePayload::ReadDatePrivacySettings { show_read_date } => {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::GetReadDatePrivacy)
+                ) {
+                    self.read_date_show = Some(show_read_date);
+                    self.read_date_loading = false;
+                    self.read_date_error = false;
+                }
+            }
+            // Slice S3: `messageSenders` answer — one blocked-senders
+            // page. Later pages append; a refetch restarts at 0.
+            EnvelopePayload::BlockedMessageSenders {
+                total_count,
+                sender_ids,
+            } => {
+                if let Some(RequestPurpose::GetBlockedSenders { offset }) =
                     pending.map(|p| p.purpose)
                 {
-                    let who = PrivacyWho::from_rule_names(&rules);
-                    match setting {
-                        CallPrivacySetting::AllowCalls => self.call_privacy_allow_calls = who,
-                        CallPrivacySetting::PeerToPeer => self.call_privacy_p2p = who,
+                    self.blocked_total = total_count;
+                    if offset == 0 {
+                        self.blocked_senders = Some(sender_ids);
+                    } else if let Some(list) = self.blocked_senders.as_mut() {
+                        list.extend(sender_ids);
                     }
-                    self.privacy_roundtrip_done();
+                    self.blocked_loading = false;
+                    self.blocked_error = false;
                 }
             }
             EnvelopePayload::FoundChatMessages {
@@ -8714,6 +8837,19 @@ impl Session {
                 ) {
                     self.privacy_roundtrip_done();
                 }
+                // Slice S3: `setReadDatePrivacySettings` confirmed — clear
+                // the optimistic spinner (the value itself was set at
+                // send time). `setUserPrivacySettingRules` /
+                // `setMessageSenderBlockList` are fully optimistic: a
+                // confirming `ok` needs no state change; failures are
+                // handled in the error arm below.
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::SetReadDatePrivacy)
+                ) {
+                    self.read_date_loading = false;
+                    self.read_date_error = false;
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
                     // A short OK is not exhaustion; 404 is.
                 }
@@ -9192,6 +9328,36 @@ impl Session {
                         }
                         self.privacy_roundtrip_done();
                         self.call_privacy_error = true;
+                    }
+                    // Slice S3: privacy-screen request failures surface
+                    // on the Privacy screen (the UI reads the state),
+                    // never as toasts.
+                    Some(RequestPurpose::GetPrivacyRules { key }) => {
+                        self.privacy.insert(key, PrivacyKeyState::Failed);
+                    }
+                    Some(RequestPurpose::SetPrivacyRules { key }) => {
+                        self.privacy.insert(key, PrivacyKeyState::Failed);
+                    }
+                    Some(RequestPurpose::GetReadDatePrivacy) => {
+                        self.read_date_loading = false;
+                        self.read_date_error = true;
+                    }
+                    Some(RequestPurpose::SetReadDatePrivacy) => {
+                        self.read_date_loading = false;
+                        self.read_date_error = true;
+                        // The optimistic value is dropped; the next
+                        // fetch restores the truth.
+                        self.read_date_show = None;
+                    }
+                    Some(RequestPurpose::GetBlockedSenders { .. }) => {
+                        self.blocked_loading = false;
+                        self.blocked_error = true;
+                    }
+                    Some(RequestPurpose::SetSenderBlockList { .. }) => {
+                        self.blocked_error = true;
+                        // Drop the optimistic list; the next fetch
+                        // restores the truth.
+                        self.blocked_senders = None;
                     }
                     Some(RequestPurpose::SendCallLog) => {
                         if let Some(summary) = self.call_summary.as_mut() {

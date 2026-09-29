@@ -534,15 +534,15 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] List of chats with custom notification exceptions (partial: per-chat settings can be set, but no exceptions list view) <!-- parity:settings-notif-exceptions -->
 - [ ] Reset all notification settings <!-- parity:settings-reset-notif -->
 - [ ] In-app notification sounds toggle <!-- parity:settings-inapp-sound -->
-- [ ] Privacy: Last Seen & Online <!-- parity:settings-privacy-lastseen -->
-- [ ] Privacy: Phone Number visibility <!-- parity:settings-privacy-phone -->
-- [ ] Privacy: Profile Photos visibility <!-- parity:settings-privacy-photo -->
-- [ ] Privacy: Forward My Messages (link in forwarded messages) <!-- parity:settings-privacy-forwards -->
-- [ ] Privacy: Call Me, incl. peer-to-peer calls <!-- parity:settings-privacy-calls -->
-- [ ] Privacy: Add Me to Groups and Channels <!-- parity:settings-privacy-invites -->
-- [ ] Privacy: See My Read Date <!-- parity:settings-privacy-readreceipts -->
-- [ ] Blocked users list <!-- parity:settings-blocked-users -->
-- [ ] Privacy exceptions per rule (always allow / never allow user lists) <!-- parity:settings-privacy-exceptions -->
+- [x] Privacy: Last Seen & Online <!-- parity:settings-privacy-lastseen -->
+- [x] Privacy: Phone Number visibility <!-- parity:settings-privacy-phone -->
+- [x] Privacy: Profile Photos visibility <!-- parity:settings-privacy-photo -->
+- [x] Privacy: Forward My Messages (link in forwarded messages) <!-- parity:settings-privacy-forwards -->
+- [x] Privacy: Call Me, incl. peer-to-peer calls (partial: base Everybody/Contacts/Nobody choice only; call exceptions not editable — see DECISIONS.md) <!-- parity:settings-privacy-calls -->
+- [x] Privacy: Add Me to Groups and Channels <!-- parity:settings-privacy-invites -->
+- [x] Privacy: See My Read Date <!-- parity:settings-privacy-readreceipts -->
+- [x] Blocked users list <!-- parity:settings-blocked-users -->
+- [x] Privacy exceptions per rule (always allow / never allow user lists; rule keys only — call rules keep the base choice, see DECISIONS.md) <!-- parity:settings-privacy-exceptions -->
 - [ ] Auto-download per network (mobile / Wi-Fi / roaming) and media type <!-- parity:settings-auto-download -->
 - [ ] Use less data for calls <!-- parity:settings-less-data-calls -->
 - [ ] Storage usage view with per-chat / file-type breakdown <!-- parity:settings-storage-usage -->

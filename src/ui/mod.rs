@@ -2,11 +2,13 @@ mod account_lifecycle;
 mod appearance;
 mod auth_recovery;
 mod chat_theme;
+mod privacy;
 mod story_areas;
 mod synthetic;
 
 pub(crate) use account_lifecycle::*;
 pub(crate) use chat_theme::*;
+pub(crate) use privacy::{PrivacyEditorTarget, PrivacyExceptionKind, apply_ready_privacy};
 
 mod dialogs;
 
@@ -703,6 +705,18 @@ pub struct QuillApp {
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
     appearance_applied: Option<(ThemeMode, u32)>,
+    /// Slice S3: Privacy settings overlay (TGX Settings → Privacy).
+    privacy_open: bool,
+    /// Slice S3: per-rule editor overlay target (Privacy screen).
+    privacy_editor: Option<PrivacyEditorTarget>,
+    /// Slice S3: exception list overlay — the rule and always/never kind.
+    privacy_exceptions: Option<(PrivacyEditorTarget, PrivacyExceptionKind)>,
+    /// Slice S3: add-exception contact picker inside the exceptions overlay.
+    exception_picker_open: bool,
+    /// Slice S3: block-user contact picker inside the Privacy overlay.
+    block_picker_open: bool,
+    /// Slice S3: two-step Unblock confirm on the Privacy screen.
+    unblock_confirm: Option<i64>,
     /// Slice A2: two-step verification overlay. `twofa_view` picks the
     /// status screen or one of the forms; the four textareas back the
     /// enable/change/disable/recovery-email forms. Passwords live in the
@@ -1489,6 +1503,9 @@ pub enum ScreenshotDemo {
     /// history (missed / declined / answered) + call settings
     /// (injected, no live Telegram).
     ReadyCallsSettings,
+    /// Slice S3: Privacy overlay (Settings → Privacy) — five rules,
+    /// read-date setting, blocked list (injected, no live Telegram).
+    ReadyPrivacy,
     /// Slice A2: two-step verification overlay — password set with
     /// recovery email (injected `passwordState`, no live Telegram).
     Ready2faManage,
@@ -2899,6 +2916,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyPrivacy) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — privacy settings (injected, no live Telegram)".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             None => bootstrap_connect(credentials),
         };
 
@@ -2984,6 +3010,13 @@ impl QuillApp {
             twofa_email,
             twofa_notice: None,
             account_lifecycle: AccountLifecycleState::new(window, cx),
+            // Slice S3: privacy screen state.
+            privacy_open: false,
+            privacy_editor: None,
+            privacy_exceptions: None,
+            exception_picker_open: false,
+            block_picker_open: false,
+            unblock_confirm: None,
             search_input,
             chat_search_input,
             forward_search_input,
@@ -4014,6 +4047,17 @@ impl QuillApp {
             app.status_note =
                 "screenshot demo — recent calls + call settings (injected, no live Telegram)"
                     .into();
+        }
+        // Slice S3: Privacy overlay with injected rules, the read-date
+        // setting, and the blocked list (no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadyPrivacy)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_privacy(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.privacy_open = true;
+            app.status_note =
+                "screenshot demo — privacy settings (injected, no live Telegram)".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             app.composer.update(cx, |input, cx| {
@@ -37535,6 +37579,17 @@ impl Render for QuillApp {
             // Dialog via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): appearance now hosted in a kit Dialog via
             // the shell sync — render wiring deleted.
+            // Slice S3: privacy overlay (Settings → Privacy) plus the
+            // per-rule editor and the always/never exception list.
+            .when(self.privacy_open, |this| {
+                this.child(self.privacy_overlay(cx))
+            })
+            .when_some(self.privacy_editor_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            .when_some(self.privacy_exceptions_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             // Phase C3a: group-call (voice chat) overlay above the call
@@ -39712,6 +39767,18 @@ impl QuillApp {
                             cx.notify();
                         }),
                     ));
+                    // Slice S3: privacy overlay entry (TGX Settings →
+                    // Privacy). Quill has no settings screen, so it sits
+                    // next to the storage entry; it fetches all privacy
+                    // rules, the read-date setting, and the first blocked
+                    // page on open (unguarded: always fresh).
+                    list = list.child(
+                        Button::new("privacy-settings")
+                            .label("🔒 Privacy")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_privacy(cx);
+                            })),
+                    );
                     // Slice A2: two-step verification overlay entry (TGX
                     // `TwoStepVerification`). Quill has no settings
                     // screen, so it sits next to the storage entry; it

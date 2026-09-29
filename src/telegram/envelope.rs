@@ -2,6 +2,7 @@ use super::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use super::story_areas::parse_story_areas;
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 use crate::ids::{ChatId, FileId, MessageId, RequestId, UserId};
+use crate::privacy::PrivacyRule;
 use crate::rich::{RichBlock, parse_rich_message};
 use crate::telegram::envelope_story::{ParsedStoryAlbum, parse_story_album};
 use crate::telegram::requests::ArchiveChatListSettings;
@@ -518,9 +519,28 @@ pub enum EnvelopePayload {
         next_offset: String,
     },
     /// Phase C2i: `userPrivacySettingRules` — `getUserPrivacySettingRules`.
-    /// Rule constructor names (`userPrivacySettingRuleAllowAll`, …).
+    /// Slice S3: now carries the parsed rule details (exception user ids),
+    /// not just constructor names.
     UserPrivacySettingRules {
-        rules: Vec<String>,
+        rules: Vec<PrivacyRule>,
+    },
+    /// Slice S3: `updateUserPrivacySettingRules` (schema 1.8.67, :10871) —
+    /// rules changed on another device; `setting` is the
+    /// `UserPrivacySetting` constructor name.
+    UpdateUserPrivacySettingRules {
+        setting: String,
+        rules: Vec<PrivacyRule>,
+    },
+    /// Slice S3: `readDatePrivacySettings` (schema 1.8.67, :9026) —
+    /// the `getReadDatePrivacySettings` answer.
+    ReadDatePrivacySettings {
+        show_read_date: bool,
+    },
+    /// Slice S3: `messageSenders` (schema 1.8.67, :14505) — the
+    /// `getBlockedMessageSenders` answer; only user senders are kept.
+    BlockedMessageSenders {
+        total_count: i32,
+        sender_ids: Vec<i64>,
     },
     /// `foundChatMessages` — `searchChatMessages`.
     FoundChatMessages {
@@ -7709,11 +7729,54 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 .cloned()
                 .unwrap_or_default();
             Ok(EnvelopePayload::UserPrivacySettingRules {
-                rules: rules
+                rules: rules.iter().map(PrivacyRule::parse).collect(),
+            })
+        }
+        // Slice S3: `updateUserPrivacySettingRules` (schema 1.8.67,
+        // :10871) — rules changed on another device.
+        "updateUserPrivacySettingRules" => {
+            let rules = value
+                .get("rules")
+                .and_then(|v| v.get("rules"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            Ok(EnvelopePayload::UpdateUserPrivacySettingRules {
+                setting: value
+                    .get("setting")
+                    .and_then(|v| v.get("@type"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                rules: rules.iter().map(PrivacyRule::parse).collect(),
+            })
+        }
+        // Slice S3: `readDatePrivacySettings` (schema 1.8.67, :9026) —
+        // the `getReadDatePrivacySettings` answer.
+        "readDatePrivacySettings" => Ok(EnvelopePayload::ReadDatePrivacySettings {
+            show_read_date: value
+                .get("show_read_date")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        // Slice S3: `messageSenders` (schema 1.8.67, :14505) — the
+        // `getBlockedMessageSenders` answer; only user senders kept.
+        "messageSenders" => {
+            let senders = value
+                .get("senders")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            Ok(EnvelopePayload::BlockedMessageSenders {
+                total_count: value
+                    .get("total_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                sender_ids: senders
                     .iter()
-                    .filter_map(|r| r.get("@type"))
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
+                    .filter(|s| s.get("@type").and_then(Value::as_str) == Some("messageSenderUser"))
+                    .filter_map(|s| s.get("user_id"))
+                    .filter_map(Value::as_i64)
                     .collect(),
             })
         }
