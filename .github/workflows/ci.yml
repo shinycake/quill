@@ -10,8 +10,6 @@ env:
   RUST_BACKTRACE: 1
 
 
-
-
 jobs:
   linux:
     name: linux-fmt-clippy-test
