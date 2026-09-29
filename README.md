@@ -46,8 +46,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Logout warning text: secret chats die, downloaded media erased (TGX SignOutHint2) (partial: logout works, no warning copy) <!-- parity:auth-logout-warning -->
 - [ ] Add another account / switch between accounts: single "accounts/primary" DB layout only, no account UI (settings.rs:39) <!-- parity:auth-multi-account -->
 - [ ] Change phone number: move contacts/groups/messages/media to a new number (partial: nothing in Quill; schema has no changePhoneNumber constructor — it re-runs the auth flow on the new number) <!-- parity:auth-change-number -->
-- [ ] Delete account with "Deleted Account" explainer (schema: deleteAccount) <!-- parity:auth-delete-account -->
-- [ ] Self-destruct-if-away timer (schema: getAccountTtl/setAccountTtl; TGX DeleteAccountIfAwayFor*) <!-- parity:auth-account-ttl -->
+- [ ] Delete account with "Deleted Account" explainer (partial: A7 backend shipped — deleteAccount builder + connect + reducer; confirmation dialog + explainer UI pending kit Phase 9) <!-- parity:auth-delete-account -->
+- [ ] Self-destruct-if-away timer (partial: A7 backend shipped — getAccountTtl/setAccountTtl builders + connect + cached days in state; picker UI pending kit Phase 9; TGX DeleteAccountIfAwayFor*) <!-- parity:auth-account-ttl -->
 - [x] Contacts list with empty state (ui/mod.rs:7729 contacts_list; telegram/requests.rs:364 getContacts) <!-- parity:auth-contacts-list -->
 - [x] Add contact via dialog: phone (required), first/last name -> addContact (ui/mod.rs:9469; telegram/requests.rs:379) <!-- parity:auth-contact-add -->
 - [x] Delete contact (schema: removeContacts; TGX DeleteContactConfirm) <!-- parity:auth-contact-delete -->

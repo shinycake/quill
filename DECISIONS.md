@@ -6031,3 +6031,27 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - `updateChatEmojiStatus` handling — chat-level update owned by the chat loop.
   - `updateTrendingStickerSets` live-update handling — consistent with S8 (no existing handling to extend; refetch-on-open covers it).
 - **ponytail notes:** `GetAnimatedEmoji` is a unit purpose with no query identity (same caveat as S9's GIF search) — the UI slice must serialize suggestions so a stale answer can't clobber a newer emoji. No recent-emoji storage was added (no TDLib API exists). No emoji-pack detail builder was added (`get_sticker_set` already covers pack contents by set id when the UI slice needs it).
+## Slice A7 — ACCOUNT LIFECYCLE: DELETE ACCOUNT + SELF-DESTRUCT TTL, BACKEND ONLY (2026-09-29)
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `accountTtl days:int32 = AccountTtl;` (:9053).
+  - `setAccountTtl ttl:accountTtl = Ok;` (:15666) — "Changes the period of inactivity after which the account of the current user will automatically be deleted".
+  - `getAccountTtl = AccountTtl;` (:15669).
+  - `deleteAccount reason:string password:string = Ok;` (:15675) — "Deletes the account of the current user, deleting all information associated with the user from the server. The phone number of the account can be used to create a new account." Notes: "Can be called before authorization when the current authorization state is authorizationStateWaitPassword"; "If the current user isn't authorized, then an empty string can be passed and account deletion can be canceled within one week".
+- **Built (backend; NO UI — kit Phase 9 owns `src/ui/mod.rs` until it merges):**
+  - Requests (`telegram/requests.rs`): `delete_account(extra, reason, password)`, `get_account_ttl(extra)`, `set_account_ttl(extra, days)` (ttl nested as `{"@type":"accountTtl","days":N}` per schema). JSON-shape unit test + schema-pin test for all four constructors.
+  - Envelope: new `EnvelopePayload::AccountTtl { days: i32 }` + parse arm (missing/invalid `days` degrades to 0, never a parse error).
+  - State: `RequestPurpose::{DeleteAccount, GetAccountTtl, SetAccountTtl { days }}`; `Session::{account_ttl_days, account_ttl_loading, account_mutating, account_error}` (init `None/false/false/None`). Reducer: `accountTtl` answer writes the cache only for our own in-flight `GetAccountTtl` (matched by `@extra`); `ok` on `SetAccountTtl` stores the confirmed sent days (the server confirmed the write of exactly this value — not an optimistic guess); `ok` on `DeleteAccount` changes nothing locally — the authoritative teardown arrives via TDLib's own `updateAuthorizationState` → `Closed`, already handled by `set_auth` (account invalidated, shutdown) — faking it client-side would be a lie; classified honest errors via the reused pure `sessions_error_line` formatter (no duplicate helper).
+  - Driver (`connect.rs`): `delete_account` (guarded on the authorized chats path, one mutation at a time; the password rides the request JSON only — never stored on session or diagnostics, the A2 rule), `get_account_ttl` (cached value reused, in-flight never duplicated, `Ok(None)` = no request needed), `set_account_ttl` (one mutation at a time, confirmed value lands from the authoritative `ok`).
+- **Key decisions (ponytail):**
+  - Reused `sessions_error_line` instead of a new `account_error_line` — it is a pure (action, error-class) formatter; the name is slightly session-flavored but a duplicate would be pure bloat.
+  - `DeleteAccount` ok does NOT proactively invalidate the account — TDLib's own state transition is the authority; `set_auth` already handles `Closed`.
+  - `change-number` was deliberately cut from this slice: the schema has no `changePhoneNumber` constructor (it re-runs the auth flow on the new number) and needs its own schema-research pass — it is the natural A7 follow-up.
+- **UI half (spec'd, ships the instant kit Phase 9 merges — kit-first, gpui-kit components):**
+  - Delete account: settings entry → kit confirm dialog with TGX-style "Deleted Account" explainer copy, optional reason field, 2FA password field when the account has a password (empty string otherwise, per schema), red destructive confirm; calls `delete_account(reason, password)`; surfaces `account_error` on the dialog; on success the app follows TDLib into the logged-out state (existing `Closed` handling).
+  - Self-destruct TTL: settings row showing the cached `account_ttl_days` (fetched via `get_account_ttl` on open), kit picker with 1 month / 3 months / 6 months / 1 year (30/90/180/365 days — verify exact TGX labels at implementation time) calling `set_account_ttl`; `account_error` surfaces on the row.
+- **Not verifiable without live Telegram:** real `deleteAccount` → `authorizationStateClosed` sequencing, real `setAccountTtl` → confirmed-days convergence, real TTL option values accepted server-side.
+- **Out of this slice (left unchecked with evidence):**
+  - `auth-change-number` (no schema constructor; needs concept-level research on the re-auth flow — next Loop 4 slice candidate).
+  - `auth-multi-account` (requires the `accounts/primary` DB layout change in `settings.rs:39` — a slice of its own).
+  - `auth-qr-authorize-other`, `auth-password-recovery` (backend pieces are small but each needs its own UI surface; queued behind the A7 UI half).

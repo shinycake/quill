@@ -106,7 +106,8 @@ use crate::telegram::requests::{
     send_chat_action_kind, send_document, send_group_call_message, send_message_album,
     send_payment_form as send_payment_form_request, send_photo, send_poll, send_rich_message,
     send_sticker, send_text, send_text_story_reply, send_video, send_video_note, send_voice_note,
-    set_archive_chat_list_settings, set_authentication_phone_number, set_bio, set_chat_description,
+    set_account_ttl, set_archive_chat_list_settings, set_authentication_phone_number, set_bio,
+    set_chat_description,
     set_chat_draft_message, set_chat_member_status, set_chat_member_tag,
     set_chat_message_auto_delete_time, set_chat_notification_settings, set_chat_permissions,
     set_chat_photo, set_chat_slow_mode_delay, set_chat_title, set_community_name,
@@ -11806,6 +11807,80 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.sessions_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A7: send `deleteAccount` (schema 1.8.67, line 15675).
+    /// Guarded on the authorized chats path; one mutation at a time.
+    /// The password rides the request JSON only — never stored on the
+    /// session or diagnostics (the A2 `password_op_send` rule).
+    pub fn delete_account(
+        &mut self,
+        reason: &str,
+        password: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.account_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.account_error = None;
+        let extra = self.session.request(RequestPurpose::DeleteAccount, None);
+        self.session.account_mutating = true;
+        match self
+            .sender
+            .send_json(&delete_account(extra, reason, password))
+        {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.account_mutating = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A7: send `getAccountTtl` (schema 1.8.67, line 15669). The
+    /// cached value is reused and an in-flight fetch is never duplicated
+    /// (`Ok(None)` = no request needed). The `password_op_send` fetch
+    /// pattern, minus the password bookkeeping.
+    pub fn get_account_ttl(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.account_ttl_days.is_some() || self.session.account_ttl_loading {
+            return Ok(None);
+        }
+        self.session.account_error = None;
+        let extra = self.session.request(RequestPurpose::GetAccountTtl, None);
+        self.session.account_ttl_loading = true;
+        match self.sender.send_json(&get_account_ttl(extra)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.account_ttl_loading = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Slice A7: send `setAccountTtl` (schema 1.8.67, line 15666). One
+    /// mutation at a time; the confirmed days land from the
+    /// authoritative `ok` (never an optimistic write).
+    pub fn set_account_ttl(&mut self, days: i32) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.account_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.account_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::SetAccountTtl { days }, None);
+        self.session.account_mutating = true;
+        match self.sender.send_json(&set_account_ttl(extra, days)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.account_mutating = false;
                 Err(err)
             }
         }

@@ -1100,6 +1100,19 @@ pub enum RequestPurpose {
     /// line 11811). Response is `ok`; the pack is reloaded on success and
     /// the new name arrives via `updateCommunity`.
     SetCommunityName,
+    /// Slice A7: `getAccountTtl`. Response is `accountTtl`, stored in
+    /// `Session::account_ttl_days`.
+    GetAccountTtl,
+    /// Slice A7: `setAccountTtl`. Response is `ok`; the confirmed `days`
+    /// are stored (the server confirmed the write of exactly this value).
+    SetAccountTtl {
+        days: i32,
+    },
+    /// Slice A7: `deleteAccount`. Response is `ok`; the authoritative
+    /// account teardown arrives via TDLib's own
+    /// `updateAuthorizationState` → `Closed` (already handled by
+    /// `set_auth`) — never faked client-side.
+    DeleteAccount,
     Close,
     LogOut,
     Other,
@@ -4056,6 +4069,18 @@ pub struct Session {
     /// is refetched from the authoritative answer on the next ingest
     /// (the `saved_sounds_stale` pattern); never an optimistic delete.
     pub sessions_stale: bool,
+    /// Slice A7: cached `getAccountTtl` answer, in days — drives the
+    /// self-destruct-if-away picker (UI half ships post-Phase-9).
+    pub account_ttl_days: Option<i32>,
+    /// Slice A7: a `getAccountTtl` round trip is in flight.
+    pub account_ttl_loading: bool,
+    /// Slice A7: a `deleteAccount` / `setAccountTtl` round trip is in
+    /// flight — the account surfaces stay disabled meanwhile.
+    pub account_mutating: bool,
+    /// Slice A7: honest one-line failure of the last account-lifecycle
+    /// op (classified from the TDLib error code, never the native
+    /// message). Cleared on the next attempt and on success.
+    pub account_error: Option<String>,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
     /// overlay.
@@ -5067,6 +5092,10 @@ impl Session {
             sessions_mutating: false,
             sessions_error: None,
             sessions_stale: false,
+            account_ttl_days: None,
+            account_ttl_loading: false,
+            account_mutating: false,
+            account_error: None,
             connected_websites: None,
             connected_websites_loading: false,
             websites_mutating: false,
@@ -8125,6 +8154,17 @@ impl Session {
                     self.sessions_stale = false;
                 }
             }
+            EnvelopePayload::AccountTtl { days } => {
+                // Slice A7: `getAccountTtl` answer — only our own
+                // in-flight request writes the cache (matched by
+                // `@extra`). Authoritative: replaces the cached days and
+                // clears any stale error.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
+                    self.account_ttl_days = Some(days);
+                    self.account_ttl_loading = false;
+                    self.account_error = None;
+                }
+            }
             EnvelopePayload::ConnectedWebsites { websites } => {
                 // Slice A4: `getConnectedWebsites` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
@@ -8271,6 +8311,26 @@ impl Session {
                     self.sessions_stale = true;
                     self.sessions_mutating = false;
                     self.sessions_error = None;
+                }
+                // Slice A7: a `setAccountTtl` succeeded — the server
+                // confirmed the write of exactly the sent value, so it
+                // is stored directly (not an optimistic guess). A
+                // `deleteAccount` success needs no local state change:
+                // the authoritative teardown arrives via TDLib's own
+                // `updateAuthorizationState` → `Closed` (`set_auth`
+                // invalidates the account there). Both clear the
+                // in-flight flag and any stale error.
+                if let Some(RequestPurpose::SetAccountTtl { days }) = pending.map(|p| p.purpose) {
+                    self.account_ttl_days = Some(days);
+                    self.account_mutating = false;
+                    self.account_error = None;
+                }
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::DeleteAccount)
+                ) {
+                    self.account_mutating = false;
+                    self.account_error = None;
                 }
                 // Slice A4: a `disconnectWebsite` /
                 // `disconnectAllWebsites` succeeded — same stale pattern
@@ -9434,6 +9494,23 @@ impl Session {
                         self.sessions_mutating = false;
                         self.sessions_error =
                             Some(sessions_error_line("change the session setting", &err));
+                    }
+                    // Slice A7: a refused account-lifecycle op (TTL fetch
+                    // or set, account deletion) clears the in-flight
+                    // flags and parks the honest, classified error line —
+                    // never a fake success, never an optimistic change.
+                    // `sessions_error_line` is reused: it is a pure
+                    // (action, error-class) formatter, not session-bound.
+                    Some(RequestPurpose::GetAccountTtl) => {
+                        self.account_ttl_loading = false;
+                        self.account_error = Some(sessions_error_line(
+                            "load the account inactivity timer",
+                            &err,
+                        ));
+                    }
+                    Some(RequestPurpose::SetAccountTtl { .. } | RequestPurpose::DeleteAccount) => {
+                        self.account_mutating = false;
+                        self.account_error = Some(sessions_error_line("update the account", &err));
                     }
                     // Slice A4: a failed websites fetch or disconnect
                     // clears the in-flight flags and parks the honest,
@@ -20178,6 +20255,119 @@ mod tests {
         assert_eq!(
             session.sessions_error.as_deref(),
             Some("Could not load the sessions list: too many requests — wait and try again")
+        );
+    }
+
+    /// Slice A7: the `getAccountTtl` answer writes the cache — but only
+    /// for our own in-flight request (matched by `@extra`).
+    #[test]
+    fn account_ttl_answer_writes_cache_for_matching_request() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::GetAccountTtl, None);
+        session.account_ttl_loading = true;
+        session.account_error = Some("stale".into());
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"accountTtl","@extra":"{}","days":180}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.account_ttl_days, Some(180));
+        assert!(!session.account_ttl_loading);
+        assert!(session.account_error.is_none());
+    }
+
+    /// Slice A7: a `setAccountTtl` ok stores the confirmed days (the
+    /// server confirmed the write of exactly the sent value) and clears
+    /// the in-flight flag.
+    #[test]
+    fn set_account_ttl_ok_stores_confirmed_days() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.account_ttl_days = Some(90);
+        session.account_mutating = true;
+        let extra = session.request(RequestPurpose::SetAccountTtl { days: 365 }, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert_eq!(session.account_ttl_days, Some(365));
+        assert!(!session.account_mutating);
+        assert!(session.account_error.is_none());
+    }
+
+    /// Slice A7: a `deleteAccount` ok changes nothing locally — the
+    /// authoritative teardown arrives via TDLib's own
+    /// `updateAuthorizationState` → `Closed`. It only clears the
+    /// in-flight flag and any stale error.
+    #[test]
+    fn delete_account_ok_clears_mutating_without_local_teardown() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.account_mutating = true;
+        session.account_error = Some("stale".into());
+        let extra = session.request(RequestPurpose::DeleteAccount, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(!session.account_mutating);
+        assert!(session.account_error.is_none());
+    }
+
+    /// Slice A7: a refused TTL fetch clears the spinner and parks an
+    /// honest classified error.
+    #[test]
+    fn account_ttl_fetch_error_surfaces_honestly() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.account_ttl_loading = true;
+        let extra = session.request(RequestPurpose::GetAccountTtl, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"BAD_REQUEST"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.account_ttl_loading);
+        assert_eq!(
+            session.account_error.as_deref(),
+            Some("Could not load the account inactivity timer: Telegram refused the request")
+        );
+    }
+
+    /// Slice A7: a refused delete clears the in-flight flag and parks an
+    /// honest classified error.
+    #[test]
+    fn delete_account_error_surfaces_honestly() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.account_mutating = true;
+        let extra = session.request(RequestPurpose::DeleteAccount, None);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"PASSWORD_HASH_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert!(!session.account_mutating);
+        assert_eq!(
+            session.account_error.as_deref(),
+            Some("Could not update the account: Telegram refused the request")
         );
     }
 
