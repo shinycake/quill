@@ -62,7 +62,10 @@ pub fn set_media_cache_scope(scope: &str) {
 }
 
 fn media_cache_scope() -> &'static str {
-    MEDIA_CACHE_SCOPE.get_or_init(|| "primary".to_owned())
+    // Non-initializing read: a startup sweep must not poison the scope
+    // before `prepare_connect` sets it.
+    static FALLBACK: &str = "primary";
+    MEDIA_CACHE_SCOPE.get().map_or(FALLBACK, String::as_str)
 }
 
 /// Account-scoped base for decrypted media scratch (GIF/video/viewer frames,
@@ -74,11 +77,12 @@ pub fn media_cache_base() -> PathBuf {
         .join(media_cache_scope())
 }
 
-/// Remove the whole account-scoped media cache plus the legacy pre-fix
-/// layouts (world-readable). Logout, startup sweep, media expiry.
-/// Best-effort; the directories are regenerable scratch.
+/// Remove every account's media cache plus the legacy pre-fix layouts
+/// (world-readable). Startup sweep, logout, media expiry. Best-effort; the
+/// directories are regenerable scratch. Sweeps the whole parent without
+/// reading the account scope, so a startup sweep can never poison it.
 pub fn sweep_media_caches() {
-    let _ = std::fs::remove_dir_all(media_cache_base());
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join("quill-media-cache"));
     for legacy in [
         "quill-gif-frames",
         "quill-video-frames",
@@ -103,6 +107,14 @@ pub fn secure_create_dir(path: &Path) -> std::io::Result<()> {
     })?;
     let mut cur = temp;
     for component in rel.components() {
+        // Only plain names are allowed: `..`/prefixes/root would resolve
+        // outside the cache tree via `symlink_metadata`'s `..` handling.
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "media cache path must be plain components",
+            ));
+        }
         cur.push(component);
         match std::fs::symlink_metadata(&cur) {
             Ok(meta) if meta.file_type().is_symlink() => {

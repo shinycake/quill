@@ -4,8 +4,8 @@
 //! duration, and a play control, then plays inline. Unigram does the same with
 //! TDLib `video`. GPUI has no video surface, so Quill extracts a short preview
 //! with `ffmpeg` — the same approach as GIF frames — and loops those frames
-//! until Pause. Frames live under `quill-video-frames/{file_id}`. That cache
-//! root is on the display allowlist; other temp paths stay blocked.
+//! until Pause. Frames live under `quill-media-cache/{account}/video-frames/{file_id}`.
+//! That cache root is on the display allowlist; other temp paths stay blocked.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
