@@ -12,7 +12,7 @@ HARD_CAP=2000
 WAIVERS=(
   "src/ui/mod.rs:48465"
   "src/connect.rs:24109"
-  "src/state.rs:21198"
+  "src/state.rs:21173"
   "src/telegram/envelope.rs:18293"
   "src/telegram/requests.rs:10407"
   "src/calls/engine.rs:3212"

@@ -20530,7 +20530,9 @@ mod tests {
 
     /// Slice A8: a `checkPhoneNumberCode` ok updates the own user's phone
     /// number (the server confirmed the change of exactly the sent
-    /// number) and clears the code-entry state.
+    /// number), clears the code-entry state, and drops any stale
+    /// in-flight send/resend purpose — a late resend answer landing after
+    /// the number changed must not resurrect the code-entry state.
     #[test]
     fn check_code_ok_updates_own_phone_number() {
         let (mut session, sink) = session();
@@ -20547,6 +20549,7 @@ mod tests {
         session.change_number_phone = Some("+15550199".into());
         session.change_number_checking = true;
         session.change_number_error = Some("stale".into());
+        let resend_extra = session.request(RequestPurpose::ResendPhoneNumberCode, None);
         let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
         apply_json(
             &mut session,
@@ -20558,34 +20561,6 @@ mod tests {
         assert!(session.change_number_phone.is_none());
         assert!(!session.change_number_checking);
         assert!(session.change_number_error.is_none());
-    }
-
-    /// Slice A8: a `checkPhoneNumberCode` ok drops any stale in-flight
-    /// send/resend purpose — a late resend answer landing after the
-    /// number changed must not resurrect the code-entry state.
-    #[test]
-    fn check_code_ok_drops_stale_resend_purpose() {
-        let (mut session, sink) = session();
-        let seq = AtomicU64::new(0);
-        session.my_user_id = Some(31);
-        session.users.insert(
-            31,
-            ParsedUser {
-                id: 31,
-                phone_number: "+15550131".into(),
-                ..Default::default()
-            },
-        );
-        session.change_number_phone = Some("+15550199".into());
-        session.change_number_checking = true;
-        let resend_extra = session.request(RequestPurpose::ResendPhoneNumberCode, None);
-        let check_extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, check_extra.0),
-        );
         // The stale resend purpose is gone: its late answer writes nothing.
         apply_json(
             &mut session,
