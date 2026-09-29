@@ -198,14 +198,6 @@ trait PressableDiv {
     fn pressable(self, theme: &Theme) -> Self;
 }
 
-impl PressableDiv for Div {
-    fn pressable(self, theme: &Theme) -> Self {
-        // Bare `Div` has no `.active()` (stateful interactivity needs
-        // `.id()`); hover tint only.
-        self.hover(|s| s.bg(theme.accent.opacity(0.10)))
-    }
-}
-
 impl PressableDiv for gpui_kit::Stateful<Div> {
     fn pressable(self, theme: &Theme) -> Self {
         self.hover(|s| s.bg(theme.accent.opacity(0.10)))
@@ -8608,7 +8600,6 @@ impl QuillApp {
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .when(highlighted, |this| this.bg(cx.theme().selection))
-                    .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.pick_command_menu_index(index, window, cx);
                     }))
@@ -21769,10 +21760,14 @@ impl QuillApp {
                     .border_color(cx.theme().border)
                     .child(div().font_semibold().child(title))
                     .child(
-                        Button::new("shared-media-close")
-                            .icon(IconName::X)
-                            .ghost()
-                            .tooltip("Close shared media")
+                        div()
+                            .id("shared-media-close")
+                            .cursor_pointer()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("✕")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_shared_media_ui(cx);
                             })),
@@ -21881,7 +21876,6 @@ impl QuillApp {
                             .py_2()
                             .cursor_pointer()
                             .pressable(cx.theme())
-                            .hover(|this| this.bg(cx.theme().accent.opacity(0.12)))
                             .child(div().text_lg().child(item.glyph))
                             .child(
                                 div()
@@ -36837,7 +36831,6 @@ fn search_result_row(
         .rounded_md()
         .cursor_pointer()
         .pressable(cx.theme())
-        .hover(|style| style.bg(cx.theme().accent.opacity(0.12)))
         .on_click(cx.listener(move |this, _, window, cx| on_pick(this, window, cx)))
         .child(div().font_medium().child(title))
         .child(

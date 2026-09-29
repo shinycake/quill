@@ -8335,6 +8335,17 @@ impl Session {
                         self.payment_receipt_error =
                             Some(format!("Receipt failed: {}", error_reason(&err)));
                     }
+                    // kit Phase 9: a failed first `getChatHistory` must not
+                    // leave the message list without a history entry — the
+                    // skeleton shimmer would run forever. Create the entry
+                    // so the UI settles into the empty state.
+                    Some(RequestPurpose::GetHistory) => {
+                        if let Some(pending) = pending
+                            && let Some(chat_id) = pending.chat_id
+                        {
+                            self.histories.entry(chat_id.0).or_default();
+                        }
+                    }
                     _ => {}
                 }
                 // Slice G1: roll back optimistic mutations the server
