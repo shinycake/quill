@@ -315,7 +315,10 @@ mod tests {
     #[test]
     fn total_unread_excludes_muted_chats() {
         // Muted chats don't count (Telegram Desktop's default badge semantics).
-        let mut session = Session::new(AccountKey("tray-test-muted".into()), Arc::new(MemorySink::new()));
+        let mut session = Session::new(
+            AccountKey("tray-test-muted".into()),
+            Arc::new(MemorySink::new()),
+        );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, muted_chat(1, 9));
         assert_eq!(total_unread(&session), 5);
