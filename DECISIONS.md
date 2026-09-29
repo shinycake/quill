@@ -6504,3 +6504,22 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
 - **Not verifiable without live Telegram:** real `deleteChatReplyMarkup` acceptance after a force-reply; real placeholder strings from live bots.
 - **Out of this slice (left unchecked with evidence):**
   - `is_personal` on `replyMarkupForceReply` (schema `td_api.tl`:3840): Quill drops it at parse (`envelope.rs`) and arms unconditionally, while TGX only auto-shows the reply UI when `personal` (private chat: `showReply` without focus; group non-personal: no reply UI, still sends `DeleteChatReplyMarkup`). Needs an envelope/state-layer slice; the bar renders for non-personal force-replies in groups until then.
+
+## Slice S17 — show "choosing a sticker" chat action of others (2026-09-29)
+
+**Scope:** `parity:stickers-typing-action` — a peer's `chatActionChoosingSticker`
+renders as a "choosing a sticker…" status line in the conversation header and
+sidebar preview (previously only "typing…" was shown).
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `chatActionChoosingSticker = ChatAction;` (:6380) — "The user is picking a sticker to send". Single-valued, no params.
+- **Built:**
+  - `envelope.rs` +4: `ChatAction::ChoosingSticker` variant + parse arm (`Some("chatActionChoosingSticker")`, before the cancel arm). Neighboring actions (recording video, uploading photo, choosing location/contact) still map to the pre-existing `ChatAction::Other` — unchanged by this slice.
+  - `state.rs` +63: `choosing_sticker_senders: Vec<MessageSender>` field + init on `ChatSummary`; `set_sender_action` clears the sender from both lists then pushes to the matching one (`Cancel | Other` leaves both cleared — no accumulation); `peer_activity_label()` — sticker wins over typing, else `None`; `sidebar_preview` label swap. Unit test `chat_action_choosing_sticker_label` (cancel clears only the sticker sender).
+  - `src/ui/mod.rs` +11 (49090 → 49101): peer-activity label lookup on `conversation_header` + 3 "typing…" label swaps to `activity_label.unwrap_or("typing…")` + 1 gate-widening line (review fixup).
+  - README box `parity:stickers-typing-action` checked.
+- **Key decisions (ponytail):**
+  - Header gate fix (merge-pipeline review fixup): the activity line was gated on `typing` (`is_peer_typing()`, i.e. typing_senders non-empty), so a peer *only* picking a sticker never showed the label. The gate is now `typing || activity_label.is_some()` — and since `typing` ⟹ label is `Some`, this is exactly "any peer activity". The muted line stays suppressed while any activity shows, consistent with typing.
+  - No new send-path or state machinery: reuses the existing sender-action routing and the `typing_senders` lifecycle pattern.
+- **Not verifiable without live Telegram:** real `chatActionChoosingSticker` updates arriving from another client; real multi-sender interleavings.
+- **Out of this slice (left unchecked with evidence):** other `ChatAction` values still map to `Other` (pre-existing); `is_personal`/selective semantics for force-reply (separate follow-up).

@@ -28851,6 +28851,9 @@ impl QuillApp {
                 .and_then(|s| s.chats.get(&chat_id.0))
                 .and_then(|chat| chat.peer_activity_label())
         });
+        // S17: widen the gate — sticker-picking sets no typing senders, so
+        // `typing` alone would hide the "choosing a sticker…" label.
+        let typing = typing || activity_label.is_some();
         // Status lines kept for every chat kind (typing / muted).
         let identity: AnyElement = match (info_target, extras) {
             (Some(InfoPanelTarget::Supergroup(supergroup_id)), Some(ex)) => {

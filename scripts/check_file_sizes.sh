@@ -15,15 +15,18 @@ HARD_CAP=2000
 # types); the bump is exact and the PR body says why the code can't live
 # elsewhere.
 WAIVERS=(
-  "src/ui/mod.rs:49098"
+  "src/ui/mod.rs:49101"
   "src/connect.rs:24898"
   "src/state.rs:21721"
   "src/telegram/envelope.rs:18604"
   "src/telegram/requests.rs:10477"
   # Slice S17 (2026-09-29, merge-pipeline rebase post-#177): type-coherent
-  # extensions only — ui/mod.rs +8 (49090 → 49098: peer-activity label
+  # extensions only — ui/mod.rs +11 (49090 → 49101: peer-activity label
   # lookup on `conversation_header` + 3 "typing…" label swaps to
-  # `activity_label.unwrap_or("typing…")`); state.rs +63 (21658 → 21721:
+  # `activity_label.unwrap_or("typing…")` + 1 gate-widening line + 2-line
+  # comment (review fixup: sticker-picking sets no typing senders, so the
+  # header gate must be `typing || activity_label.is_some()`));
+  # state.rs +63 (21658 → 21721:
   # `choosing_sticker_senders` field + init on `ChatSummary`,
   # `set_sender_action` routing match, `peer_activity_label` method,
   # `sidebar_preview` label swap, `chat_action_choosing_sticker_label`
