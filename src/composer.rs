@@ -253,6 +253,9 @@ impl ComposerEdit {
             | MessageContent::Call { .. }
             // Phase S1: screenshot-taken service rows are not editable.
             | MessageContent::ScreenshotTaken
+            // Slice C2k: community service rows are not editable.
+            | MessageContent::ChatAddedToCommunity { .. }
+            | MessageContent::ChatRemovedFromCommunity
             // M2: rich messages are edited in the rich editor, not here.
             | MessageContent::RichMessage(_)
             // B1: games are not editable.
