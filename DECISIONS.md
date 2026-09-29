@@ -6267,3 +6267,22 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   - Photo via typed path, not a new `rfd` dependency — the app has no native file-picker infra anywhere; a dependency for one prompt is bloat.
   - README: the three boxes checked (375/525 = 71.4%).
 - **Not verifiable without live Telegram:** real `setChatTitle`/`setChatDescription`/`setChatPhoto` round-trips, real `updateChatTitle`/`updateChatPhoto` convergence, real rights-gate refusals from the server. Tested instead: driver gates/shapes (backend slice tests), client-side validation paths (code), and the screenshot demo (visual).
+## Slice S12 — STICKERS BACKEND: SUGGESTIONS BY EMOJI IN COMPOSER (2026-09-29)
+
+- **Rationale:** `parity:stickers-suggest-by-emoji` had zero TDLib/state wiring. The composer suggestion-row UI lives in `src/ui/mod.rs` (frozen for kit Phase 9), so this slice ships the complete backend: the mode preference, the trailing-emoji detection, and the `searchStickers` → suggestion-slot pipeline. The post-Phase-9 UI slice only calls `ConnectDriver::update_sticker_suggestions(composer_text)` on text change and renders `StickerPanel::suggestions`.
+- **Schema (1.8.67, verified verbatim in `schema/td_api.tl` — no invented constructors/fields):**
+  - `searchStickers sticker_type:StickerType emojis:string query:string input_language_codes:vector<string> offset:int32 limit:int32 = Stickers;` (line 14648) — the existing S8 `search_stickers` builder is reused as-is; suggestions pass the detected emoji as `emojis`, empty `query`, empty `input_language_codes`, offset 0, limit 12.
+  - No suggestion-mode setting exists (concept-level check: case-insensitive "suggest" over td_api.tl returns only staking/suggested-post constructors; there is no `sticker_suggest`-ish option or constructor) — the "Installed + recommended / Only installed / None" mode is a client-side preference, persisted in `MediaPrefs` like the other client-side media prefs (serde-defaulted so old prefs files still load).
+- **What was built:**
+  - `src/sticker_suggest.rs` (new, one responsibility): `StickerSuggestMode` (`InstalledAndRecommended` default / `InstalledOnly` / `None`, snake_case serde), `SUGGEST_LIMIT = 12`, and `suggest_emoji_for` — the last whitespace-delimited token when every char is emoji-ish. Hand-rolled emoji ranges (no new dependency; false negatives just mean no suggestions, never wrong ones).
+  - `src/settings.rs`: `MediaPrefs::sticker_suggest_mode` (+ serde default + `Default` impl entry).
+  - `src/state.rs`: `RequestPurpose::SuggestStickers`; `StickerPanel::{suggestions, suggest_for}`; `accept_sticker_suggestions` (InstalledOnly filters to installed set ids; None drops the answer — mode changed mid-flight) and `clear_sticker_suggestions`; dispatch in the `Stickers` arm purpose-gated so suggestion answers never clobber the search UI's `found_stickers`.
+  - `src/connect.rs`: `update_sticker_suggestions(text)` driver — None mode / no trailing emoji clears; unchanged emoji is not re-requested; a stale in-flight suggest is dropped via `take_purpose` before the new one goes out (a late answer can never land under a newer emoji); send failure clears `suggest_for` so the next keystroke retries.
+  - Tests: `sticker_suggest` unit tests (trailing emoji, trailing whitespace, ZWJ sequence, VS16, keycap, non-emoji tail, empty; mode default + serde roundtrip + missing-field default) and `s12_sticker_suggest_purpose_gated_dispatch` (all three modes, slot isolation, stray-answer ignore).
+- **Key decisions (ponytail):**
+  - No new dependency for emoji detection — hand-rolled ranges with a `ponytail:` comment naming the ceiling (false negatives → no suggestions; upgrade to a proper emoji-properties crate if misses become a real problem).
+  - Reused the S8 `search_stickers` builder rather than a suggestion-specific constructor (TDLib has none).
+  - `suggest_for` + `take_purpose` gives the one-in-flight invariant without a query-identity field on the purpose (unlike S9's GIF search, which documents its race).
+- **Out of this slice (left unchecked with evidence):**
+  - The composer suggestion-row UI (README `parity:stickers-suggest-by-emoji` stays `[ ]` with the partial note) — kit Phase 9 owns UI surfaces; the UI slice calls `update_sticker_suggestions` on composer text change and renders `suggestions` with a gpui-kit row.
+  - The settings toggle for the mode (settings UI pending; the pref is persisted and honored meanwhile).
