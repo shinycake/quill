@@ -311,6 +311,8 @@ pub fn prepare_connect<S: SecretStore + ?Sized>(
     store: &S,
     credentials: &TelegramCredentials,
 ) -> Result<PreparedConnect, ConnectBlocker> {
+    // Account-scope the private media caches before any extraction runs.
+    crate::local_path::set_media_cache_scope(&account.0);
     let plan = plan_restore(
         app_root,
         account.clone(),
