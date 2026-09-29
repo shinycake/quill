@@ -22,15 +22,16 @@ use crate::telegram::envelope::{
     LinkPreview, LoginUrlInfo, MessageAutoDelete, MessageContent, MessageForwardInfo,
     MessageInteractionInfo, MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct,
     MessageSender, NotificationSettingsScope, NotificationSound, OptionValue, ParsedCall,
-    ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedFile,
-    ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWebsite,
-    ParsedWelcomeMessage, PasswordState, PaymentFormData, PaymentReceiptData, Poll, ReplyKeyboard,
-    ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult, ReportStoryResult,
-    RichMessageContent, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
-    StickerFormat, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
-    StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
-    ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
+    ParsedChatEvent, ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember,
+    ParsedCommunity, ParsedCommunityFullInfo, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
+    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
+    ParsedUser, ParsedVideoChat, ParsedWebsite, ParsedWelcomeMessage, PasswordState,
+    PaymentFormData, PaymentReceiptData, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
+    ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
+    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
+    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryInteractionView,
+    StoryInteractionsView, StoryListView, TdError, UsernameCheckResult, ValidatedOrderInfoData,
+    effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::requests::{
@@ -1010,6 +1011,18 @@ pub enum RequestPurpose {
     PasswordStateOp {
         op: PasswordOp,
     },
+    /// Slice (communities backend core): `createCommunity` (schema 1.8.67,
+    /// line 11806). Response is `communityId`; the driver chains it into
+    /// `loadCommunityFullInfo`.
+    CreateCommunity,
+    /// Slice (communities backend core): `loadCommunityFullInfo` (schema
+    /// 1.8.67, line 11799). Response is `ok`; the pack arrives as
+    /// `updateCommunityFullInfo`.
+    LoadCommunityFullInfo,
+    /// Slice (communities backend core): `setCommunityName` (schema 1.8.67,
+    /// line 11811). Response is `ok`; the pack is reloaded on success and
+    /// the new name arrives via `updateCommunity`.
+    SetCommunityName,
     Close,
     LogOut,
     Other,
@@ -1386,6 +1399,10 @@ pub struct PendingRequest {
     /// Phase 6: `supergroup_id` for `GetSupergroupFullInfo` requests so the
     /// id-less `supergroupFullInfo` response lands on the right group.
     pub supergroup_id: Option<i64>,
+    /// Slice (communities backend core): `community_id` for
+    /// `LoadCommunityFullInfo` / `SetCommunityName` correlation and
+    /// per-community in-flight dedupe.
+    pub community_id: Option<i64>,
     /// Phase 9.1: `story_id` for `GetStory` requests so in-flight
     /// per-story dedupe distinguishes stories of the same chat.
     pub story_id: Option<i32>,
@@ -1452,6 +1469,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                community_id: None,
                 story_id: None,
                 folder_id: None,
                 scope: None,
@@ -1484,6 +1502,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                community_id: None,
                 story_id: None,
                 folder_id: None,
                 scope: None,
@@ -1517,6 +1536,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                community_id: None,
                 story_id: None,
                 folder_id: None,
                 scope: None,
@@ -1550,6 +1570,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                community_id: None,
                 story_id: None,
                 folder_id: None,
                 scope: None,
@@ -1581,6 +1602,7 @@ impl RequestRegistry {
                 forum_topic_id: None,
                 user_id: None,
                 supergroup_id: None,
+                community_id: None,
                 story_id: None,
                 folder_id: None,
                 scope: None,
@@ -1701,6 +1723,15 @@ impl RequestRegistry {
         self.pending
             .values()
             .any(|p| p.purpose == purpose && p.supergroup_id == Some(supergroup_id))
+    }
+
+    /// Slice (communities backend core): an in-flight request for a
+    /// purpose/community pair (`LoadCommunityFullInfo` /
+    /// `SetCommunityName`).
+    pub fn has_purpose_for_community(&self, purpose: RequestPurpose, community_id: i64) -> bool {
+        self.pending
+            .values()
+            .any(|p| p.purpose == purpose && p.community_id == Some(community_id))
     }
 
     /// Phase 9.1: an in-flight request for a purpose/chat/story triple
@@ -4197,6 +4228,14 @@ pub struct Session {
     /// Phase 6: cached `getSupergroupFullInfo`, keyed by supergroup id.
     /// Presence records "fetched".
     pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
+    /// Slice (communities backend core): communities by id, fed by
+    /// `updateCommunity` (schema 1.8.67, line 10726),
+    /// create-on-first-sight.
+    pub communities: HashMap<i64, ParsedCommunity>,
+    /// Slice (communities backend core): `communityFullInfo` cache, keyed
+    /// by community id, fed by `updateCommunityFullInfo` (schema 1.8.67,
+    /// line 10753). Presence records "fetched".
+    pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
     /// Phase D2: `getChatStatistics` fetch state, keyed by chat id.
     pub chat_statistics: HashMap<i64, ChatStatisticsFetch>,
     /// Phase D3a: `getChatInviteLinks` fetch state, keyed by chat id.
@@ -4989,6 +5028,8 @@ impl Session {
             contacts_notice: None,
             user_full_infos: HashMap::new(),
             supergroup_full_infos: HashMap::new(),
+            communities: HashMap::new(),
+            community_full_infos: HashMap::new(),
             chat_statistics: HashMap::new(),
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),
@@ -5941,6 +5982,26 @@ impl Session {
                     .insert(supergroup_id, has_aggressive_anti_spam_enabled);
                 self.supergroup_can_toggle_anti_spam
                     .insert(supergroup_id, can_toggle_aggressive_anti_spam);
+            }
+            // Slice (communities backend core): `communityId` (schema 1.8.67,
+            // line 2264) is the `createCommunity` response — the driver
+            // chains it into `loadCommunityFullInfo`; nothing to reduce.
+            EnvelopePayload::CommunityId { .. } => {}
+            // Slice (communities backend core): `updateCommunity` (schema
+            // 1.8.67, line 10726) — create-on-first-sight, like chat
+            // ingestion; the update carries the full object.
+            EnvelopePayload::UpdateCommunity { community } => {
+                self.communities.insert(community.id, community);
+            }
+            // Slice (communities backend core): `updateCommunityFullInfo`
+            // (schema 1.8.67, line 10753) — carries its own `community_id`,
+            // so it applies whenever it arrives (no pending correlation).
+            // The full pack replaces the cache.
+            EnvelopePayload::UpdateCommunityFullInfo {
+                community_id,
+                full_info,
+            } => {
+                self.community_full_infos.insert(community_id, full_info);
             }
             // Slice G2: welcome-message pack (`updateChatWelcomeMessages`,
             // schema 1.8.67, line 10649) — the full pack replaces the
@@ -8037,6 +8098,15 @@ impl Session {
                         if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                             self.welcome_messages.remove(&chat_id.0);
                             self.welcome_message_fetches.remove(&chat_id.0);
+                        }
+                    }
+                    // Slice (communities backend core): a
+                    // `setCommunityName` succeeded — drop the cached
+                    // full-info pack so the driver refetches it; the new
+                    // name itself arrives via `updateCommunity`.
+                    Some(RequestPurpose::SetCommunityName) => {
+                        if let Some(community_id) = pending.and_then(|p| p.community_id) {
+                            self.community_full_infos.remove(&community_id);
                         }
                     }
                     // Phase 9.5: a posted-story management call landed —
@@ -11121,6 +11191,21 @@ impl Session {
         let id = self.request(purpose, None);
         if let Some(pending) = self.requests.pending.get_mut(&id.0) {
             pending.supergroup_id = Some(supergroup_id);
+        }
+        id
+    }
+
+    /// Slice (communities backend core): like `request`, but stamps the
+    /// community id for `LoadCommunityFullInfo` / `SetCommunityName`
+    /// correlation (`PendingRequest::community_id`).
+    pub fn request_for_community(
+        &mut self,
+        purpose: RequestPurpose,
+        community_id: i64,
+    ) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.community_id = Some(community_id);
         }
         id
     }
@@ -15661,6 +15746,114 @@ mod tests {
         assert_eq!(info.description, "CANARY desc");
         assert_eq!(info.member_count, 4321);
         assert!(session.supergroup_full_info(78).is_none());
+    }
+
+    #[test]
+    fn community_updates_apply_create_name_change_full_info_replace() {
+        // Slice (communities backend core): `updateCommunity` (schema
+        // 1.8.67, line 10726) creates the community on first sight;
+        // `updateCommunityFullInfo` (line 10753) lands the full-info pack.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        assert!(!session.communities.contains_key(&42));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCommunity","community":{"@type":"community","id":42,"have_access":true,"name":"Rustaceans","date":1759000000}}"#,
+        );
+        let community = session
+            .communities
+            .get(&42)
+            .expect("created on first sight");
+        assert_eq!(community.name, "Rustaceans");
+        assert!(community.have_access);
+        assert_eq!(community.date, 1759000000);
+        // A second update with a new name replaces (the rename path;
+        // `setCommunityName` also broadcasts `updateCommunity`).
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCommunity","community":{"@type":"community","id":42,"have_access":true,"name":"Rustaceans+","date":1759000000}}"#,
+        );
+        assert_eq!(session.communities.get(&42).unwrap().name, "Rustaceans+");
+        // Full info replaces the whole pack.
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[{"@type":"communityChat","chat_id":7,"can_view_history":true,"is_hidden":true}],"administrator_count":3,"banned_count":1,"add_chat_request_count":2}}"#,
+        );
+        let info = session
+            .community_full_infos
+            .get(&42)
+            .expect("full info cached");
+        assert_eq!(info.administrator_count, 3);
+        assert_eq!(info.banned_count, 1);
+        assert_eq!(info.add_chat_request_count, 2);
+        assert_eq!(info.chats.len(), 1);
+        assert!(info.chats[0].is_hidden);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[],"administrator_count":4,"banned_count":0,"add_chat_request_count":0}}"#,
+        );
+        let info = session.community_full_infos.get(&42).unwrap();
+        assert_eq!(info.administrator_count, 4);
+        assert!(info.chats.is_empty());
+        // Unrelated communities are untouched.
+        assert!(!session.communities.contains_key(&43));
+        assert!(!session.community_full_infos.contains_key(&43));
+    }
+
+    #[test]
+    fn set_community_name_ok_drops_full_info_for_refetch() {
+        // Slice (communities backend core): a confirmed `setCommunityName`
+        // drops the cached full-info pack so the driver refetches it (the
+        // welcome-message-mutation pattern); an error leaves the cache
+        // alone, so nothing refetches.
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.community_full_infos.insert(
+            42,
+            ParsedCommunityFullInfo {
+                chats: Vec::new(),
+                administrator_count: 3,
+                banned_count: 0,
+                add_chat_request_count: 0,
+            },
+        );
+        let extra = session.request_for_community(RequestPurpose::SetCommunityName, 42);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert!(!session.community_full_infos.contains_key(&42));
+        // Error path: the cache stays.
+        session.community_full_infos.insert(
+            42,
+            ParsedCommunityFullInfo {
+                chats: Vec::new(),
+                administrator_count: 3,
+                banned_count: 0,
+                add_chat_request_count: 0,
+            },
+        );
+        let extra = session.request_for_community(RequestPurpose::SetCommunityName, 42);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"NAME_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.community_full_infos.contains_key(&42));
     }
 
     // Phase 6: `addContact` ok invalidates the contacts list for refetch.
