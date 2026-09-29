@@ -351,19 +351,19 @@ pub enum RequestPurpose {
     SearchEmojis,
     /// Slice S10: `getEmojiCategories` (td_api.tl:14738). Response is `emojiCategories`.
     GetEmojiCategories,
-    /// Slice S10: `getInstalledStickerSets` with `stickerTypeEmoji` (td_api.tl:14657). Response is `stickerSets`.
+    /// Slice S10: `getInstalledStickerSets` with `stickerTypeCustomEmoji` (td_api.tl:14657). Response is `stickerSets`.
     GetInstalledEmojiSets,
-    /// Slice S10: `getArchivedStickerSets` with `stickerTypeEmoji` (td_api.tl:14663). Response is `stickerSets`.
+    /// Slice S10: `getArchivedStickerSets` with `stickerTypeCustomEmoji` (td_api.tl:14663). Response is `stickerSets`.
     GetArchivedEmojiSets {
         first_page: bool,
     },
-    /// Slice S10: `getTrendingStickerSets` with `stickerTypeEmoji` (td_api.tl:14669). Response is `trendingStickerSets`.
+    /// Slice S10: `getTrendingStickerSets` with `stickerTypeCustomEmoji` (td_api.tl:14669). Response is `trendingStickerSets`.
     GetTrendingEmojiSets,
-    /// Slice S10: `searchStickerSets` with `stickerTypeEmoji` (td_api.tl:14689). Response is `stickerSets`.
+    /// Slice S10: `searchStickerSets` with `stickerTypeCustomEmoji` (td_api.tl:14689). Response is `stickerSets`.
     SearchEmojiSets,
     /// Slice S10: `changeStickerSet` on an emoji set (td_api.tl:14692). Response is `ok`.
     ChangeEmojiSet,
-    /// Slice S10: `reorderInstalledStickerSets` with `stickerTypeEmoji` (td_api.tl:14698). Response is `ok`.
+    /// Slice S10: `reorderInstalledStickerSets` with `stickerTypeCustomEmoji` (td_api.tl:14698). Response is `ok`.
     ReorderInstalledEmojiSets,
     /// `getSavedAnimations`. Response is `animations`.
     GetSavedAnimations,

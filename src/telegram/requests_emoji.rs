@@ -129,7 +129,7 @@ pub fn get_emoji_categories(extra: RequestId) -> String {
 }
 
 /// Slice S10: `getInstalledStickerSets` for custom-emoji sets
-/// (`stickerTypeEmoji`) — the "Emoji Sets" settings screen's installed list.
+/// (`stickerTypeCustomEmoji`) — the "Emoji Sets" settings screen's installed list.
 /// Response is `stickerSets`. (`changeStickerSet` is type-agnostic, so the
 /// existing `change_sticker_set` builder is reused for emoji-set
 /// install/archive/remove.)
@@ -137,19 +137,19 @@ pub fn get_installed_emoji_sets(extra: RequestId) -> String {
     json!({
         "@type": "getInstalledStickerSets",
         "@extra": extra.as_extra(),
-        "sticker_type": { "@type": "stickerTypeEmoji" },
+        "sticker_type": { "@type": "stickerTypeCustomEmoji" },
     })
     .to_string()
 }
 
 /// Slice S10: `getArchivedStickerSets` for custom-emoji sets
-/// (`stickerTypeEmoji`). `offset_set_id` pages (0 = first page). Response is
+/// (`stickerTypeCustomEmoji`). `offset_set_id` pages (0 = first page). Response is
 /// `stickerSets`.
 pub fn get_archived_emoji_sets(extra: RequestId, offset_set_id: i64, limit: i32) -> String {
     json!({
         "@type": "getArchivedStickerSets",
         "@extra": extra.as_extra(),
-        "sticker_type": { "@type": "stickerTypeEmoji" },
+        "sticker_type": { "@type": "stickerTypeCustomEmoji" },
         "offset_sticker_set_id": offset_set_id.to_string(),
         "limit": limit,
     })
@@ -157,7 +157,7 @@ pub fn get_archived_emoji_sets(extra: RequestId, offset_set_id: i64, limit: i32)
 }
 
 /// Slice S10: `getTrendingStickerSets` for custom-emoji sets
-/// (`stickerTypeEmoji`) — the discover/trending section. `offset`/`limit`
+/// (`stickerTypeCustomEmoji`) — the discover/trending section. `offset`/`limit`
 /// page the server list. Response is `trendingStickerSets`.
 /// (`viewTrendingStickerSets` is type-agnostic, so the existing
 /// `view_trending_sticker_sets` builder is reused.)
@@ -165,7 +165,7 @@ pub fn get_trending_emoji_sets(extra: RequestId, offset: i32, limit: i32) -> Str
     json!({
         "@type": "getTrendingStickerSets",
         "@extra": extra.as_extra(),
-        "sticker_type": { "@type": "stickerTypeEmoji" },
+        "sticker_type": { "@type": "stickerTypeCustomEmoji" },
         "offset": offset,
         "limit": limit,
     })
@@ -173,26 +173,26 @@ pub fn get_trending_emoji_sets(extra: RequestId, offset: i32, limit: i32) -> Str
 }
 
 /// Slice S10: `searchStickerSets` for custom-emoji sets
-/// (`stickerTypeEmoji`). Response is `stickerSets`.
+/// (`stickerTypeCustomEmoji`). Response is `stickerSets`.
 pub fn search_emoji_sets(extra: RequestId, query: &str) -> String {
     json!({
         "@type": "searchStickerSets",
         "@extra": extra.as_extra(),
-        "sticker_type": { "@type": "stickerTypeEmoji" },
+        "sticker_type": { "@type": "stickerTypeCustomEmoji" },
         "query": query,
     })
     .to_string()
 }
 
 /// Slice S10: `reorderInstalledStickerSets` for custom-emoji sets
-/// (`stickerTypeEmoji`) — manual pack order; `sticker_set_ids` is the full
+/// (`stickerTypeCustomEmoji`) — manual pack order; `sticker_set_ids` is the full
 /// new order. (The "dynamic order" toggle is computed client-side from
 /// recency — no TDLib setting exists.) Response is `ok`.
 pub fn reorder_installed_emoji_sets(extra: RequestId, set_ids: &[i64]) -> String {
     json!({
         "@type": "reorderInstalledStickerSets",
         "@extra": extra.as_extra(),
-        "sticker_type": { "@type": "stickerTypeEmoji" },
+        "sticker_type": { "@type": "stickerTypeCustomEmoji" },
         "sticker_set_ids": set_ids,
     })
     .to_string()
@@ -209,7 +209,7 @@ mod tests {
     /// `getUpgradedGiftEmojiStatuses` (:13960),
     /// `clearRecentEmojiStatuses` (:13966), `getAnimatedEmoji` (:14743),
     /// `getCustomEmojiStickers` (:14751), `searchEmojis` (:14732),
-    /// `getEmojiCategories` (:14738), and the `stickerTypeEmoji` pack
+    /// `getEmojiCategories` (:14738), and the `stickerTypeCustomEmoji` pack
     /// calls — `getInstalledStickerSets` (:14657),
     /// `getArchivedStickerSets` (:14663), `getTrendingStickerSets`
     /// (:14669), `searchStickerSets` (:14689),
@@ -280,34 +280,34 @@ mod tests {
         assert_eq!(v["type"], Value::Null);
 
         // Emoji packs: same constructors as S8's stickers, but
-        // `stickerTypeEmoji`.
+        // `stickerTypeCustomEmoji`.
         let v: serde_json::Value =
             serde_json::from_str(&get_installed_emoji_sets(RequestId(51))).unwrap();
         assert_eq!(v["@type"], "getInstalledStickerSets");
-        assert_eq!(v["sticker_type"]["@type"], "stickerTypeEmoji");
+        assert_eq!(v["sticker_type"]["@type"], "stickerTypeCustomEmoji");
 
         let v: serde_json::Value =
             serde_json::from_str(&get_archived_emoji_sets(RequestId(52), 0, 100)).unwrap();
         assert_eq!(v["@type"], "getArchivedStickerSets");
-        assert_eq!(v["sticker_type"]["@type"], "stickerTypeEmoji");
+        assert_eq!(v["sticker_type"]["@type"], "stickerTypeCustomEmoji");
         assert_eq!(v["offset_sticker_set_id"], "0");
         assert_eq!(v["limit"], 100);
 
         let v: serde_json::Value =
             serde_json::from_str(&get_trending_emoji_sets(RequestId(53), 0, 100)).unwrap();
         assert_eq!(v["@type"], "getTrendingStickerSets");
-        assert_eq!(v["sticker_type"]["@type"], "stickerTypeEmoji");
+        assert_eq!(v["sticker_type"]["@type"], "stickerTypeCustomEmoji");
 
         let v: serde_json::Value =
             serde_json::from_str(&search_emoji_sets(RequestId(54), "blob")).unwrap();
         assert_eq!(v["@type"], "searchStickerSets");
-        assert_eq!(v["sticker_type"]["@type"], "stickerTypeEmoji");
+        assert_eq!(v["sticker_type"]["@type"], "stickerTypeCustomEmoji");
         assert_eq!(v["query"], "blob");
 
         let v: serde_json::Value =
             serde_json::from_str(&reorder_installed_emoji_sets(RequestId(55), &[78, 77])).unwrap();
         assert_eq!(v["@type"], "reorderInstalledStickerSets");
-        assert_eq!(v["sticker_type"]["@type"], "stickerTypeEmoji");
+        assert_eq!(v["sticker_type"]["@type"], "stickerTypeCustomEmoji");
         assert_eq!(v["sticker_set_ids"], serde_json::json!([78, 77]));
     }
 }
