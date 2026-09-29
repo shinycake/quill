@@ -40,6 +40,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::table::{Table, TableBody, TableCell, TableRow};
+use gpui_kit::component::tag::Tag;
 use gpui_kit::component::theme::ThemeMode;
 use gpui_kit::component::*;
 // kit Phase 3: the geometry `Size` (row sizes for the kit `VirtualList`),
@@ -557,15 +558,13 @@ pub struct QuillApp {
     demo_screen_frame: Option<quill::calls::engine::VideoFrame>,
     /// Phase C2e: demo-mode camera pick (live picks go to the driver).
     demo_selected_camera: Option<String>,
-    /// Phase C2e: decoded video tiles cached by frame seq, rebuilt only
-    /// when the newest frame changes.
-    call_remote_image: Option<(u64, Arc<RenderImage>)>,
-    call_local_image: Option<(u64, Arc<RenderImage>)>,
-    /// Phase C2l: decoded peer screen-share tile, same caching rule.
-    /// A dedicated slot — the screen and camera streams share `seq`
-    /// numbering, so reusing `call_remote_image` would cross-render
-    /// (all demo fixtures use seq 0).
-    call_screen_image: Option<(u64, Arc<RenderImage>)>,
+    /// Phase C2e/C2l: decoded video tiles cached by `(frame seq,
+    /// is_screen)`, rebuilt only when the key changes. The peer's
+    /// screen and camera streams share `seq` numbering (all demo
+    /// fixtures use seq 0), so `is_screen` is part of the key — a
+    /// seq-only key would cross-render.
+    call_remote_image: Option<((u64, bool), Arc<RenderImage>)>,
+    call_local_image: Option<((u64, bool), Arc<RenderImage>)>,
     /// Slice A1: decoded QR-login bitmap cached by link, rebuilt only when
     /// the link changes. The link itself is never logged.
     qr_login_cache: Option<(String, Arc<RenderImage>)>,
@@ -2751,21 +2750,14 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
-            Some(ScreenshotDemo::ReadyCallScreenShare) => {
+            Some(
+                ScreenshotDemo::ReadyCallScreenShare | ScreenshotDemo::ReadyCallScreenShareReceive,
+            ) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
                     ConnectUiStatus::DemoReadyChats,
                     None,
-                    "screenshot demo — connected video call, screen-share send (injected, no live Telegram)".into(),
-                    AuthorizationState::Ready,
-                )
-            }
-            Some(ScreenshotDemo::ReadyCallScreenShareReceive) => {
-                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
-                (
-                    ConnectUiStatus::DemoReadyChats,
-                    None,
-                    "screenshot demo — connected video call, peer screen-share receive (injected, no live Telegram)".into(),
+                    "screenshot demo — connected video call, screen-share (injected, no live Telegram)".into(),
                     AuthorizationState::Ready,
                 )
             }
@@ -2980,7 +2972,6 @@ impl QuillApp {
             demo_selected_camera: None,
             call_remote_image: None,
             call_local_image: None,
-            call_screen_image: None,
             qr_login_cache: None,
             group_video_images: HashMap::new(),
             demo_group_frames: HashMap::new(),
@@ -3805,7 +3796,6 @@ impl QuillApp {
                     kind: quill::calls::engine::MediaDeviceKind::Screen,
                 },
             ]);
-            app.demo_remote_frame = Some(demo_video_frame(false));
             app.demo_local_frame = Some(demo_video_frame(true));
             app.demo_screen_frame = Some(QuillApp::demo_screen_frame());
             if let Some(call) = app
@@ -9870,46 +9860,26 @@ impl QuillApp {
         ]))))
     }
 
-    /// Phase C2e: cached decoded tile for a video frame, rebuilt only
-    /// when the frame sequence changed. `local` picks the preview slot,
-    /// otherwise the peer slot.
+    /// Phase C2e/C2l: cached decoded tile for a video frame, rebuilt
+    /// only when the `(seq, is_screen)` key changed. `local` picks the
+    /// preview slot, otherwise the peer slot (the peer's camera and
+    /// screen share the slot; the key keeps the streams apart).
     fn cached_video_image(
         &mut self,
         local: bool,
         frame: &quill::calls::engine::VideoFrame,
     ) -> Option<Arc<RenderImage>> {
+        let key = (frame.seq, frame.is_screen);
         let slot = if local {
             &mut self.call_local_image
         } else {
             &mut self.call_remote_image
         };
-        if slot.as_ref().is_some_and(|(seq, _)| *seq == frame.seq) {
+        if slot.as_ref().is_some_and(|(k, _)| *k == key) {
             return slot.as_ref().map(|(_, image)| image.clone());
         }
         let image = Self::video_render_image(frame)?;
-        *slot = Some((frame.seq, image.clone()));
-        Some(image)
-    }
-
-    /// Phase C2l: cached decoded tile for the peer's 1:1 screen share —
-    /// same seq-gated caching as `cached_video_image`, but a dedicated
-    /// slot (see `call_screen_image`).
-    fn cached_screen_image(
-        &mut self,
-        frame: &quill::calls::engine::VideoFrame,
-    ) -> Option<Arc<RenderImage>> {
-        if self
-            .call_screen_image
-            .as_ref()
-            .is_some_and(|(seq, _)| *seq == frame.seq)
-        {
-            return self
-                .call_screen_image
-                .as_ref()
-                .map(|(_, image)| image.clone());
-        }
-        let image = Self::video_render_image(frame)?;
-        self.call_screen_image = Some((frame.seq, image.clone()));
+        *slot = Some((key, image.clone()));
         Some(image)
     }
 
@@ -24229,8 +24199,9 @@ impl QuillApp {
     /// screen the share takes the main tile (with a badge), same
     /// preference as the group tiles. Frames come from the driver
     /// (live) or the demo fixture (screenshot mode); both tiles
-    /// degrade to honest status text when a feed is missing, and
-    /// decoded tiles are cached by frame seq so re-renders don't
+    /// degrade to honest status text when a feed is missing (a paused
+    /// peer share states itself rather than freezing), and decoded
+    /// tiles are cached by (frame seq, is_screen) so re-renders don't
     /// re-decode.
     fn call_video_stage(&mut self, call: &ActiveCall, name: &str) -> Div {
         let (remote_frame, local_frame): (
@@ -24287,10 +24258,18 @@ impl QuillApp {
             call.remote_video,
             remote_frame.as_ref(),
         ) {
+            // Phase C2l: a paused peer share states itself instead of
+            // rendering — same honest-state rule as the camera arm; a
+            // stale frozen frame would mislead.
+            (Some(_), _, _)
+                if call.remote_screen == quill::calls::engine::RemoteVideoState::Paused =>
+            {
+                status_text("Screen share paused by peer").into_any_element()
+            }
             // Phase C2l: the peer's screen share takes the main tile
-            // while the share is live (same preference as the group
+            // while the share is Active (same preference as the group
             // tiles); the camera resumes the tile when the share ends.
-            (Some(frame), _, _) => match self.cached_screen_image(frame) {
+            (Some(frame), _, _) => match self.cached_video_image(false, frame) {
                 Some(image) => div()
                     .w_full()
                     .h_full()
@@ -24301,16 +24280,7 @@ impl QuillApp {
                             .absolute()
                             .top_2()
                             .left_2()
-                            .rounded_md()
-                            .px_2()
-                            .py_1()
-                            .bg(scrim())
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(text_on_fill())
-                                    .child("🖥 Peer's screen"),
-                            ),
+                            .child(Tag::info().child("🖥 Peer's screen")),
                     )
                     .into_any_element(),
                 None => status_text("Couldn't decode the peer's screen").into_any_element(),

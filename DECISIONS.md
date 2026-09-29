@@ -6222,21 +6222,22 @@ ntgcalls v3.0.0 prebuilt lib, bindings verified against
   frames callback + remote-source state hook.
 - **Built:**
   - `src/ui/mod.rs` `call_video_stage`: while the peer's share is live
-    the screen frame takes the main video-stage tile (badge "🖥 Peer's
-    screen", absolute chip) — same preference as the group tiles, which
-    prefer the screen slot when sharing. The camera resumes the tile
-    when the share ends; the local PiP is untouched.
-  - Dedicated `call_screen_image` decode-cache slot via
-    `cached_screen_image` — the screen and camera streams share `seq`
-    numbering (all demo fixtures use seq 0), so reusing
-    `call_remote_image` would cross-render.
+    the screen frame takes the main video-stage tile (kit `Tag::info`
+    badge "🖥 Peer's screen", absolute chip) — same preference as the
+    group tiles, which prefer the screen slot when sharing. The camera
+    resumes the tile when the share ends; the local PiP is untouched.
+  - The peer decode-cache slot (`cached_video_image`) keys by
+    `(frame seq, is_screen)` — the screen and camera streams share
+    `seq` numbering (all demo fixtures use seq 0), so a seq-only key
+    would cross-render; no dedicated slot needed.
   - `ActiveCall::remote_screen: RemoteVideoState` (state.rs; three
     construction sites init `Inactive`): the driver's screen-state
     drain now records the state on the call. The tile renders only
     while it is not `Inactive` — this closes the race C2j flagged
     (a late PLAYBACK+SCREEN frame arriving after the Inactive drain
     would otherwise repopulate the slot with a stale picture).
-    Paused keeps rendering the last frame, matching the camera rule.
+    `Paused` states the tile ("Screen share paused by peer"), the
+    same honest-state rule as the camera arm.
   - Screenshot fixture `ScreenshotDemo::ReadyCallScreenShareReceive`
     ("ready-call-screenshare-receive"): synthetic 16:9 desktop-pattern
     screen frame (`demo_screen_frame`, window rects + taskbar strip),

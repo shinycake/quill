@@ -844,9 +844,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2j: newest decoded frame of the peer's 1:1 screen share;
     /// `None` when the peer is not sharing (or no frame has arrived yet).
-    /// Post-Phase-9 UI renders this as the screen-share tile; until
-    /// then the backend keeps the slot warm and drops it when the
-    /// peer's share goes inactive.
+    /// Phase C2l renders this as the screen-share tile while
+    /// `ActiveCall::remote_screen` is not inactive; the backend keeps
+    /// the slot warm and drops it when the peer's share goes inactive.
     pub fn latest_screen_frame(&self, call_id: i32) -> Option<VideoFrame> {
         self.video_frame_slots
             .lock()
@@ -21752,7 +21752,10 @@ mod tests {
     /// Phase C2j: when the peer's 1:1 screen share goes inactive the
     /// pump drops the retained screen frames (no stale picture can
     /// render) while the peer camera frame is untouched; a non-inactive
-    /// state leaves the slot alone.
+    /// state leaves the slot alone. Phase C2l: the pump also records
+    /// the state on the call — the UI gates the screen tile on it,
+    /// closing the race where a late frame arriving after Inactive
+    /// would repopulate a stale slot.
     #[test]
     fn remote_screen_state_inactive_clears_screen_slot() {
         let (dir, mut driver, handle, sink, seq) = ready_call_driver();
@@ -21766,42 +21769,23 @@ mod tests {
             is_screen: screen,
         };
         let pump = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+        let remote_screen = |driver: &ConnectDriver<Arc<RecordingSender>>| {
+            driver.session.active_call.as_ref().unwrap().remote_screen
+        };
+        assert_eq!(remote_screen(&driver), RemoteVideoState::Inactive);
         handle.emit_video_frame(77, frame(false));
         handle.emit_video_frame(77, frame(true));
+        handle.emit_remote_screen_state(77, RemoteVideoState::Active);
+        ingest_call_json(&mut driver, &seq, &sink, pump);
+        assert_eq!(remote_screen(&driver), RemoteVideoState::Active);
         handle.emit_remote_screen_state(77, RemoteVideoState::Paused);
         ingest_call_json(&mut driver, &seq, &sink, pump);
         assert!(driver.latest_screen_frame(77).is_some());
         handle.emit_remote_screen_state(77, RemoteVideoState::Inactive);
         ingest_call_json(&mut driver, &seq, &sink, pump);
+        assert_eq!(remote_screen(&driver), RemoteVideoState::Inactive);
         assert!(driver.latest_screen_frame(77).is_none());
         assert!(driver.latest_video_frame(77, false).is_some());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Phase C2l: the pump records the peer's 1:1 screen-share state on
-    /// the call — the UI gates the screen tile on it, closing the race
-    /// where a late frame arriving after Inactive would repopulate a
-    /// stale slot.
-    #[test]
-    fn remote_screen_state_recorded_on_call() {
-        let (dir, mut driver, handle, sink, seq) = ready_call_driver();
-        let pump = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
-        assert_eq!(
-            driver.session.active_call.as_ref().unwrap().remote_screen,
-            RemoteVideoState::Inactive
-        );
-        handle.emit_remote_screen_state(77, RemoteVideoState::Active);
-        ingest_call_json(&mut driver, &seq, &sink, pump);
-        assert_eq!(
-            driver.session.active_call.as_ref().unwrap().remote_screen,
-            RemoteVideoState::Active
-        );
-        handle.emit_remote_screen_state(77, RemoteVideoState::Inactive);
-        ingest_call_json(&mut driver, &seq, &sink, pump);
-        assert_eq!(
-            driver.session.active_call.as_ref().unwrap().remote_screen,
-            RemoteVideoState::Inactive
-        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
