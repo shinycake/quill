@@ -4893,6 +4893,10 @@ pub enum InfoPanelTarget {
     /// `getChatStatistics` fetch is gated on
     /// `supergroupFullInfo.can_get_statistics` before opening.
     Statistics(i64),
+    /// Slice G10: community info panel, keyed by community id. The
+    /// `loadCommunityFullInfo` fetch fires on open; name edits go
+    /// through `TextPromptKind::CommunityName`.
+    Community(i64),
 }
 
 /// Phase 6: cached `userFullInfo` subset (schema 1.8.67, line 2468) — the

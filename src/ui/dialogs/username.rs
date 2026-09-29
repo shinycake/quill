@@ -16,6 +16,10 @@ pub enum TextPromptKind {
     /// Slice G8: `setChatPhoto` (schema 1.8.67, line 13435) — a local
     /// file path, empty removes the photo; same gate as the title.
     GroupPhoto,
+    /// Slice G10: `setCommunityName` (schema 1.8.67, line 11811).
+    /// `chat_id` on the dialog is unused for this kind; the community
+    /// id rides the variant.
+    CommunityName { community_id: i64 },
 }
 
 pub struct UsernameDialog {

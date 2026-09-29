@@ -877,6 +877,8 @@ pub struct QuillApp {
     admin_dialog: Option<AdminDialog>,
     /// Slice G1: group/supergroup/channel creation dialog.
     create_chat_dialog: Option<CreateChatDialog>,
+    /// Slice G10: communities dialog state (create dialog + hub flag).
+    community_ui: CommunityUi,
     /// Slice G1: member-management dialog (tabs + add section).
     member_dialog: Option<MemberDialog>,
     /// B1: password prompt for `inlineKeyboardButtonTypeCallbackWithPassword`.
@@ -1232,6 +1234,17 @@ pub enum ScreenshotDemo {
     /// Edit title / Edit description / Change photo rows render
     /// directly.
     ReadyGroupInfoEdit,
+    /// Slice G10: communities create dialog (injected, no live
+    /// Telegram): the create dialog open over the seeded chat list, so
+    /// the name field, chat picker, and hide-checkbox render directly.
+    ReadyCommunityCreate,
+    /// Slice G10: communities hub dialog (injected, no live Telegram):
+    /// two injected communities with the hub open.
+    ReadyCommunityHub,
+    /// Slice G10: community info panel (injected, no live Telegram):
+    /// the "Rustaceans" community with its injected full-info pack, so
+    /// the name edit, counts, and chat rows render directly.
+    ReadyCommunityInfo,
     /// Bot chat demo (injected, no live Telegram): private chat with a
     /// `userTypeBot` user (id 21), opened with history plus a cached
     /// `botInfo` (description + commands), so the bot panel renders under
@@ -2383,6 +2396,21 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            // Slice G10: communities demos share the seeded chat list;
+            // the demo block injects the community fixtures.
+            Some(
+                ScreenshotDemo::ReadyCommunityCreate
+                | ScreenshotDemo::ReadyCommunityHub
+                | ScreenshotDemo::ReadyCommunityInfo,
+            ) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — communities G10".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyBotChat) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3179,6 +3207,7 @@ impl QuillApp {
             dismissed_keyboards: std::collections::HashSet::new(),
             permissions_dialog: None,
             username_dialog: None,
+            community_ui: CommunityUi::default(),
             restrict_dialog: None,
             group_confirm_dialog: None,
             quote_reply_dialog: None,
@@ -4481,6 +4510,33 @@ impl QuillApp {
             }
             app.open_info_panel_target(InfoPanelTarget::Supergroup(61), window, cx);
             app.status_note = "screenshot demo — group info edit".into();
+            cx.notify();
+        }
+        // Slice G10: community fixtures, then open the new surface.
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyCommunityCreate
+                    | ScreenshotDemo::ReadyCommunityHub
+                    | ScreenshotDemo::ReadyCommunityInfo
+            )
+        ) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                community::apply_ready_communities(session, &app.demo_sink, &app.demo_seq);
+            }
+            match demo {
+                Some(ScreenshotDemo::ReadyCommunityCreate) => {
+                    app.open_create_community_dialog(window, cx);
+                }
+                Some(ScreenshotDemo::ReadyCommunityHub) => {
+                    app.open_community_hub(cx);
+                }
+                _ => {
+                    app.open_community_info(9001, cx);
+                }
+            }
+            app.status_note = "screenshot demo — communities G10".into();
             cx.notify();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyBotChat)) {
@@ -14325,6 +14381,133 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice G10: open the "New community" dialog (side-menu entry).
+    fn open_create_community_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.community_ui.create_dialog = Some(CreateCommunityDialog::new(window, cx));
+        cx.notify();
+    }
+
+    fn close_create_community_dialog(&mut self, cx: &mut Context<Self>) {
+        self.community_ui.create_dialog = None;
+        cx.notify();
+    }
+
+    /// Slice G10: single-select base-chat picker for the create dialog.
+    fn toggle_create_community_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.community_ui.create_dialog.as_mut() {
+            dialog.chat_id = if dialog.chat_id == Some(chat_id) {
+                None
+            } else {
+                Some(chat_id)
+            };
+            cx.notify();
+        }
+    }
+
+    /// Slice G10: submit the create-community dialog. Guards mirror the
+    /// driver (`create_community` refuses empty names and unknown chats
+    /// client-side); the new community arrives via `updateCommunity`.
+    fn submit_create_community_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.community_ui.create_dialog.take() else {
+            return;
+        };
+        let name = dialog.name_input.read(cx).value().trim().to_string();
+        let chat_id = dialog.chat_id;
+        let hide_chat = dialog.hide_chat;
+        let problem = if name.is_empty() {
+            Some("Name cannot be empty")
+        } else if chat_id.is_none() {
+            Some("Pick a chat for the community")
+        } else {
+            None
+        };
+        if let Some(problem) = problem {
+            self.community_ui.create_dialog = Some(dialog);
+            self.status_note = problem.into();
+            cx.notify();
+            return;
+        }
+        let note = match self.live.as_mut() {
+            Some(live) => {
+                match live
+                    .driver
+                    .create_community(ChatId(chat_id.unwrap_or(0)), &name, hide_chat)
+                {
+                    Ok(Some(_)) => "Community created".to_string(),
+                    _ => {
+                        self.community_ui.create_dialog = Some(dialog);
+                        "could not create community".to_string()
+                    }
+                }
+            }
+            None => {
+                self.community_ui.create_dialog = Some(dialog);
+                "creating communities needs a live connection (demo)".to_string()
+            }
+        };
+        self.status_note = note;
+        cx.notify();
+    }
+
+    /// Slice G10: open the communities hub dialog (side-menu entry).
+    fn open_community_hub(&mut self, cx: &mut Context<Self>) {
+        self.community_ui.hub_open = true;
+        cx.notify();
+    }
+
+    fn close_community_hub(&mut self, cx: &mut Context<Self>) {
+        self.community_ui.hub_open = false;
+        cx.notify();
+    }
+
+    /// Slice G10: open the community info panel and fetch its full
+    /// info on the live path (`loadCommunityFullInfo` is cached and
+    /// deduped by the driver); the demo path relies on the fixture.
+    fn open_community_info(&mut self, community_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver
+                .set_info_panel(Some(InfoPanelTarget::Community(community_id)));
+            if let Err(err) = live.driver.load_community_full_info(community_id) {
+                self.status_note = format!("info request failed: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.open_info_panel = Some(InfoPanelTarget::Community(community_id));
+        }
+        cx.notify();
+    }
+
+    /// Slice G10: community name edit prompt (`setCommunityName`,
+    /// schema 1.8.67 line 11811). Prefilled with the current name.
+    fn open_community_name_dialog(
+        &mut self,
+        community_id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .session()
+            .and_then(|s| s.communities.get(&community_id))
+            .map(|community| community.name.clone())
+            .unwrap_or_default();
+        // `chat_id` is unused for `CommunityName`; the community id
+        // rides the prompt kind.
+        self.username_dialog = Some(UsernameDialog::new(
+            window,
+            cx,
+            ChatId(community_id),
+            TextPromptKind::CommunityName { community_id },
+            &current,
+            "Community name",
+        ));
+        cx.notify();
+    }
+
+    /// Slice G10: community info panel body (delegates to
+    /// dialogs/community.rs so this file only holds the thin method).
+    fn community_info_panel(&self, community_id: i64, cx: &mut Context<Self>) -> AnyElement {
+        community::render_community_info_panel(self, community_id, cx)
+    }
+
     /// Slice G1: open the member-management dialog and kick off the
     /// member fetch for the current tab.
     fn open_member_dialog(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
@@ -14808,6 +14991,30 @@ impl QuillApp {
                     None => {
                         self.username_dialog = Some(dialog);
                         "titles need a live connection (demo)".into()
+                    }
+                }
+            }
+            // Slice G10: `setCommunityName` (schema 1.8.67, line 11811;
+            // the driver refuses empty names client-side). Not
+            // optimistic — the new name arrives via `updateCommunity`.
+            TextPromptKind::CommunityName { community_id } => {
+                if value.is_empty() {
+                    self.username_dialog = Some(dialog);
+                    self.status_note = "community name cannot be empty".into();
+                    cx.notify();
+                    return;
+                }
+                match self.live.as_mut() {
+                    Some(live) => match live.driver.set_community_name(community_id, &value) {
+                        Ok(_) => "community name updated".into(),
+                        Err(_) => {
+                            self.username_dialog = Some(dialog);
+                            "could not update community name".into()
+                        }
+                    },
+                    None => {
+                        self.username_dialog = Some(dialog);
+                        "renaming communities needs a live connection (demo)".into()
                     }
                 }
             }
@@ -18979,6 +19186,11 @@ impl QuillApp {
                     "Group photo",
                     "Path to an image file — empty removes the photo",
                 ),
+                // Slice G10: community rename prompt.
+                TextPromptKind::CommunityName { .. } => (
+                    "Community name",
+                    "Shown in the communities hub and info panel",
+                ),
             };
             let body = div()
                 .flex()
@@ -21005,6 +21217,12 @@ impl QuillApp {
                     Some(chat_id) => live.driver.fetch_basic_group_members(chat_id).map(|_| ()),
                     None => Ok(()),
                 },
+                // Slice G10: community full info (cached + deduped by
+                // the driver); arrives as `updateCommunityFullInfo`.
+                InfoPanelTarget::Community(community_id) => live
+                    .driver
+                    .load_community_full_info(community_id)
+                    .map(|_| ()),
             };
             if let Err(err) = fetch {
                 self.status_note = format!("info request failed: {err:?}");
@@ -21068,6 +21286,11 @@ impl QuillApp {
             InfoPanelTarget::Statistics(chat_id) => {
                 ("Statistics", self.chat_statistics_panel(chat_id, cx))
             }
+            // Slice G10: community info (name edit, counts, chats).
+            InfoPanelTarget::Community(community_id) => (
+                "Community info",
+                self.community_info_panel(community_id, cx),
+            ),
         };
         Some(
             div()
@@ -39706,6 +39929,22 @@ impl QuillApp {
                                 this.open_create_chat_dialog(CreateChatKind::Channel, window, cx);
                             })),
                     );
+                    // Slice G10: communities — create entry + hub entry
+                    // next to the other "New" entries.
+                    list = list.child(
+                        Button::new("g10-new-community")
+                            .label("🏘 New community")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_create_community_dialog(window, cx);
+                            })),
+                    );
+                    list = list.child(
+                        Button::new("g10-communities-hub")
+                            .label("🏘 Communities")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_community_hub(cx);
+                            })),
+                    );
                     // Slice S4: Data & Storage dialog entry (TGX Settings →
                     // Data and Storage). Quill has no settings screen, so
                     // it sits next to the secret-chat entry; it fetches
@@ -48634,6 +48873,10 @@ pub enum DialogKind {
     Appearance,
     /// Slice A9: account lifecycle (delete account + self-destruct TTL).
     AccountLifecycle,
+    /// Slice G10: communities create dialog.
+    CommunityCreate,
+    /// Slice G10: communities hub dialog.
+    CommunityHub,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -48697,6 +48940,9 @@ impl QuillShell {
             DialogKind::Welcome => app.welcome_dialog.is_some(),
             DialogKind::Appearance => app.appearance_open,
             DialogKind::AccountLifecycle => app.account_lifecycle.open,
+            // Slice G10: communities create + hub dialogs.
+            DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
+            DialogKind::CommunityHub => app.community_ui.hub_open,
         }
     }
 
@@ -48734,12 +48980,15 @@ impl QuillShell {
             DialogKind::Welcome => QuillApp::build_welcome_dialog,
             DialogKind::Appearance => QuillApp::build_appearance_dialog,
             DialogKind::AccountLifecycle => QuillApp::build_account_lifecycle_dialog,
+            // Slice G10: community builders live in dialogs/community.rs.
+            DialogKind::CommunityCreate => community::build_create_community_dialog,
+            DialogKind::CommunityHub => community::build_community_hub_dialog,
         }
     }
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 32] = [
+    const KINDS: [DialogKind; 34] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -48772,6 +49021,9 @@ impl QuillShell {
         DialogKind::AddContact,
         DialogKind::Appearance,
         DialogKind::AccountLifecycle,
+        // Slice G10: communities dialogs render last (lowest priority).
+        DialogKind::CommunityCreate,
+        DialogKind::CommunityHub,
     ];
 
     /// Keep the single kit dialog in sync with the app-side open flags.

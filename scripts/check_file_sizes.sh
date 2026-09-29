@@ -72,6 +72,13 @@ WAIVERS=(
   # (`..SendOptions::default()` in the existing `composer_send_options`
   # literal — required to cover the new field, text sends keep default
   # false). All S15 tests moved to `tests/sticker_dynamic_order.rs`.
+  # Slice G10 (2026-09-29, review fixup + rebase post-S16): type-coherent
+  # extensions only — ui/mod.rs (DialogKind variants + dialog_is_open /
+  # dialog_builder / KINDS match arms, info-panel fetch/render arms,
+  # username-dialog submit/title-hint arms, demo-scenario dispatch arms,
+  # new methods on QuillApp + one bundled `community_ui` field,
+  # side-menu entries, 3 screenshot scenarios; exact count set post-rebase);
+  # state.rs (`InfoPanelTarget::Community` variant; exact count set post-rebase).
   "src/calls/engine.rs:3212"
   "tests/replay.rs:3505"
 )
