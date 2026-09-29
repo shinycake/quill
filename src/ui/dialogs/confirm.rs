@@ -1,5 +1,3 @@
-use super::super::*;
-
 /// Slice A3: which terminate the sessions overlay is confirming (TGX
 /// `TerminateSessionQuestion` / `TerminateIncompleteSessionQuestion` /
 /// `AreYouSureSessions`).
