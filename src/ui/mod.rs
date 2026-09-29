@@ -31669,6 +31669,7 @@ impl QuillApp {
                                 .h(px(72.))
                                 .rounded_md()
                                 .bg(accent_strong())
+                                .text_color(text_on_fill())
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -31684,6 +31685,7 @@ impl QuillApp {
                     .h(px(72.))
                     .rounded_md()
                     .bg(accent_strong())
+                    .text_color(text_on_fill())
                     .flex()
                     .items_center()
                     .justify_center()
@@ -34219,8 +34221,7 @@ impl QuillApp {
                     } else {
                         Button::new(("media-viewer-play", row_id))
                             .label(if playing { "❚❚ Pause" } else { "▶ Play" })
-                            .ghost()
-                            .text_color(text_bright())
+                            .custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.toggle_viewer_video(cx);
                             }))
@@ -34239,8 +34240,7 @@ impl QuillApp {
                     .child(
                         Button::new(("media-viewer-speed", row_id))
                             .label(speed_label)
-                            .ghost()
-                            .text_color(text_on_fill())
+                            .custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cycle_playback_speed(cx);
                             })),
@@ -34266,8 +34266,7 @@ impl QuillApp {
                     .child(
                         Button::new(("media-viewer-mute", row_id))
                             .label(if muted { "Unmute" } else { "Mute" })
-                            .ghost()
-                            .text_color(text_on_fill())
+                            .custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.toggle_playback_mute(cx);
                             })),
@@ -37469,7 +37468,7 @@ impl QuillApp {
                                         // schema 1.8.67 line 1070).
                                         div()
                                             .text_xs()
-                                            .text_color(warning_bright())
+                                            .text_color(warning_orange())
                                             .child("Polls restricted in this chat")
                                             .into_any_element()
                                     })
@@ -44763,7 +44762,7 @@ fn poll_body(
         body = body.child(
             div()
                 .text_xs()
-                .text_color(warning_bright())
+                .text_color(warning_orange())
                 .child(poll_vote_restriction_label(reason)),
         );
     }
@@ -45105,12 +45104,25 @@ fn session_history_row(
     let reply_id = format!("reply-{}", message.id.0);
     let reply_target =
         ComposerReplyTo::new(message.chat_id, message.id, effective_preview(message));
-    let reply_btn = Button::new(reply_id)
-        .label("Reply")
-        .ghost()
-        .on_click(cx.listener(move |this, _, window, cx| {
+    // The action row below renders inside the bubble fill (`extra` in
+    // synthetic.rs): the kit Ghost variant hardwires its label to the
+    // theme's secondary foreground and ignores caller text colors, so on an
+    // outgoing (blue) bubble the actions would be dark-on-blue in light
+    // mode. Use a Custom variant with white text for outgoing bubbles;
+    // keep ghost for incoming.
+    let outgoing = message.is_outgoing;
+    let action_style = |btn: Button, cx: &App| {
+        if outgoing {
+            btn.custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
+        } else {
+            btn.ghost()
+        }
+    };
+    let reply_btn = action_style(Button::new(reply_id).label("Reply"), cx).on_click(cx.listener(
+        move |this, _, window, cx| {
             this.begin_reply_to(reply_target.clone(), window, cx);
-        }));
+        },
+    ));
     let chat_id = message.chat_id;
     let message_id = message.id;
     let pending = message.pending;
@@ -45122,27 +45134,31 @@ fn session_history_row(
         .then(|| ForwardDraft::from_message(chat_id, message_id, pending))
         .flatten()
         .map(|_| {
-            Button::new(format!("forward-{}", message_id.0))
-                .label("Forward")
-                .ghost()
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.begin_forward_one(chat_id, message_id, pending, window, cx);
-                }))
+            action_style(
+                Button::new(format!("forward-{}", message_id.0)).label("Forward"),
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.begin_forward_one(chat_id, message_id, pending, window, cx);
+            }))
         });
     let select_btn = (!is_secret)
         .then(|| ForwardDraft::from_message(chat_id, message_id, pending))
         .flatten()
         .map(|_| {
-            Button::new(format!("select-forward-{}", message_id.0))
-                .label(if selected_forward {
-                    "Selected"
-                } else {
-                    "Select"
-                })
-                .ghost()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_forward_select(chat_id, message_id, pending, cx);
-                }))
+            action_style(
+                Button::new(format!("select-forward-{}", message_id.0)).label(
+                    if selected_forward {
+                        "Selected"
+                    } else {
+                        "Select"
+                    },
+                ),
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_forward_select(chat_id, message_id, pending, cx);
+            }))
         });
     let edit_btn = ComposerEdit::from_own_content(
         message.chat_id,
@@ -45152,12 +45168,13 @@ fn session_history_row(
         &message.content,
     )
     .map(|edit| {
-        Button::new(format!("edit-{}", message.id.0))
-            .label("Edit")
-            .ghost()
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.begin_edit(edit.clone(), window, cx);
-            }))
+        action_style(
+            Button::new(format!("edit-{}", message.id.0)).label("Edit"),
+            cx,
+        )
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.begin_edit(edit.clone(), window, cx);
+        }))
     });
     let delete_btn = DeleteConfirm::own(
         message.chat_id,
@@ -45166,36 +45183,47 @@ fn session_history_row(
         message.pending,
     )
     .map(|confirm| {
-        Button::new(format!("delete-{}", message.id.0))
-            .label("Delete")
-            .ghost()
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.begin_delete(confirm.clone(), cx);
-            }))
+        action_style(
+            Button::new(format!("delete-{}", message.id.0)).label("Delete"),
+            cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.begin_delete(confirm.clone(), cx);
+        }))
     });
     let react_btn = message.can_react().then(|| {
-        Button::new(format!("react-{}", message_id.0))
-            .label(if reaction_open { "Reacting" } else { "React" })
-            .ghost()
-            .on_click(cx.listener(move |this, _, _, cx| {
-                if this
-                    .pending_react
-                    .is_some_and(|(chat, id)| chat == chat_id && id == message_id)
-                {
-                    this.close_reaction_picker(cx);
-                } else {
-                    this.open_reaction_picker(chat_id, message_id, cx);
-                }
-            }))
+        action_style(
+            Button::new(format!("react-{}", message_id.0)).label(if reaction_open {
+                "Reacting"
+            } else {
+                "React"
+            }),
+            cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if this
+                .pending_react
+                .is_some_and(|(chat, id)| chat == chat_id && id == message_id)
+            {
+                this.close_reaction_picker(cx);
+            } else {
+                this.open_reaction_picker(chat_id, message_id, cx);
+            }
+        }))
     });
     let pin_btn = message.can_pin().then(|| {
         let pinned = message.is_pinned;
-        Button::new(format!("pin-{}", message_id.0))
-            .label(if pinned { "Unpin" } else { "Pin" })
-            .ghost()
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.toggle_pin_message(chat_id, message_id, cx);
-            }))
+        action_style(
+            Button::new(format!("pin-{}", message_id.0)).label(if pinned {
+                "Unpin"
+            } else {
+                "Pin"
+            }),
+            cx,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.toggle_pin_message(chat_id, message_id, cx);
+        }))
     });
     // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
     // official clients' post footer. Renders whenever views exist; only
@@ -45227,7 +45255,12 @@ fn session_history_row(
                 .id(("row-signature", message_id.0 as u64))
                 .mt_1()
                 .text_xs()
-                .text_color(cx.theme().muted_foreground)
+                // Inside the bubble fill: white on outgoing, kit muted otherwise.
+                .text_color(if message.is_outgoing {
+                    text_on_fill().into()
+                } else {
+                    cx.theme().muted_foreground
+                })
                 .child(signature.clone())
         });
     let chips = message.emoji_reaction_chips();

@@ -182,6 +182,12 @@ pub fn warning_soft() -> Rgba {
     pick(0xffc861, 0x9a6700)
 }
 #[inline]
+pub fn warning_orange() -> Rgba {
+    // Former `ORANGE`: poll-restriction labels. Dark value is the exact
+    // pre-migration 0xf0883e; light reuses the primer dark-amber text value.
+    pick(0xf0883e, 0x9a6700)
+}
+#[inline]
 pub fn warning_bg() -> Rgba {
     pick(0x2a2318, 0xfff8c5)
 }
