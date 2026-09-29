@@ -89,12 +89,7 @@ impl PaymentDialog {
 
     /// Prefill the order fields from the form's `saved_order_info`
     /// (schema:4720) so returning buyers don't retype.
-    pub(crate) fn prefill(
-        &self,
-        order: &OrderInfoData,
-        window: &mut Window,
-        cx: &mut Context<QuillApp>,
-    ) {
+    fn prefill(&self, order: &OrderInfoData, window: &mut Window, cx: &mut Context<QuillApp>) {
         let mut set = |input: &Entity<TextareaState>, value: &str| {
             if !value.is_empty() {
                 input.update(cx, |input, cx| input.set_value(value, window, cx));
