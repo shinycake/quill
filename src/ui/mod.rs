@@ -57,6 +57,7 @@ use gpui_kit::gpui::StyleRefinement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
+use quill::community_mode::community_member_ids;
 use quill::composer::{
     AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
     ComposerScheduling, ComposerSnapshot, DeleteConfirm, FormatAction, ForwardDraft,
@@ -65,7 +66,6 @@ use quill::composer::{
     clear_format_markup, command_menu_trigger, draft_text_to_store, filter_command_menu_items,
     find_urls, should_send_on_enter, strip_command_menu_trigger,
 };
-use quill::community_mode::community_member_ids;
 use quill::connect::{
     ChatSearchQueryOutcome, ConnectBlocker, ConnectGate, DraftSaveOutcome, LiveConnect,
     PREVIEW_HISTORY_LIMIT, SEARCH_DEBOUNCE, SearchQueryOutcome, SoundResolution,
@@ -40894,38 +40894,47 @@ impl QuillApp {
                                 }
                                 loading_list
                             } else {
-                                let (glyph, title, hint) = if let ChatListFilter::Community(community_id) = filter {
-                                    // Parity slice
-                                    // `parity:communities-chatlist-mode`: a
-                                    // missing pack means the fetch hasn't
-                                    // landed yet (entering the mode fires
-                                    // `loadCommunityFullInfo` when live) —
-                                    // "Loading…", like the community info
-                                    // panel. An empty pack / no matching
-                                    // loaded chats is the genuine empty
-                                    // state, never a crash.
-                                    if self.session().is_some_and(|s| {
-                                        !s.community_full_infos.contains_key(&community_id)
-                                    }) {
-                                        ("⏳", "Loading community…", "Fetching the community's chats.")
+                                let (glyph, title, hint) =
+                                    if let ChatListFilter::Community(community_id) = filter {
+                                        // Parity slice
+                                        // `parity:communities-chatlist-mode`: a
+                                        // missing pack means the fetch hasn't
+                                        // landed yet (entering the mode fires
+                                        // `loadCommunityFullInfo` when live) —
+                                        // "Loading…", like the community info
+                                        // panel. An empty pack / no matching
+                                        // loaded chats is the genuine empty
+                                        // state, never a crash.
+                                        if self.session().is_some_and(|s| {
+                                            !s.community_full_infos.contains_key(&community_id)
+                                        }) {
+                                            (
+                                                "⏳",
+                                                "Loading community…",
+                                                "Fetching the community's chats.",
+                                            )
+                                        } else {
+                                            (
+                                                "👥",
+                                                "No chats in this community yet",
+                                                "Chats added to the community show up here.",
+                                            )
+                                        }
+                                    } else if filter == ChatListFilter::Unread {
+                                        ("🔕", "No unread chats", "You are all caught up.")
+                                    } else if folder.is_some() {
+                                        (
+                                            "📁",
+                                            "No chats in this folder yet",
+                                            "Add chats to the folder from its settings.",
+                                        )
                                     } else {
                                         (
-                                            "👥",
-                                            "No chats in this community yet",
-                                            "Chats added to the community show up here.",
+                                            "💬",
+                                            "No chats yet",
+                                            "Start a conversation to see it here.",
                                         )
-                                    }
-                                } else if filter == ChatListFilter::Unread {
-                                    ("🔕", "No unread chats", "You are all caught up.")
-                                } else if folder.is_some() {
-                                    (
-                                        "📁",
-                                        "No chats in this folder yet",
-                                        "Add chats to the folder from its settings.",
-                                    )
-                                } else {
-                                    ("💬", "No chats yet", "Start a conversation to see it here.")
-                                };
+                                    };
                                 list.child(chat_list_empty_state(glyph, title, hint, cx))
                             };
                         }

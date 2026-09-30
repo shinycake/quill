@@ -18,7 +18,13 @@ fn feed(session: &mut Session, seq: &AtomicU64, sink: &Arc<dyn DiagnosticSink>, 
     session.apply(owned);
 }
 
-fn new_chat(session: &mut Session, seq: &AtomicU64, sink: &Arc<dyn DiagnosticSink>, id: i64, order: &str) {
+fn new_chat(
+    session: &mut Session,
+    seq: &AtomicU64,
+    sink: &Arc<dyn DiagnosticSink>,
+    id: i64,
+    order: &str,
+) {
     feed(
         session,
         seq,
@@ -37,7 +43,12 @@ fn new_chat(session: &mut Session, seq: &AtomicU64, sink: &Arc<dyn DiagnosticSin
     );
 }
 
-fn full_info(session: &mut Session, seq: &AtomicU64, sink: &Arc<dyn DiagnosticSink>, chats_json: &str) {
+fn full_info(
+    session: &mut Session,
+    seq: &AtomicU64,
+    sink: &Arc<dyn DiagnosticSink>,
+    chats_json: &str,
+) {
     feed(
         session,
         seq,
