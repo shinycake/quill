@@ -11,6 +11,7 @@ use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::theme::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -196,7 +197,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        "Theme, accent, wallpaper, text size and chat style. \
+                        "Theme, accent, wallpaper, text size, chat style and chat-list rows. \
                          Changes apply immediately and are saved on this device.",
                     ),
             );
@@ -206,6 +207,7 @@ impl QuillApp {
             body = body.child(this.appearance_wallpaper_section(cx));
             body = body.child(this.appearance_font_section(cx));
             body = body.child(this.appearance_bubble_section(cx));
+            body = body.child(this.appearance_chat_list_section(cx));
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
                     .label("Close")
@@ -555,5 +557,90 @@ impl QuillApp {
             "Bubbles or plain rows without bubble backgrounds.",
             control.into_any_element(),
         )
+    }
+
+    /// A labeled toggle row: title + hint on the left, kit `Switch` on
+    /// the right (the data-storage dialog pattern).
+    fn appearance_switch_row(
+        &self,
+        cx: &mut Context<Self>,
+        id: &'static str,
+        title: &str,
+        hint: &str,
+        checked: bool,
+        on_change: impl Fn(&mut AppearancePrefs, bool) + 'static,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().text_sm().child(title.to_string()))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(hint.to_string()),
+                    ),
+            )
+            .child(
+                Switch::new(id)
+                    .checked(checked)
+                    .accessibility_label(title)
+                    .on_click(cx.listener(move |this, &on, _, cx| {
+                        this.set_appearance(cx, |a| on_change(a, on));
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// Slice chatlist-list-style: chat-list row style — preview line
+    /// count (kit RadioGroup, like the theme/chat-style sections), media
+    /// icons and formatted preview text (kit Switch rows).
+    fn appearance_chat_list_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let lines = self.appearance.preview_lines;
+        // kit Phase 6 style: a kit RadioGroup (was: hand-rolled chips).
+        let control = RadioGroup::horizontal("appearance-chat-list-lines")
+            .selected_index(Some(if lines >= 3 { 1 } else { 0 }))
+            .children([
+                Radio::new("appearance-chat-list-lines-2").label("2 lines"),
+                Radio::new("appearance-chat-list-lines-3").label("3 lines"),
+            ])
+            .on_click(cx.listener(|this, &ix, _, cx| {
+                this.set_appearance(cx, |a| {
+                    a.preview_lines = if ix == 0 { 2 } else { 3 };
+                });
+            }));
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(self.appearance_section(
+            cx,
+            "Chat list rows",
+            "Two lines shows the title plus the message preview; three lines adds the sender line.",
+            control.into_any_element(),
+        ));
+        body = body.child(self.appearance_switch_row(
+            cx,
+            "appearance-chat-list-media-icons",
+            "Media icons",
+            "Show a photo, video or file icon before the preview text.",
+            self.appearance.chat_list_media_icons,
+            |a, on| a.chat_list_media_icons = on,
+        ));
+        body = body.child(self.appearance_switch_row(
+            cx,
+            "appearance-chat-list-rich-preview",
+            "Formatted preview text",
+            "Show bold, italic and other formatting in the chat-list preview.",
+            self.appearance.chat_list_rich_preview,
+            |a, on| a.chat_list_rich_preview = on,
+        ));
+        body.into_any_element()
     }
 }

@@ -5,6 +5,7 @@ pub mod album;
 pub mod animation;
 pub mod auth;
 pub mod calls;
+pub mod chatlist_style;
 pub mod community_mode;
 pub mod composer;
 pub mod connect;

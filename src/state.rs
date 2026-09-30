@@ -1,5 +1,6 @@
 use crate::auth::{AuthView, view_for};
 use crate::calls::engine::{RemoteVideoState, TransportState};
+use crate::chatlist_style::{ChatPreviewStyle, preview_sender_name, preview_style};
 use crate::composer::{CommandMenuItem, merge_command_menu_items};
 use crate::data_settings::{AutoDownloadNetSettings, DataStoragePrefs, NetworkKind};
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
@@ -2127,6 +2128,14 @@ pub struct ChatSummary {
     pub notification_settings: ChatNotificationSettings,
     /// Sidebar preview from `updateChatLastMessage`. Not logged.
     pub last_preview: String,
+    /// Slice chatlist-list-style: media icon + formatted-text entities
+    /// for the last message, captured wherever `last_preview` is set
+    /// (pure functions of the same content).
+    pub last_preview_style: ChatPreviewStyle,
+    /// Slice chatlist-list-style: sender name for the 3-line row ("You"
+    /// for own messages, the author signature for signed channel posts,
+    /// else the chat title — the list doesn't parse `sender_id`).
+    pub last_preview_sender: String,
     /// Senders with an active `chatActionTyping` (`updateChatAction`).
     pub typing_senders: Vec<MessageSender>,
     /// Senders with an active `chatActionChoosingSticker` (`updateChatAction`).
@@ -2601,6 +2610,8 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         folder_positions: BTreeMap::new(),
         notification_settings: ChatNotificationSettings::default(),
         last_preview: String::new(),
+        last_preview_style: ChatPreviewStyle::default(),
+        last_preview_sender: String::new(),
         typing_senders: Vec::new(),
         choosing_sticker_senders: Vec::new(),
         draft: None,
@@ -7228,12 +7239,23 @@ impl Session {
                     .chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id));
-                chat.last_preview = last_message
-                    .as_ref()
-                    .map(|message| {
-                        effective_content(&message.content, message.ephemeral.as_ref()).preview()
-                    })
-                    .unwrap_or_default();
+                // Slice chatlist-list-style: the preview's style inputs
+                // (media icon, formatted-text entities) and the 3-line
+                // sender name are pure functions of the same content.
+                if let Some(message) = last_message.as_ref() {
+                    let content = effective_content(&message.content, message.ephemeral.as_ref());
+                    chat.last_preview = content.preview();
+                    chat.last_preview_style = preview_style(content, &chat.last_preview);
+                    chat.last_preview_sender = preview_sender_name(
+                        message.is_outgoing,
+                        message.author_signature.as_deref(),
+                        &chat.title,
+                    );
+                } else {
+                    chat.last_preview = String::new();
+                    chat.last_preview_style = ChatPreviewStyle::default();
+                    chat.last_preview_sender = String::new();
+                }
                 // `positions` is the full set of lists this chat belongs to.
                 self.replace_main_list_from_positions(chat_id, &positions);
                 self.rebuild_main_order();
@@ -7655,6 +7677,9 @@ impl Session {
             } => {
                 self.remember_files(&files);
                 let preview = content.preview();
+                // Slice chatlist-list-style: style inputs for the new
+                // content, before `content` moves into the history below.
+                let style = preview_style(&content, &preview);
                 // M1 fix-up: the edited message may be a scheduled send —
                 // refresh the scheduled-list entry too, not just history.
                 if let Some(slot) = self
@@ -7676,6 +7701,7 @@ impl Session {
                         == Some(message_id.0);
                     if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
                         chat.last_preview = preview;
+                        chat.last_preview_style = style;
                     }
                 }
             }
@@ -7700,16 +7726,20 @@ impl Session {
                         .and_then(|history| history.messages.keys().next_back().copied())
                         == Some(message_id.0);
                     if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                        let preview = self
+                        let styled = self
                             .histories
                             .get(&chat_id.0)
                             .and_then(|history| history.messages.get(&message_id.0))
                             .map(|message| {
-                                effective_content(&message.content, message.ephemeral.as_ref())
-                                    .preview()
+                                let content =
+                                    effective_content(&message.content, message.ephemeral.as_ref());
+                                let preview = content.preview();
+                                let style = preview_style(content, &preview);
+                                (preview, style)
                             });
-                        if let Some(preview) = preview {
+                        if let Some((preview, style)) = styled {
                             chat.last_preview = preview;
+                            chat.last_preview_style = style;
                         }
                     }
                 }

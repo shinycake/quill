@@ -208,11 +208,11 @@ pub fn save_media_prefs(paths: &AccountPaths, prefs: &MediaPrefs) -> std::io::Re
 
 /// Settings → Appearance slice: client-side look-and-feel, persisted as
 /// JSON next to the account root (`appearance_prefs.json`). Entirely
-/// client-side — no TDLib setting exists for the app theme, accent, or
-/// font size (TDLib's `accentColor` is per-peer name/profile tinting,
-/// not app chrome; chat backgrounds exist server-side as
-/// `setChatBackground`, schema 1.8.67 :13473, but this slice paints
-/// local solid colors only — see DECISIONS.md).
+/// client-side — no TDLib setting exists for the app theme, accent,
+/// font size, or chat-list style (TDLib's `accentColor` is per-peer
+/// name/profile tinting, not app chrome; chat backgrounds exist
+/// server-side as `setChatBackground`, schema 1.8.67 :13473, but this
+/// slice paints local solid colors only — see DECISIONS.md).
 ///
 /// TGX reference (`Settings.java`, `SettingsThemeController.java`):
 /// night modes None/Auto(lux)/Scheduled/System, per-theme accent color
@@ -275,6 +275,18 @@ pub struct AppearancePrefs {
     /// Bubble style (true) vs plain full-width rows (false).
     #[serde(default = "default_true")]
     pub bubbles: bool,
+    /// Slice chatlist-list-style: chat-list preview lines — 2 (title +
+    /// preview) or 3 (title + sender line + preview line).
+    #[serde(default = "default_preview_lines")]
+    pub preview_lines: u8,
+    /// Slice chatlist-list-style: show a media-type icon before the
+    /// chat-list preview text.
+    #[serde(default)]
+    pub chat_list_media_icons: bool,
+    /// Slice chatlist-list-style: render formatted text (bold/italic/…)
+    /// in the chat-list preview instead of plain text.
+    #[serde(default)]
+    pub chat_list_rich_preview: bool,
 }
 
 fn default_night_start() -> u16 {
@@ -289,6 +301,10 @@ fn default_font_size() -> u8 {
     FONT_SIZE_DEFAULT
 }
 
+fn default_preview_lines() -> u8 {
+    crate::chatlist_style::PREVIEW_LINES_DEFAULT
+}
+
 impl Default for AppearancePrefs {
     fn default() -> Self {
         Self {
@@ -300,6 +316,9 @@ impl Default for AppearancePrefs {
             wallpaper_rgb: None,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
+            preview_lines: crate::chatlist_style::PREVIEW_LINES_DEFAULT,
+            chat_list_media_icons: false,
+            chat_list_rich_preview: false,
         }
     }
 }
@@ -312,6 +331,7 @@ impl Default for AppearancePrefs {
 pub fn load_appearance_prefs(paths: &AccountPaths) -> AppearancePrefs {
     let mut prefs: AppearancePrefs = load_json_prefs(paths, "appearance_prefs.json");
     prefs.font_size_px = clamp_font_size(prefs.font_size_px);
+    prefs.preview_lines = crate::chatlist_style::clamp_preview_lines(prefs.preview_lines);
     prefs.night_start_minutes %= 24 * 60;
     prefs.night_end_minutes %= 24 * 60;
     prefs
@@ -620,6 +640,9 @@ mod tests {
             wallpaper_rgb: Some(0x0e1621),
             font_size_px: 17,
             bubbles: false,
+            preview_lines: 3,
+            chat_list_media_icons: true,
+            chat_list_rich_preview: true,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_appearance_prefs(&paths), prefs);
