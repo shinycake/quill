@@ -256,6 +256,7 @@ mod tests {
             phone_number: String::new(),
             is_contact,
             is_bot,
+            is_inline: false,
             status: UserStatusKind::Empty,
             photo_small_file_id: 0,
             profile_accent_color_id: -1,

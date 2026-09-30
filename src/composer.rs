@@ -1087,6 +1087,25 @@ pub fn strip_command_menu_trigger(text: &str) -> Option<&str> {
     text.get(..text.len() - token_len)
 }
 
+/// Bots slice: `@botname query` inline-mode trigger. Returns
+/// `(username, query)` when the composer text starts with an `@`-led
+/// token — TGX `InlineSearchContext` only runs inline lookup from the
+/// message-composer start (`startIndex == 0`), never mid-text or in
+/// captions. `@bot` → `("bot", "")`; `@bot cats` → `("bot", "cats")`.
+/// `None` for a non-leading `@` (`hi @bot`), a bare `@`, or an empty
+/// token. Usernames are ASCII alphanumeric + underscore; the query is
+/// everything after the token's first whitespace run.
+pub fn inline_query_trigger(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('@')?;
+    let username_len = rest
+        .char_indices()
+        .take_while(|(_, c)| c.is_ascii_alphanumeric() || *c == '_')
+        .map(|(i, c)| i + c.len_utf8())
+        .last()?;
+    let query = rest[username_len..].trim_start();
+    Some((&rest[..username_len], query))
+}
+
 /// Phase 3.3: merge `botInfo.commands` (bot-specific) with `getCommands`
 /// results (global/default scope) into menu rows. Bot-specific rows come
 /// first; global rows follow, skipping command names already listed, so a
@@ -1637,6 +1656,28 @@ mod tests {
         // user commits the token with a space.
         assert_eq!(command_menu_trigger("/start "), None);
         assert_eq!(command_menu_trigger("hello /st "), None);
+    }
+
+    #[test]
+    fn inline_query_trigger_parses_leading_at_token() {
+        assert_eq!(inline_query_trigger("@bot"), Some(("bot", "")));
+        assert_eq!(inline_query_trigger("@bot "), Some(("bot", "")));
+        assert_eq!(inline_query_trigger("@bot cats"), Some(("bot", "cats")));
+        assert_eq!(
+            inline_query_trigger("@gif_bot_1 cute cats"),
+            Some(("gif_bot_1", "cute cats"))
+        );
+        // Token ends at the first non-username char; the rest is query.
+        assert_eq!(inline_query_trigger("@bot!"), Some(("bot", "!")));
+    }
+
+    #[test]
+    fn inline_query_trigger_rejects_non_leading_at() {
+        assert_eq!(inline_query_trigger(""), None);
+        assert_eq!(inline_query_trigger("@"), None);
+        assert_eq!(inline_query_trigger("hi @bot"), None);
+        assert_eq!(inline_query_trigger(" @bot"), None);
+        assert_eq!(inline_query_trigger("@@bot"), None);
     }
 
     #[test]

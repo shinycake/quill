@@ -17,6 +17,7 @@ mod dialogs;
 pub(crate) use dialogs::*;
 mod format_helpers;
 mod history_row;
+mod inline_mode;
 mod keybindings;
 mod menu_states;
 mod playback;
@@ -548,6 +549,18 @@ pub struct QuillApp {
     /// `command_menu_selected` is the highlighted row (Up/Down/Enter).
     command_menu_open: bool,
     command_menu_selected: usize,
+    /// Bots slice: `@botname query` inline-mode results dropdown above
+    /// the composer. `inline_results_selected` is the highlighted row
+    /// (Up/Down/Enter); `inline_query_token` debounces the
+    /// `getInlineQueryResults` dispatch (100ms quiet window, TGX).
+    /// `inline_query_armed` is the `(username, query)` a debounce timer
+    /// is currently armed for — `poll_live` re-runs the inline progress
+    /// check after every batch of session updates, and the armed identity
+    /// keeps it from spawning a duplicate timer per poll.
+    inline_results_open: bool,
+    inline_results_selected: usize,
+    inline_query_token: u64,
+    inline_query_armed: Option<(String, String)>,
     phone_input: Entity<TextareaState>,
     code_input: Entity<TextareaState>,
     password_input: Entity<TextareaState>,
@@ -1278,6 +1291,12 @@ pub enum ScreenshotDemo {
     /// scope) so the `/` command menu renders open above the composer
     /// with the bot-specific and "Global" sections (Phase 3.3).
     ReadyBotCommandMenu,
+    /// Inline-mode demo (injected, no live Telegram): like
+    /// `ReadyBotChat`, but the Demo Bot is an inline bot (`@gif`) with
+    /// an injected resolved slot and a loaded results page, so the
+    /// `@bot` inline-results dropdown renders open above the composer
+    /// (bots slice).
+    ReadyInlineResults,
     /// Bot profile actions demo (injected, no live Telegram): like
     /// `ReadyBotChat`, plus an armed `bot_start_params` entry (START
     /// button), `botInfo` with a menu button and a privacy-policy URL,
@@ -1815,12 +1834,20 @@ impl QuillApp {
                 this.note_open_draft(true, cx);
                 // Phase 3.3: the `/` menu tracks the composer text (Blur
                 // dismisses it); Enter picks the highlighted command
-                // instead of sending while the menu is open.
+                // instead of sending while the menu is open. Bots slice:
+                // the `@bot` inline-results dropdown tracks it the same
+                // way and takes precedence on Enter (the triggers are
+                // mutually exclusive — the `/` menu stays shut while the
+                // inline trigger is active).
                 match event {
                     InputEvent::Blur => {
                         this.close_command_menu(cx);
+                        this.close_inline_results(cx);
                     }
-                    _ => this.sync_command_menu(cx),
+                    _ => {
+                        this.sync_command_menu(cx);
+                        this.sync_inline_mode(cx);
+                    }
                 }
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
@@ -1828,7 +1855,9 @@ impl QuillApp {
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                         this.chat_prefs.send_key_mode,
                     ) {
-                        if this.pick_command_menu_selection(window, cx) {
+                        if this.pick_inline_result_selection(window, cx) {
+                            // Enter was consumed by the inline results.
+                        } else if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
                         } else if !text.trim().is_empty() {
                             this.submit_composer(
@@ -2508,6 +2537,15 @@ impl QuillApp {
                     AuthorizationState::Ready,
                 )
             }
+            Some(ScreenshotDemo::ReadyInlineResults) => {
+                demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
+                (
+                    ConnectUiStatus::DemoReadyChats,
+                    None,
+                    "screenshot demo — @bot inline results".into(),
+                    AuthorizationState::Ready,
+                )
+            }
             Some(ScreenshotDemo::ReadyBotProfile) => {
                 demo_session = Some(seed_ready_chats_session(demo_sink.clone()));
                 (
@@ -3076,6 +3114,10 @@ impl QuillApp {
             group_call_composer,
             command_menu_open: false,
             command_menu_selected: 0,
+            inline_results_open: false,
+            inline_results_selected: 0,
+            inline_query_token: 0,
+            inline_query_armed: None,
             phone_input,
             code_input,
             password_input,
@@ -4661,12 +4703,27 @@ impl QuillApp {
             app.sync_command_menu(cx);
             app.status_note = "screenshot demo — bot chat with / command menu".into();
         }
+        // Bots slice: inline-mode demo — injected resolved bot + loaded
+        // results page, composer preset to the trigger.
+        if matches!(demo, Some(ScreenshotDemo::ReadyInlineResults)) {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                inline_mode::apply_ready_inline_results(session, &app.demo_sink, &app.demo_seq);
+            }
+            app.composer.update(cx, |input, cx| {
+                input.set_value("@gif cats", window, cx);
+            });
+            app.sync_inline_mode(cx);
+            app.status_note = "screenshot demo — @bot inline results".into();
+        }
         // Phase 3.3: Esc / Up / Down for the `/` command menu. The
         // composer input consumes Escape and arrows in its own `Input`
         // key context, so a keystroke interceptor — which runs before
         // keymap dispatch — is the only reliable hook. It acts only while
         // the menu is open and stops propagation so the input never sees
-        // the swallowed keystroke.
+        // the swallowed keystroke. Bots slice: the `@bot` inline-results
+        // dropdown shares the interceptor and takes precedence while open
+        // (the triggers are mutually exclusive).
         let menu_app = cx.weak_entity();
         cx.intercept_keystrokes(move |event, _window, cx| {
             if event.keystroke.modifiers.modified() {
@@ -4674,13 +4731,19 @@ impl QuillApp {
             }
             let handled = match event.keystroke.key.as_str() {
                 "escape" => menu_app
-                    .update(cx, |this, cx| this.close_command_menu(cx))
+                    .update(cx, |this, cx| {
+                        this.close_inline_results(cx) || this.close_command_menu(cx)
+                    })
                     .unwrap_or(false),
                 "up" => menu_app
-                    .update(cx, |this, cx| this.step_command_menu(-1, cx))
+                    .update(cx, |this, cx| {
+                        this.step_inline_results(-1, cx) || this.step_command_menu(-1, cx)
+                    })
                     .unwrap_or(false),
                 "down" => menu_app
-                    .update(cx, |this, cx| this.step_command_menu(1, cx))
+                    .update(cx, |this, cx| {
+                        this.step_inline_results(1, cx) || this.step_command_menu(1, cx)
+                    })
                     .unwrap_or(false),
                 _ => false,
             };
@@ -4927,6 +4990,14 @@ impl QuillApp {
             progressed = true;
         }
         self.finish_successful_sends(cx);
+        // Bots slice: a `searchPublicChat` answer (or a stale inline-query
+        // response landing) may have resolved the bot / freed the query
+        // slot while the composer text sat unchanged — arm the debounced
+        // dispatch for the current trigger, if any. Idempotent: no-ops
+        // when the slot is already fresh or a timer is armed.
+        if progressed {
+            self.progress_inline_mode(cx);
+        }
         if progressed || send_failed {
             cx.notify();
         }
@@ -7343,7 +7414,9 @@ impl QuillApp {
 
     /// Phase S2: confirm the secret-chat inline-bot warning (TGX's single
     /// `Confirm`, `ALERT_NO_CANCEL`) — insert the stashed `SwitchInline`
-    /// query and don't ask again this session.
+    /// query and don't ask again this session. Bots slice: a typed `@bot`
+    /// trigger stashes an empty marker (the text is already in the
+    /// composer), so confirming only lifts the gate and re-syncs.
     fn confirm_inline_bot_alert(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // The banner only renders in a secret chat; a stale stash must
         // never confirm into another chat's composer.
@@ -7354,11 +7427,14 @@ impl QuillApp {
             return;
         };
         self.inline_bot_alert_shown = true;
-        self.composer.update(cx, |input, cx| {
-            let next = quill::composer::insert_switch_inline_text(&input.value(), &query);
-            input.set_value(next, window, cx);
-        });
+        if !query.is_empty() {
+            self.composer.update(cx, |input, cx| {
+                let next = quill::composer::insert_switch_inline_text(&input.value(), &query);
+                input.set_value(next, window, cx);
+            });
+        }
         self.sync_command_menu(cx);
+        self.sync_inline_mode(cx);
         cx.notify();
     }
 
@@ -7445,7 +7521,10 @@ impl QuillApp {
     /// commands, invalid trigger, empty composer).
     fn sync_command_menu(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
-        let triggered = command_menu_trigger(&text).is_some();
+        // Bots slice: the `@bot` inline trigger owns the composer start —
+        // the `/` menu never competes with the inline-results dropdown.
+        let inline_active = quill::composer::inline_query_trigger(&text).is_some();
+        let triggered = command_menu_trigger(&text).is_some() && !inline_active;
         let open_chat = self.session().and_then(|session| session.open_chat);
         let has_items = open_chat.is_some_and(|chat_id| {
             self.session()
@@ -28994,6 +29073,10 @@ impl QuillApp {
         // Phase 3.3: the `/` menu never survives a chat switch.
         self.command_menu_open = false;
         self.command_menu_selected = 0;
+        // Bots slice: neither does the inline-results dropdown.
+        self.inline_results_open = false;
+        self.inline_results_selected = 0;
+        self.inline_query_armed = None;
         if self.recording_active() {
             self.cancel_recording(cx);
         }
@@ -39140,6 +39223,12 @@ impl QuillApp {
                         .when_some(self.force_reply_panel(cx), |this, panel| this.child(panel))
                         // Phase 3.3: `/` command menu above the composer.
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
+                            this.child(panel)
+                        })
+                        // Bots slice: `@bot` inline-results dropdown above
+                        // the composer (mutually exclusive with the `/`
+                        // menu — see `sync_command_menu`).
+                        .when_some(self.inline_results_dropdown(cx), |this, panel| {
                             this.child(panel)
                         })
                         // Phase A1: slow-mode countdown. The composer stays

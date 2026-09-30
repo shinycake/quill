@@ -31,10 +31,10 @@ use crate::settings::{
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch,
     ChatSearchJumpNeed, ChatStatisticsFetch, ComposerLinkPreview, ForwardFlight, InfoPanelTarget,
-    InlineQueryFetch, InlineQuerySlot, InstantViewPage, InviteLinkFetch, JoinRequestFetch,
-    LoginUrlRequest, MemberListFilter, MemberStatusChange, PasswordOp, PaymentRequest,
-    PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus, Session, SharedMediaTab,
-    ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
+    InlineBotResolve, InlineQueryFetch, InlineQuerySlot, InstantViewPage, InviteLinkFetch,
+    JoinRequestFetch, LoginUrlRequest, MemberListFilter, MemberStatusChange, PasswordOp,
+    PaymentRequest, PollVotersFetch, RequestPurpose, RequestRollback, SearchStatus, Session,
+    SharedMediaTab, ShutdownPhase, SupergroupMembersFetch, WelcomeMessagesFetch,
 };
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
@@ -106,13 +106,15 @@ use crate::telegram::requests::{
     resend_authentication_code, resend_messages, resend_phone_number_code,
     resend_recovery_email_address_code, revoke_chat_invite_link, revoke_group_call_invite_link,
     search_call_messages, search_chat_messages, search_chats, search_messages,
-    search_messages_filter_json, search_public_chats, search_recently_found_chats, search_stickers,
-    send_animation, send_bot_start_message as send_bot_start_message_request,
-    send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
-    send_chat_action, send_chat_action_kind, send_document, send_group_call_message,
-    send_message_album, send_payment_form as send_payment_form_request, send_phone_number_code,
-    send_photo, send_poll, send_rich_message, send_sticker, send_text, send_text_story_reply,
-    send_video, send_video_note, send_voice_note, set_account_ttl, set_archive_chat_list_settings,
+    search_messages_filter_json, search_public_chat, search_public_chats,
+    search_recently_found_chats, search_stickers, send_animation,
+    send_bot_start_message as send_bot_start_message_request, send_call_debug_information,
+    send_call_log, send_call_rating_detail, send_call_signaling_data, send_chat_action,
+    send_chat_action_kind, send_document, send_group_call_message,
+    send_inline_query_result_message, send_message_album,
+    send_payment_form as send_payment_form_request, send_phone_number_code, send_photo, send_poll,
+    send_rich_message, send_sticker, send_text, send_text_story_reply, send_video, send_video_note,
+    send_voice_note, set_account_ttl, set_archive_chat_list_settings,
     set_authentication_phone_number, set_bio, set_chat_description, set_chat_draft_message,
     set_chat_member_status, set_chat_member_tag, set_chat_message_auto_delete_time,
     set_chat_notification_settings, set_chat_permissions, set_chat_photo, set_chat_slow_mode_delay,
@@ -11851,6 +11853,71 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Bots slice: resolve `@botname` → bot user id via `searchPublicChat`
+    /// (schema 1.8.67, line 11603). Sets the resolve slot to `Resolving`
+    /// with a fresh generation; the answer (or error) resolves it in
+    /// `Session::apply` (stale generations are ignored). A local
+    /// user-cache hit short-circuits: the caller should check
+    /// `session.users` first and skip this when the username is known.
+    pub fn resolve_inline_bot(
+        &mut self,
+        username: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.inline_bot_resolve_seq = self.session.inline_bot_resolve_seq.wrapping_add(1);
+        let generation = self.session.inline_bot_resolve_seq;
+        self.session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+            username: username.to_string(),
+            generation,
+        });
+        let extra = self
+            .session
+            .request(RequestPurpose::ResolveInlineBot { generation }, None);
+        let json = search_public_chat(extra, username);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                    username: username.to_string(),
+                    reason: "could not look up the bot".to_string(),
+                });
+                Err(err)
+            }
+        }
+    }
+
+    /// Bots slice: send the picked inline result via
+    /// `sendInlineQueryResultMessage` (schema 1.8.67, line 12226).
+    /// `hide_via_bot` is false (TGX default); the schema always clears
+    /// the chat draft on send, so the caller clears the composer first.
+    /// Response is the sent `message`.
+    pub fn send_inline_query_result(
+        &mut self,
+        chat_id: ChatId,
+        query_id: i64,
+        result_id: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SendInlineQueryResult, Some(chat_id));
+        let json = send_inline_query_result_message(
+            extra, chat_id, None, None, query_id, result_id, false,
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
     /// B4: stop a poll / quiz via `stopPoll` (schema 1.8.67, line 12953).
     /// Guards: chats path active, supported chat, the message is a live
     /// open poll. The UI confirms before calling; `can_be_edited`
@@ -14064,6 +14131,67 @@ mod tests {
         assert!(matches!(failed, Err(ConnectSendError::Native)));
         assert!(driver2.session.inline_query.is_none());
         let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    /// Bots slice: `resolve_inline_bot` sets the resolve slot with a
+    /// fresh generation and sends `searchPublicChat`; a second resolve
+    /// bumps the generation so the first answer goes stale.
+    #[test]
+    fn resolve_inline_bot_sends_search_public_chat_with_generation() {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        let seq = AtomicU64::new(0);
+        driver
+            .ingest(
+                copy_and_parse(
+                    r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let gen1 = driver.session.inline_bot_resolve_seq + 1;
+        driver
+            .resolve_inline_bot("gif")
+            .expect("resolve")
+            .expect("request id");
+        assert_eq!(
+            driver.session.inline_bot_resolve,
+            Some(InlineBotResolve::Resolving {
+                username: "gif".into(),
+                generation: gen1,
+            })
+        );
+        driver
+            .resolve_inline_bot("gifs")
+            .expect("resolve")
+            .expect("request id");
+        let gen2 = gen1 + 1;
+        assert_eq!(
+            driver.session.inline_bot_resolve,
+            Some(InlineBotResolve::Resolving {
+                username: "gifs".into(),
+                generation: gen2,
+            })
+        );
+        let sends: Vec<Value> = recorder
+            .snapshot()
+            .iter()
+            .filter(|json| json.contains("searchPublicChat"))
+            .map(|json| serde_json::from_str::<Value>(json).unwrap())
+            .collect();
+        assert_eq!(sends.len(), 2);
+        assert_eq!(sends[0]["username"], "gif");
+        assert_eq!(sends[1]["username"], "gifs");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Phase B1: the three secret-chat request shapes
