@@ -1,7 +1,9 @@
 //! mute menu, notification sounds, badge prefs, scope/reaction settings.
 
 use super::app::QuillApp;
+use super::chat_theme::{danger, danger_bg};
 use super::demo::{demo_file_json, demo_media_allowlist};
+use super::dialogs::NotificationsConfirm;
 use super::notifications::notification_settings_json;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
@@ -201,6 +203,7 @@ impl QuillApp {
                 this.notification_defaults_open = false;
                 this.defaults_sound_picker = None;
                 this.defaults_exceptions_scope = None;
+                this.notifications_confirm = None;
                 cx.notify();
             },
         );
@@ -220,6 +223,9 @@ impl QuillApp {
                          Changes apply via setScopeNotificationSettings.",
                     ),
             );
+            if let Some(confirm) = this.notifications_confirm {
+                body = body.child(this.notifications_confirm_banner(confirm, cx));
+            }
             for scope in NotificationSettingsScope::ALL {
                 body = body.child(this.scope_settings_section(cx, scope, &saved_sounds));
             }
@@ -238,7 +244,8 @@ impl QuillApp {
                     .label("Reset all")
                     .danger()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.reset_all_notification_settings(cx);
+                        this.notifications_confirm = Some(NotificationsConfirm::ResetAll);
+                        cx.notify();
                     }))
                     .into_any_element(),
                 Button::new("close-notif-defaults")
@@ -248,6 +255,7 @@ impl QuillApp {
                         this.notification_defaults_open = false;
                         this.defaults_sound_picker = None;
                         this.defaults_exceptions_scope = None;
+                        this.notifications_confirm = None;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::NotificationDefaults, window, cx);
                     }))
@@ -1461,6 +1469,76 @@ impl QuillApp {
             self.status_note = "notification settings reset".into();
         }
         cx.notify();
+    }
+
+    /// Parity slice: the "Reset all" confirmation banner in the defaults
+    /// dialog — the `sessions_confirm_banner` pattern. Destructive
+    /// `resetAllNotificationSettings` has no undo, so the footer's "Reset
+    /// all" button arms this banner instead of sending the request.
+    pub(super) fn notifications_confirm_banner(
+        &self,
+        confirm: NotificationsConfirm,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let question = match confirm {
+            NotificationsConfirm::ResetAll => {
+                "Reset all notification settings to the server defaults? This cannot be undone."
+            }
+        };
+        div()
+            .id("notifications-confirm")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(danger())
+            .bg(danger_bg())
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .text_color(danger())
+                    .child(question),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("notifications-confirm-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_notifications_reset(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("notifications-confirm-reset")
+                            .label("Reset")
+                            .danger()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_notifications_reset(cx);
+                            })),
+                    ),
+            )
+    }
+
+    /// Parity slice: drop the pending "Reset all" confirmation.
+    pub(super) fn cancel_notifications_reset(&mut self, cx: &mut Context<Self>) {
+        self.notifications_confirm = None;
+        cx.notify();
+    }
+
+    /// Parity slice: send the confirmed reset. Live: the driver sends
+    /// `resetAllNotificationSettings`; demo: seed the schema defaults
+    /// directly — both via the shared `reset_all_notification_settings`.
+    pub(super) fn confirm_notifications_reset(&mut self, cx: &mut Context<Self>) {
+        self.notifications_confirm.take();
+        self.reset_all_notification_settings(cx);
     }
 
     /// Parity slice: one scope's section in the defaults dialog.

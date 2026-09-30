@@ -554,7 +554,7 @@ pub fn set_reaction_notification_settings(
     .to_string()
 }
 
-/// `resetAllNotificationSettings` (TDLib 1.8.67, line 13670): resets all
+/// `resetAllNotificationSettings` (TDLib 1.8.67, line 13671): resets all
 /// chat and scope notification settings to their default values. The new
 /// values arrive as `updateScopeNotificationSettings` /
 /// `updateChatNotificationSettings`.

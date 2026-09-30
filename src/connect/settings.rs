@@ -14,11 +14,10 @@ use crate::telegram::requests::{
     delete_account, disconnect_all_websites, disconnect_website, get_account_ttl,
     get_active_sessions, get_chat_notification_settings_exceptions, get_connected_websites,
     get_saved_notification_sounds, get_scope_notification_settings, get_storage_statistics,
-    reset_all_notification_settings,
-    set_account_ttl, set_chat_notification_settings, set_message_sender_block_list,
-    set_reaction_notification_settings, set_scope_notification_settings,
-    terminate_all_other_sessions, terminate_session, toggle_session_can_accept_calls,
-    toggle_session_can_accept_secret_chats,
+    reset_all_notification_settings, set_account_ttl, set_chat_notification_settings,
+    set_message_sender_block_list, set_reaction_notification_settings,
+    set_scope_notification_settings, terminate_all_other_sessions, terminate_session,
+    toggle_session_can_accept_calls, toggle_session_can_accept_secret_chats,
 };
 use crate::telegram::requests_data_settings::{
     get_auto_download_settings_presets, remove_all_files_from_downloads, set_auto_download_settings,
