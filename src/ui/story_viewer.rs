@@ -1492,42 +1492,41 @@ impl QuillApp {
             // honest placeholder.
             let joinable = matches!(item.kind, StoryViewerKind::Live)
                 && item.live_call.is_some_and(|call| !call.is_rtmp_stream);
-            let body: AnyElement = if joinable {
-                let chat_id = item.chat_id;
-                let story_id = item.story_id;
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_3()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(text_bright())
-                            .child("🔴 Live story"),
-                    )
-                    .child(
-                        Button::new("story-join-live")
-                            .label("Join live")
-                            .on_click(cx.listener(move |this, _, _, cx| {
+            let body: AnyElement =
+                if joinable {
+                    let chat_id = item.chat_id;
+                    let story_id = item.story_id;
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(text_bright())
+                                .child("🔴 Live story"),
+                        )
+                        .child(Button::new("story-join-live").label("Join live").on_click(
+                            cx.listener(move |this, _, _, cx| {
                                 this.join_live_story_from_viewer(chat_id, story_id, cx);
-                            })),
-                    )
-                    .into_any_element()
-            } else {
-                let status = if matches!(item.kind, StoryViewerKind::Live) {
-                    format!("{kind_label} — RTMP playback is not supported yet")
-                } else if matches!(item.kind, StoryViewerKind::Unsupported) {
-                    format!("{kind_label} — not supported in this slice")
+                            }),
+                        ))
+                        .into_any_element()
                 } else {
-                    status
+                    let status = if matches!(item.kind, StoryViewerKind::Live) {
+                        format!("{kind_label} — RTMP playback is not supported yet")
+                    } else if matches!(item.kind, StoryViewerKind::Unsupported) {
+                        format!("{kind_label} — not supported in this slice")
+                    } else {
+                        status
+                    };
+                    div()
+                        .text_sm()
+                        .text_color(text_bright())
+                        .child(status)
+                        .into_any_element()
                 };
-                div()
-                    .text_sm()
-                    .text_color(text_bright())
-                    .child(status)
-                    .into_any_element()
-            };
             div()
                 .id(("story-viewer-loading", item.story_id as u64))
                 .w(px(360.))
