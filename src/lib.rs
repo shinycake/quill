@@ -4,6 +4,7 @@
 pub mod album;
 pub mod animation;
 pub mod auth;
+pub mod autostart;
 pub mod calls;
 pub mod chat_export;
 pub mod chatlist_style;

@@ -564,7 +564,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Minimize/close-to-tray behavior <!-- parity:platform-minimize-to-tray -->
 - [ ] Tray context menu (open window, quit) <!-- parity:platform-tray-menu -->
 - [ ] Start minimized to tray <!-- parity:platform-start-minimized -->
-- [ ] Autostart on login (OS-level; schema `autostart` is bot-start-only, no TDLib involvement) <!-- parity:platform-autostart -->
+- [x] Autostart on login (OS-level; schema `autostart` is bot-start-only, no TDLib involvement) — Linux XDG Autostart `.desktop` + macOS LaunchAgents plist; Windows unsupported (registry Run key needs a Windows setup to verify; explicit follow-up) <!-- parity:platform-autostart -->
 - [ ] Spellcheck in composer <!-- parity:platform-spellcheck -->
 - [x] Chat history export to file (JSON export of the full history to Downloads, via client-side `getChatHistory` paging — no exportHistory constructor in schema; per-message sender names absent by design, Quill plumbs no sender identity) <!-- parity:platform-history-export -->
 - [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->

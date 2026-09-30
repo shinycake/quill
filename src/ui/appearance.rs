@@ -249,7 +249,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key and app language. \
+                        "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language and startup. \
                          Changes apply immediately (language applies after restart) and are saved on this device.",
                     ),
             );
@@ -264,6 +264,7 @@ impl QuillApp {
             // Slice parity:settings-language: the app language picker
             // (the tag TDLib gets in `setTdlibParameters`).
             body = body.child(this.appearance_language_section(cx));
+            body = body.child(this.general_autostart_section(cx));
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
                     .label("Close")
@@ -704,6 +705,36 @@ impl QuillApp {
     /// parity:settings-ctrlenter-send): which keystroke sends a chat
     /// message. Lives in the Appearance dialog — Quill has no separate
     /// Chat Settings screen yet.
+    /// `parity:platform-autostart` — "Launch at login" switch. OS-level
+    /// (XDG Autostart on Linux, LaunchAgents on macOS); unsupported
+    /// platforms render an explanatory line instead of the switch.
+    fn general_autostart_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        if !quill::autostart::supported() {
+            return self.appearance_section(
+                cx,
+                "Launch at login",
+                "Autostart is not supported on this platform yet.",
+                div().into_any_element(),
+            );
+        }
+        let on = quill::autostart::is_enabled();
+        let control = Switch::new("general-autostart-switch")
+            .checked(on)
+            .accessibility_label("Launch Quill at login")
+            .on_click(cx.listener(|this, &on, _, cx| {
+                if let Err(err) = quill::autostart::set_enabled(on) {
+                    this.status_note = err.to_string();
+                }
+                cx.notify();
+            }));
+        self.appearance_section(
+            cx,
+            "Launch at login",
+            "Start Quill automatically when you sign in to this device.",
+            control.into_any_element(),
+        )
+    }
+
     fn appearance_send_key_section(&self, cx: &mut Context<Self>) -> AnyElement {
         use quill::composer::SendKeyMode;
         let current = self.chat_prefs.send_key_mode;
