@@ -9,6 +9,7 @@ use crate::ids::{
 };
 use crate::notify::{self, OsNotification, QueuedNotification};
 use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
+use crate::settings::BadgePrefs;
 use crate::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MAX_BYTES, AUTO_DOWNLOAD_MUSIC,
     AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE,
@@ -4419,6 +4420,11 @@ pub struct Session {
     /// 1.8.67 has no contact-sync switch (verified concept-level; TGX
     /// implements sync client-side in `TdlibContactManager`).
     pub contact_prefs: ContactPrefs,
+    /// Slice parity:chatlist-badge-settings: local badge-counter
+    /// preferences (include muted/archived, messages-vs-chats),
+    /// persisted via `settings::BadgePrefs`. Loaded at startup like
+    /// `call_prefs`; the UI saves on toggle.
+    pub badge_prefs: BadgePrefs,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -5403,6 +5409,7 @@ impl Session {
             call_prefs: CallPrefs::default(),
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
+            badge_prefs: BadgePrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
             open_topic: None,

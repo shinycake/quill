@@ -713,3 +713,93 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// Slice parity:chatlist-badge-settings: local-only app badge counter
+/// preferences, persisted as JSON next to the account root
+/// (`badge_prefs.json`). Client-side only — the tray badge count is a
+/// desktop-client concern (TDLib 1.8.67 has no badge settings):
+/// - `include_muted`: count muted chats (Telegram Desktop default: ON —
+///   its `_includeMutedCounter` is true)
+/// - `include_archived`: count archived chats (default OFF, both clients)
+/// - `count_messages`: sum unread messages vs count unread chats
+///   (default: messages)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BadgePrefs {
+    #[serde(default = "default_true")]
+    pub include_muted: bool,
+    #[serde(default)]
+    pub include_archived: bool,
+    #[serde(default = "default_true")]
+    pub count_messages: bool,
+}
+
+impl Default for BadgePrefs {
+    fn default() -> Self {
+        Self {
+            include_muted: true,
+            include_archived: false,
+            count_messages: true,
+        }
+    }
+}
+
+fn badge_prefs_path(paths: &AccountPaths) -> PathBuf {
+    paths.root.join("badge_prefs.json")
+}
+
+/// Load badge prefs; missing or corrupt files fall back to defaults
+/// (never a hard error — prefs must not block startup).
+pub fn load_badge_prefs(paths: &AccountPaths) -> BadgePrefs {
+    std::fs::read(badge_prefs_path(paths))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Persist badge prefs; failures are returned to the caller to surface
+/// in the status note.
+pub fn save_badge_prefs(paths: &AccountPaths, prefs: &BadgePrefs) -> std::io::Result<()> {
+    let path = badge_prefs_path(paths);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(prefs)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, bytes)
+}
+
+#[cfg(test)]
+mod badge_prefs_tests {
+    use super::*;
+
+    #[test]
+    fn badge_prefs_default_matches_telegram_desktop() {
+        let prefs = BadgePrefs::default();
+        assert!(prefs.include_muted);
+        assert!(!prefs.include_archived);
+        assert!(prefs.count_messages);
+    }
+
+    #[test]
+    fn badge_prefs_serde_roundtrip() {
+        let prefs = BadgePrefs {
+            include_muted: false,
+            include_archived: true,
+            count_messages: false,
+        };
+        let json = serde_json::to_string(&prefs).unwrap();
+        assert_eq!(serde_json::from_str::<BadgePrefs>(&json).unwrap(), prefs);
+    }
+
+    #[test]
+    fn badge_prefs_missing_file_falls_back_to_default() {
+        let paths = AccountPaths {
+            root: PathBuf::from("/nonexistent-dir-for-badge-test"),
+            tdlib_database: PathBuf::new(),
+            tdlib_files: PathBuf::new(),
+            app_thumbnails: PathBuf::new(),
+            exports: PathBuf::new(),
+        };
+        assert_eq!(load_badge_prefs(&paths), BadgePrefs::default());
+    }
+}
