@@ -6814,3 +6814,26 @@ panel (`getGameHighScores`), send-game entry via `sendMessage`+`inputMessageGame
   the thumbnail; sending a bot's game to a different chat (composer
   attachment path); `inlineKeyboardButtonTypeCallbackGame` inline buttons
   (already flow through `press_game_button` when rendered).
+
+## Slice auth-multi-account part 1 — ACCOUNT REGISTRY (2026-09-30)
+
+**Scope:** `parity:auth-multi-account` — the data layer only. `AccountKey`
+already namespaces every account's data on disk
+(`<app_root>/accounts/<key>/`); this slice adds the missing list of *known*
+accounts: new named module `src/accounts.rs` with `AccountEntry`
+(key/phone/display name) and `AccountRegistry` (accounts + current),
+persisted as `<app_root>/accounts.json` (next to, not inside, the per-account
+dirs).
+
+- **Key decisions (ponytail):**
+  - Registry is data-only: `load` (missing/corrupt/empty/unknown-current →
+    default single primary, never blocks startup), `save`, `get`, `add`
+    (duplicate key = noop), `remove` (current or unknown = noop — the active
+    account cannot be removed), `set_current` (unknown = noop).
+  - No migration file format: the default registry IS the migration for
+    existing single-account installs (primary, empty metadata).
+  - 6 unit tests (load default/corrupt, round-trip, add-dup, remove guards,
+    set-current guard) — the smallest thing that fails if the logic breaks.
+- **Out of this slice (parts 2–3):** add-account auth flow, account switching
+  (restart driver under a different key), settings UI for the account list.
+  The README box stays unchecked until switching works end to end.
