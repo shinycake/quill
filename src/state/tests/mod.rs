@@ -1,0 +1,19 @@
+//! Unit tests for the session reducer, grouped by area.
+use super::*;
+
+mod bots;
+mod calls;
+mod chat_list;
+mod common;
+mod downloads;
+mod groups;
+mod messages;
+mod notifications;
+mod payments;
+mod requests;
+mod search;
+mod sessions;
+mod shared_media;
+mod stickers;
+mod stories;
+mod users;

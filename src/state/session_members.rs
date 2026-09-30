@@ -1,0 +1,59 @@
+//! Chat-member and secret-chat acceptors.
+use super::*;
+
+impl Session {
+    /// Record own channel membership from `getChatMember` / `updateChatMember`.
+    /// The member is only trusted when `member_id` is the current user.
+    pub fn accept_own_chat_member(&mut self, chat_id: ChatId, member: ParsedChatMember) {
+        let own = self
+            .my_user_id
+            .is_some_and(|me| member.member_id == MessageSender::User { user_id: me });
+        if !own {
+            self.diagnostics.record(Diagnostic {
+                category: "reducer",
+                type_name: Some("chatMember".into()),
+                extra: Some(chat_id.0 as u64),
+                seq: None,
+                note: "foreign-member-ignored",
+            });
+            return;
+        }
+        if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+            chat.set_member_status(member.status, member.admin_can_post_messages);
+            chat.set_admin_can_invite_users(member.admin_can_invite_users);
+            chat.set_admin_can_promote_members(member.admin_rights.map(|r| r.can_promote_members));
+            chat.set_admin_can_restrict_members(
+                member.admin_rights.map(|r| r.can_restrict_members),
+            );
+            chat.set_admin_can_pin_messages(member.admin_rights.map(|r| r.can_pin_messages));
+            // Slice G2: sign-messages + welcome-message rights for the
+            // channel path.
+            chat.set_admin_can_change_info(member.admin_rights.map(|r| r.can_change_info));
+            chat.set_admin_can_send_welcome_messages(
+                member.admin_rights.map(|r| r.can_send_welcome_messages),
+            );
+        }
+    }
+
+    /// Phase B1: record a secret chat (`updateSecretChat` or a
+    /// `getSecretChat` answer), fanning the state out to the chat
+    /// summary when the chat is already known. `updateSecretChat` is
+    /// guaranteed to arrive *before* the chat identifier is returned
+    /// (schema 1.8.67, line 10740), hence the session-level map that
+    /// `updateNewChat` hydrates from; a satisfied fetch leaves
+    /// `secret_chat_fetch_queue`.
+    pub(crate) fn accept_secret_chat(&mut self, secret_chat: &ParsedSecretChat) {
+        let state = secret_chat.state.clone();
+        self.secret_chat_states
+            .insert(secret_chat.id, secret_chat.clone());
+        self.secret_chat_fetch_queue
+            .retain(|id| *id != secret_chat.id);
+        for chat in self.chats.values_mut() {
+            if let ChatKind::Secret { secret_chat_id, .. } = &chat.kind
+                && *secret_chat_id == secret_chat.id
+            {
+                chat.secret_state = Some(state.clone());
+            }
+        }
+    }
+}
