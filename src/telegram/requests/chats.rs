@@ -486,9 +486,9 @@ pub fn get_scope_notification_settings(
 }
 
 /// `getChatNotificationSettingsExceptions` (TDLib 1.8.67, line 13659).
-/// `compare_sound=true` returns only chats whose sound differs from the
-/// scope default; `false` returns every chat with any non-default setting
-/// (the exceptions list view).
+/// `compare_sound=false` returns chats with any non-default setting but
+/// EXCLUDES chats whose only non-default setting is the sound; `true`
+/// includes those sound-only chats too (the exceptions list view).
 pub fn get_chat_notification_settings_exceptions(
     extra: RequestId,
     scope: crate::telegram::envelope::NotificationSettingsScope,

@@ -266,8 +266,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Parity slice: `getChatNotificationSettingsExceptions` (TDLib 1.8.67,
     /// line 13659) for a scope not yet loaded and not in flight — once per
-    /// dialog open. `compare_sound=false` returns every chat with any
-    /// non-default setting (the exceptions list view).
+    /// dialog open. `compare_sound=true` includes chats whose only
+    /// non-default setting is the sound (the exceptions list view).
     pub fn maybe_fetch_notification_exceptions(
         &mut self,
         scope: NotificationSettingsScope,
@@ -294,7 +294,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self
             .sender
             .send_json(&get_chat_notification_settings_exceptions(
-                extra, scope, false,
+                extra, scope, true,
             ))
         {
             self.session.requests.take(extra);

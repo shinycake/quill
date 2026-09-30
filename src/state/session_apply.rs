@@ -554,6 +554,12 @@ impl Session {
                     .chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id));
+                // A placeholder chat (kind unknown — a server id with no
+                // local chat, e.g. archived or never opened) has no
+                // trustworthy scope: `scope_for_chat_kind` would always
+                // guess GroupChats. Prune/invalidate across all scopes
+                // instead of the guessed one.
+                let kind_unknown = matches!(chat.kind, ChatKind::Unknown);
                 let scope = scope_for_chat_kind(&chat.kind);
                 let fully_default = notification_settings == ChatNotificationSettings::default();
                 chat.notification_settings = notification_settings;
@@ -563,9 +569,15 @@ impl Session {
                 // list; any other change drops the list so the next dialog
                 // open refetches it.
                 if fully_default {
-                    if let Some(list) = self.notification_exceptions.get_mut(&scope) {
+                    if kind_unknown {
+                        for list in self.notification_exceptions.values_mut() {
+                            list.retain(|id| *id != chat_id.0);
+                        }
+                    } else if let Some(list) = self.notification_exceptions.get_mut(&scope) {
                         list.retain(|id| *id != chat_id.0);
                     }
+                } else if kind_unknown {
+                    self.notification_exceptions.clear();
                 } else {
                     self.notification_exceptions.remove(&scope);
                 }

@@ -20,7 +20,8 @@ pub fn scope_for_chat_kind(kind: &ChatKind) -> NotificationSettingsScope {
 impl Session {
     /// Parity slice: chats with any non-default notification setting for
     /// the scope — the `getChatNotificationSettingsExceptions`
-    /// `compare_sound=false` semantics, computed locally. The screenshot
+    /// `compare_sound=true` semantics (whole-struct compare, sound-only
+    /// chats included), computed locally. The screenshot
     /// demo (no driver) answers the request from this; live sessions get
     /// the authoritative server list.
     pub fn local_notification_exceptions(&self, scope: NotificationSettingsScope) -> Vec<i64> {
