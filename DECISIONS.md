@@ -4479,6 +4479,40 @@ P2P privacy in the privacy settings.
   has no such binding), echo-cancellation / noise-suppression
   toggles (`ntgcalls-sys` exposes none), call verification emojis
   for 1:1 calls (already parsed for group calls).
+
+## Phase C2j — echo-cancellation / noise-suppression toggles BLOCKED (2026-09-30)
+
+Claimed 2026-09-30 by Loop 1 as `parity:calls-audio-fx`, researched,
+blocked the same day — no code written, no PR.
+
+- **Concept-level verification (3 layers):**
+  1. `crates/ntgcalls-sys/src/lib.rs`: all 76 hand-written `ntg_*`
+     FFI bindings reviewed — none control echo cancellation, noise
+     suppression, AGC, or high-pass filtering.
+  2. ntgcalls source at pinned tag v3.0.0 (shallow clone): the ONLY
+     echo/noise references are in
+     `wrtc/src/interfaces/media/channels/outgoing_audio_channel.cpp:22-26`,
+     which hardcodes
+     `audio_options.echo_cancellation = false;`
+     `audio_options.noise_suppression = false;`
+     `audio_options.auto_gain_control = false;`
+     `audio_options.highpass_filter = false;`
+     at voice-channel creation. The incoming channel only sets
+     jitter-buffer options. There is no runtime path to change these.
+  3. `schema/td_api.tl` (1.8.67): the only echo/noise constructors are
+     `callProblemEcho` / `callProblemNoise` — post-call rating
+     problems, not audio-processing controls. TDLib exposes nothing;
+     Telegram's official clients do APM in their native VoIP layer.
+- **Why no workaround:** ntgcalls owns the microphone audio device
+  internally (Sora C++ SDK / WebRTC ADM) — Quill never sees raw mic
+  frames, so it cannot apply its own EC/NS. Rebuilding ntgcalls with
+  patched defaults needs a native build machine (documented future
+  option only); the prebuilt is LGPLv3-sidecar dlopen.
+- **Verdict:** real toggles are impossible on the pinned engine; a
+  settings UI that writes a pref but changes nothing would be
+  dishonest. Slice recorded as blocked; README line updated with the
+  evidence. Unblocks if a future ntgcalls release exposes
+  audio-processing controls.
 ## Phase S1 — SECRET-CHAT PARITY (2026-09-27)
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
