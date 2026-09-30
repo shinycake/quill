@@ -810,7 +810,10 @@ impl QuillApp {
     /// `updateNewGroupCallMessage`. Clears on send — a send failure
     /// surfaces via `group_call_error`.
     pub(super) fn send_group_call_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.group_call_composer.read(cx).value().to_string();
+        let text = quill::composer::send_text_on_enter(
+            self.group_call_composer.read(cx).value().to_string(),
+            self.chat_prefs.send_key_mode,
+        );
         if text.trim().is_empty() {
             return;
         }

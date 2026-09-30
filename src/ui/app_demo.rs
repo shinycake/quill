@@ -977,7 +977,14 @@ impl QuillApp {
                         } else if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
                         } else if !text.trim().is_empty() {
-                            this.submit_composer(text, window, cx);
+                            this.submit_composer(
+                                quill::composer::send_text_on_enter(
+                                    text,
+                                    this.chat_prefs.send_key_mode,
+                                ),
+                                window,
+                                cx,
+                            );
                         }
                     }
                 }

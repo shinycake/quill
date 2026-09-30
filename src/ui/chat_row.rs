@@ -270,8 +270,11 @@ pub(super) fn chat_row_tags(
 /// `VirtualList` can position them from declared sizes — 56px base
 /// (avatar 40 + the old py_2), 80px when the folder-tag strip is present.
 /// `session_chat_row` enforces the same height on the element.
-pub(super) fn chat_row_height(tags: &[String]) -> Pixels {
-    if tags.is_empty() { px(56.) } else { px(80.) }
+pub(super) fn chat_row_height(tags: &[String], preview_lines: u8) -> Pixels {
+    px(quill::chatlist_style::chat_row_height_px(
+        !tags.is_empty(),
+        preview_lines,
+    ))
 }
 
 impl QuillApp {
@@ -507,7 +510,7 @@ pub(super) fn session_chat_row(
         // `VirtualList` positions rows from declared sizes, so the row
         // enforces the same height and centers its content. Title and
         // preview truncate to one line so content can never overflow it.
-        .h(chat_row_height(&tags))
+        .h(chat_row_height(&tags, row_style.preview_lines))
         .flex()
         .flex_col()
         .justify_center()
@@ -632,28 +635,22 @@ pub(super) fn session_chat_row(
                                         .when(has_mentions, |this| this.child(mention_badge())),
                                 ),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .truncate()
-                                .text_color(cx.theme().muted_foreground)
-                                .when(row_style.preview_lines >= 3, |this| {
-                                    // Slice chatlist-list-style: the third line
-                                    // names the sender ("You" / author signature /
-                                    // chat title).
-                                    this.child(
-                                        div()
-                                            .text_xs()
-                                            .font_semibold()
-                                            .truncate()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(chat.last_preview_sender.clone()),
-                                    )
-                                })
-                                .child(super::chatlist_style::chat_list_preview_line(
-                                    icon, &preview, entities, cx,
-                                )),
-                        ),
+                        .when(row_style.preview_lines >= 3, |this| {
+                            // Slice chatlist-list-style: the third line
+                            // names the sender ("You" / author signature /
+                            // chat title).
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .truncate()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(chat.last_preview_sender.clone()),
+                            )
+                        })
+                        .child(super::chatlist_style::chat_list_preview_line(
+                            icon, &preview, entities, cx,
+                        )),
                 ),
         )
         .when(!tags.is_empty(), |this| {

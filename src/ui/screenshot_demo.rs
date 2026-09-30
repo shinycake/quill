@@ -167,12 +167,6 @@ pub enum ScreenshotDemo {
     /// `botInfo` (description + commands), so the bot panel renders under
     /// the header and the composer is visible (Phase 3.1).
     ReadyBotChat,
-    /// Inline-mode demo (injected, no live Telegram): like
-    /// `ReadyBotChat`, but the Demo Bot is an inline bot (`@gif`) with
-    /// an injected resolved slot and a loaded results page, so the
-    /// `@bot` inline-results dropdown renders open above the composer
-    /// (bots slice).
-    ReadyInlineResults,
     /// Inline keyboard demo (injected, no live Telegram): like
     /// `ReadyBotChat`, but the bot message carries a
     /// `replyMarkupInlineKeyboard` with URL / callback / switchInline /
@@ -183,6 +177,12 @@ pub enum ScreenshotDemo {
     /// scope) so the `/` command menu renders open above the composer
     /// with the bot-specific and "Global" sections (Phase 3.3).
     ReadyBotCommandMenu,
+    /// Inline-mode demo (injected, no live Telegram): like
+    /// `ReadyBotChat`, but the Demo Bot is an inline bot (`@gif`) with
+    /// an injected resolved slot and a loaded results page, so the
+    /// `@bot` inline-results dropdown renders open above the composer
+    /// (bots slice).
+    ReadyInlineResults,
     /// Bot profile actions demo (injected, no live Telegram): like
     /// `ReadyBotChat`, plus an armed `bot_start_params` entry (START
     /// button), `botInfo` with a menu button and a privacy-policy URL,

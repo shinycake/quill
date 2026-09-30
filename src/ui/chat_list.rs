@@ -1784,6 +1784,7 @@ impl QuillApp {
                                     let height = match item {
                                         ChatListItem::Chat { chat, .. } => chat_row_height(
                                             &chat_row_tags(chat, &folder_names, show_folder_tags),
+                                            self.appearance.preview_lines,
                                         ),
                                         ChatListItem::ArchiveHeader { .. } => px(32.),
                                         ChatListItem::ArchiveEmpty => px(24.),

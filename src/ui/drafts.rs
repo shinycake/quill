@@ -122,6 +122,10 @@ impl QuillApp {
         // Phase 3.3: the `/` menu never survives a chat switch.
         self.command_menu_open = false;
         self.command_menu_selected = 0;
+        // Bots slice: neither does the inline-results dropdown.
+        self.inline_results_open = false;
+        self.inline_results_selected = 0;
+        self.inline_query_armed = None;
         if self.recording_active() {
             self.cancel_recording(cx);
         }
