@@ -1,0 +1,116 @@
+# Quill worker — disposable builder/reviewer/fixer turn (workflow-redesign.md §1.4).
+#
+# MIGRATION STEP 3: definition only. The Conductor does not dispatch workers
+# while the control issue is in `mode: shadow`. Workers run on the
+# self-hosted `quill-worker` runner pool with read-only repo permission and
+# can produce NOTHING but an uploaded artifact: no push, no PR, no comment,
+# no status, no rerun, no merge. Every artifact is fenced by
+# (work_issue, generation, claim run id, base/head SHA) and is inert until
+# the Publisher accepts it.
+#
+# The agent turn itself is the hook script $QUILL_AUTOMATION/agent-turn.sh
+# (lives under ~/quill-automation per the design, not in the repo). While
+# unconfigured it records the claim and exits 0 without touching the tree.
+name: quill-worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      role:
+        description: "Worker role"
+        required: true
+        type: choice
+        options: [builder, reviewer, fixer]
+      work_issue:
+        description: "GitHub work issue number"
+        required: true
+      generation:
+        description: "Claim generation (fencing)"
+        required: true
+      claim_run_id:
+        description: "Actions run id that issued the claim"
+        required: true
+      base_sha:
+        description: "Starting main SHA"
+        required: true
+      head_sha:
+        description: "Expected branch head SHA (empty for new branch)"
+        required: false
+        default: ""
+      branch:
+        description: "WIP branch name"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  turn:
+    name: "worker turn (${{ inputs.role }})"
+    runs-on: [self-hosted, quill-worker]
+    timeout-minutes: 35
+    steps:
+      - name: Isolated checkout of exact SHA
+        run: |
+          set -euo pipefail
+          RUN_DIR="$HOME/quill-automation/jobs/${{ github.run_id }}"
+          rm -rf "$RUN_DIR" && mkdir -p "$RUN_DIR" && cd "$RUN_DIR"
+          git init -q
+          git fetch -q --depth 50 "https://github.com/${{ github.repository }}.git" \
+            "${{ inputs.head_sha || inputs.base_sha }}"
+          git checkout -q "${{ inputs.head_sha || inputs.base_sha }}"
+          echo "checked out $(git rev-parse HEAD) in $RUN_DIR"
+      - name: Agent turn (hook)
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          cd "$HOME/quill-automation/jobs/${{ github.run_id }}"
+          HOOK="$HOME/quill-automation/agent-turn.sh"
+          if [ -x "$HOOK" ]; then
+            "$HOOK" \
+              --role "${{ inputs.role }}" \
+              --work-issue "${{ inputs.work_issue }}" \
+              --generation "${{ inputs.generation }}" \
+              --claim-run-id "${{ inputs.claim_run_id }}" \
+              --base-sha "${{ inputs.base_sha }}" \
+              --head-sha "${{ inputs.head_sha }}" \
+              --branch "${{ inputs.branch }}"
+          else
+            echo "no agent turn configured (shadow): recording claim, no tree changes"
+          fi
+      - name: Local gates
+        run: |
+          set -euo pipefail
+          cd "$HOME/quill-automation/jobs/${{ github.run_id }}"
+          cargo fmt --all -- --check
+          cargo clippy --no-default-features --all-targets --locked -- -D warnings
+          cargo test --no-default-features --locked
+      - name: Write manifest
+        run: |
+          set -euo pipefail
+          cd "$HOME/quill-automation/jobs/${{ github.run_id }}"
+          git diff HEAD --stat > artifact-diffstat.txt || true
+          cat > artifact-manifest.json <<EOF
+          {
+            "work_issue": "${{ inputs.work_issue }}",
+            "generation": "${{ inputs.generation }}",
+            "claim_run_id": "${{ inputs.claim_run_id }}",
+            "role": "${{ inputs.role }}",
+            "base_sha": "${{ inputs.base_sha }}",
+            "expected_head_sha": "${{ inputs.head_sha }}",
+            "branch": "${{ inputs.branch }}",
+            "worker_run_id": "${{ github.run_id }}",
+            "result_head_sha": "$(git rev-parse HEAD)"
+          }
+          EOF
+          mkdir -p "$GITHUB_WORKSPACE/quill-artifact"
+          cp artifact-manifest.json artifact-diffstat.txt "$GITHUB_WORKSPACE/quill-artifact/"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-${{ inputs.role }}-issue${{ inputs.work_issue }}-gen${{ inputs.generation }}-${{ github.run_id }}
+          path: quill-artifact/
+          retention-days: 14
+      - name: Scrub job directory
+        if: always()
+        run: rm -rf "$HOME/quill-automation/jobs/${{ github.run_id }}"
