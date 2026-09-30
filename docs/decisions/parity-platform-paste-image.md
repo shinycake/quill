@@ -6,4 +6,5 @@
   - `ClipboardEntry::Image` already carries encoded bytes (`Image { format, bytes }`) — no re-encoding needed; bytes are written to a temp file (`quill-paste-<nanos>-<pid>.<ext>`) and picked through the existing `ComposerAttachment::pick` path, so the send-path canonicalization and album rules apply unchanged.
   - The lib helper (`clipboard_image_attachment`) takes a plain extension string, not `gpui::ImageFormat` — `src/composer.rs` builds without the `ui` feature and can't reference gpui types. The format→extension match lives in the UI layer.
 - **Tests:** `clipboard_image_attachment_persists_png_bytes`, `clipboard_image_attachment_names_are_unique` (nanos+pid naming; millis could collide on rapid successive pastes).
+- **Proof:** `docs/screenshots/ready-paste-image.png` — GPUI `--screenshot-demo ready-paste-image` (composer with pasted clipboard photo attachment chip; Xvfb+ffmpeg capture).
 - **Out of this slice:** drag-and-drop files into the composer (`parity:platform-drag-drop-files`) — separate input path.

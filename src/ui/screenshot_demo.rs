@@ -25,6 +25,9 @@ pub enum ScreenshotDemo {
     ReadyMedia,
     /// Composer attachment chip + outgoing photo/document (injected, no live Telegram).
     ReadySendMedia,
+    /// Paste-image: composer with a pasted clipboard photo attachment chip
+    /// (injected, no live Telegram). Visible outcome of Ctrl/Cmd+V image paste.
+    ReadyPasteImage,
     /// Sidebar search over injected recents / `searchChats` / `searchMessages`.
     ReadySearch,
     /// In-chat search (`searchChatMessages`) + jump-to-message.

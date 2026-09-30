@@ -99,6 +99,13 @@ impl QuillApp {
                 input.set_value("sending a photo too", window, cx);
             });
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyPasteImage)) {
+            self.composer.update(cx, |input, cx| {
+                input.set_value("pasted from clipboard", window, cx);
+            });
+            self.status_note =
+                "screenshot demo — paste image → composer photo attachment".into();
+        }
         // kit Phase 5: these demos documented the attach-row controls
         // (group-media toggles, self-destruct timer picker, Clear), which
         // now live in the attach menu — keep the menu open for the shot.
