@@ -6925,3 +6925,18 @@ name `platform-chat-export` is kept in code/comments.)
   trip (file presence is the verifiable proxy, and it is tested).
 - **Out of this slice:** Windows Run-key support; "start minimized" /
   tray-on-startup options; per-user vs system-wide autostart.
+
+## Slice msg-blockquote-expandable — expandable block quotes (2026-09-30)
+- **Key decision (ponytail):** collapse threshold is 3 visible lines — TDLib
+  documents `textEntityTypeExpandableBlockQuote` as "collapsed by default to
+  3 lines with the ability to show full text" (`schema/td_api.tl:5770`); long
+  plain `textEntityTypeBlockQuote`s collapse the same way so both render
+  identically. Quotes ≤ 3 lines render fully with no affordance.
+- Expansion state reuses the spoiler `revealed` set + key scheme
+  (chat, message, first-run index, caption?) instead of threading a second
+  set through every history call site — same tap-to-reveal interaction
+  pattern as spoilers. Quote styling reuses the `reply_quote_strip` bar
+  (`border_l_2` + `accent()`); the affordance is a kit ghost
+  `Button` ("Show more"/"Show less"), same as "Load full message".
+- **Out of this slice:** sender-authored `textEntityTypeExpandableBlockQuote`
+  from the composer (composer only emits `textEntityTypeBlockQuote`).
