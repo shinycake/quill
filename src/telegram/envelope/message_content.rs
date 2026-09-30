@@ -683,10 +683,11 @@ pub(crate) fn parse_caption(value: Option<&Value>) -> (String, Vec<TextEntity>) 
     (text, entities)
 }
 
-/// Keep the entity types Quill renders (Phase 4.1): links plus the style
-/// entities (`textEntityTypeBold` … `textEntityTypePreCode`). Unknown entity
-/// types (mentions, hashtags, phone numbers, bank-card numbers, block
-/// quotes, custom emoji, media timestamps, dates, …) are ignored.
+/// Keep the entity types Quill renders (Phase 4.1): links, the style
+/// entities (`textEntityTypeBold` … `textEntityTypePreCode`), and block
+/// quotes (`textEntityTypeBlockQuote` / `textEntityTypeExpandableBlockQuote`).
+/// Unknown entity types (mentions, hashtags, phone numbers, bank-card
+/// numbers, custom emoji, media timestamps, dates, …) are ignored.
 pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<TextEntity> {
     let Some(entries) = formatted
         .and_then(|value| value.get("entities"))
@@ -740,6 +741,8 @@ pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<
                     .unwrap_or("")
                     .to_string(),
             },
+            Some("textEntityTypeBlockQuote") => TextEntityKind::BlockQuote,
+            Some("textEntityTypeExpandableBlockQuote") => TextEntityKind::ExpandableBlockQuote,
             _ => continue,
         };
         out.push(TextEntity {
