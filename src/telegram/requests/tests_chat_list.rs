@@ -1,6 +1,5 @@
 use crate::ids::RequestId;
 use crate::telegram::requests::*;
-use serde_json::json;
 
 #[test]
 fn search_public_chat_shape_matches_1_8_67() {
