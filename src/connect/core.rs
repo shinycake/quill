@@ -534,7 +534,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let extra = self.session.request(RequestPurpose::SetParameters, None);
-        let params = build_set_tdlib_parameters(&self.credentials, &self.paths, &self.database_key);
+        let params = build_set_tdlib_parameters(
+            &self.credentials,
+            &self.paths,
+            &self.database_key,
+            &self.session.language_prefs.system_language_code,
+        );
         // Contains api_hash — do not log `json`.
         let json = params.to_json(extra);
         self.sender.send_json(&json)?;

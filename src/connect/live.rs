@@ -6,8 +6,8 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::ids::AccountKey;
 use crate::platform::SecretStore;
 use crate::settings::{
-    load_badge_prefs, load_call_prefs, load_contact_prefs, load_media_prefs, load_preferences,
-    safe_app_root,
+    load_badge_prefs, load_call_prefs, load_contact_prefs, load_language_prefs, load_media_prefs,
+    load_preferences, safe_app_root,
 };
 use crate::state::Session;
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -136,6 +136,9 @@ pub fn start_live_connect_for_account(
     // Parity slice: in-app notification sounds toggle (tdesktop "Play
     // sounds") loads the same way.
     session.inapp_sounds_enabled = load_preferences(&prepared.paths).inapp_sounds_enabled;
+    // Slice parity:settings-language: the app language tag load the same
+    // way (defaults to "en" when unset).
+    session.language_prefs = load_language_prefs(&prepared.paths);
     // Slice S4: local per-network auto-download settings load the same
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).

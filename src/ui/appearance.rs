@@ -2,7 +2,10 @@
 //! funnel. Everything here is client-side — theme, auto-night, accent,
 //! wallpaper, message font size and bubble style live in
 //! `appearance_prefs.json` (see `quill::settings::AppearancePrefs`);
-//! there is no TDLib setting for any of it.
+//! there is no TDLib setting for any of it. The exception is the
+//! Language section (slice parity:settings-language): its tag is the
+//! `system_language_code` sent in `setTdlibParameters`, persisted in
+//! `language_prefs.json` and applied on restart.
 
 use super::QuillApp;
 use super::chat_theme::set_theme_mode;
@@ -18,9 +21,10 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::AccountKey;
 use quill::settings::{
-    AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, ThemeChoice, clamp_font_size,
-    load_appearance_prefs, load_chat_prefs, local_minutes_since_midnight, night_active,
-    safe_app_root, save_appearance_prefs, save_chat_prefs,
+    AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, DEFAULT_LANGUAGE_CODE, LanguagePrefs,
+    SUPPORTED_LANGUAGES, ThemeChoice, clamp_font_size, load_appearance_prefs, load_chat_prefs,
+    local_minutes_since_midnight, night_active, safe_app_root, save_appearance_prefs,
+    save_chat_prefs,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -154,6 +158,26 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice parity:settings-language: update the app language pref in the
+    /// session and persist it to the account dir (via
+    /// `ConnectDriver::save_language_prefs`). TDLib reads the tag once at
+    /// startup, so the UI notes that the change applies after restart.
+    pub(crate) fn set_language_pref(&mut self, code: &str, cx: &mut Context<Self>) {
+        let prefs = LanguagePrefs {
+            system_language_code: code.to_string(),
+        };
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.language_prefs = prefs;
+            if let Err(err) = live.driver.save_language_prefs() {
+                self.status_note = format!("couldn't save language setting: {err}");
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.language_prefs = prefs;
+            self.status_note = "demo: language setting is not saved".into();
+        }
+        cx.notify();
+    }
+
     /// Step the scheduled auto-night start/end time (30-minute steps,
     /// wraps past midnight).
     fn bump_night_time(&mut self, cx: &mut Context<Self>, is_start: bool, delta: i16) {
@@ -225,8 +249,8 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        "Theme, accent, wallpaper, text size, chat style, chat-list rows and message send key. \
-                         Changes apply immediately and are saved on this device.",
+                        "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key and app language. \
+                         Changes apply immediately (language applies after restart) and are saved on this device.",
                     ),
             );
             body = body.child(this.appearance_theme_section(cx));
@@ -237,6 +261,9 @@ impl QuillApp {
             body = body.child(this.appearance_bubble_section(cx));
             body = body.child(this.appearance_chat_list_section(cx));
             body = body.child(this.appearance_send_key_section(cx));
+            // Slice parity:settings-language: the app language picker
+            // (the tag TDLib gets in `setTdlibParameters`).
+            body = body.child(this.appearance_language_section(cx));
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
                     .label("Close")
@@ -703,6 +730,39 @@ impl QuillApp {
             cx,
             "Send messages with",
             "Enter sends, or Enter inserts a newline and Ctrl/Cmd+Enter sends.",
+            control.into_any_element(),
+        )
+    }
+
+    /// Slice parity:settings-language: the app language picker (the IETF
+    /// tag TDLib gets in `setTdlibParameters`; it was hardcoded "en"
+    /// before this slice). TDLib reads parameters once at startup, so
+    /// the chosen language applies after restart — no runtime
+    /// application is attempted (see `settings::LanguagePrefs` for why
+    /// `setOption("language_pack_id")` can't do it). The app's own
+    /// strings stay English; this only changes the tag reported to
+    /// Telegram.
+    fn appearance_language_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let current = self
+            .session()
+            .map(|s| s.language_prefs.system_language_code.as_str())
+            .unwrap_or(DEFAULT_LANGUAGE_CODE);
+        let control = RadioGroup::vertical("appearance-language")
+            .selected_index(
+                SUPPORTED_LANGUAGES
+                    .iter()
+                    .position(|(code, _)| *code == current),
+            )
+            .children(SUPPORTED_LANGUAGES.iter().map(|(code, name)| {
+                Radio::new(format!("appearance-language-{code}")).label(format!("{name} ({code})"))
+            }))
+            .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                this.set_language_pref(SUPPORTED_LANGUAGES[*ix].0, cx);
+            }));
+        self.appearance_section(
+            cx,
+            "Language",
+            "The language reported to Telegram. Applies after restart — the app's own text stays English for now.",
             control.into_any_element(),
         )
     }
