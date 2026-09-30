@@ -1068,7 +1068,8 @@ impl QuillApp {
     }
 
     /// Slice `parity:bots-payment-recurring`: "Rejoin" —
-    /// `reuseStarSubscription` on an expired channel subscription.
+    /// `reuseStarSubscription` on an active channel subscription whose chat
+    /// the user needs to rejoin (the type's `can_reuse` is true).
     pub(super) fn rejoin_subscription(&mut self, id: String, cx: &mut Context<Self>) {
         let sent = self
             .live
@@ -1082,7 +1083,8 @@ impl QuillApp {
 }
 
 /// Slice `parity:bots-payment-recurring`: one `starSubscription` row —
-/// title, status, price, and the Cancel / Re-enable / Rejoin actions.
+/// title, status, price, and the Cancel / Re-enable / Rejoin / Renew
+/// actions.
 /// `starSubscription` carries no title (schema 1.8.67, line 1262), so the
 /// chat cache supplies it; the type names are the honest fallback.
 fn subscription_row(
@@ -1171,16 +1173,22 @@ fn subscription_row(
                 ),
         );
     } else if expired {
-        if matches!(sub.sub_type, StarSubscriptionTypeData::Channel { .. }) {
-            let id = sub.id.clone();
-            row = row.child(
-                Button::new(format!("subs-rejoin-{id}"))
-                    .label("Rejoin")
-                    .disabled(mutating)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.rejoin_subscription(id.clone(), cx);
-                    })),
-            );
+        // Schema 1.8.67: `reuseStarSubscription` reuses an ACTIVE
+        // subscription, so an expired channel sub renews through the
+        // type's `invite_link` instead, opened in the OS browser.
+        if let StarSubscriptionTypeData::Channel { invite_link, .. } = &sub.sub_type {
+            if !invite_link.is_empty() {
+                let link = invite_link.clone();
+                let id = sub.id.clone();
+                row = row.child(
+                    Button::new(format!("subs-renew-{id}"))
+                        .label("Renew")
+                        .disabled(mutating)
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            cx.open_url(&link);
+                        })),
+                );
+            }
         }
     } else if sub.is_canceled {
         let id = sub.id.clone();
@@ -1190,6 +1198,22 @@ fn subscription_row(
                 .disabled(mutating)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.reenable_subscription(id.clone(), cx);
+                })),
+        );
+    } else if matches!(
+        sub.sub_type,
+        StarSubscriptionTypeData::Channel {
+            can_reuse: true,
+            ..
+        }
+    ) {
+        let id = sub.id.clone();
+        row = row.child(
+            Button::new(format!("subs-rejoin-{id}"))
+                .label("Rejoin")
+                .disabled(mutating)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.rejoin_subscription(id.clone(), cx);
                 })),
         );
     } else {

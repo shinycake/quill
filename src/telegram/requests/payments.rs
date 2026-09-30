@@ -177,8 +177,9 @@ pub fn edit_star_subscription(
 }
 
 /// Slice `parity:bots-payment-recurring`: `reuseStarSubscription` (TDLib
-/// 1.8.67, `schema/td_api.tl:16095`) — rejoin an expired channel
-/// subscription via its invite link. Response is `ok`.
+/// 1.8.67, `schema/td_api.tl:16095`) — reuse an ACTIVE Telegram Star
+/// subscription to a channel chat and join the chat again (valid when the
+/// type's `can_reuse` is true). Response is `ok`.
 pub fn reuse_star_subscription(extra: RequestId, subscription_id: &str) -> String {
     json!({
         "@type": "reuseStarSubscription",

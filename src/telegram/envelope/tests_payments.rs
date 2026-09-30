@@ -254,9 +254,10 @@ fn payment_recurring_star_subscriptions_parse() {
 #[test]
 fn payment_recurring_star_subscriptions_tolerate_gaps() {
     // Slice `parity:bots-payment-recurring`: an unknown subscription type
-    // and a missing pricing block must not fail the whole list —
-    // `Unknown` and a zero pricing stand in (TDLib omits nothing per the
-    // schema, but a future type must not break the dialog).
+    // and a zero-valued pricing block must not fail the whole list — the
+    // type parses as `Unknown` and the zero pricing parses fine. A missing
+    // pricing block instead drops that subscription (`parse_star_subscription`
+    // uses `?` on the pricing parse; pricing is non-optional per the schema).
     let env = parse_envelope(
             r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","amount":0,"nanostar_amount":0},"required_star_count":0,"next_offset":"","subscriptions":[{"@type":"starSubscription","id":"sub9","chat_id":3,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{"@type":"starSubscriptionPricing","period":0,"star_count":0},"type":{"@type":"starSubscriptionTypeFuture","x":1}}]}"#,
         )

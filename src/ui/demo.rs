@@ -1263,7 +1263,7 @@ impl QuillApp {
 /// Slice `parity:bots-payment-recurring`: subscriptions dialog fixture —
 /// one active channel subscription ("Demo channel", chat 13 in the
 /// `ReadyChats` seed), one canceled bot subscription with its own title,
-/// and one expired channel subscription to show the Rejoin row.
+/// and one expired channel subscription to show the Renew row.
 /// Injected, no live Telegram.
 pub(super) fn demo_star_subscriptions() -> StarSubscriptionsData {
     // Far-future / fixed dates so the demo is stable: sub1 renews,
@@ -1314,9 +1314,12 @@ pub(super) fn demo_star_subscriptions() -> StarSubscriptionsData {
                     period: 2_592_000,
                     star_count: 50,
                 },
+                // `can_reuse` is false: it implies an ACTIVE subscription
+                // (schema 1.8.67), so an expired channel sub renews through
+                // `invite_link` instead.
                 sub_type: StarSubscriptionTypeData::Channel {
-                    can_reuse: true,
-                    invite_link: String::new(),
+                    can_reuse: false,
+                    invite_link: "https://t.me/+demo-renew".into(),
                 },
             },
         ],

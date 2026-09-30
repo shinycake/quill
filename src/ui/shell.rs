@@ -291,7 +291,7 @@ impl QuillShell {
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 35] = [
+    const KINDS: [DialogKind; 36] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,

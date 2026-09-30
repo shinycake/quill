@@ -220,9 +220,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Slice `parity:bots-payment-recurring`: `reuseStarSubscription`
-    /// (schema 1.8.67, line 16095) — rejoin an expired channel
-    /// subscription. Same one-at-a-time + refetch discipline as
-    /// `edit_star_subscription`.
+    /// (schema 1.8.67, line 16095) — rejoin the chat of an ACTIVE channel
+    /// subscription (`can_reuse`). Same one-at-a-time + refetch discipline
+    /// as `edit_star_subscription`.
     pub fn reuse_star_subscription(
         &mut self,
         subscription_id: &str,
