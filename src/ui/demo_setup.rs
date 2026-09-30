@@ -26,7 +26,7 @@ use super::conversation::apply_ready_typing;
 use super::demo::demo_video_frame;
 use super::demo::{
     demo_media_allowlist, demo_password_state_manage, demo_password_state_pending, demo_sessions,
-    demo_storage_stats, demo_thumb_png_path, demo_websites,
+    demo_star_subscriptions, demo_storage_stats, demo_thumb_png_path, demo_websites,
 };
 use super::drafts::apply_ready_drafts;
 use super::folders::apply_ready_folders;
@@ -605,6 +605,18 @@ impl QuillApp {
             }
             self.storage_usage_open = true;
             self.status_note = "screenshot demo — data & storage".into();
+        }
+        // Slice `parity:bots-payment-recurring`: Subscriptions fixture —
+        // fixture `starSubscriptions` with the dialog open (injected, no
+        // live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadySubscriptions)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.star_subscriptions = Some(demo_star_subscriptions());
+                session.star_subscriptions_loading = false;
+                session.subscriptions_open = true;
+            }
+            self.status_note = "screenshot demo — ⭐ subscriptions".into();
         }
         // Settings → Appearance: the Appearance dialog open over the
         // ReadyChats fixture (injected, no live Telegram). Non-default

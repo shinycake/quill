@@ -137,6 +137,9 @@ pub enum DialogKind {
     Scheduled,
     PaymentForm,
     PaymentReceipt,
+    // Slice `parity:bots-payment-recurring`: the `starSubscriptions`
+    // management dialog.
+    Subscriptions,
     CallbackPassword,
     LoginUrlConfirm,
     PollVoters,
@@ -207,6 +210,7 @@ impl QuillShell {
                         .is_some_and(|s| s.payment_form.is_some() || s.payment_form_loading)
             }
             DialogKind::PaymentReceipt => app.session().is_some_and(|s| s.payment_receipt_open),
+            DialogKind::Subscriptions => app.session().is_some_and(|s| s.subscriptions_open),
             DialogKind::CallbackPassword => app.callback_password_dialog.is_some(),
             DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
@@ -248,6 +252,7 @@ impl QuillShell {
             DialogKind::Scheduled => QuillApp::build_scheduled_dialog,
             DialogKind::PaymentForm => QuillApp::build_payment_dialog,
             DialogKind::PaymentReceipt => QuillApp::build_payment_receipt_dialog,
+            DialogKind::Subscriptions => QuillApp::build_subscriptions_dialog,
             DialogKind::CallbackPassword => QuillApp::build_callback_password_dialog,
             DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
@@ -286,7 +291,7 @@ impl QuillShell {
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 35] = [
+    const KINDS: [DialogKind; 36] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -305,6 +310,7 @@ impl QuillShell {
         DialogKind::LoginUrlConfirm,
         DialogKind::PaymentForm,
         DialogKind::PaymentReceipt,
+        DialogKind::Subscriptions,
         DialogKind::CreateChat,
         DialogKind::Member,
         DialogKind::Permissions,

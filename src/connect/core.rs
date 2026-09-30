@@ -428,6 +428,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` `ok`
         // marks the websites list stale in the reducer; same pattern.
         let _ = self.refresh_connected_websites_if_stale();
+        // Slice `parity:bots-payment-recurring`: an
+        // `editStarSubscription` / `reuseStarSubscription` `ok` marks the
+        // subscriptions list stale in the reducer; same pattern.
+        let _ = self.refresh_star_subscriptions_if_stale();
         if view_after {
             self.maybe_view_open_messages()?;
         }

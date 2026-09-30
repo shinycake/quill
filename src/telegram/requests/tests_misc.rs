@@ -328,3 +328,30 @@ fn p1_payment_request_shapes_match_1_8_67() {
     assert_eq!(v["chat_id"], 21);
     assert_eq!(v["message_id"], 401);
 }
+
+#[test]
+fn payment_recurring_request_shapes_match_1_8_67() {
+    // Slice `parity:bots-payment-recurring`: `getStarSubscriptions`
+    // (schema 1.8.67, line 16075).
+    let json = get_star_subscriptions(RequestId(81), false, "");
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "getStarSubscriptions");
+    assert_eq!(v["@extra"], "81");
+    assert_eq!(v["only_expiring"], false);
+    assert_eq!(v["offset"], "");
+    let json = get_star_subscriptions(RequestId(82), true, "50");
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["only_expiring"], true);
+    assert_eq!(v["offset"], "50");
+    // `editStarSubscription` (schema 1.8.67, line 16086).
+    let json = edit_star_subscription(RequestId(83), "sub1", true);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "editStarSubscription");
+    assert_eq!(v["subscription_id"], "sub1");
+    assert_eq!(v["is_canceled"], true);
+    // `reuseStarSubscription` (schema 1.8.67, line 16095).
+    let json = reuse_star_subscription(RequestId(84), "sub2");
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "reuseStarSubscription");
+    assert_eq!(v["subscription_id"], "sub2");
+}

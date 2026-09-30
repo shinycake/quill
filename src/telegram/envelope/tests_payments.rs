@@ -199,3 +199,82 @@ fn p1_payment_price_uses_currency_exponents() {
     assert_eq!(format_payment_price("KRW", 1000), "KRW 1000");
     assert_eq!(format_payment_price("EUR", 5), "EUR 0.05");
 }
+
+#[test]
+fn payment_recurring_star_subscriptions_parse() {
+    // Slice `parity:bots-payment-recurring`: `starSubscriptions` with a
+    // channel subscription, a bot subscription, and a next page
+    // (schema 1.8.67, lines 1239/1246/1262/1269).
+    let env = parse_envelope(
+            r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","amount":500,"nanostar_amount":0},"required_star_count":100,"next_offset":"50","subscriptions":[{"@type":"starSubscription","id":"sub1","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{"@type":"starSubscriptionPricing","period":2592000,"star_count":100},"type":{"@type":"starSubscriptionTypeChannel","can_reuse":true,"invite_link":"https://t.me/+abc"}},{"@type":"starSubscription","id":"sub2","chat_id":2,"expiration_date":1700000000,"is_canceled":true,"is_expiring":true,"pricing":{"@type":"starSubscriptionPricing","period":604800,"star_count":25},"type":{"@type":"starSubscriptionTypeBot","is_canceled_by_bot":false,"title":"My Bot","photo":null,"invoice_link":"https://t.me/$botinvoice"}}]}"#,
+        )
+        .unwrap();
+    match env.payload {
+        EnvelopePayload::StarSubscriptions(subs) => {
+            assert_eq!(subs.star_amount, 500);
+            assert_eq!(subs.required_star_count, 100);
+            assert_eq!(subs.next_offset, "50");
+            assert_eq!(subs.subscriptions.len(), 2);
+            let ch = &subs.subscriptions[0];
+            assert_eq!(ch.id, "sub1");
+            assert_eq!(ch.chat_id, -1001);
+            assert!(!ch.is_canceled && !ch.is_expiring);
+            assert_eq!(ch.pricing.period, 2_592_000);
+            assert_eq!(ch.pricing.star_count, 100);
+            match &ch.sub_type {
+                StarSubscriptionTypeData::Channel {
+                    can_reuse,
+                    invite_link,
+                } => {
+                    assert!(can_reuse);
+                    assert_eq!(invite_link, "https://t.me/+abc");
+                }
+                other => panic!("{other:?}"),
+            }
+            let bot = &subs.subscriptions[1];
+            assert_eq!(bot.id, "sub2");
+            assert!(bot.is_canceled && bot.is_expiring);
+            match &bot.sub_type {
+                StarSubscriptionTypeData::Bot {
+                    is_canceled_by_bot,
+                    title,
+                    invoice_link,
+                } => {
+                    assert!(!is_canceled_by_bot);
+                    assert_eq!(title, "My Bot");
+                    assert_eq!(invoice_link, "https://t.me/$botinvoice");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn payment_recurring_star_subscriptions_tolerate_gaps() {
+    // Slice `parity:bots-payment-recurring`: an unknown subscription type
+    // and a zero-valued pricing block must not fail the whole list — the
+    // type parses as `Unknown` and the zero pricing parses fine. A missing
+    // pricing block instead drops that subscription (`parse_star_subscription`
+    // uses `?` on the pricing parse; pricing is non-optional per the schema).
+    let env = parse_envelope(
+            r#"{"@type":"starSubscriptions","star_amount":{"@type":"starAmount","amount":0,"nanostar_amount":0},"required_star_count":0,"next_offset":"","subscriptions":[{"@type":"starSubscription","id":"sub9","chat_id":3,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{"@type":"starSubscriptionPricing","period":0,"star_count":0},"type":{"@type":"starSubscriptionTypeFuture","x":1}}]}"#,
+        )
+        .unwrap();
+    match env.payload {
+        EnvelopePayload::StarSubscriptions(subs) => {
+            assert_eq!(subs.subscriptions.len(), 1);
+            let sub = &subs.subscriptions[0];
+            assert_eq!(sub.id, "sub9");
+            assert!(matches!(sub.sub_type, StarSubscriptionTypeData::Unknown));
+            assert_eq!(subs.next_offset, "");
+        }
+        other => panic!("{other:?}"),
+    }
+    // A `starSubscriptions` error object parses as `Error`, not as a
+    // subscription list.
+    let env = parse_envelope(r#"{"@type":"error","code":400,"message":"SUBSCRIPTION_NOT_FOUND"}"#)
+        .unwrap();
+    assert!(matches!(env.payload, EnvelopePayload::Error(_)));
+}

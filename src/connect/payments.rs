@@ -4,7 +4,8 @@ use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{
-    get_payment_form, get_payment_receipt, send_payment_form as send_payment_form_request,
+    edit_star_subscription, get_payment_form, get_payment_receipt, get_star_subscriptions,
+    reuse_star_subscription, send_payment_form as send_payment_form_request,
     validate_order_info as validate_order_info_request,
 };
 use crate::telegram::{delete_saved_credentials, delete_saved_order_info};
@@ -120,5 +121,125 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::DeleteSavedCredentials, None);
         self.send_json_request(extra, &delete_saved_credentials(extra))?;
         Ok(2)
+    }
+}
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// Slice `parity:bots-payment-recurring`: fetch the `starSubscriptions`
+    /// list (`getStarSubscriptions`, schema 1.8.67, line 16075). Guarded:
+    /// once per session unless the list was marked stale by a mutation.
+    /// `Ok(None)` = no request needed.
+    pub fn maybe_fetch_star_subscriptions(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if (self.session.star_subscriptions.is_some() && !self.session.star_subscriptions_stale)
+            || self.session.star_subscriptions_loading
+        {
+            return Ok(None);
+        }
+        self.fetch_star_subscriptions_page(false).map(Some)
+    }
+
+    /// Slice `parity:bots-payment-recurring`: fetch the next
+    /// `getStarSubscriptions` page (`next_offset` from the last answer).
+    /// `Ok(None)` = no more pages, or a fetch already in flight.
+    pub fn fetch_more_star_subscriptions(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.star_subscriptions_offset.is_empty()
+            || self.session.star_subscriptions_loading
+        {
+            return Ok(None);
+        }
+        self.fetch_star_subscriptions_page(true).map(Some)
+    }
+
+    fn fetch_star_subscriptions_page(
+        &mut self,
+        append: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        let offset = if append {
+            self.session.star_subscriptions_offset.clone()
+        } else {
+            String::new()
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::GetStarSubscriptions { append }, None);
+        self.session.star_subscriptions_loading = true;
+        self.session.star_subscriptions_error = None;
+        let json = get_star_subscriptions(extra, false, &offset);
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.session.star_subscriptions_loading = false;
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Slice `parity:bots-payment-recurring`: refetch the subscriptions
+    /// list after a mutation marked it stale — the reducer kept the old
+    /// cache and marked it stale on the authoritative `ok` (the
+    /// `refresh_active_sessions_if_stale` pattern).
+    pub fn refresh_star_subscriptions_if_stale(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.session.star_subscriptions_stale {
+            return Ok(None);
+        }
+        self.session.star_subscriptions_stale = false;
+        self.fetch_star_subscriptions_page(false).map(Some)
+    }
+
+    /// Slice `parity:bots-payment-recurring`: `editStarSubscription`
+    /// (schema 1.8.67, line 16086) — cancel (`is_canceled: true`) or
+    /// re-enable a subscription. One mutation at a time; the list is
+    /// refetched from the authoritative `ok` — never optimistic.
+    pub fn edit_star_subscription(
+        &mut self,
+        subscription_id: &str,
+        is_canceled: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.star_subscriptions_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::EditStarSubscription, None);
+        self.session.star_subscriptions_mutating = true;
+        self.session.star_subscriptions_error = None;
+        let json = edit_star_subscription(extra, subscription_id, is_canceled);
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.session.star_subscriptions_mutating = false;
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// Slice `parity:bots-payment-recurring`: `reuseStarSubscription`
+    /// (schema 1.8.67, line 16095) — rejoin the chat of an ACTIVE channel
+    /// subscription (`can_reuse`). Same one-at-a-time + refetch discipline
+    /// as `edit_star_subscription`.
+    pub fn reuse_star_subscription(
+        &mut self,
+        subscription_id: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.star_subscriptions_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ReuseStarSubscription, None);
+        self.session.star_subscriptions_mutating = true;
+        self.session.star_subscriptions_error = None;
+        let json = reuse_star_subscription(extra, subscription_id);
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.session.star_subscriptions_mutating = false;
+            return Err(err);
+        }
+        Ok(extra)
     }
 }

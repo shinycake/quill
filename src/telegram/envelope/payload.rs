@@ -828,6 +828,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "paymentReceipt" => parse_payment_receipt(&value)
             .map(EnvelopePayload::PaymentReceipt)
             .ok_or(ParseError::MissingField),
+        // Slice `parity:bots-payment-recurring`: `getStarSubscriptions`
+        // answer (TDLib 1.8.67, `schema/td_api.tl:1269`).
+        "starSubscriptions" => parse_star_subscriptions(&value)
+            .map(EnvelopePayload::StarSubscriptions)
+            .ok_or(ParseError::MissingField),
         // Parity slice: `createChatFolder` / `editChatFolder` responses
         // (TDLib 1.8.67, `schema/td_api.tl:13358` / `:13361`).
         "chatFolderInfo" => parse_chat_folder_info(&value)

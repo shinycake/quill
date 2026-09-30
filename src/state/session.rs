@@ -456,6 +456,32 @@ pub struct Session {
     /// `sendPaymentForm` — the UI takes it on the next poll and opens it
     /// in the OS browser (3-D Secure and similar).
     pub payment_verification_url: Option<String>,
+    /// Slice `parity:bots-payment-recurring`: the fetched
+    /// `starSubscriptions`, shown in the Subscriptions dialog.
+    pub star_subscriptions: Option<StarSubscriptionsData>,
+    /// Slice `parity:bots-payment-recurring`: `getStarSubscriptions` is in
+    /// flight (dialog shows a spinner).
+    pub star_subscriptions_loading: bool,
+    /// Slice `parity:bots-payment-recurring`: latest subscriptions error,
+    /// shown in the dialog (never a secret — ids are opaque TDLib strings).
+    pub star_subscriptions_error: Option<String>,
+    /// Slice `parity:bots-payment-recurring`: pagination offset for the
+    /// next `getStarSubscriptions` page (empty = no more pages).
+    pub star_subscriptions_offset: String,
+    /// Slice `parity:bots-payment-recurring`: a cancel/rejoin mutation
+    /// landed — the list refetches on the next pump (the
+    /// `sessions_stale` pattern; never optimistic).
+    pub star_subscriptions_stale: bool,
+    /// Slice `parity:bots-payment-recurring`: an `editStarSubscription` /
+    /// `reuseStarSubscription` is in flight — the dialog disables its
+    /// action buttons until the `ok` (or error) lands.
+    pub star_subscriptions_mutating: bool,
+    /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog is
+    /// on screen.
+    pub subscriptions_open: bool,
+    /// Slice `parity:bots-payment-recurring`: subscription id awaiting
+    /// cancel confirmation in the dialog.
+    pub subscription_cancel_confirm: Option<String>,
     /// B1: force-reply target set when an incoming message carrying
     /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
     /// inline / show-keyboard markup) arrives. The UI drains it on the
@@ -975,6 +1001,14 @@ impl Session {
             payment_sending: false,
             payment_receipt_error: None,
             payment_verification_url: None,
+            star_subscriptions: None,
+            star_subscriptions_loading: false,
+            star_subscriptions_error: None,
+            star_subscriptions_offset: String::new(),
+            star_subscriptions_stale: false,
+            star_subscriptions_mutating: false,
+            subscriptions_open: false,
+            subscription_cancel_confirm: None,
             pending_force_reply: None,
             files: HashMap::new(),
             downloading: HashSet::new(),

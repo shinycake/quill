@@ -1779,6 +1779,27 @@ impl Session {
                     self.payment_receipt_open = true;
                 }
             }
+            EnvelopePayload::StarSubscriptions(subs) => {
+                // Slice `parity:bots-payment-recurring`:
+                // `getStarSubscriptions` answer to our own fetch (matched
+                // by `@extra`). Follow-up pages append; a fresh fetch
+                // replaces.
+                if let Some(p) = pending
+                    && let RequestPurpose::GetStarSubscriptions { append } = p.purpose
+                {
+                    self.star_subscriptions_loading = false;
+                    self.star_subscriptions_error = None;
+                    self.star_subscriptions_stale = false;
+                    self.star_subscriptions_offset = subs.next_offset.clone();
+                    if append && let Some(existing) = self.star_subscriptions.as_mut() {
+                        existing.star_amount = subs.star_amount;
+                        existing.required_star_count = subs.required_star_count;
+                        existing.subscriptions.extend(subs.subscriptions);
+                    } else {
+                        self.star_subscriptions = Some(subs);
+                    }
+                }
+            }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
                 if self.gifs.open {
                     self.gifs.stale = true;

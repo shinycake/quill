@@ -146,3 +146,45 @@ pub fn get_payment_receipt(extra: RequestId, chat_id: ChatId, message_id: Messag
     })
     .to_string()
 }
+
+/// Slice `parity:bots-payment-recurring`: `getStarSubscriptions` (TDLib
+/// 1.8.67, `schema/td_api.tl:16075`). Response is `starSubscriptions`.
+pub fn get_star_subscriptions(extra: RequestId, only_expiring: bool, offset: &str) -> String {
+    json!({
+        "@type": "getStarSubscriptions",
+        "@extra": extra.as_extra(),
+        "only_expiring": only_expiring,
+        "offset": offset,
+    })
+    .to_string()
+}
+
+/// Slice `parity:bots-payment-recurring`: `editStarSubscription` (TDLib
+/// 1.8.67, `schema/td_api.tl:16086`) — cancel (`is_canceled: true`) or
+/// re-enable (`is_canceled: false`) a subscription. Response is `ok`.
+pub fn edit_star_subscription(
+    extra: RequestId,
+    subscription_id: &str,
+    is_canceled: bool,
+) -> String {
+    json!({
+        "@type": "editStarSubscription",
+        "@extra": extra.as_extra(),
+        "subscription_id": subscription_id,
+        "is_canceled": is_canceled,
+    })
+    .to_string()
+}
+
+/// Slice `parity:bots-payment-recurring`: `reuseStarSubscription` (TDLib
+/// 1.8.67, `schema/td_api.tl:16095`) — reuse an ACTIVE Telegram Star
+/// subscription to a channel chat and join the chat again (valid when the
+/// type's `can_reuse` is true). Response is `ok`.
+pub fn reuse_star_subscription(extra: RequestId, subscription_id: &str) -> String {
+    json!({
+        "@type": "reuseStarSubscription",
+        "@extra": extra.as_extra(),
+        "subscription_id": subscription_id,
+    })
+    .to_string()
+}
