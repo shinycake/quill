@@ -48,6 +48,16 @@ pub enum RichBlock {
         /// Set only for editor-created blocks (outgoing `inputDocumentFile`).
         local_path: Option<PathBuf>,
     },
+    Photo {
+        caption: String,
+        /// Set only for editor-created blocks (outgoing `inputPhoto`).
+        local_path: Option<PathBuf>,
+    },
+    Video {
+        caption: String,
+        /// Set only for editor-created blocks (outgoing `inputVideo`).
+        local_path: Option<PathBuf>,
+    },
     Table {
         rows: Vec<Vec<String>>,
     },
@@ -95,6 +105,9 @@ impl RichBlock {
             RichBlock::Document { file_name, .. } => {
                 (!file_name.is_empty()).then_some(file_name.as_str())
             }
+            RichBlock::Photo { caption, .. } | RichBlock::Video { caption, .. } => {
+                (!caption.is_empty()).then_some(caption.as_str())
+            }
             _ => None,
         }
     }
@@ -117,6 +130,18 @@ fn field_str(value: &Value, field: &str) -> String {
 
 fn block_type(value: &Value) -> &str {
     value.get("@type").and_then(Value::as_str).unwrap_or("")
+}
+
+/// Plain text of a `pageBlockCaption` node (`pageBlockPhoto`,
+/// `pageBlockVideo`, `pageBlockDocument` share this shape).
+fn block_caption(value: &Value) -> String {
+    rich_text_to_parts(
+        value
+            .get("caption")
+            .and_then(|c| c.get("text"))
+            .unwrap_or(&Value::Null),
+    )
+    .0
 }
 
 #[derive(Default)]
@@ -417,18 +442,21 @@ pub fn parse_page_block(value: &Value) -> RichBlock {
         }
         "pageBlockDocument" => {
             let document = value.get("document").unwrap_or(&Value::Null);
-            let (caption, _, _) = rich_text_to_parts(
-                value
-                    .get("caption")
-                    .and_then(|c| c.get("text"))
-                    .unwrap_or(&Value::Null),
-            );
             RichBlock::Document {
                 file_name: field_str(document, "file_name"),
-                caption,
+                caption: block_caption(value),
                 local_path: None,
             }
         }
+        // Schema :4279 (`pageBlockPhoto`) and :4287 (`pageBlockVideo`).
+        "pageBlockPhoto" => RichBlock::Photo {
+            caption: block_caption(value),
+            local_path: None,
+        },
+        "pageBlockVideo" => RichBlock::Video {
+            caption: block_caption(value),
+            local_path: None,
+        },
         "pageBlockButtonRow" => {
             let buttons = value
                 .get("buttons")
@@ -570,8 +598,17 @@ fn block_rich_text(text: &str) -> Value {
     formatted_to_rich_text(&clean, &entities)
 }
 
+/// `pageBlockCaption` for an outgoing media block (schema :4133).
+fn page_block_caption(caption: &str) -> Value {
+    json!({
+        "@type": "pageBlockCaption",
+        "text": block_rich_text(caption),
+        "credit": plain(""),
+    })
+}
+
 /// Build one `inputPageBlock*` object. `None` for blocks with no honest
-/// input mapping (invisible, unsupported, or a document without a local
+/// input mapping (invisible, unsupported, or a media block without a local
 /// path — never a JSON `local.path`).
 pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
     match block {
@@ -626,11 +663,56 @@ pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
                     "thumbnail": Value::Null,
                     "disable_content_type_detection": false,
                 },
-                "caption": {
-                    "@type": "pageBlockCaption",
-                    "text": block_rich_text(caption),
-                    "credit": plain(""),
+                "caption": page_block_caption(caption),
+            }))
+        }
+        RichBlock::Photo {
+            caption,
+            local_path,
+        } => {
+            let path = local_path.as_ref()?.to_string_lossy().into_owned();
+            Some(json!({
+                // Schema :6029 (`inputPageBlockPhoto`); `inputPhoto` is
+                // :5837 — thumbnail null uploads from the file, same as
+                // `input_message_photo` in telegram/requests/media.rs.
+                "@type": "inputPageBlockPhoto",
+                "photo": {
+                    "@type": "inputPhoto",
+                    "photo": { "@type": "inputFileLocal", "path": path },
+                    "thumbnail": Value::Null,
+                    "video": Value::Null,
+                    "added_sticker_file_ids": [],
+                    "width": 0,
+                    "height": 0,
                 },
+                "caption": page_block_caption(caption),
+                "has_spoiler": false,
+            }))
+        }
+        RichBlock::Video {
+            caption,
+            local_path,
+        } => {
+            let path = local_path.as_ref()?.to_string_lossy().into_owned();
+            Some(json!({
+                // Schema :6035 (`inputPageBlockVideo`); `inputVideo` is
+                // :5856 — zeros let TDLib probe the local file, same as
+                // `input_message_video` in telegram/requests/media.rs.
+                "@type": "inputPageBlockVideo",
+                "video": {
+                    "@type": "inputVideo",
+                    "video": { "@type": "inputFileLocal", "path": path },
+                    "thumbnail": Value::Null,
+                    "cover": Value::Null,
+                    "start_timestamp": 0,
+                    "added_sticker_file_ids": [],
+                    "duration": 0,
+                    "width": 0,
+                    "height": 0,
+                    "supports_streaming": false,
+                },
+                "caption": page_block_caption(caption),
+                "has_spoiler": false,
             }))
         }
         RichBlock::Table { rows } => {
@@ -1033,6 +1115,39 @@ mod tests {
                 local_path: None,
             }
         );
+        let photo = json!({
+            "@type": "pageBlockPhoto",
+            "photo": { "@type": "photo", "id": 1 },
+            "caption": { "@type": "pageBlockCaption",
+                "text": { "@type": "richTextPlain", "text": "sunset" },
+                "credit": { "@type": "richTextPlain", "text": "" } },
+            "url": "",
+            "has_spoiler": false,
+        });
+        assert_eq!(
+            parse_page_block(&photo),
+            RichBlock::Photo {
+                caption: "sunset".into(),
+                local_path: None,
+            }
+        );
+        let video = json!({
+            "@type": "pageBlockVideo",
+            "video": { "@type": "video", "id": 2 },
+            "caption": { "@type": "pageBlockCaption",
+                "text": { "@type": "richTextPlain", "text": "clip" },
+                "credit": { "@type": "richTextPlain", "text": "" } },
+            "need_autoplay": false,
+            "is_looped": false,
+            "has_spoiler": false,
+        });
+        assert_eq!(
+            parse_page_block(&video),
+            RichBlock::Video {
+                caption: "clip".into(),
+                local_path: None,
+            }
+        );
     }
 
     #[test]
@@ -1175,6 +1290,50 @@ mod tests {
         assert_eq!(json["@type"], "inputPageBlockDocument");
         assert_eq!(json["document"]["@type"], "inputDocument");
         assert_eq!(json["document"]["document"]["@type"], "inputFileLocal");
+
+        // Photo/video mirror the document mapping: no local path → no
+        // honest input mapping.
+        for (kind, type_name) in [
+            (
+                RichBlock::Photo {
+                    caption: "cap".into(),
+                    local_path: None,
+                },
+                "inputPageBlockPhoto",
+            ),
+            (
+                RichBlock::Video {
+                    caption: "cap".into(),
+                    local_path: None,
+                },
+                "inputPageBlockVideo",
+            ),
+        ] {
+            assert!(input_page_block_json(&kind).is_none(), "{type_name}");
+        }
+        let photo = RichBlock::Photo {
+            caption: "cap".into(),
+            local_path: Some(PathBuf::from("/tmp/p.jpg")),
+        };
+        let json = input_page_block_json(&photo).expect("photo");
+        assert_eq!(json["@type"], "inputPageBlockPhoto");
+        assert_eq!(json["photo"]["@type"], "inputPhoto");
+        assert_eq!(json["photo"]["photo"]["@type"], "inputFileLocal");
+        assert_eq!(json["photo"]["photo"]["path"], "/tmp/p.jpg");
+        assert_eq!(json["caption"]["@type"], "pageBlockCaption");
+        assert_eq!(json["has_spoiler"], false);
+
+        let video = RichBlock::Video {
+            caption: String::new(),
+            local_path: Some(PathBuf::from("/tmp/v.mp4")),
+        };
+        let json = input_page_block_json(&video).expect("video");
+        assert_eq!(json["@type"], "inputPageBlockVideo");
+        assert_eq!(json["video"]["@type"], "inputVideo");
+        assert_eq!(json["video"]["video"]["@type"], "inputFileLocal");
+        assert_eq!(json["video"]["video"]["path"], "/tmp/v.mp4");
+        assert_eq!(json["caption"]["@type"], "pageBlockCaption");
+        assert_eq!(json["has_spoiler"], false);
     }
 
     #[test]

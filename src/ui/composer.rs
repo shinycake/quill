@@ -343,6 +343,21 @@ impl QuillApp {
                 local_path: Some(attachment.path.clone()),
             });
         }
+        // Attached photos/videos become inline media blocks — every one is
+        // converted (photos and videos accumulate, unlike documents), same
+        // local-path rule as above.
+        for attachment in &self.pending_attachments {
+            match attachment.kind {
+                AttachmentKind::Photo => blocks.push(quill::rich::RichBlock::Photo {
+                    caption: String::new(),
+                    local_path: Some(attachment.path.clone()),
+                }),
+                AttachmentKind::Video => blocks.push(quill::rich::RichBlock::Video {
+                    caption: String::new(),
+                    local_path: Some(attachment.path.clone()),
+                }),
+                _ => {}
+            }
         // Rich-text max length (same status-note pattern as the caption
         // limit): refuse over-limit drafts before the emptiness check so
         // the note names the limit instead of "type a message".

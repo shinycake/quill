@@ -692,6 +692,42 @@ pub(super) fn message_rich_block(
     stack.into_any_element()
 }
 
+/// M2: inline photo/video rich block — an emoji tile with the caption,
+/// mirroring the document tile above.
+fn rich_media_tile(
+    row_id: u64,
+    index: usize,
+    kind: &str,
+    emoji: &str,
+    caption: &str,
+) -> AnyElement {
+    // No caption → label the tile with the media kind instead of an empty row.
+    let label = if caption.is_empty() {
+        match kind {
+            "photo" => "Photo",
+            "video" => "Video",
+            _ => kind,
+        }
+        .to_string()
+    } else {
+        caption.to_string()
+    };
+    div()
+        .id(format!("rich-{kind}-{row_id}-{index}"))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().text_sm().child(emoji.to_string()))
+                .child(div().text_sm().font_medium().child(label)),
+        )
+        .into_any_element()
+}
+
 /// M2: one `RichBlock` as an element. `None` for invisible/unsupported
 /// blocks (`pageBlockAnchor`, unknown types) — parsed, never rendered as
 /// fake content.
@@ -826,6 +862,15 @@ pub(super) fn rich_block_element(
                 col = col.child(div().text_xs().child(caption.clone()));
             }
             Some(col.into_any_element())
+        }
+        // Inline photos/videos mirror the document tile: emoji + caption.
+        // (Thumbnails need `media_roots` plumbing through both render call
+        // sites — future work, not needed for parity here.)
+        RichBlock::Photo { caption, .. } => {
+            Some(rich_media_tile(row_id, index, "photo", "📷", caption))
+        }
+        RichBlock::Video { caption, .. } => {
+            Some(rich_media_tile(row_id, index, "video", "🎬", caption))
         }
         RichBlock::Table { rows } => {
             let mut table = div()
