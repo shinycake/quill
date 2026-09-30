@@ -450,6 +450,16 @@ impl Session {
                     err.code
                 ));
             }
+            // Slice payments: a refused `deleteSavedOrderInfo` /
+            // `deleteSavedCredentials` surfaces in the status note (the
+            // UI drains `chat_action_error`); the optimistic state was
+            // never changed, so nothing to roll back.
+            Some(RequestPurpose::DeleteSavedOrderInfo | RequestPurpose::DeleteSavedCredentials) => {
+                self.chat_action_error = Some(format!(
+                    "could not clear saved payment info (error {})",
+                    err.code
+                ));
+            }
             Some(RequestPurpose::GetArchiveChatListSettings) => {
                 self.archive_settings_loading = false;
                 self.chat_action_error = Some(format!(

@@ -1120,6 +1120,15 @@ pub enum RequestPurpose {
     /// (not an optimistic guess — the `ok` confirms the change of
     /// exactly the number the code was sent to).
     CheckPhoneNumberCode,
+    /// Slice payments: `deleteSavedOrderInfo` (schema 1.8.67, line
+    /// 15286). Response is `ok`; the saved info lives server-side, so
+    /// there is no local state to invalidate — the `ok` just retires
+    /// the pending request.
+    DeleteSavedOrderInfo,
+    /// Slice payments: `deleteSavedCredentials` (schema 1.8.67, line
+    /// 15289). Response is `ok`; same no-local-state treatment as
+    /// `DeleteSavedOrderInfo`.
+    DeleteSavedCredentials,
     Close,
     LogOut,
     Other,
