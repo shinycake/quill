@@ -492,6 +492,10 @@ pub enum ScreenshotDemo {
     /// chat with the composer in rich mode (markup text, block buttons,
     /// live block preview).
     ReadyRichEditor,
+    /// Slice msg-richtext-ai-tools: the same rich editor with a short
+    /// draft so the AI ghost buttons (✨ Fix / Rewrite / Create / Fix rich /
+    /// Rewrite rich) sit in frame. Injected Ready session, no live Telegram.
+    ReadyRichAiTools,
     /// Slice A5: profile management (injected, no live Telegram) — the
     /// "Edit profile" dialog open on the current user (id 777) with a
     /// seeded name, bio, usernames and profile-photo id.

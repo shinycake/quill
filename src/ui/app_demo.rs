@@ -422,6 +422,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — rich editor".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyRichAiTools => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — rich editor AI tools".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyProfileEdit | ScreenshotDemo::ReadyUsername => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

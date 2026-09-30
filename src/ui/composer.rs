@@ -772,7 +772,12 @@ impl QuillApp {
     /// with the same block renderer as history. The ✕ button closes the
     /// editor (the text stays, so nothing is lost).
     pub(super) fn rich_editor_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut buttons = div().id("rich-editor-blocks").flex().items_center().gap_1();
+        let mut buttons = div()
+            .id("rich-editor-blocks")
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_1();
         for (id, label, template) in [
             ("rich-block-h1", "H1", "# "),
             ("rich-block-h2", "H2", "## "),
