@@ -14,6 +14,13 @@ use std::path::PathBuf;
 /// One page block, either parsed from an incoming `pageBlock*` or produced
 /// by the rich-text editor. Text is plain; `entities` carry the inline
 /// styling so the renderer reuses the normal entity painter.
+/// Rich-text composer max length: 32,768 UTF-8 characters (Unicode scalar
+/// values) counted over the text of every block, per Telegram's "Rich
+/// Message Limits". Entity offsets stay in UTF-16 (`RichWalk::utf16_len`,
+/// `src/composer.rs` `out16`); the length limit is a separate unit. Button
+/// labels are chrome, not message text, and are not counted.
+pub const RICH_TEXT_MAX_CHARS: usize = 32_768;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RichBlock {
     Paragraph {
@@ -56,6 +63,26 @@ pub enum RichBlock {
 }
 
 impl RichBlock {
+    /// Character (Unicode scalar value) count of every text payload in this block.
+    pub fn text_char_len(&self) -> usize {
+        fn len(s: &str) -> usize {
+            s.chars().count()
+        }
+        match self {
+            RichBlock::Paragraph { text, .. } | RichBlock::Heading { text, .. } => len(text),
+            RichBlock::List { items, .. } => items.iter().map(|item| len(&item.text)).sum(),
+            RichBlock::Collapsible { header, body, .. } => len(header) + len(body),
+            RichBlock::Document {
+                file_name, caption, ..
+            } => len(file_name) + len(caption),
+            RichBlock::Table { rows } => rows.iter().flatten().map(|cell| len(cell)).sum(),
+            RichBlock::ButtonRow { .. }
+            | RichBlock::Divider
+            | RichBlock::Empty
+            | RichBlock::Unsupported { .. } => 0,
+        }
+    }
+
     /// First text-ish content, for chat-list previews.
     pub fn preview_text(&self) -> Option<&str> {
         match self {
@@ -644,9 +671,19 @@ pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
     }
 }
 
+/// Total characters (Unicode scalar values) of text across all blocks in
+/// the composer.
+pub fn rich_blocks_char_len(blocks: &[RichBlock]) -> usize {
+    blocks.iter().map(RichBlock::text_char_len).sum()
+}
+
 /// Build the `inputRichMessage` object for `inputMessageRichMessage`.
-/// `None` when no block survives (the send is then invalid).
+/// `None` when no block survives (the send is then invalid), or when the
+/// blocks exceed the rich-text max length.
 pub fn input_rich_message(blocks: &[RichBlock]) -> Option<Value> {
+    if rich_blocks_char_len(blocks) > RICH_TEXT_MAX_CHARS {
+        return None;
+    }
     let inputs: Vec<Value> = blocks.iter().filter_map(input_page_block_json).collect();
     if inputs.is_empty() {
         return None;
@@ -1168,6 +1205,62 @@ mod tests {
         let message = input_rich_message(&[RichBlock::Divider]).unwrap();
         assert_eq!(message["@type"], "inputRichMessage");
         assert_eq!(message["source"]["@type"], "richMessageSourceBlocks");
+    }
+
+    #[test]
+    fn rich_text_max_length_is_chars_across_blocks() {
+        let paragraph = |text: String| RichBlock::Paragraph {
+            text,
+            entities: Vec::new(),
+            buttons: Vec::new(),
+        };
+        // Under the limit across two blocks: accepted.
+        let half = "x".repeat(RICH_TEXT_MAX_CHARS / 2);
+        let blocks = vec![paragraph(half.clone()), paragraph(half.clone())];
+        assert_eq!(rich_blocks_char_len(&blocks), RICH_TEXT_MAX_CHARS);
+        assert!(input_rich_message(&blocks).is_some());
+        // One char over: rejected.
+        let blocks = vec![paragraph(half.clone()), paragraph(format!("{half}x"))];
+        assert!(rich_blocks_char_len(&blocks) > RICH_TEXT_MAX_CHARS);
+        assert!(input_rich_message(&blocks).is_none());
+        // The limit counts Unicode scalar values, not UTF-16 code units:
+        // 32,768 emoji accepted, one more refused (a UTF-16 count would
+        // have refused at 16,385 emoji).
+        let emoji = "\u{1F600}".repeat(RICH_TEXT_MAX_CHARS);
+        assert!(input_rich_message(&[paragraph(emoji.clone())]).is_some());
+        assert!(input_rich_message(&[paragraph(format!("{emoji}\u{1F600}"))]).is_none());
+        // Headings, list items, table cells, collapsibles, and document
+        // fields all contribute; chrome (buttons/dividers) does not.
+        let mixed = vec![
+            RichBlock::Heading {
+                level: 1,
+                text: "ab".into(),
+                entities: Vec::new(),
+            },
+            RichBlock::List {
+                ordered: false,
+                items: vec![RichListItem {
+                    text: "cd".into(),
+                    checked: None,
+                }],
+            },
+            RichBlock::Table {
+                rows: vec![vec!["e".into()]],
+            },
+            RichBlock::Collapsible {
+                header: "f".into(),
+                body: "g".into(),
+                open: true,
+            },
+            RichBlock::Document {
+                file_name: "h".into(),
+                caption: "i".into(),
+                local_path: None,
+            },
+            RichBlock::Divider,
+        ];
+        assert_eq!(rich_blocks_char_len(&mixed), 9);
+        assert_eq!(rich_blocks_char_len(&[RichBlock::Divider]), 0);
     }
 
     #[test]

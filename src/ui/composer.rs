@@ -343,6 +343,18 @@ impl QuillApp {
                 local_path: Some(attachment.path.clone()),
             });
         }
+        // Rich-text max length (same status-note pattern as the caption
+        // limit): refuse over-limit drafts before the emptiness check so
+        // the note names the limit instead of "type a message".
+        if quill::rich::rich_blocks_char_len(&blocks) > quill::rich::RICH_TEXT_MAX_CHARS {
+            self.status_note = format!(
+                "rich message too long (max {} characters)",
+                quill::rich::RICH_TEXT_MAX_CHARS
+            )
+            .into();
+            cx.notify();
+            return;
+        }
         if quill::rich::input_rich_message(&blocks).is_none() {
             self.status_note = "type a message or attach a file".into();
             cx.notify();

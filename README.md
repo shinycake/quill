@@ -119,7 +119,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Expandable block quotes (long block quotes collapse with an expand affordance; authoring covered by parity:msg-quote-block) <!-- parity:msg-blockquote-expandable -->
 - [ ] Inline photos/videos in the rich-text composer (partial: inline documents/files/music done — parity:msg-richtext-inline-doc) <!-- parity:msg-richtext-inline-media -->
 - [ ] AI tools in the rich-text composer (composeTextWithAi, composeRichMessageWithAi, createRichMessageWithAi, fixTextWithAi, fixRichMessageWithAi) <!-- parity:msg-richtext-ai-tools -->
-- [ ] Rich-text composer max length (32,768 chars) <!-- parity:msg-richtext-max-length -->
+- [x] Rich-text composer max length (32,768 chars) <!-- parity:msg-richtext-max-length -->
 - [ ] Premium gating of the rich-text editor <!-- parity:msg-richtext-premium-gate -->
 
 ### Chat list
