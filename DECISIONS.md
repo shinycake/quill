@@ -6896,3 +6896,32 @@ name `platform-chat-export` is kept in code/comments.)
   against a live chat (paging + file write against real TDLib).
 - **Out of this slice:** full account data export
   (`parity:platform-data-export`) — separate, much bigger slice.
+## Slice: platform-autostart (2026-09-30, loop 1)
+
+- **Scope:** OS-level "launch at login" toggle for Quill itself. The TDLib
+  schema `autostart` constructor is bot-start-only — no TDLib involvement.
+- **What was built:**
+  - New `src/autostart.rs`: `set_enabled` / `is_enabled` / `supported`
+    over a pure `Platform { Linux, MacOs }` core with injectable home dir
+    (no process-global HOME mutation in tests). Linux writes an XDG
+    Autostart `~/.config/autostart/quill.desktop`; macOS writes
+    `~/Library/LaunchAgents/com.quill.app.plist` (`RunAtLoad`).
+  - UI: "Launch at login" switch section in the Appearance dialog
+    (follows the send-key precedent — that dialog already hosts
+    non-appearance device settings). Unsupported platforms render an
+    explanatory line instead of the switch; toggle failures surface via
+    `status_note`.
+  - Tests: desktop-file path/content, plist path/content, enable→disable
+    roundtrip against a sandboxed home (double-disable is a no-op).
+  - README box `parity:platform-autostart` checked with an honest note.
+- **Key decisions (ponytail):**
+  - No new dependency (`auto-launch` crate): both supported platforms are
+    one file write with a static template.
+  - Windows is explicitly unsupported in this slice — the Run-key registry
+    write is 5 lines of winreg but there is no Windows CI and no way to
+    verify it; shipping unchecked registry code is worse than an honest gap.
+  - No file picker for the exe path: `std::env::current_exe()`.
+- **Not verifiable without live login cycle:** a real logout/login round
+  trip (file presence is the verifiable proxy, and it is tested).
+- **Out of this slice:** Windows Run-key support; "start minimized" /
+  tray-on-startup options; per-user vs system-wide autostart.
