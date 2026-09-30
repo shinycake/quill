@@ -1,0 +1,34 @@
+name: macos-smoke-fallback
+# Hosted-macOS fallback for the macOS compile gate. Used ONLY when Idan's
+# M1 Pro self-hosted runner is offline.
+# workflow_dispatch ONLY (triggering requires write access) — the merge
+# pipeline dispatches it explicitly in that case. There are intentionally no
+# pull_request triggers, so this never runs on its own.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Full commit SHA to compile-smoke'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  macos-smoke:
+    name: macos-compile-smoke
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: compile ui
+        run: cargo build --features ui --locked
+      - name: compile release ui
+        run: cargo build --features ui --release --locked
+      - name: package smoke
+        run: bash scripts/macos-package-smoke.sh
