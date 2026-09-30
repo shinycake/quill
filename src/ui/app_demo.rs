@@ -793,11 +793,16 @@ impl QuillApp {
         demo: Option<ScreenshotDemo>,
     ) -> Self {
         let chat = cx.new(SyntheticChat::new);
+        // Send-key mode drives kit's newline-vs-submit behavior: plain
+        // Enter submits only in Enter mode; in CtrlEnter mode it inserts
+        // a newline and Ctrl/Cmd+Enter sends.
+        let chat_prefs = Self::load_chat_prefs();
+        let submit_on_enter = chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Message — Enter sends, Shift+Enter newline. IME Enter must not send.")
                 .auto_grow(2, 6)
-                .submit_on_enter(true)
+                .submit_on_enter(submit_on_enter)
         });
         // Phase C2h: in-call group-chat composer for the voice-chat
         // overlay (sendGroupCallMessage).
@@ -805,7 +810,7 @@ impl QuillApp {
             TextareaState::new(window, cx)
                 .placeholder("Message the voice chat — Enter sends")
                 .auto_grow(1, 3)
-                .submit_on_enter(true)
+                .submit_on_enter(submit_on_enter)
         });
         // Phase C2i: comment field for the call-rating detail card.
         let rating_comment_input = cx.new(|cx| {
@@ -1015,7 +1020,7 @@ impl QuillApp {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
                         this.submit_phone(window, cx);
                     }
@@ -1031,7 +1036,7 @@ impl QuillApp {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
                         this.submit_code(window, cx);
                     }
@@ -1047,7 +1052,7 @@ impl QuillApp {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
                         this.submit_password(window, cx);
                     }
@@ -1066,7 +1071,7 @@ impl QuillApp {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
                         this.activate_first_search_result(window, cx);
                     }
@@ -1084,7 +1089,7 @@ impl QuillApp {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
                         this.jump_selected_chat_search_hit(cx);
                     }
@@ -1100,7 +1105,7 @@ impl QuillApp {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
                     ) {
                         this.activate_first_forward_destination(cx);
                     }
@@ -1123,8 +1128,6 @@ impl QuillApp {
         };
 
         let pending_attachments = demo_pending_attachments(demo);
-
-        let chat_prefs = Self::load_chat_prefs();
 
         let mut app = Self {
             chat,

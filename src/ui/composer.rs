@@ -1007,7 +1007,10 @@ impl QuillApp {
     /// commands, invalid trigger, empty composer).
     pub(super) fn sync_command_menu(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
-        let triggered = command_menu_trigger(&text).is_some();
+        // Bots slice: the `@bot` inline trigger owns the composer start —
+        // the `/` menu never competes with the inline-results dropdown.
+        let inline_active = quill::composer::inline_query_trigger(&text).is_some();
+        let triggered = command_menu_trigger(&text).is_some() && !inline_active;
         let open_chat = self.session().and_then(|session| session.open_chat);
         let has_items = open_chat.is_some_and(|chat_id| {
             self.session()

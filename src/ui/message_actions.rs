@@ -859,10 +859,12 @@ impl QuillApp {
             return;
         };
         self.inline_bot_alert_shown = true;
-        self.composer.update(cx, |input, cx| {
-            let next = quill::composer::insert_switch_inline_text(&input.value(), &query);
-            input.set_value(next, window, cx);
-        });
+        if !query.is_empty() {
+            self.composer.update(cx, |input, cx| {
+                let next = quill::composer::insert_switch_inline_text(&input.value(), &query);
+                input.set_value(next, window, cx);
+            });
+        }
         self.sync_command_menu(cx);
         self.sync_inline_mode(cx);
         cx.notify();

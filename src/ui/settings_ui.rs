@@ -435,6 +435,18 @@ impl QuillApp {
                 "Ask before placing a call",
                 |prefs, on| prefs.confirm_before_calling = on,
             ))
+            // Slice calls-proxy: "Use proxy for calls" (official:
+            // Settings → Data & Storage → Proxy). Client-side toggle in
+            // CallPrefs — the TDLib schema has no such option; when on,
+            // the client routes call media through the enabled proxy
+            // (SOCKS5 only, see `calls::proxy::proxy_for_calls`).
+            .child(pref_row(
+                "call-pref-proxy",
+                prefs.use_proxy_for_calls,
+                "Use proxy for calls",
+                "Route calls through the enabled proxy",
+                |prefs, on| prefs.use_proxy_for_calls = on,
+            ))
             .child({
                 // Slice S4: "Use less data for calls" is a real TDLib
                 // setting (`autoDownloadSettings.use_less_data_for_calls`,
