@@ -6938,4 +6938,15 @@ name `platform-chat-export` is kept in code/comments.)
   - README box checked with a corrected description.
 - **Key decisions (ponytail):** verified instead of rebuilt — the code was complete and tested (`linux_command_shape`, `macos_command_escapes_quotes`, coalescing tests all pass). No new code was the right diff.
 - **Tests:** existing suite covers it; no new tests needed.
+
+## Parity slice — customizable key bindings (2026-09-30)
+
+- **Scope:** `parity:platform-custom-keybindings`. Users can rebind 16 shortcuts (focus, search, formatting, media viewer) via a "Keyboard shortcuts" section in the Appearance dialog. Changes apply immediately, persist to `prefs.json`, and are re-applied at startup.
+- **Key decisions (ponytail):**
+  - Window-chrome and app-lifecycle bindings (quit, close, minimize, fullscreen) are NOT rebindable — rebinding those risks stranding the user with no way out. Only the 16 user-facing actions are in `REBINDABLE_ACTIONS`.
+  - `KeyBinding::new` unwraps the keystroke parse (panics on invalid input), so `keybinding_for` validates with `Keystroke::parse` first — a corrupt saved pref falls back to defaults, never panics startup.
+  - An override replaces ALL default keystrokes for its action (e.g. both cmd-1 and ctrl-1 for Focus chat list), keeping the model simple: one custom keystroke per action.
+  - The capture UI uses a focused div with `on_key_down`; `Keystroke::to_string()` gives the canonical keystroke string. Escape cancels capture.
+  - Startup application is a one-shot in `poll_live` when the live driver (and its prefs paths) is first ready — `bind_keys` in main.rs runs before prefs are loadable.
+- **Tests:** `keybinding_for_valid_id_and_keystroke`, `keybinding_for_unknown_id_is_none`, `keybinding_for_invalid_keystroke_is_none`, `rebindable_ids_are_unique` (UI tests, run with the ui feature).
 - **Out of this slice:** none identified.
