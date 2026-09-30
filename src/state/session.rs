@@ -1118,3 +1118,31 @@ impl Session {
         }
     }
 }
+
+/// Slice parity:platform-offline-indicator — what the UI renders for a
+/// TDLib connection state. Only `Ready` is "connected" (no indicator);
+/// every other state renders the offline/connection indicator.
+/// `Unknown` is treated as transitional (presence only), never as
+/// connected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionIndicator {
+    /// Fully offline — banner with the "Waiting for network…" label.
+    Offline,
+    /// Connecting / updating / proxy — presence dot only. Per-state
+    /// labels ("Connecting…", "Updating…", "Connecting to proxy…") are
+    /// the `platform-reconnect-states` slice.
+    Transitioning,
+}
+
+/// Slice parity:platform-offline-indicator — `Session::connection` →
+/// indicator visibility. `None` = `Ready` = connected, nothing renders.
+pub fn connection_indicator(state: ConnectionState) -> Option<ConnectionIndicator> {
+    match state {
+        ConnectionState::Ready => None,
+        ConnectionState::WaitingForNetwork => Some(ConnectionIndicator::Offline),
+        ConnectionState::ConnectingToProxy
+        | ConnectionState::Connecting
+        | ConnectionState::Updating
+        | ConnectionState::Unknown => Some(ConnectionIndicator::Transitioning),
+    }
+}

@@ -5,6 +5,7 @@ mod bots;
 mod calls;
 mod chat_list;
 mod common;
+mod connection_indicator;
 mod downloads;
 mod groups;
 mod messages;

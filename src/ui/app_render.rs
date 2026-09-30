@@ -8,6 +8,7 @@ use super::actions::{
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
+use gpui_kit::component::alert::Alert;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -15,7 +16,7 @@ use quill::auth::{AuthAction, view_for};
 use quill::composer::FormatAction;
 use quill::ids::ChatId;
 use quill::settings::ThemeChoice;
-use quill::state::StoryPostOutcome;
+use quill::state::{ConnectionIndicator, StoryPostOutcome, connection_indicator};
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Phase 8.1: feed OS window focus into the notification decision, then
@@ -157,6 +158,13 @@ impl Render for QuillApp {
         let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
         let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
         let show_qr = inputs_live && matches!(auth.action, AuthAction::WaitOtherDevice);
+        // Slice parity:platform-offline-indicator — re-read every frame
+        // (the 40ms `poll_live` loop applies `updateConnectionState` and
+        // re-renders), so the indicator follows TDLib live.
+        let connection = self
+            .session()
+            .map(|session| session.connection)
+            .and_then(connection_indicator);
         div()
             .flex()
             .flex_col()
@@ -313,6 +321,28 @@ impl Render for QuillApp {
                 self.chat_search_is_open(),
                 cx,
             ))
+            // Slice parity:platform-offline-indicator — slim connection
+            // strip below the title bar. Offline gets the kit warning
+            // banner with the "Waiting for network…" label; transitional
+            // states get a presence dot only (per-state labels are the
+            // `platform-reconnect-states` slice).
+            .when(connection == Some(ConnectionIndicator::Offline), |this| {
+                this.child(Alert::warning("connection-indicator", "Waiting for network…").banner())
+            })
+            .when(
+                connection == Some(ConnectionIndicator::Transitioning),
+                |this| {
+                    this.child(
+                        div()
+                            .w_full()
+                            .flex_none()
+                            .flex()
+                            .justify_center()
+                            .py(px(4.))
+                            .child(div().size(px(8.)).rounded_full().bg(cx.theme().warning)),
+                    )
+                },
+            )
             .child(
                 div()
                     .id("quill-shell")

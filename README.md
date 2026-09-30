@@ -574,7 +574,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Honest updater states: already up to date, no network, download/install failed with retry <!-- parity:platform-update-states -->
 - [ ] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder -->
 - [ ] Update changelog display after updates <!-- parity:platform-update-changelog -->
-- [ ] Offline connection indicator in UI (partial: updateConnectionState parsed at telegram/envelope.rs:5506 and stored in state.rs:2199, but never rendered) <!-- parity:platform-offline-indicator -->
+- [x] Offline connection indicator in UI: slim strip below the title bar driven by `Session::connection` — kit warning banner "Waiting for network…" when offline, presence dot for transitional states (Connecting/Updating/ConnectingToProxy); per-state reconnect labels are parity:platform-reconnect-states <!-- parity:platform-offline-indicator -->
 - [ ] Reconnect state labels ("Connecting…", "Waiting for network…", "Updating…", "Connecting to proxy…") <!-- parity:platform-reconnect-states -->
 - [ ] "You're offline" error messaging when sending/calling while offline <!-- parity:platform-offline-errors -->
 - [x] TDLib request errors surfaced on the originating surface (e.g. failed createCall → error line on call overlay) (src/state.rs:4547) <!-- parity:platform-error-surfacing -->
