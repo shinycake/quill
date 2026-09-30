@@ -30264,6 +30264,50 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Parity slice: apply a scope's mention-notification override
+    /// (`setScopeNotificationSettings`).
+    fn apply_scope_mention_notif(
+        &mut self,
+        scope: NotificationSettingsScope,
+        notify: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
+                .driver
+                .session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.disable_mention_notifications = !notify;
+            let result = live
+                .driver
+                .send_scope_notification_settings(scope, &settings);
+            self.status_note = match result {
+                Ok(_) => "default mention notifications updated…".into(),
+                Err(_) => "could not change default mention notifications".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let mut settings = session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+                .unwrap_or_default();
+            settings.disable_mention_notifications = !notify;
+            session.scope_notification_settings.insert(scope, settings);
+            self.status_note = "default mention notifications updated".into();
+        }
+        cx.notify();
+    }
+
     /// Parity slice: apply a scope's story-poster default
     /// (`setScopeNotificationSettings`).
     fn apply_scope_story_poster(
@@ -30308,6 +30352,49 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Parity slice: apply a scope's pinned-message-notification override
+    /// (`setScopeNotificationSettings`).
+    fn apply_scope_pinned_notif(
+        &mut self,
+        scope: NotificationSettingsScope,
+        notify: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
+                .driver
+                .session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.disable_pinned_message_notifications = !notify;
+            let result = live
+                .driver
+                .send_scope_notification_settings(scope, &settings);
+            self.status_note = match result {
+                Ok(_) => "default pinned-message notifications updated…".into(),
+                Err(_) => "could not change default pinned-message notifications".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let mut settings = session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+                .unwrap_or_default();
+            settings.disable_pinned_message_notifications = !notify;
+            session.scope_notification_settings.insert(scope, settings);
+            self.status_note = "default pinned-message notifications updated".into();
+        }
+        cx.notify();
+    }
     /// Parity slice: apply a reaction-notification source
     /// (`setReactionNotificationSettings`).
     fn apply_reaction_source(
@@ -31537,6 +31624,52 @@ impl QuillApp {
                             .accessibility_label("Show message preview")
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.apply_scope_preview(scope, on, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Notify about mentions"),
+                    )
+                    .child(
+                        // Parity slice: mention-notification override per scope
+                        // (schema: disable_mention_notifications).
+                        Switch::new(format!("scope-mentions-{scope:?}"))
+                            .checked(!settings.disable_mention_notifications)
+                            .accessibility_label("Notify about mentions")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.apply_scope_mention_notif(scope, on, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Notify about pinned messages"),
+                    )
+                    .child(
+                        // Parity slice: pinned-message-notification override
+                        // per scope (schema: disable_pinned_message_notifications).
+                        Switch::new(format!("scope-pinned-{scope:?}"))
+                            .checked(!settings.disable_pinned_message_notifications)
+                            .accessibility_label("Notify about pinned messages")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.apply_scope_pinned_notif(scope, on, cx);
                             })),
                     ),
             )
