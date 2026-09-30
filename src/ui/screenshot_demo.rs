@@ -505,6 +505,11 @@ pub enum ScreenshotDemo {
     /// draft so the AI ghost buttons (✨ Fix / Rewrite / Create / Fix rich /
     /// Rewrite rich) sit in frame. Injected Ready session, no live Telegram.
     ReadyRichAiTools,
+    /// Slice msg-richtext-premium-gate: multi-line composer so the ⛶ Rich
+    /// editor button is visible, status note shows the non-Premium refusal
+    /// ("Rich messages require Telegram Premium"). Editor stays closed.
+    /// Injected Ready session, no live Telegram.
+    ReadyRichPremiumGate,
     /// Slice A5: profile management (injected, no live Telegram) — the
     /// "Edit profile" dialog open on the current user (id 777) with a
     /// seeded name, bio, usernames and profile-photo id.
