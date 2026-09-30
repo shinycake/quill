@@ -115,7 +115,12 @@ fn ui_main(args: &[String]) {
                                         .await;
                                     let alive = tray_view
                                         .update(cx, |this, _| {
-                                            quill::tray::sync_tray(this.session())
+                                            quill::tray::sync_tray(this.session());
+                                            // parity:platform-app-icon-badge — unread
+                                            // badge on the app/taskbar icon
+                                            // (Linux LauncherEntry D-Bus
+                                            // signal; no-op elsewhere).
+                                            quill::icon_badge::sync_icon_badge(this.session())
                                         })
                                         .is_ok();
                                     if !alive {
