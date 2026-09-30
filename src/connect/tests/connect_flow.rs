@@ -949,6 +949,70 @@ fn missing_tdjson_message_is_actionable() {
     assert!(msg.contains("never searched"));
 }
 
+/// Slice calls-less-data: the "Use less data for calls" toggle pushes
+/// `setAutoDownloadSettings` with `use_less_data_for_calls` for all three
+/// networks, and refuses while local prefs are unseeded (so the all-off
+/// defaults never silently disable the user's auto-downloads).
+#[test]
+fn less_data_for_calls_pushes_all_networks_and_refuses_unseeded() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ready = copy_and_parse(
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        &seq,
+        &dyn_sink,
+    )
+    .unwrap();
+    driver.ingest(ready).unwrap();
+
+    // Unseeded: refused, no setAutoDownloadSettings sent.
+    assert!(driver.set_less_data_for_calls(true).is_err());
+    assert!(
+        recorder
+            .snapshot()
+            .iter()
+            .all(|json| !json.contains(r#""@type":"setAutoDownloadSettings""#))
+    );
+
+    driver.session.data_storage.seeded = true;
+    driver.set_less_data_for_calls(true).unwrap();
+    let sent: Vec<Value> = recorder
+        .snapshot()
+        .iter()
+        .map(|json| serde_json::from_str(json).expect("sent json parses"))
+        .collect();
+    let less: Vec<&Value> = sent
+        .iter()
+        .filter(|v| v["@type"] == "setAutoDownloadSettings")
+        .collect();
+    assert_eq!(less.len(), 3);
+    let networks: Vec<&str> = less
+        .iter()
+        .map(|v| v["type"]["@type"].as_str().expect("network type"))
+        .collect();
+    assert_eq!(
+        networks,
+        vec![
+            "networkTypeMobile",
+            "networkTypeMobileRoaming",
+            "networkTypeWiFi"
+        ]
+    );
+    for req in &less {
+        assert_eq!(req["settings"]["use_less_data_for_calls"], true);
+    }
+
+    drop(driver);
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn driver_loads_chats_after_ready_then_send_text() {
     let store = MemorySecretStore::new();
