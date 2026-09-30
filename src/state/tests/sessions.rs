@@ -591,3 +591,16 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
         Some("Could not change the session setting: Telegram refused the request")
     );
 }
+
+// Slice parity:platform-offline-errors — `is_offline` is true for any
+// non-Ready connection state.
+#[test]
+fn is_offline_follows_connection_state() {
+    let (mut session, _sink) = session();
+    session.connection = ConnectionState::Ready;
+    assert!(!session.is_offline());
+    session.connection = ConnectionState::WaitingForNetwork;
+    assert!(session.is_offline());
+    session.connection = ConnectionState::Connecting;
+    assert!(session.is_offline());
+}

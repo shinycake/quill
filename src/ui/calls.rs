@@ -431,8 +431,22 @@ impl QuillApp {
     }
 
     /// Phase C2i: the actual `startCall` send, after any confirmation.
+    /// Slice parity:platform-offline-errors — a call can't be queued
+    /// like a message, so refuse while offline with an honest note.
     pub(super) fn dial_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
         if self.live.is_some() {
+            if self
+                .live
+                .as_ref()
+                .expect("live")
+                .driver
+                .session
+                .is_offline()
+            {
+                self.status_note = "You're offline — can't start a call".into();
+                cx.notify();
+                return;
+            }
             let result = self
                 .live
                 .as_mut()

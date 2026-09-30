@@ -33,6 +33,22 @@ pub(super) fn apply_ready_reply(session: &mut Session, sink: &Arc<MemorySink>, s
 }
 
 impl QuillApp {
+    /// Slice parity:platform-offline-errors — honest send note. When the
+    /// live session has no connection TDLib queues the outgoing request
+    /// and flushes it on reconnect, so claim queueing instead of
+    /// "sending…".
+    fn send_started_note(&self, online_note: &str) -> String {
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.is_offline())
+        {
+            "You're offline — will send when you reconnect".into()
+        } else {
+            online_note.into()
+        }
+    }
+
     pub(super) fn submit_composer(
         &mut self,
         text: String,
@@ -202,7 +218,7 @@ impl QuillApp {
                             self.composer
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             self.forget_local_draft(chat_id);
-                            self.status_note = "sending…".into();
+                            self.status_note = self.send_started_note("sending…");
                         }
                         Err(quill::connect::ConnectSendError::CaptionTooLong { limit }) => {
                             // MED4: runtime `message_caption_length_max`
@@ -399,7 +415,7 @@ impl QuillApp {
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
-                self.status_note = "sending\u{2026}".into();
+                self.status_note = self.send_started_note("sending…");
             }
             Err(_) => {
                 self.status_note = "could not send rich message".into();
@@ -1413,7 +1429,7 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.finish_edit_restore_draft(window, cx);
-                    self.status_note = "saving edit…".into();
+                    self.status_note = self.send_started_note("saving edit…");
                 }
                 Err(_) => {
                     self.status_note = "could not edit message".into();

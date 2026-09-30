@@ -1193,3 +1193,12 @@ pub fn connection_indicator(state: ConnectionState) -> Option<ConnectionIndicato
         ConnectionState::Unknown => Some(ConnectionIndicator::Transitioning("Connecting…")),
     }
 }
+
+impl Session {
+    /// Slice parity:platform-offline-errors — whether the client is
+    /// currently offline for send purposes. Anything other than
+    /// `Ready` means TDLib has no live connection.
+    pub fn is_offline(&self) -> bool {
+        !matches!(self.connection, ConnectionState::Ready)
+    }
+}
