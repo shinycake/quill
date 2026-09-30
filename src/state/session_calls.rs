@@ -33,6 +33,21 @@ impl Session {
             return;
         }
         if self.active_call.is_some() {
+            // A *different* call id while one is active. A terminal
+            // update for the swap-pending/queued incoming call (the
+            // caller hung up) clears it; the first pending incoming
+            // raises the swap prompt; further ones auto-decline busy.
+            let swap_id = self
+                .call_swap_pending
+                .map(|(id, _, _)| id)
+                .or_else(|| self.call_swap_accept_queued.map(|(id, _)| id));
+            if Some(call.id) == swap_id {
+                if call.state.is_terminal() {
+                    self.call_swap_pending = None;
+                    self.call_swap_accept_queued = None;
+                }
+                return;
+            }
             if !call.is_outgoing
                 && matches!(call.state, CallState::Pending { .. })
                 && !self
@@ -40,14 +55,21 @@ impl Session {
                     .iter()
                     .any(|(id, _, _)| *id == call.id)
             {
-                self.call_busy_decline_queue
-                    .push((call.id, call.user_id, call.is_video));
+                let note =
+                    if self.call_swap_pending.is_none() && self.call_swap_accept_queued.is_none() {
+                        self.call_swap_pending = Some((call.id, call.user_id, call.is_video));
+                        "incoming-while-active-swap-prompt"
+                    } else {
+                        self.call_busy_decline_queue
+                            .push((call.id, call.user_id, call.is_video));
+                        "incoming-while-active-busy-decline"
+                    };
                 self.diagnostics.record(Diagnostic {
                     category: "call",
                     type_name: Some("updateCall".to_string()),
                     extra: None,
                     seq: Some(self.last_seq),
-                    note: "incoming-while-active-busy-decline",
+                    note,
                 });
             }
             return;
@@ -123,6 +145,11 @@ impl Session {
         summary.final_transport = active.transport;
         summary.muted = active.muted;
         self.call_summary = Some(summary);
+        // The active call ended on its own — a still-open swap prompt
+        // is moot (the incoming call now flows through the normal
+        // incoming path). A queued post-swap accept survives: the
+        // driver issues acceptCall once this terminal update lands.
+        self.call_swap_pending = None;
         self.call_busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
     }

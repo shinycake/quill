@@ -267,6 +267,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-key-verification" => ScreenshotDemo::ReadyKeyVerification,
                 "ready-self-destruct" => ScreenshotDemo::ReadySelfDestruct,
                 "ready-call" => ScreenshotDemo::ReadyCall,
+                "ready-call-swap" => ScreenshotDemo::ReadyCallSwap,
                 "ready-call-video" => ScreenshotDemo::ReadyCallVideo,
                 "ready-call-screenshare" => ScreenshotDemo::ReadyCallScreenShare,
                 "ready-call-screenshare-receive" => ScreenshotDemo::ReadyCallScreenShareReceive,
@@ -448,6 +449,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyKeyVerification => ".quill-ready-ready-key-verification",
         ScreenshotDemo::ReadySelfDestruct => ".quill-ready-ready-self-destruct",
         ScreenshotDemo::ReadyCall => ".quill-ready-ready-call",
+        ScreenshotDemo::ReadyCallSwap => ".quill-ready-ready-call-swap",
         ScreenshotDemo::ReadyCallVideo => ".quill-ready-ready-call-video",
         ScreenshotDemo::ReadyCallScreenShare => ".quill-ready-ready-call-screenshare",
         ScreenshotDemo::ReadyCallScreenShareReceive => {

@@ -387,6 +387,11 @@ pub enum ScreenshotDemo {
     /// ticking). Signaling only: the card carries the honest
     /// no-audio-transport note.
     ReadyCall,
+    /// Swap prompt: an active outgoing voice call with Zed plus an
+    /// incoming pending video call from Ada, so the state machine
+    /// raises the swap prompt and the kit dialog renders ("End &
+    /// answer" / "Decline"). Injected, no live Telegram.
+    ReadyCallSwap,
     /// Phase C1b: a *connected* (`callStateReady`) incoming video call
     /// from Zed, so the overlay renders the video-stage placeholder
     /// grid (remote + local tiles), the 📹 "Video call" kind line, the

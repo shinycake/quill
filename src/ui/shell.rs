@@ -149,6 +149,8 @@ pub enum DialogKind {
     FolderDelete,
     FolderManage,
     CallConfirm,
+    /// Swap prompt: incoming call while another call is active.
+    CallSwap,
     NotificationDefaults,
     StorageUsage,
     TwoFa,
@@ -217,6 +219,7 @@ impl QuillShell {
             DialogKind::FolderDelete => app.folder_delete_confirm.is_some(),
             DialogKind::FolderManage => app.folder_manage_open,
             DialogKind::CallConfirm => app.call_confirm.is_some(),
+            DialogKind::CallSwap => app.session().is_some_and(|s| s.call_swap_pending.is_some()),
             DialogKind::NotificationDefaults => app.notification_defaults_open,
             DialogKind::StorageUsage => app.storage_usage_open,
             DialogKind::TwoFa => app.twofa_open,
@@ -257,6 +260,7 @@ impl QuillShell {
             DialogKind::FolderDelete => QuillApp::build_folder_delete_dialog,
             DialogKind::FolderManage => QuillApp::build_folder_manage_dialog,
             DialogKind::CallConfirm => QuillApp::build_call_confirm_dialog,
+            DialogKind::CallSwap => QuillApp::build_call_swap_dialog,
             DialogKind::NotificationDefaults => QuillApp::build_notification_defaults_dialog,
             DialogKind::StorageUsage => QuillApp::build_storage_usage_dialog,
             DialogKind::TwoFa => QuillApp::build_twofa_dialog,
@@ -282,7 +286,7 @@ impl QuillShell {
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 34] = [
+    const KINDS: [DialogKind; 35] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -292,6 +296,8 @@ impl QuillShell {
         DialogKind::StorageUsage,
         DialogKind::NotificationDefaults,
         DialogKind::CallConfirm,
+        // Swap prompt is call-urgent: same priority band as CallConfirm.
+        DialogKind::CallSwap,
         DialogKind::FolderEditor,
         DialogKind::FolderDelete,
         DialogKind::FolderManage,

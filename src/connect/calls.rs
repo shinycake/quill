@@ -740,6 +740,77 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
+    /// Swap prompt: decline the pending incoming call as busy.
+    /// Clears the prompt; the caller's terminal update is a no-op
+    /// afterwards.
+    pub fn decline_swap_call(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (call_id, _user_id, is_video) = self
+            .session
+            .call_swap_pending
+            .take()
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let extra = self.session.request(RequestPurpose::DiscardCall, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Swap prompt: end the current call and answer the pending
+    /// incoming one. `discardCall` for the active call goes out
+    /// immediately; `acceptCall` for the pending call fires from the
+    /// driver pump once the terminal updateCall lands (TDLib allows a
+    /// single active call, so the accept must wait for the discard).
+    pub fn accept_swap_call(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let (pending_id, _user_id, is_video) = self
+            .session
+            .call_swap_pending
+            .take()
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        self.session.call_swap_accept_queued = Some((pending_id, is_video));
+        if self.session.active_call.is_some() {
+            self.discard_call().map(|_| ())
+        } else {
+            self.maybe_accept_queued_swap()
+        }
+    }
+
+    /// Driver pump: fire the queued post-swap `acceptCall` once no
+    /// call is active. Called from `ingest` next to
+    /// `maybe_decline_busy_calls`. If the caller hung up meanwhile,
+    /// the server rejects the accept and the update stream records it.
+    pub(crate) fn maybe_accept_queued_swap(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() || self.session.active_call.is_some() {
+            return Ok(());
+        }
+        let Some((call_id, _is_video)) = self.session.call_swap_accept_queued.take() else {
+            return Ok(());
+        };
+        let extra = self.session.request(RequestPurpose::AcceptCall, None);
+        let protocol = self.engine_protocol_json();
+        if let Err(err) = self
+            .sender
+            .send_json(&accept_call_with_protocol(extra, call_id, &protocol))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        if let Some(engine) = self.call_engine.as_deref_mut() {
+            let _ = engine.accept_call(call_id);
+        }
+        Ok(())
+    }
+
     /// Phase C2c: real mute through the native engine. When an available
     /// engine is installed and the transport exists, the engine is
     /// called first and its error propagates *without* flipping the

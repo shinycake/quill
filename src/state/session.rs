@@ -294,6 +294,17 @@ pub struct Session {
     /// `(user_id, is_video)` so the UI can say so honestly instead of
     /// declining silently. Drained by the UI banner.
     pub call_busy_declined: Vec<(i64, bool)>,
+    /// Swap prompt: the first incoming call that arrived while another
+    /// call was active, awaiting the user's decision — `(call_id,
+    /// user_id, is_video)`. Further incoming calls while the prompt is
+    /// open go to `call_busy_decline_queue` (auto-declined busy).
+    pub call_swap_pending: Option<(i32, i64, bool)>,
+    /// Swap prompt: the user chose "end current & answer" — the
+    /// pending incoming call's `(call_id, is_video)`, accepted by the
+    /// driver once the active call's terminal update lands (TDLib
+    /// allows a single active call, so `acceptCall` waits for the
+    /// discard to complete).
+    pub call_swap_accept_queued: Option<(i32, bool)>,
     /// Phase C2i: recent calls from `searchCallMessages` (server-side
     /// history, schema 1.8.67 :11903) for the Recent-calls tab, newest
     /// first.
@@ -890,6 +901,8 @@ impl Session {
             group_call_error: None,
             call_busy_decline_queue: Vec::new(),
             call_busy_declined: Vec::new(),
+            call_swap_pending: None,
+            call_swap_accept_queued: None,
             recent_calls: Vec::new(),
             recent_calls_offset: String::new(),
             recent_calls_loading: false,
