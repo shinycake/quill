@@ -358,6 +358,7 @@ impl QuillApp {
                 }),
                 _ => {}
             }
+        }
         // Rich-text max length (same status-note pattern as the caption
         // limit): refuse over-limit drafts before the emptiness check so
         // the note names the limit instead of "type a message".
