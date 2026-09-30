@@ -41,6 +41,18 @@ pub fn should_send_on_enter(event: EnterEvent, mode: SendKeyMode) -> bool {
     }
 }
 
+/// Text to actually send for a `PressEnter` that passed
+/// `should_send_on_enter`. In CtrlEnter mode kit inserts the newline
+/// before emitting the event (the composer runs with
+/// `submit_on_enter(false)`), so strip that single trailing newline —
+/// otherwise Ctrl+Enter sends a trailing blank line.
+pub fn send_text_on_enter(text: String, mode: SendKeyMode) -> String {
+    match mode {
+        SendKeyMode::CtrlEnter => text.strip_suffix('\n').unwrap_or(&text).to_string(),
+        SendKeyMode::Enter => text,
+    }
+}
+
 /// Map Kit `InputEvent::PressEnter` plus the IME mark from
 /// `EntityInputHandler::marked_text_range`.
 ///

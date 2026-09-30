@@ -439,29 +439,16 @@ pub struct ChatPrefs {
     pub send_key_mode: crate::composer::SendKeyMode,
 }
 
-fn chat_prefs_path(paths: &AccountPaths) -> PathBuf {
-    paths.root.join("chat_prefs.json")
-}
-
 /// Load chat prefs; missing or corrupt files fall back to defaults
 /// (never a hard error — prefs must not block startup).
 pub fn load_chat_prefs(paths: &AccountPaths) -> ChatPrefs {
-    std::fs::read(chat_prefs_path(paths))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    load_json_prefs(paths, "chat_prefs.json")
 }
 
 /// Persist chat prefs; failures are returned to the caller to surface
 /// in the status note.
 pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) -> std::io::Result<()> {
-    let path = chat_prefs_path(paths);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let bytes = serde_json::to_vec_pretty(prefs)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, bytes)
+    save_json_prefs(paths, "chat_prefs.json", prefs)
 }
 
 #[derive(Debug, Clone)]

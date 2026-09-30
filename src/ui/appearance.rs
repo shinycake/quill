@@ -143,6 +143,15 @@ impl QuillApp {
         if let Err(err) = save_chat_prefs(&Self::appearance_paths(), &self.chat_prefs) {
             self.status_note = format!("Couldn't save chat settings: {err}");
         }
+        // Keep kit's newline-vs-submit behavior in sync with the mode on
+        // the two chat composers (other inputs always submit on Enter).
+        let submit = self.chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
+        self.composer.update(cx, |input, cx| {
+            input.set_submit_on_enter(submit, cx);
+        });
+        self.group_call_composer.update(cx, |input, cx| {
+            input.set_submit_on_enter(submit, cx);
+        });
         cx.notify();
     }
 
@@ -674,7 +683,11 @@ impl QuillApp {
             .selected_index(Some(if current == SendKeyMode::Enter { 0 } else { 1 }))
             .children([
                 Radio::new("appearance-send-key-enter").label("⏎ Enter"),
-                Radio::new("appearance-send-key-ctrlenter").label("⌃⏎ Ctrl+Enter"),
+                Radio::new("appearance-send-key-ctrlenter").label(if cfg!(target_os = "macos") {
+                    "⌘⏎ Cmd+Enter"
+                } else {
+                    "⌃⏎ Ctrl+Enter"
+                }),
             ])
             .on_click(cx.listener(|this, &ix, _, cx| {
                 this.set_chat_prefs(cx, |c| {
@@ -690,5 +703,6 @@ impl QuillApp {
             "Send messages with",
             "Enter sends, or Enter inserts a newline and Ctrl/Cmd+Enter sends.",
             control.into_any_element(),
-        )    }
+        )
+    }
 }
