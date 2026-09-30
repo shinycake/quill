@@ -474,8 +474,9 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
     commands:vector<botCommand> … = BotInfo;` (line 2430) — commands are
     directly `vector<botCommand>`, not the `botCommands` wrapper (line 829)
   - `botCommand command:string description:string is_ephemeral:Bool =
-    BotCommand;` (line 826) — `is_ephemeral` is parsed but intentionally
-    not stored: tapping a command always inserts the plain `/command` text
+    BotCommand;` (line 826) — `is_ephemeral` is kept (ephemeral-command
+    icon slice marks ephemeral commands with an eye-off icon); tapping a
+    command always inserts the plain `/command` text
   - `updateUserFullInfo user_id:int53 user_full_info:userFullInfo =
     Update;` (line 10744)
 - **UX:**
@@ -682,8 +683,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
   (needs a cursor-offset API on the input); per-language scopes
   (`botCommandScope…` with non-empty `language_code`); `@botname`
   namespaced commands in groups; sending `/`-commands as typed (already
-  works — they are plain text); ephemeral-command rendering
-  (`is_ephemeral` is not kept).
+  works — they are plain text).
 
 ## Phase 4.1 — Rich text entities (2026-09-26)
 

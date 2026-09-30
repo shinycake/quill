@@ -486,7 +486,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Bot privacy settings (read-only): privacy-policy URL button, /privacy command fallback, else the schema's telegram.org/privacy-tpa fallback note — no client-side bot privacy setting exists in the schema <!-- parity:bots-privacy -->
 - [x] Similar bots section in the bot profile: getBotSimilarBots, names resolved from the user cache, tap opens the bot chat (state.rs, connect.rs, ui/mod.rs) <!-- parity:bots-similar -->
 - [x] `/` command menu merging chat-specific bot commands and global getCommands (state.rs:3100) <!-- parity:bots-command-menu -->
-- [ ] Ephemeral-command icon in the bot command list (BotCommand.is_ephemeral) <!-- parity:bots-ephemeral-command-icon -->
+- [x] Ephemeral-command icon in the bot command list (BotCommand.is_ephemeral) <!-- parity:bots-ephemeral-command-icon -->
 - [x] Inline mode: type @bot in composer, inline query results list, send an inline result (`getInlineQueryResults` backend from S9; this slice adds: `@bot query` trigger parse, bot resolution via local user cache with `searchPublicChat` fallback, 100ms-debounced queries, results dropdown with keyboard/mouse pick + next-page loading, `sendInlineQueryResultMessage` send, secret-chat alert on the typed path) <!-- parity:bots-inline-mode -->
 - [ ] Games: send / play, high scores (no game code at all) <!-- parity:bots-games -->
 - [x] Poll creation dialog: question, add/remove options (2–10), validation errors, anonymous + multiple-answer toggles (ui/mod.rs:14860, poll.rs:112) <!-- parity:bots-poll-create -->
