@@ -141,6 +141,36 @@ impl QuillApp {
             self.present_forward_result(result, cx);
             progressed = true;
         }
+        // `parity:platform-chat-export` — drive export paging and surface
+        // the result (file path or error) as a status note, then clear it.
+        if let Some(live) = self.live.as_mut() {
+            live.driver.pump_chat_export();
+            let note = live
+                .driver
+                .session
+                .chat_export
+                .as_ref()
+                .filter(|export| export.settled())
+                .map(|export| {
+                    if let Some(path) = export.finished_path.as_ref() {
+                        format!(
+                            "Exported {} messages to {}",
+                            export.messages.len(),
+                            path.display()
+                        )
+                    } else {
+                        format!(
+                            "Chat export failed: {}",
+                            export.failed.as_deref().unwrap_or("unknown error")
+                        )
+                    }
+                });
+            if let Some(note) = note {
+                live.driver.session.chat_export = None;
+                self.status_note = note;
+                progressed = true;
+            }
+        }
         // M1: a `messageLink` response lands here (`getMessageLink`) —
         // copy the link to the clipboard, exactly like tdesktop's "Copy
         // Message Link".

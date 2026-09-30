@@ -687,6 +687,10 @@ pub struct Session {
     /// Slice CL: chat-list peek preview — the latest `getChatHistory`
     /// result for one unopened chat (`parity:chatlist-chat-preview`).
     pub chat_preview_fetch: Option<PreviewHistoryFetch>,
+    /// `parity:platform-chat-export` — in-progress chat history export.
+    /// The driver pages `getChatHistory` into this; the UI surfaces the
+    /// result (path or error) and clears it.
+    pub chat_export: Option<crate::chat_export::ChatExportState>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -1079,6 +1083,7 @@ impl Session {
             boost_intent: None,
             comment_thread: None,
             chat_preview_fetch: None,
+            chat_export: None,
             supergroup_usernames: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),

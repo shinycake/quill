@@ -566,7 +566,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Start minimized to tray <!-- parity:platform-start-minimized -->
 - [ ] Autostart on login (OS-level; schema `autostart` is bot-start-only, no TDLib involvement) <!-- parity:platform-autostart -->
 - [ ] Spellcheck in composer <!-- parity:platform-spellcheck -->
-- [ ] Chat history export to file (partial: getChatHistory fetching exists; no export-to-file; implementable client-side — no exportHistory constructor in schema, not schema-blocked) <!-- parity:platform-history-export -->
+- [x] Chat history export to file (JSON export of the full history to Downloads, via client-side `getChatHistory` paging — no exportHistory constructor in schema; per-message sender names absent by design, Quill plumbs no sender identity) <!-- parity:platform-history-export -->
 - [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
 - [ ] Check for updates automatically on launch against GitHub Releases (latest tag vs compiled-in `CARGO_PKG_VERSION`), with an opt-out toggle in Settings <!-- parity:platform-update-check-auto -->
 - [ ] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->

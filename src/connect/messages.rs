@@ -19,6 +19,92 @@ use crate::telegram::requests::{
 use crate::voice::VoiceDraft;
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// `parity:platform-chat-export` — start exporting a chat's history to
+    /// a JSON file. Refuses while another export is running.
+    pub fn start_chat_export(
+        &mut self,
+        chat_id: ChatId,
+        chat_title: String,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.chat_export.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.chat_export = Some(crate::chat_export::ChatExportState::new(
+            chat_id, chat_title,
+        ));
+        self.send_export_page()
+    }
+
+    /// `parity:platform-chat-export` — drive the export forward: send the
+    /// next page while history remains, write the file when paging is
+    /// done. Called from the app's live poll loop; no-op without an export.
+    pub fn pump_chat_export(&mut self) {
+        let done_paging = self
+            .session
+            .chat_export
+            .as_ref()
+            .is_some_and(|e| e.done_paging && !e.settled());
+        if done_paging {
+            let result = {
+                let export = self.session.chat_export.as_ref().expect("checked");
+                let dir = crate::chat_export::default_export_dir();
+                match crate::chat_export::write_export(export, &dir) {
+                    Ok(path) => Ok(path),
+                    Err(err) => Err(format!("could not write export file: {err}")),
+                }
+            };
+            let export = self.session.chat_export.as_mut().expect("checked");
+            match result {
+                Ok(path) => export.finished_path = Some(path),
+                Err(note) => export.failed = Some(note),
+            }
+            return;
+        }
+        let need_page = self
+            .session
+            .chat_export
+            .as_ref()
+            .is_some_and(|e| !e.in_flight && !e.done_paging && !e.settled());
+        if need_page
+            && self.send_export_page().is_err()
+            && let Some(export) = self.session.chat_export.as_mut()
+        {
+            export.failed = Some("failed to send TDLib request".into());
+        }
+    }
+
+    /// Send one export `getChatHistory` page for the active export.
+    fn send_export_page(&mut self) -> Result<(), ConnectSendError> {
+        let (chat_id, from) = {
+            let export = self
+                .session
+                .chat_export
+                .as_ref()
+                .ok_or(ConnectSendError::InvalidRequest)?;
+            (export.chat_id, export.page_from())
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::ExportChatHistory, Some(chat_id));
+        if let Err(err) = self.sender.send_json(&get_chat_history(
+            extra,
+            chat_id,
+            from,
+            0,
+            crate::chat_export::EXPORT_PAGE_LIMIT,
+            false,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        if let Some(export) = self.session.chat_export.as_mut() {
+            export.in_flight = true;
+        }
+        Ok(())
+    }
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
     pub fn fetch_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {

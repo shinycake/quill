@@ -58,6 +58,28 @@ impl Session {
             });
             return;
         }
+        // `parity:platform-chat-export` — append the page to the export
+        // buffer. A short page means the server has no more history.
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::ExportChatHistory
+            && let Some(chat_id) = pending.chat_id
+        {
+            if let Some(export) = self.chat_export.as_mut()
+                && export.chat_id == chat_id
+            {
+                let short_page = messages.len() < crate::chat_export::EXPORT_PAGE_LIMIT as usize;
+                for message in messages {
+                    export
+                        .messages
+                        .push(crate::chat_export::project_message(&message));
+                }
+                export.in_flight = false;
+                if short_page {
+                    export.done_paging = true;
+                }
+            }
+            return;
+        }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetHistoryAround
         {
