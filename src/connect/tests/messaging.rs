@@ -425,7 +425,7 @@ fn photo_history_auto_downloads_thumb_and_full_photo() {
     // A user open while the auto download is in flight dedupes instead
     // of re-requesting.
     assert_eq!(
-        driver.download_file(FileId(2), USER_DOWNLOAD_PRIORITY, true),
+        driver.download_user_file(FileId(2), None),
         Ok(None),
         "in-flight download must not duplicate"
     );

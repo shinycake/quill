@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 impl JsonSender for Arc<FailDownloadSender> {
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
-        if request.contains("downloadFile") {
+        if request.contains("downloadFile") || request.contains("addFileToDownloads") {
             return Err(ConnectSendError::Native);
         }
         self.sent
@@ -26,8 +26,8 @@ impl JsonSender for Arc<FailDownloadSender> {
 }
 
 #[test]
-fn download_file_send_failure_marks_failed_download() {
-    // A `downloadFile` transport failure (the request never reached
+fn user_download_send_failure_marks_failed_download() {
+    // An `addFileToDownloads` transport failure (the request never reached
     // TDLib) records the failure like an error response, so the row
     // offers Retry instead of silently returning to "not downloaded".
     let store = MemorySecretStore::new();
@@ -53,11 +53,104 @@ fn download_file_send_failure_marks_failed_download() {
                 .unwrap(),
             )
             .unwrap();
-    let err = driver.download_file(FileId(21), 1, true).unwrap_err();
+    let err = driver
+        .download_user_file(FileId(21), Some((ChatId(7), 99)))
+        .unwrap_err();
     assert!(matches!(err, ConnectSendError::Native));
     assert!(driver.session.failed_downloads.contains(&21));
     assert!(!driver.session.downloading.contains(&21));
     assert!(!driver.session.user_downloads.contains(&21));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn user_downloads_use_list_api_pause_and_cancel() {
+    // Slice media-downloads-pause: user-initiated downloads go through
+    // `addFileToDownloads` (not one-shot `downloadFile`); pause/resume
+    // send `toggleDownloadIsPaused`; cancel of a listed download sends
+    // `removeFileFromDownloads(delete_from_cache:false)`. Automatic
+    // downloads stay on one-shot `downloadFile` / `cancelDownloadFile`.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink.clone()),
+        recorder.clone(),
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    // The auth-ready ingest above may already have fired automatic
+    // downloads (thumbs etc.), so index relative to the count before
+    // this test's own requests.
+    let base = recorder.snapshot().len();
+    driver
+        .download_user_file(FileId(51), Some((ChatId(7), 99)))
+        .expect("user download")
+        .expect("sent");
+    let sent = recorder.snapshot();
+    assert_eq!(sent.len(), base + 1);
+    let add: Value = serde_json::from_str(&sent[base]).unwrap();
+    assert_eq!(add["@type"], "addFileToDownloads");
+    assert_eq!(add["file_id"], 51);
+    assert_eq!(add["chat_id"], 7);
+    assert_eq!(add["message_id"], 99);
+    assert_eq!(add["priority"], 32);
+    assert!(driver.session.user_downloads.contains(&51));
+    assert!(driver.session.downloading.contains(&51));
+
+    assert!(driver.pause_download(FileId(51)).expect("pause"));
+    assert!(driver.resume_download(FileId(51)).expect("resume"));
+    let sent = recorder.snapshot();
+    assert_eq!(sent.len(), base + 3);
+    let pause: Value = serde_json::from_str(&sent[base + 1]).unwrap();
+    assert_eq!(pause["@type"], "toggleDownloadIsPaused");
+    assert_eq!(pause["file_id"], 51);
+    assert_eq!(pause["is_paused"], true);
+    let resume: Value = serde_json::from_str(&sent[base + 2]).unwrap();
+    assert_eq!(resume["@type"], "toggleDownloadIsPaused");
+    assert_eq!(resume["file_id"], 51);
+    assert_eq!(resume["is_paused"], false);
+
+    // Pause of a non-user download is a no-op (never listed).
+    assert!(!driver.pause_download(FileId(52)).expect("pause noop"));
+    assert_eq!(recorder.snapshot().len(), base + 3);
+
+    // Cancel of the listed download removes it from the list.
+    assert!(driver.cancel_download(FileId(51)).expect("cancel"));
+    let sent = recorder.snapshot();
+    assert_eq!(sent.len(), base + 4);
+    let cancel: Value = serde_json::from_str(&sent[base + 3]).unwrap();
+    assert_eq!(cancel["@type"], "removeFileFromDownloads");
+    assert_eq!(cancel["file_id"], 51);
+    assert_eq!(cancel["delete_from_cache"], false);
+    assert!(!driver.session.downloading.contains(&51));
+    assert!(!driver.session.user_downloads.contains(&51));
+
+    // Automatic download: one-shot `downloadFile` + `cancelDownloadFile`.
+    driver
+        .download_file(FileId(53), 1)
+        .expect("auto download")
+        .expect("sent");
+    assert!(!driver.session.user_downloads.contains(&53));
+    assert!(driver.cancel_download(FileId(53)).expect("auto cancel"));
+    let sent = recorder.snapshot();
+    assert_eq!(sent.len(), base + 6);
+    let auto: Value = serde_json::from_str(&sent[base + 4]).unwrap();
+    assert_eq!(auto["@type"], "downloadFile");
+    let auto_cancel: Value = serde_json::from_str(&sent[base + 5]).unwrap();
+    assert_eq!(auto_cancel["@type"], "cancelDownloadFile");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

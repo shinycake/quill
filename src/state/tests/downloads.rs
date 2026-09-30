@@ -402,6 +402,57 @@ fn stalled_user_download_marks_failed_but_cancel_does_not() {
 }
 
 #[test]
+fn update_file_download_tracks_pause_and_completion() {
+    // Slice media-downloads-pause: `updateFileDownload` is the list API's
+    // pause/completion channel — it sets/clears `paused_downloads` for
+    // user-initiated downloads, and completion records the recent download
+    // and unsticks everything (mirroring the `updateFile` path).
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.begin_download(FileId(31));
+    session.user_downloads.insert(31);
+    let update = |paused: bool, complete: i32| {
+        format!(
+            r#"{{"@type":"updateFileDownload","file_id":31,"complete_date":{complete},"is_paused":{paused},"counts":{{"@type":"downloadedFileCounts","being_downloaded":1,"recently_downloaded":0}}}}"#,
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &update(true, 0));
+    assert!(session.paused_downloads.contains(&31));
+    assert!(session.user_downloads.contains(&31));
+    assert!(session.downloading.contains(&31));
+    apply_json(&mut session, &seq, &sink, &update(false, 0));
+    assert!(!session.paused_downloads.contains(&31));
+    assert!(session.user_downloads.contains(&31));
+    // Completion: recent list + full unstick (paused cleared too).
+    session.paused_downloads.insert(31);
+    apply_json(&mut session, &seq, &sink, &update(false, 1723456789));
+    assert!(session.completed_downloads.contains(&31));
+    assert!(!session.user_downloads.contains(&31));
+    assert!(!session.downloading.contains(&31));
+    assert!(!session.paused_downloads.contains(&31));
+}
+
+#[test]
+fn update_file_download_ignores_non_user_downloads() {
+    // Pause state is only tracked for user-initiated (listed) downloads —
+    // an automatic download's `updateFileDownload` must not enter
+    // `paused_downloads`, and a completion for a non-user file records
+    // nothing in the recent list.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.begin_download(FileId(32));
+    let update = |paused: bool, complete: i32| {
+        format!(
+            r#"{{"@type":"updateFileDownload","file_id":32,"complete_date":{complete},"is_paused":{paused},"counts":{{"@type":"downloadedFileCounts","being_downloaded":1,"recently_downloaded":0}}}}"#,
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &update(true, 0));
+    assert!(!session.paused_downloads.contains(&32));
+    apply_json(&mut session, &seq, &sink, &update(false, 1723456789));
+    assert!(!session.completed_downloads.contains(&32));
+}
+
+#[test]
 fn download_file_error_marks_failed_download() {
     // A `downloadFile` error response unsticks the download and records
     // the failure so the row can offer an honest retry — but only for

@@ -788,6 +788,11 @@ pub(super) fn session_history_row(
             files,
             downloading,
             failed,
+            // Slice media-downloads-pause: the pause toggle only appears
+            // for user-initiated (listed) downloads.
+            session
+                .filter(|s| s.user_downloads.contains(&doc.file_id.0))
+                .map(|s| s.paused_downloads.contains(&doc.file_id.0)),
             None,
             cx,
         )),

@@ -1431,6 +1431,26 @@ impl Session {
             EnvelopePayload::UpdateFile(file) | EnvelopePayload::File(file) => {
                 self.upsert_file(file, true);
             }
+            EnvelopePayload::UpdateFileDownload {
+                file_id,
+                is_paused,
+                complete_date,
+            } => {
+                // Slice media-downloads-pause: the list API's pause/completion
+                // channel. Pause state is tracked only for user-initiated
+                // (listed) downloads; completion mirrors the `updateFile`
+                // path (recent list + unstick).
+                if complete_date != 0 {
+                    self.record_completed_user_download(file_id);
+                    self.unstick_download(file_id);
+                } else if self.user_downloads.contains(&file_id) {
+                    if is_paused {
+                        self.paused_downloads.insert(file_id);
+                    } else {
+                        self.paused_downloads.remove(&file_id);
+                    }
+                }
+            }
             EnvelopePayload::StickerSets { sets, .. } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
                     self.accept_installed_sticker_sets(sets);

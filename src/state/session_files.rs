@@ -6,15 +6,7 @@ impl Session {
         let idle_incomplete = file.local.is_idle_incomplete();
         if file.local.is_downloading_completed {
             self.failed_downloads.remove(&file.id.0);
-            if self.user_downloads.contains(&file.id.0) {
-                // A user-initiated download that finished: remember for the
-                // downloads manager's recent list (deduped, capped).
-                self.completed_downloads.retain(|id| *id != file.id.0);
-                self.completed_downloads.push_back(file.id.0);
-                while self.completed_downloads.len() > 50 {
-                    self.completed_downloads.pop_front();
-                }
-            }
+            self.record_completed_user_download(file.id.0);
         }
         if from_file_update && idle_incomplete && self.user_downloads.contains(&file.id.0) {
             // MED3: a user-initiated download that went active → idle without
@@ -53,7 +45,21 @@ impl Session {
     pub(crate) fn unstick_download(&mut self, file_id: i32) {
         self.downloading.remove(&file_id);
         self.user_downloads.remove(&file_id);
+        self.paused_downloads.remove(&file_id);
         self.download_extras.retain(|_, id| *id != file_id);
+    }
+
+    /// Record a finished user-initiated download in the downloads manager's
+    /// recent list (deduped, capped at 50). Shared by the `updateFile`
+    /// completion path and the list-API `updateFileDownload` path.
+    pub(crate) fn record_completed_user_download(&mut self, file_id: i32) {
+        if self.user_downloads.contains(&file_id) {
+            self.completed_downloads.retain(|id| *id != file_id);
+            self.completed_downloads.push_back(file_id);
+            while self.completed_downloads.len() > 50 {
+                self.completed_downloads.pop_front();
+            }
+        }
     }
 
     pub fn file(&self, id: FileId) -> Option<&ParsedFile> {

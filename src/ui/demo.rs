@@ -201,6 +201,33 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
     session.begin_download(FileId(24));
     session.user_downloads.insert(24);
     apply(&mut session, &file_update(24, 24, 10, true, ""));
+    // Paused document 27 → "paused" state + Resume toggle on the chip and
+    // the manager row (slice media-downloads-pause).
+    apply(
+        &mut session,
+        &document(206, 27, "big-video.mp4", 100_000_000),
+    );
+    session.begin_download(FileId(27));
+    session.user_downloads.insert(27);
+    apply(
+        &mut session,
+        &file_update(27, 100_000_000, 30_000_000, true, ""),
+    );
+    apply(
+        &mut session,
+        &serde_json::json!({
+            "@type": "updateFileDownload",
+            "file_id": 27,
+            "complete_date": 0,
+            "is_paused": true,
+            "counts": {
+                "@type": "downloadedFileCounts",
+                "being_downloaded": 2,
+                "recently_downloaded": 1
+            }
+        })
+        .to_string(),
+    );
     // Failed document 26 → Retry chip on the row.
     apply(&mut session, &document(205, 26, "archive.zip", 1_048_576));
     session.failed_downloads.insert(26);

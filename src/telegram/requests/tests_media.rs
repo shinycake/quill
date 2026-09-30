@@ -303,6 +303,50 @@ fn cancel_download_file_shape_matches_1_8_67() {
 }
 
 #[test]
+fn add_file_to_downloads_shape_matches_1_8_67() {
+    // `addFileToDownloads file_id:int32 chat_id:int53 message_id:int53
+    // priority:int32 = File;` (schema 1.8.67, line 14039).
+    let json = add_file_to_downloads(RequestId(21), FileId(77), ChatId(5), MessageId(9), 32);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "addFileToDownloads");
+    assert_eq!(v["@extra"], "21");
+    assert_eq!(v["file_id"], 77);
+    assert_eq!(v["chat_id"], 5);
+    assert_eq!(v["message_id"], 9);
+    assert_eq!(v["priority"], 32);
+    assert_eq!(v.as_object().unwrap().len(), 6);
+    assert!(!json.contains("CANARY"));
+}
+
+#[test]
+fn toggle_download_is_paused_shape_matches_1_8_67() {
+    // `toggleDownloadIsPaused file_id:int32 is_paused:Bool = Ok;`
+    // (schema 1.8.67, line 14044).
+    let json = toggle_download_is_paused(RequestId(22), FileId(78), true);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "toggleDownloadIsPaused");
+    assert_eq!(v["@extra"], "22");
+    assert_eq!(v["file_id"], 78);
+    assert_eq!(v["is_paused"], true);
+    assert_eq!(v.as_object().unwrap().len(), 4);
+    assert!(!json.contains("CANARY"));
+}
+
+#[test]
+fn remove_file_from_downloads_shape_matches_1_8_67() {
+    // `removeFileFromDownloads file_id:int32 delete_from_cache:Bool = Ok;`
+    // (schema 1.8.67, line 14050).
+    let json = remove_file_from_downloads(RequestId(23), FileId(79), false);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "removeFileFromDownloads");
+    assert_eq!(v["@extra"], "23");
+    assert_eq!(v["file_id"], 79);
+    assert_eq!(v["delete_from_cache"], false);
+    assert_eq!(v.as_object().unwrap().len(), 4);
+    assert!(!json.contains("CANARY"));
+}
+
+#[test]
 fn send_voice_note_shape_matches_1_8_67() {
     let json = send_voice_note(
         RequestId(15),

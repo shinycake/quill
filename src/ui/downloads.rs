@@ -8,7 +8,6 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::connect::USER_DOWNLOAD_PRIORITY;
 use quill::ids::{ChatId, FileId};
 use std::path::PathBuf;
 impl QuillApp {
@@ -25,16 +24,14 @@ impl QuillApp {
             self.click_sponsored_message(chat_id, message_id, true, cx);
         }
         if let Some(live) = self.live.as_mut() {
-            let result = live
-                .driver
-                .download_file(file_id, USER_DOWNLOAD_PRIORITY, true);
+            let result = live.driver.download_user_file(file_id, sponsored);
             self.status_note = match result {
                 Ok(Some(_)) => "downloading…".into(),
                 Ok(None) => "already local or in progress".into(),
                 Err(_) => "could not download".into(),
             };
         } else if self.demo_session.is_some() {
-            self.status_note = "demo — downloadFile runs with live TDLib".into();
+            self.status_note = "demo — addFileToDownloads runs with live TDLib".into();
         }
         cx.notify();
     }
@@ -71,8 +68,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// MED3: cancel an in-flight download (`cancelDownloadFile`, TGX's
-    /// cancel button on downloading media).
+    /// Cancel an in-flight download: listed (user-initiated) downloads go
+    /// through `removeFileFromDownloads`; one-shot automatic downloads use
+    /// `cancelDownloadFile` (TGX's cancel button on downloading media).
     pub(super) fn cancel_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.cancel_download(file_id) {
@@ -82,6 +80,36 @@ impl QuillApp {
             };
         } else if self.demo_session.is_some() {
             self.status_note = "demo — cancelDownloadFile runs with live TDLib".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice media-downloads-pause: pause a user-initiated download
+    /// (`toggleDownloadIsPaused`; the pause state arrives on
+    /// `updateFileDownload`).
+    pub(super) fn pause_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.pause_download(file_id) {
+                Ok(true) => "download paused".into(),
+                Ok(false) => "nothing to pause".into(),
+                Err(_) => "could not pause the download".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — toggleDownloadIsPaused runs with live TDLib".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice media-downloads-pause: resume a paused user-initiated download.
+    pub(super) fn resume_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.resume_download(file_id) {
+                Ok(true) => "download resumed".into(),
+                Ok(false) => "nothing to resume".into(),
+                Err(_) => "could not resume the download".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — toggleDownloadIsPaused runs with live TDLib".into();
         }
         cx.notify();
     }
@@ -193,8 +221,8 @@ impl QuillApp {
     }
 
     /// MED3: one downloads-manager row. Active rows show the live progress
-    /// bar + percent + a cancel button; failed rows show a retry button;
-    /// recent rows show size + open / reveal actions.
+    /// bar + percent + pause/resume and cancel buttons; failed rows show a
+    /// retry button; recent rows show size + open / reveal actions.
     pub(super) fn download_row(
         &self,
         file_id: i32,
@@ -213,7 +241,15 @@ impl QuillApp {
             .map(format_bytes)
             .unwrap_or_default();
         let progress = file.and_then(|f| f.download_progress());
-        let status = if active {
+        // Slice media-downloads-pause: paused is a subset of the active
+        // user downloads (`Session::paused_downloads`).
+        let paused = active
+            && session
+                .as_ref()
+                .is_some_and(|s| s.paused_downloads.contains(&file_id));
+        let status = if paused {
+            "paused".to_string()
+        } else if active {
             match progress {
                 Some(p) => format!("{}%", (p * 100.0).round() as i32),
                 None => "downloading…".to_string(),
@@ -249,18 +285,37 @@ impl QuillApp {
             );
         }
         let actions = if active {
-            div().flex().gap_2().child(
-                div()
-                    .id(("download-cancel", file_id as u64))
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .text_xs()
-                    .text_color(accent())
-                    .child("Cancel")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.cancel_media_download(FileId(file_id), cx);
-                    })),
-            )
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    div()
+                        .id(("download-pause", file_id as u64))
+                        .cursor_pointer()
+                        .pressable(cx.theme())
+                        .text_xs()
+                        .text_color(accent())
+                        .child(if paused { "Resume" } else { "Pause" })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if paused {
+                                this.resume_media_download(FileId(file_id), cx);
+                            } else {
+                                this.pause_media_download(FileId(file_id), cx);
+                            }
+                        })),
+                )
+                .child(
+                    div()
+                        .id(("download-cancel", file_id as u64))
+                        .cursor_pointer()
+                        .pressable(cx.theme())
+                        .text_xs()
+                        .text_color(accent())
+                        .child("Cancel")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.cancel_media_download(FileId(file_id), cx);
+                        })),
+                )
         } else if failed {
             div().flex().gap_2().child(
                 div()

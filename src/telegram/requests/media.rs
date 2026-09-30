@@ -2,7 +2,7 @@ use super::{
     SelfDestructSend, SendReply, formatted_caption, message_topic_value, self_destruct_type_value,
     send_reply_value,
 };
-use crate::ids::{ChatId, FileId, RequestId};
+use crate::ids::{ChatId, FileId, MessageId, RequestId};
 use serde_json::{Value, json};
 
 /// `downloadFile` (TDLib 1.8.67). `synchronous: false` returns the current
@@ -30,6 +30,56 @@ pub fn cancel_download_file(extra: RequestId, file_id: FileId, only_if_pending: 
         "@extra": extra.as_extra(),
         "file_id": file_id.0,
         "only_if_pending": only_if_pending,
+    })
+    .to_string()
+}
+
+/// `addFileToDownloads` (TDLib 1.8.67, schema :14036-14040). Adds the file
+/// to the persistent download list (answer: `file`); pause/resume only
+/// exists for listed files (`toggleDownloadIsPaused`) — one-shot
+/// `downloadFile` has no pause parameter (MED3 evidence, DECISIONS.md).
+pub fn add_file_to_downloads(
+    extra: RequestId,
+    file_id: FileId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    priority: i32,
+) -> String {
+    json!({
+        "@type": "addFileToDownloads",
+        "@extra": extra.as_extra(),
+        "file_id": file_id.0,
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "priority": priority,
+    })
+    .to_string()
+}
+
+/// `toggleDownloadIsPaused` (TDLib 1.8.67, schema :14041-14044): pause or
+/// resume a file in the persistent download list.
+pub fn toggle_download_is_paused(extra: RequestId, file_id: FileId, is_paused: bool) -> String {
+    json!({
+        "@type": "toggleDownloadIsPaused",
+        "@extra": extra.as_extra(),
+        "file_id": file_id.0,
+        "is_paused": is_paused,
+    })
+    .to_string()
+}
+
+/// `removeFileFromDownloads` (TDLib 1.8.67, schema :14049-14050): removes a
+/// file from the persistent download list, stopping its download.
+pub fn remove_file_from_downloads(
+    extra: RequestId,
+    file_id: FileId,
+    delete_from_cache: bool,
+) -> String {
+    json!({
+        "@type": "removeFileFromDownloads",
+        "@extra": extra.as_extra(),
+        "file_id": file_id.0,
+        "delete_from_cache": delete_from_cache,
     })
     .to_string()
 }

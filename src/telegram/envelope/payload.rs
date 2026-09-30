@@ -1100,6 +1100,16 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             chat_id: value.get("chat_id").and_then(Value::as_i64).unwrap_or(0),
         }),
         "updateFile" => Ok(EnvelopePayload::UpdateFile(parse_file(value.get("file"))?)),
+        // Slice media-downloads-pause: `updateFileDownload` (schema 1.8.67,
+        // line 10795) — pause state / completion for a listed download.
+        "updateFileDownload" => Ok(EnvelopePayload::UpdateFileDownload {
+            file_id: int53_or_zero(value.get("file_id")) as i32,
+            is_paused: value
+                .get("is_paused")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            complete_date: int53_or_zero(value.get("complete_date")) as i32,
+        }),
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
         "stickerSets" => Ok(parse_sticker_sets(&value)),
         "stickerSet" => Ok(parse_sticker_set(&value)),

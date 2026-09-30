@@ -4854,6 +4854,26 @@ Completes README `parity:media-link-preview-send-options` (MED4 left it partial:
   - Prefetch fires only in live sessions; the screenshot demo injects a fake preview into `demo_session`.
 - **Not verifiable without live Telegram:** the `getLinkPreview` round-trip against a real server (success payload shape, 404 behavior); the exact server treatment of `force_small_media`/`force_large_media` on exotic preview types.
 - **Out of this slice:** per-URL preview selection when several URLs are typed; preview thumbnails in the chip; `show_above_text` for secret chats (schema-ignored); embedded-player inline playback (still MED4-out).
+## Slice MED-pause — DOWNLOAD PAUSE/RESUME (2026-09-30)
+
+Completes README `parity:media-downloads-pause` (MED3 left it out honestly: pause exists only in the list API).
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `addFileToDownloads file_id:int32 chat_id:int53 message_id:int53 priority:int32 = File` (:14039); `toggleDownloadIsPaused file_id:int32 is_paused:Bool = Ok` (:14044); `removeFileFromDownloads file_id:int32 delete_from_cache:Bool = Ok` (:14050).
+  - `updateFileDownload file_id:int32 complete_date:int32 is_paused:Bool counts:downloadedFileCounts = Update` (:10795); `fileDownload.is_paused` (:3319).
+- **Built:**
+  - Request builders (`requests/media.rs`): `add_file_to_downloads`, `toggle_download_is_paused`, `remove_file_from_downloads` — shapes pinned by JSON tests.
+  - Drivers (`connect/media.rs`): new `download_user_file(file_id, origin)` routes user-initiated downloads (history rows, viewer, manager retry — the `Session::user_downloads` set) through `addFileToDownloads` at `USER_DOWNLOAD_PRIORITY`; `download_file` is now the automatic one-shot path only (thumbs, auto media, avatars, sounds). `pause_download` / `resume_download` send `toggleDownloadIsPaused` (no-op for non-listed files). `cancel_download` sends `removeFileFromDownloads(delete_from_cache:false)` for listed downloads, `cancelDownloadFile` for one-shot ones.
+  - State: `Session::paused_downloads` (subset of `user_downloads`, cleared by `unstick_download`); `updateFileDownload` reducer sets/clears pause and mirrors the `updateFile` completion path (recent list + unstick) via the shared `record_completed_user_download` helper. Pause state is never optimistic — `updateFileDownload` is the single source of truth, so a failed toggle can't desync the UI.
+  - UI: downloads-manager active rows get Pause/Resume beside Cancel (paused rows show "paused"); the history document chip gets a Pause/Resume toggle (shown only for user-initiated listed downloads; sponsored chips keep Cancel only).
+  - Tests: builder JSON shapes; reducer pause/completion/non-user cases; driver routing (list API vs one-shot, toggle payloads, listed vs automatic cancel).
+  - Screenshot fixture `quill --screenshot-demo ready-downloads` gains a paused `big-video.mp4` (30%) via a real injected `updateFileDownload`.
+- **Key decisions (ponytail):**
+  - No optimistic pause: the toggle sends the request and the update flips the state — one code path for truth, no revert logic.
+  - `(0, 0)` chat/message context for `addFileToDownloads` when the origin is unknown (manager retry); TDLib accepts it, the file still lists and pauses.
+  - `counts` from `updateFileDownload` is parsed and ignored — no list-wide counts UI in this slice.
+- **Not verifiable without live Telegram:** the real `toggleDownloadIsPaused` round-trip (does TDLib echo `updateFileDownload` promptly on toggle); `addFileToDownloads` answer `file` shape vs `downloadFile`'s; pause racing an in-flight part fetch.
+- **Out of this slice:** `toggleAllDownloadsArePaused` / pause-all; migrating the manager panel to `searchFileDownloads` (keeps local tracking); per-type size caps; offset/limit partial streaming.
 ## Slice CL1 — CHAT LIST: ROW MENU, PIN, READ/UNREAD, MUTE, CLEAR/DELETE (2026-09-27)
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
