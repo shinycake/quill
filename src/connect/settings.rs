@@ -14,6 +14,7 @@ use crate::telegram::requests::{
     delete_account, disconnect_all_websites, disconnect_website, get_account_ttl,
     get_active_sessions, get_chat_notification_settings_exceptions, get_connected_websites,
     get_saved_notification_sounds, get_scope_notification_settings, get_storage_statistics,
+    reset_all_notification_settings,
     set_account_ttl, set_chat_notification_settings, set_message_sender_block_list,
     set_reaction_notification_settings, set_scope_notification_settings,
     terminate_all_other_sessions, terminate_session, toggle_session_can_accept_calls,
@@ -1000,6 +1001,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self
             .sender
             .send_json(&set_reaction_notification_settings(extra, settings))
+        {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Parity slice: `resetAllNotificationSettings` — resets all chat and
+    /// scope notification settings to their default values. The new values
+    /// arrive as `updateScopeNotificationSettings` /
+    /// `updateChatNotificationSettings`; the ok arm drops the cached scope
+    /// settings so the next fetch shows server-confirmed defaults.
+    pub fn reset_all_notification_settings(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ResetAllNotificationSettings, None);
+        match self
+            .sender
+            .send_json(&reset_all_notification_settings(extra))
         {
             Ok(()) => Ok(extra),
             Err(err) => {

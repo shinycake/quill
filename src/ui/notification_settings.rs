@@ -233,7 +233,14 @@ impl QuillApp {
             // sounds") — the client-side toggle gating
             // `Session::notification_sound_for`.
             body = body.child(this.inapp_sounds_section(cx));
-            let footer = div().flex().justify_end().child(
+            let footer = div().flex().justify_end().gap_2().children([
+                Button::new("reset-all-notif-settings")
+                    .label("Reset all")
+                    .danger()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.reset_all_notification_settings(cx);
+                    }))
+                    .into_any_element(),
                 Button::new("close-notif-defaults")
                     .label("Close")
                     .ghost()
@@ -243,8 +250,9 @@ impl QuillApp {
                         this.defaults_exceptions_scope = None;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::NotificationDefaults, window, cx);
-                    })),
-            );
+                    }))
+                    .into_any_element(),
+            ]);
             dialog
                 .overlay(true)
                 .title("Notification defaults")
@@ -1429,6 +1437,28 @@ impl QuillApp {
             settings.show_preview = show_preview;
             session.reaction_notification_settings = Some(settings);
             self.status_note = "reaction preview updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: `resetAllNotificationSettings` from the defaults
+    /// dialog's "Reset all" button — resets all chat and scope notification
+    /// settings to the server defaults. Live: the driver sends it; the ok
+    /// arm clears the cached scope defaults and the authoritative updates
+    /// refill them. Demo: seed the schema defaults directly.
+    pub(super) fn reset_all_notification_settings(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.reset_all_notification_settings() {
+                Ok(_) => "resetting all notification settings…".into(),
+                Err(_) => "could not reset notification settings".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            for scope in NotificationSettingsScope::ALL {
+                session
+                    .scope_notification_settings
+                    .insert(scope, ScopeNotificationSettings::default());
+            }
+            self.status_note = "notification settings reset".into();
         }
         cx.notify();
     }

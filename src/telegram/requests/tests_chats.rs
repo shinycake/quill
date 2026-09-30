@@ -648,3 +648,14 @@ fn cl3_set_message_sender_block_list_shapes_match_1_8_67() {
     assert_eq!(v["@type"], "setMessageSenderBlockList");
     assert!(v["block_list"].is_null());
 }
+
+#[test]
+fn reset_all_notification_settings_shape_matches_1_8_67() {
+    // Parity slice: `resetAllNotificationSettings = Ok;` (schema 1.8.67,
+    // line 13670) — parameterless; resets all chat and scope notification
+    // settings to their default values.
+    let json = reset_all_notification_settings(RequestId(64));
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "resetAllNotificationSettings");
+    assert_eq!(v["@extra"], "64");
+}

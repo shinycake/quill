@@ -318,6 +318,18 @@ impl Session {
             self.read_date_loading = false;
             self.read_date_error = false;
         }
+        // Parity slice: `resetAllNotificationSettings` confirmed — drop the
+        // cached scope defaults so the next fetch (or the authoritative
+        // `updateScopeNotificationSettings` answers) shows the
+        // server-confirmed defaults instead of the stale pre-reset ones.
+        // (`notification_exceptions` lives on the sibling
+        // settings-notif-exceptions branch; its per-chat updates prune it.)
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::ResetAllNotificationSettings)
+        ) {
+            self.scope_notification_settings.clear();
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
             // A short OK is not exhaustion; 404 is.
         }

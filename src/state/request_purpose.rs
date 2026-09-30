@@ -166,6 +166,12 @@ pub enum RequestPurpose {
     /// `chats` (the exception chat ids); the scope is correlated via
     /// `PendingRequest::scope`.
     GetChatNotificationSettingsExceptions,
+    /// Parity slice: `resetAllNotificationSettings`. Response is `ok`;
+    /// the new values arrive as `updateScopeNotificationSettings` /
+    /// `updateChatNotificationSettings` (the ok arm drops the cached
+    /// scope settings so they refetch fresh).
+    ResetAllNotificationSettings,
+
     /// Slice A3: `getActiveSessions`. Response is `sessions`; the list is
     /// replaced from the authoritative answer (never optimistic).
     GetActiveSessions,
