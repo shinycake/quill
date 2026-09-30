@@ -15,6 +15,10 @@ pub enum ScreenshotDemo {
     /// with `connection` forced to `WaitingForNetwork`, so the offline
     /// banner renders below the title bar (injected, no live Telegram).
     ReadyOffline,
+    /// Slice parity:platform-reconnect-states — the ReadyChats fixture
+    /// with `connection` forced to `Updating`, so the transitional strip
+    /// renders with its per-state label ("Updating…").
+    ReadyReconnecting,
     ReadyChatsComposer,
     ReadyUnread,
     ReadyUnreadRead,

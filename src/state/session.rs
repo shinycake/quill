@@ -1127,16 +1127,26 @@ impl Session {
 /// Slice parity:platform-offline-indicator — what the UI renders for a
 /// TDLib connection state. Only `Ready` is "connected" (no indicator);
 /// every other state renders the offline/connection indicator.
-/// `Unknown` is treated as transitional (presence only), never as
-/// connected.
+/// `Unknown` is treated as transitional (falls back to "Connecting…"),
+/// never as connected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionIndicator {
     /// Fully offline — banner with the "Waiting for network…" label.
     Offline,
-    /// Connecting / updating / proxy — presence dot only. Per-state
-    /// labels ("Connecting…", "Updating…", "Connecting to proxy…") are
-    /// the `platform-reconnect-states` slice.
-    Transitioning,
+    /// Connecting / updating / proxy — presence dot plus the per-state
+    /// label ("Connecting…", "Updating…", "Connecting to proxy…").
+    /// (Slice parity:platform-reconnect-states.)
+    Transitioning(&'static str),
+}
+
+impl ConnectionIndicator {
+    /// The label the connection strip renders for this indicator.
+    pub fn label(&self) -> &'static str {
+        match self {
+            ConnectionIndicator::Offline => "Waiting for network…",
+            ConnectionIndicator::Transitioning(label) => label,
+        }
+    }
 }
 
 /// Slice parity:platform-offline-indicator — `Session::connection` →
@@ -1145,9 +1155,11 @@ pub fn connection_indicator(state: ConnectionState) -> Option<ConnectionIndicato
     match state {
         ConnectionState::Ready => None,
         ConnectionState::WaitingForNetwork => Some(ConnectionIndicator::Offline),
-        ConnectionState::ConnectingToProxy
-        | ConnectionState::Connecting
-        | ConnectionState::Updating
-        | ConnectionState::Unknown => Some(ConnectionIndicator::Transitioning),
+        ConnectionState::ConnectingToProxy => {
+            Some(ConnectionIndicator::Transitioning("Connecting to proxy…"))
+        }
+        ConnectionState::Connecting => Some(ConnectionIndicator::Transitioning("Connecting…")),
+        ConnectionState::Updating => Some(ConnectionIndicator::Transitioning("Updating…")),
+        ConnectionState::Unknown => Some(ConnectionIndicator::Transitioning("Connecting…")),
     }
 }

@@ -1,11 +1,12 @@
-//! Slice parity:platform-offline-indicator — state → indicator mapping.
+//! Slice parity:platform-reconnect-states — state → indicator mapping
+//! (extends the parity:platform-offline-indicator visibility mapping
+//! with per-state reconnect labels).
 use super::common::*;
 use super::*;
 
 /// Every non-Ready connection state renders the indicator; Ready renders
 /// nothing. WaitingForNetwork is the offline case (labelled banner);
-/// the transitional states render presence only (per-state labels are
-/// the `platform-reconnect-states` slice).
+/// the transitional states carry their per-state reconnect label.
 #[test]
 fn connection_state_maps_to_indicator_visibility() {
     assert_eq!(connection_indicator(ConnectionState::Ready), None);
@@ -13,18 +14,30 @@ fn connection_state_maps_to_indicator_visibility() {
         connection_indicator(ConnectionState::WaitingForNetwork),
         Some(ConnectionIndicator::Offline)
     );
-    for state in [
-        ConnectionState::ConnectingToProxy,
-        ConnectionState::Connecting,
-        ConnectionState::Updating,
-        ConnectionState::Unknown,
+    for (state, label) in [
+        (ConnectionState::ConnectingToProxy, "Connecting to proxy…"),
+        (ConnectionState::Connecting, "Connecting…"),
+        (ConnectionState::Updating, "Updating…"),
+        // Unknown is not a TDLib state with its own label; it falls back
+        // to the generic transitional label.
+        (ConnectionState::Unknown, "Connecting…"),
     ] {
         assert_eq!(
             connection_indicator(state),
-            Some(ConnectionIndicator::Transitioning),
-            "{state:?} must render the indicator"
+            Some(ConnectionIndicator::Transitioning(label)),
+            "{state:?} must render the indicator with its label"
         );
     }
+}
+
+/// The indicator's label is what the connection strip renders.
+#[test]
+fn indicator_label_matches_state() {
+    assert_eq!(ConnectionIndicator::Offline.label(), "Waiting for network…");
+    assert_eq!(
+        ConnectionIndicator::Transitioning("Updating…").label(),
+        "Updating…"
+    );
 }
 
 /// `updateConnectionState` flows from TDLib through the reducer into the
@@ -59,6 +72,6 @@ fn update_connection_state_drives_indicator() {
     );
     assert_eq!(
         connection_indicator(session.connection),
-        Some(ConnectionIndicator::Transitioning)
+        Some(ConnectionIndicator::Transitioning("Updating…"))
     );
 }

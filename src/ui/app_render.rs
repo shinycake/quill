@@ -324,22 +324,33 @@ impl Render for QuillApp {
             // Slice parity:platform-offline-indicator — slim connection
             // strip below the title bar. Offline gets the kit warning
             // banner with the "Waiting for network…" label; transitional
-            // states get a presence dot only (per-state labels are the
-            // `platform-reconnect-states` slice).
+            // states get a presence dot plus their per-state label
+            // (slice parity:platform-reconnect-states).
             .when(connection == Some(ConnectionIndicator::Offline), |this| {
                 this.child(Alert::warning("connection-indicator", "Waiting for network…").banner())
             })
-            .when(
-                connection == Some(ConnectionIndicator::Transitioning),
-                |this| {
+            .when_some(
+                connection.and_then(|c| match c {
+                    ConnectionIndicator::Transitioning(label) => Some(label),
+                    ConnectionIndicator::Offline => None,
+                }),
+                |this, label| {
                     this.child(
                         div()
                             .w_full()
                             .flex_none()
                             .flex()
+                            .items_center()
                             .justify_center()
+                            .gap(px(6.))
                             .py(px(4.))
-                            .child(div().size(px(8.)).rounded_full().bg(cx.theme().warning)),
+                            .child(div().size(px(8.)).rounded_full().bg(cx.theme().warning))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(label),
+                            ),
                     )
                 },
             )
