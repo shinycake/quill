@@ -1,0 +1,2 @@
+# platform paste image — clipboard images attach as photo via bubbled Paste handler
+parity:platform-paste-image

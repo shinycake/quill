@@ -138,6 +138,13 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyPasteImage => (
+            Some(seed_ready_send_media_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — paste clipboard image as photo attachment (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadySearch => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -779,6 +786,14 @@ pub(super) fn demo_pending_attachments(demo: Option<ScreenshotDemo>) -> Vec<Comp
         && let Some(att) = ComposerAttachment::pick(
             &demo_media_allowlist().join("demo-notes.txt"),
             AttachmentKind::Document,
+        )
+    {
+        ComposerAttachment::push_attachment(&mut pending_attachments, att);
+    }
+    if matches!(demo, Some(ScreenshotDemo::ReadyPasteImage))
+        && let Some(att) = ComposerAttachment::pick(
+            &demo_media_allowlist().join("demo-thumb.png"),
+            AttachmentKind::Photo,
         )
     {
         ComposerAttachment::push_attachment(&mut pending_attachments, att);
