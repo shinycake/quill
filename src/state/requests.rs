@@ -159,12 +159,12 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
         ErrorClass::StoryUserRestricted => {
             return format!("Could not {action} (error {})", err.code);
         }
-        // Slice msg-richtext-ai-tools: AI errors never reach the
-        // sessions screen — keep the generic code-based line.
-        ErrorClass::AiComposeFloodPremium => {
+        // Slice msg-richtext-ai-tools: AI errors never reach the sessions
+        // screen, so AiComposeFloodPremium shares the generic code-based
+        // line (kept as an explicit arm: the match must stay exhaustive).
+        ErrorClass::AiComposeFloodPremium | ErrorClass::Other => {
             return format!("Could not {action} (error {})", err.code);
         }
-        ErrorClass::Other => return format!("Could not {action} (error {})", err.code),
     };
     format!("Could not {action}: {detail}")
 }

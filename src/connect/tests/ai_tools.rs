@@ -68,7 +68,7 @@ fn create_rich_message_with_ai_round_trips_blocks() {
     let v = sent_request(&recorder, "createRichMessageWithAi");
     assert_eq!(v["@extra"], extra.0.to_string());
     assert_eq!(v["prompt"], "haiku about rain");
-    assert_eq!(v["language_code"], "");
+    assert_eq!(v["language_code"], "en");
     assert_eq!(v["add_emojis"], false);
 
     let json = format!(
@@ -84,6 +84,18 @@ fn create_rich_message_with_ai_round_trips_blocks() {
         rich.blocks.as_slice(),
         [RichBlock::Paragraph { text, .. }, RichBlock::Divider] if text == "rain falls"
     ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn create_rich_message_with_ai_sends_user_language_code() {
+    let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = ai_harness();
+    driver.session.language_prefs.system_language_code = "es".to_string();
+    driver
+        .create_rich_message_with_ai(ChatId(7), "haiku about rain")
+        .expect("create request");
+    let v = sent_request(&recorder, "createRichMessageWithAi");
+    assert_eq!(v["language_code"], "es");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
