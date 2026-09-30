@@ -8,9 +8,14 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch or commit SHA to UI-build'
+        description: 'Full commit SHA to UI-build'
         required: true
         type: string
+      run_name:
+        description: 'Unique run name for exact run tracking (SHA + nonce)'
+        required: true
+        type: string
+run-name: ${{ inputs.run_name }}
 permissions:
   contents: read
 jobs:
@@ -21,5 +26,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
         with:
           ref: ${{ inputs.ref }}
+      - name: assert checked-out SHA matches requested ref
+        run: |
+          BUILT="$(git rev-parse HEAD)"
+          if [ "$BUILT" != "${{ inputs.ref }}" ]; then
+            echo "ref mismatch: checked out $BUILT, requested ${{ inputs.ref }}" >&2
+            exit 1
+          fi
       - name: UI build (compile gate)
         run: cargo build --features ui --locked
