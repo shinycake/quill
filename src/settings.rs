@@ -428,6 +428,42 @@ pub fn save_contact_prefs(paths: &AccountPaths, prefs: &ContactPrefs) -> std::io
     std::fs::write(path, bytes)
 }
 
+/// Chat-composer behavior prefs, persisted as JSON next to the account
+/// root (`chat_prefs.json`). Client-side only (no TDLib setting):
+/// - `send_key_mode`: which keystroke sends a message
+///   (`composer::SendKeyMode`; parity:settings-enter-send,
+///   parity:settings-ctrlenter-send).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatPrefs {
+    #[serde(default)]
+    pub send_key_mode: crate::composer::SendKeyMode,
+}
+
+fn chat_prefs_path(paths: &AccountPaths) -> PathBuf {
+    paths.root.join("chat_prefs.json")
+}
+
+/// Load chat prefs; missing or corrupt files fall back to defaults
+/// (never a hard error — prefs must not block startup).
+pub fn load_chat_prefs(paths: &AccountPaths) -> ChatPrefs {
+    std::fs::read(chat_prefs_path(paths))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Persist chat prefs; failures are returned to the caller to surface
+/// in the status note.
+pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) -> std::io::Result<()> {
+    let path = chat_prefs_path(paths);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = serde_json::to_vec_pretty(prefs)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, bytes)
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountPaths {
     pub root: PathBuf,

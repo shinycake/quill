@@ -4,6 +4,7 @@ use crate::ids::{ChatId, MessageId, ViewGeneration};
 use crate::local_path::{is_explicit_send_path, pick_send_path};
 use crate::telegram::envelope::{BotCommand, MessageContent};
 use crate::telegram::requests::SelfDestructSend;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,13 +13,32 @@ pub struct EnterEvent {
     pub composing: bool,
     /// Shift+Enter inserts a newline in chat-style inputs.
     pub shift: bool,
-    /// Platform secondary modifier (Ctrl/Cmd) — treated as "do not send".
+    /// Platform secondary modifier (Ctrl/Cmd).
     pub secondary: bool,
 }
 
-/// Enter sends only when the composition is finished and no modifiers apply.
-pub fn should_send_on_enter(event: EnterEvent) -> bool {
-    !event.composing && !event.shift && !event.secondary
+/// Which keystroke sends a chat message (parity:settings-enter-send,
+/// parity:settings-ctrlenter-send). Telegram Desktop calls this
+/// "Send with Enter".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SendKeyMode {
+    /// Plain Enter sends; Shift+Enter inserts a newline.
+    #[default]
+    Enter,
+    /// Plain Enter inserts a newline; Ctrl/Cmd+Enter sends.
+    CtrlEnter,
+}
+
+/// Whether the keystroke described by `event` sends the message under
+/// `mode`. IME composition never sends, in either mode.
+pub fn should_send_on_enter(event: EnterEvent, mode: SendKeyMode) -> bool {
+    if event.composing {
+        return false;
+    }
+    match mode {
+        SendKeyMode::Enter => !event.shift && !event.secondary,
+        SendKeyMode::CtrlEnter => event.secondary && !event.shift,
+    }
 }
 
 /// Map Kit `InputEvent::PressEnter` plus the IME mark from
@@ -1326,38 +1346,50 @@ mod tests {
 
     #[test]
     fn ime_enter_does_not_send() {
-        assert!(!should_send_on_enter(EnterEvent {
-            composing: true,
-            shift: false,
-            secondary: false,
-        }));
+        assert!(!should_send_on_enter(
+            EnterEvent {
+                composing: true,
+                shift: false,
+                secondary: false,
+            },
+            SendKeyMode::Enter,
+        ));
     }
 
     #[test]
     fn plain_enter_sends() {
-        assert!(should_send_on_enter(EnterEvent {
-            composing: false,
-            shift: false,
-            secondary: false,
-        }));
+        assert!(should_send_on_enter(
+            EnterEvent {
+                composing: false,
+                shift: false,
+                secondary: false,
+            },
+            SendKeyMode::Enter,
+        ));
     }
 
     #[test]
     fn shift_enter_is_newline() {
-        assert!(!should_send_on_enter(EnterEvent {
-            composing: false,
-            shift: true,
-            secondary: false,
-        }));
+        assert!(!should_send_on_enter(
+            EnterEvent {
+                composing: false,
+                shift: true,
+                secondary: false,
+            },
+            SendKeyMode::Enter,
+        ));
     }
 
     #[test]
     fn secondary_enter_does_not_send() {
-        assert!(!should_send_on_enter(EnterEvent {
-            composing: false,
-            shift: false,
-            secondary: true,
-        }));
+        assert!(!should_send_on_enter(
+            EnterEvent {
+                composing: false,
+                shift: false,
+                secondary: true,
+            },
+            SendKeyMode::Enter,
+        ));
     }
 
     #[test]
@@ -1365,11 +1397,11 @@ mod tests {
         // Kit PressEnter has no composing field; a live IME mark must suppress send.
         let composing = enter_event_from_kit(false, false, Some(0..2));
         assert!(composing.composing);
-        assert!(!should_send_on_enter(composing));
+        assert!(!should_send_on_enter(composing, SendKeyMode::Enter));
 
         let idle = enter_event_from_kit(false, false, None);
         assert!(!idle.composing);
-        assert!(should_send_on_enter(idle));
+        assert!(should_send_on_enter(idle, SendKeyMode::Enter));
     }
 
     #[test]
