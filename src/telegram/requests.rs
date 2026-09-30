@@ -464,6 +464,21 @@ pub fn search_public_chats(extra: RequestId, query: &str) -> String {
     .to_string()
 }
 
+/// `searchPublicChat` (TDLib 1.8.67, schema line 11603):
+/// `searchPublicChat username:string = Chat;`
+/// Singular public-username lookup — returns the chat itself (unlike the
+/// plural `searchPublicChats`, which returns ids). The inline-mode slice
+/// uses it for `@botname` → bot user id resolution: a bot username
+/// resolves to its private chat (`chatTypePrivate.user_id`).
+pub fn search_public_chat(extra: RequestId, username: &str) -> String {
+    json!({
+        "@type": "searchPublicChat",
+        "@extra": extra.as_extra(),
+        "username": username,
+    })
+    .to_string()
+}
+
 /// `searchMessages` (TDLib 1.8.67). `chat_list` null = all lists (official
 /// clients / Unigram); schema: only Main and Archive are searchable.
 /// `filter` null = all message types; `community_filter` selects the
@@ -7842,6 +7857,23 @@ mod tests {
             line,
             "searchPublicChats query:string type_filter:SearchChatTypeFilter = Chats;"
         );
+    }
+
+    #[test]
+    fn search_public_chat_shape_matches_1_8_67() {
+        // `searchPublicChat username:string = Chat` (schema 1.8.67, line
+        // 11603); singular lookup returning the chat itself.
+        let json = search_public_chat(RequestId(25), "gif");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "searchPublicChat");
+        assert_eq!(v["@extra"], "25");
+        assert_eq!(v["username"], "gif");
+        let schema = include_str!("../../schema/td_api.tl");
+        let line = schema
+            .lines()
+            .find(|l| l.starts_with("searchPublicChat "))
+            .expect("searchPublicChat in schema");
+        assert_eq!(line, "searchPublicChat username:string = Chat;");
     }
 
     #[test]

@@ -2682,6 +2682,10 @@ pub struct ParsedUser {
     pub phone_number: String,
     pub is_contact: bool,
     pub is_bot: bool,
+    /// Bots slice: `userTypeBot.is_inline` (schema 1.8.67, line 2424) —
+    /// whether the bot supports inline mode (`getInlineQueryResults`).
+    /// False for non-bots and for bots without inline mode enabled.
+    pub is_inline: bool,
     pub status: UserStatusKind,
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
@@ -9505,6 +9509,13 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(|t| t.get("@type"))
         .and_then(Value::as_str)
         == Some("userTypeBot");
+    // Bots slice: `userTypeBot.is_inline` — only present on the bot
+    // type object; defaults false for everyone else.
+    let is_inline = value
+        .get("type")
+        .and_then(|t| t.get("is_inline"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let status = parse_user_status(value.get("status"));
     let photo_small_file_id = i32::try_from(int53_or_zero(
         value
@@ -9534,6 +9545,7 @@ fn parse_user(value: &Value) -> Option<ParsedUser> {
         phone_number,
         is_contact,
         is_bot,
+        is_inline,
         status,
         photo_small_file_id,
         profile_accent_color_id,

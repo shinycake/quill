@@ -6541,6 +6541,7 @@ is applied to the stored message in place.
 - **Out of this slice:** the ephemeral countdown UI itself (separate box).
 
 
+
 ## Slice A12 — AUTH: PROFILE ACCENT COLOR (setProfileAccentColor) (2026-09-29)
 
 - **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
@@ -6695,3 +6696,34 @@ setting (official clients: Settings → Data & Storage → Proxy).
   proxy — separate future slice), feeding the enabled proxy from
   TDLib `getProxies` into `proxy_for_calls` at connect time, any
   ntgcalls upgrade that exposes proxy configuration.
+## Slice bots-inline-mode — INLINE MODE: TYPE @BOT, RESULTS LIST, SEND (2026-09-29)
+
+**Scope:** `parity:bots-inline-mode` — the full typed-inline-mode vertical:
+type `@botname query` at the composer start → bot resolution → debounced
+`getInlineQueryResults` → selectable results dropdown → send via
+`sendInlineQueryResultMessage`.
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `getInlineQueryResults bot_user_id:int53 chat_id:int53 user_location:location query:string offset:string = InlineQueryResults;` (:13019)
+  - `sendInlineQueryResultMessage chat_id:int53 topic_id:MessageTopic reply_to:InputMessageReplyTo options:messageSendOptions query_id:int64 result_id:string hide_via_bot:Bool = Message;` (:12226) — always clears the chat draft.
+  - `searchPublicChat username:string = Chat;` (:11603) — singular lookup returning the chat itself.
+  - `userTypeBot … is_inline:Bool …` (:2424) — inline-mode capability flag.
+- **Telegram X evidence (`~/workspace/telegram-x`, `InlineSearchContext.java`):**
+  - Inline lookup only from the message-composer start (`startIndex == 0`); resolution = local cache → `SearchPublicChat(username)` → require bot + `is_inline`; 100ms debounce; new queries cancel prior pending work; `hideViaBot = false`; paging via `next_offset`; secret chats show the one-time privacy alert before the first inline query.
+- **Built:**
+  - `quill::composer::inline_query_trigger` (pure, unit-tested): `@bot` → `("bot","")`, `@bot cats` → `("bot","cats")`; `None` for non-leading `@`, bare `@`, bad username chars.
+  - `search_public_chat` request builder + verbatim schema shape test (`requests.rs`).
+  - `ParsedUser.is_inline` parsed from `userTypeBot.is_inline` (envelope.rs; type-coherent extension).
+  - State (`state.rs`): `RequestPurpose::ResolveInlineBot { generation: u64 }` + `SendInlineQueryResult`; `InlineBotResolve` slot (`Resolving`/`Resolved`/`Failed`) + generation counter; `searchPublicChat` answer dispatch in the `UpdateNewChat` arm (private chat → bot user id, non-bot username → honest failure, `is_inline` re-scanned from the user cache); error dispatch; stale generations ignored. Four reducer tests (resolve, non-bot failure, stale-answer ignore, error failure).
+  - Driver (`connect.rs`): `resolve_inline_bot` (generation bump + `searchPublicChat`) and `send_inline_query_result` (`hide_via_bot=false`); driver test asserts slot, generation bump, and both request shapes.
+  - UI (new named module `src/ui/inline_mode.rs`): `sync_inline_mode` on every composer change; local user-cache short-circuit (non-bot → immediate "not a bot" hint); 100ms token-debounce (link-preview pattern) with trigger-survival re-check; results dropdown above the composer mirroring the `/` command menu (title/description rows, "More results…" paging row, Loading/Failed/hint states); Esc/Up/Down/Enter + click pick; Enter picks the inline result before the `/` menu; the `/` menu is suppressed while the inline trigger is active; secret-chat typed path reuses the TGX alert banner (empty-stash marker — confirming no longer re-inserts text that is already typed); chat switch and blur close the dropdown.
+  - `src/ui/mod.rs` +~45 lines: the `mod inline_mode;` declaration, three App fields, and call sites at the existing composer-change / Enter / blur / keystroke-interceptor / render-chain / chat-switch / alert-confirm sites, plus command-menu suppression. (The `check_file_sizes.sh` waiver system was deleted 2026-09-29 per Idan — no waiver-bump bookkeeping; the no-dumping-ground rule still holds, hence the named module.)
+  - Screenshot demo `ready-inline-results` (new `ScreenshotDemo` variant + fixture in `src/ui/inline_mode.rs`, `main.rs` wiring).
+  - README boxes `parity:bots-inline-mode` checked; `parity:secret-bot-alert` note corrected (typed path is now a second invocation point).
+- **Key decisions (ponytail):**
+  - Generation counter instead of a username-carrying purpose: `RequestPurpose` derives `Copy` (130 call sites), so the race-safe correlator is a `u64`, not a `String`.
+  - `is_inline: Option<bool>` — `None` (searchPublicChat path without a cached user object) means "attempt the query; its error is the capability check", not a second lookup.
+  - No media-preview subsystem: the envelope layer deliberately drops thumbnails; rows render the already-parsed title/description/kind.
+  - The `inlineQueryResultsButton` (start-bot/web-app row) is parsed but not rendered — out of slice.
+- **Not verifiable without live Telegram:** real `searchPublicChat`/`getInlineQueryResults` round trips against a live inline bot; real `updateMessageSendFailed` for a failed inline-result send (no dedicated error dispatch — the purpose exists for request tracking only).
+- **Out of this slice:** inline mode in captions/attachments; `switch_pm` button row rendering; GIF-search UI still rides the S9 backend path.

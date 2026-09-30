@@ -198,6 +198,19 @@ pub enum RequestPurpose {
         bot_user_id: i64,
         first_page: bool,
     },
+    /// Bots slice: `searchPublicChat` for `@botname` → bot user id
+    /// resolution (schema 1.8.67, line 11603). Response is `chat`; the
+    /// outcome lands in `Session::inline_bot_resolve`. `generation`
+    /// matches `InlineBotResolve::Resolving::generation` so a stale
+    /// answer (a newer username is already being resolved) is ignored —
+    /// a `u64` keeps the `Copy` purpose enum intact.
+    ResolveInlineBot {
+        generation: u64,
+    },
+    /// Bots slice: `sendInlineQueryResultMessage` (schema 1.8.67, line
+    /// 12226). Response is the sent `message`; failures surface through
+    /// the normal message-send failure path.
+    SendInlineQueryResult,
     /// B4: `stopPoll` (schema 1.8.67 line 12953). Response is `ok`; the
     /// poll closes via `updatePoll`.
     StopPoll,
@@ -4727,6 +4740,14 @@ pub struct Session {
     /// Bots slice: the single active `getInlineQueryResults` fetch (the
     /// composer has one active inline query, so a slot — not a map).
     pub inline_query: Option<InlineQuerySlot>,
+    /// Bots slice: `@botname` → bot user id resolution for inline mode.
+    /// Set by the driver before `searchPublicChat`; the answer (or error)
+    /// resolves it. The composer has one active trigger, so a single
+    /// slot — not a map.
+    pub inline_bot_resolve: Option<InlineBotResolve>,
+    /// Bots slice: generation counter for `ResolveInlineBot` request
+    /// correlation (bumped per resolve; see the purpose docs).
+    pub inline_bot_resolve_seq: u64,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -5178,6 +5199,30 @@ pub struct InlineQuerySlot {
     pub fetch: InlineQueryFetch,
 }
 
+/// Bots slice: `@botname` → bot user id resolution for inline mode.
+/// `is_inline` is `Some` when the bot was found in the local user cache
+/// (`ParsedUser.is_inline`); `None` when it came from `searchPublicChat`
+/// (the chat answer carries no user object — the query attempt itself is
+/// the capability check, and its error surfaces honestly). `generation`
+/// correlates the in-flight request with its answer (see
+/// `RequestPurpose::ResolveInlineBot`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum InlineBotResolve {
+    Resolving {
+        username: String,
+        generation: u64,
+    },
+    Resolved {
+        username: String,
+        user_id: i64,
+        is_inline: Option<bool>,
+    },
+    Failed {
+        username: String,
+        reason: String,
+    },
+}
+
 /// Phase D3c: `getChatEventLog` page size (schema 1.8.67, line 15252:
 /// "up to 100"). Shared by the driver and the `has_more` heuristic in
 /// `Session::apply` — a short page means the log is exhausted.
@@ -5516,6 +5561,8 @@ impl Session {
             supergroup_invite_right: HashMap::new(),
             poll_voters: HashMap::new(),
             inline_query: None,
+            inline_bot_resolve: None,
+            inline_bot_resolve_seq: 0,
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
@@ -6246,7 +6293,9 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id));
                 chat.title = title;
-                chat.kind = kind;
+                // Bots slice: cloned (not moved) — the inline-bot resolve
+                // match below still needs `kind`.
+                chat.kind = kind.clone();
                 chat.unread_count = unread_count;
                 chat.last_read_inbox_message_id = last_read_inbox_message_id;
                 chat.last_read_outbox_message_id = last_read_outbox_message_id;
@@ -6295,6 +6344,56 @@ impl Session {
                 }
                 if !self.draft_dirty.contains(&chat_id.0) {
                     chat.draft = draft;
+                }
+                // Bots slice: `searchPublicChat` answer for `@botname`
+                // resolution. A bot username yields `ChatKind::Private`
+                // with the bot's user id; any other kind means the
+                // username is not a bot. The user object may already
+                // have arrived via `updateUser` — re-scan the cache for
+                // the inline capability (`None` = unknown; the query
+                // attempt itself is the capability check). The generation
+                // guard drops stale answers (a newer username is already
+                // resolving).
+                if let Some(p) = pending.as_ref()
+                    && let RequestPurpose::ResolveInlineBot { generation } = p.purpose
+                    && let Some(InlineBotResolve::Resolving {
+                        username,
+                        generation: slot_generation,
+                    }) = self.inline_bot_resolve.as_ref()
+                    && *slot_generation == generation
+                {
+                    match &kind {
+                        ChatKind::Private { user_id } => {
+                            // Any public username resolves to a private
+                            // chat — confirm it is actually a bot. The
+                            // user object may already have arrived via
+                            // `updateUser`; `is_inline` stays `None` when
+                            // unknown (the query attempt itself is then
+                            // the capability check).
+                            match self.users.get(&user_id.0) {
+                                Some(user) if !user.is_bot => {
+                                    self.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                                        username: username.clone(),
+                                        reason: format!("@{username} is not a bot"),
+                                    });
+                                }
+                                user => {
+                                    let is_inline = user.map(|u| u.is_inline);
+                                    self.inline_bot_resolve = Some(InlineBotResolve::Resolved {
+                                        username: username.clone(),
+                                        user_id: user_id.0,
+                                        is_inline,
+                                    });
+                                }
+                            }
+                        }
+                        _ => {
+                            self.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                                username: username.clone(),
+                                reason: format!("@{username} is not a bot"),
+                            });
+                        }
+                    }
                 }
             }
             // Parity slice: `updateChatPhoto` — swap the cached small
@@ -10053,6 +10152,31 @@ impl Session {
                             ));
                         }
                     }
+                    // Bots slice: a failed `@botname` lookup lands in the
+                    // resolve slot so the composer shows an honest hint;
+                    // stale failures (a newer username is already being
+                    // resolved) are ignored via the generation guard.
+                    Some(RequestPurpose::ResolveInlineBot { generation }) => {
+                        let stale = !matches!(
+                            &self.inline_bot_resolve,
+                            Some(InlineBotResolve::Resolving {
+                                generation: slot_generation,
+                                ..
+                            }) if *slot_generation == generation
+                        );
+                        if !stale {
+                            let username = match &self.inline_bot_resolve {
+                                Some(InlineBotResolve::Resolving { username, .. }) => {
+                                    username.clone()
+                                }
+                                _ => String::new(),
+                            };
+                            self.inline_bot_resolve = Some(InlineBotResolve::Failed {
+                                reason: format!("could not find @{username} (error {})", err.code),
+                                username,
+                            });
+                        }
+                    }
                     // Phase D3c: a failed first page lands in the fetch
                     // state so the panel shows an honest error instead of
                     // spinning forever. A failed "load more" keeps the
@@ -13156,6 +13280,149 @@ mod tests {
         );
         let err = session.resend_error.expect("resend error surfaced");
         assert!(err.contains("Could not retry the send"), "{err}");
+    }
+
+    /// Bots slice: a `searchPublicChat` answer for `@botname` resolves
+    /// the bot user id; the cached `is_inline` flag rides along. The
+    /// answer is a raw `chat` object (not `updateNewChat`) — this is the
+    /// shape TDLib actually returns for `searchPublicChat`.
+    #[test]
+    fn resolve_inline_bot_private_chat_resolves_with_cached_inline_flag() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.users.insert(
+            77,
+            ParsedUser {
+                id: 77,
+                username: "gif".into(),
+                is_bot: true,
+                is_inline: true,
+                ..Default::default()
+            },
+        );
+        let extra = session.request(RequestPurpose::ResolveInlineBot { generation: 1 }, None);
+        session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+            username: "gif".into(),
+            generation: 1,
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"chat","@extra":"{}","id":5,"title":"gif","type":{{"@type":"chatTypePrivate","user_id":77}},"unread_count":0}}"#,
+                extra.0,
+            ),
+        );
+        assert_eq!(
+            session.inline_bot_resolve,
+            Some(InlineBotResolve::Resolved {
+                username: "gif".into(),
+                user_id: 77,
+                is_inline: Some(true),
+            })
+        );
+    }
+
+    /// Bots slice: any public username resolves to a private chat — a
+    /// cached non-bot must fail the resolve instead of being treated as
+    /// a bot.
+    #[test]
+    fn resolve_inline_bot_non_bot_username_fails() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.users.insert(
+            78,
+            ParsedUser {
+                id: 78,
+                username: "alice".into(),
+                is_bot: false,
+                ..Default::default()
+            },
+        );
+        let extra = session.request(RequestPurpose::ResolveInlineBot { generation: 1 }, None);
+        session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+            username: "alice".into(),
+            generation: 1,
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewChat","@extra":"{}","chat":{{"id":6,"title":"alice","type":{{"@type":"chatTypePrivate","user_id":78}},"unread_count":0}}}}"#,
+                extra.0,
+            ),
+        );
+        assert!(
+            matches!(
+                &session.inline_bot_resolve,
+                Some(InlineBotResolve::Failed { reason, .. }) if reason.contains("not a bot")
+            ),
+            "{:?}",
+            session.inline_bot_resolve
+        );
+    }
+
+    /// Bots slice: a stale `searchPublicChat` answer (an older
+    /// generation — the user kept typing a new username) must not
+    /// overwrite the newer resolution.
+    #[test]
+    fn resolve_inline_bot_stale_answer_ignored() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::ResolveInlineBot { generation: 1 }, None);
+        // A newer resolve already replaced the slot.
+        session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+            username: "gifs".into(),
+            generation: 2,
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewChat","@extra":"{}","chat":{{"id":5,"title":"gif","type":{{"@type":"chatTypePrivate","user_id":77}},"unread_count":0}}}}"#,
+                extra.0,
+            ),
+        );
+        assert_eq!(
+            session.inline_bot_resolve,
+            Some(InlineBotResolve::Resolving {
+                username: "gifs".into(),
+                generation: 2,
+            })
+        );
+    }
+
+    /// Bots slice: a failed `searchPublicChat` (unknown username) lands
+    /// an honest hint in the resolve slot.
+    #[test]
+    fn resolve_inline_bot_error_fails_slot() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let extra = session.request(RequestPurpose::ResolveInlineBot { generation: 3 }, None);
+        session.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+            username: "nosuchbot".into(),
+            generation: 3,
+        });
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"USERNAME_NOT_OCCUPIED"}}"#,
+                extra.0,
+            ),
+        );
+        assert!(
+            matches!(
+                &session.inline_bot_resolve,
+                Some(InlineBotResolve::Failed { username, .. }) if username == "nosuchbot"
+            ),
+            "{:?}",
+            session.inline_bot_resolve
+        );
     }
 
     /// M1 fix-up: a failed `getMessageLink` surfaces in
