@@ -989,6 +989,16 @@ impl Session {
         {
             self.scope_settings_loading.remove(&scope);
         }
+        // Parity slice: a failed
+        // `getChatNotificationSettingsExceptions` must not leave the
+        // scope in `notification_exceptions_loading` — otherwise every
+        // later dialog open skips the fetch and the exceptions stay
+        // unfetchable. Dropping it here means the next open retries.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
+            && let Some(scope) = pending.and_then(|p| p.scope)
+        {
+            self.notification_exceptions_loading.remove(&scope);
+        }
         // Phase 3.3: `getCommands` failed — on a user session the
         // method is annotated "for bots only" (schema 1.8.67 line
         // 14953), so the error is permanent. Record an empty set

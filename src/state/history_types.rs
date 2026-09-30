@@ -17,6 +17,27 @@ pub fn scope_for_chat_kind(kind: &ChatKind) -> NotificationSettingsScope {
     }
 }
 
+impl Session {
+    /// Parity slice: chats with any non-default notification setting for
+    /// the scope — the `getChatNotificationSettingsExceptions`
+    /// `compare_sound=false` semantics, computed locally. The screenshot
+    /// demo (no driver) answers the request from this; live sessions get
+    /// the authoritative server list.
+    pub fn local_notification_exceptions(&self, scope: NotificationSettingsScope) -> Vec<i64> {
+        let mut ids: Vec<i64> = self
+            .chats
+            .values()
+            .filter(|c| {
+                scope_for_chat_kind(&c.kind) == scope
+                    && c.notification_settings != ChatNotificationSettings::default()
+            })
+            .map(|c| c.id.0)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+}
+
 pub(crate) fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
     ChatSummary {
         id: chat_id,

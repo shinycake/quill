@@ -149,6 +149,13 @@ pub struct Session {
     /// for `use_default_*` fallback (e.g. default sound) and the scope
     /// defaults settings view.
     pub scope_notification_settings: HashMap<NotificationSettingsScope, ScopeNotificationSettings>,
+    /// Parity slice: `getChatNotificationSettingsExceptions` answers —
+    /// chat ids with non-default notification settings per scope (the
+    /// exceptions list view).
+    pub notification_exceptions: HashMap<NotificationSettingsScope, Vec<i64>>,
+    /// Parity slice: scopes with a `getChatNotificationSettingsExceptions`
+    /// in flight.
+    pub notification_exceptions_loading: HashSet<NotificationSettingsScope>,
     /// Parity slice: scopes with a `getScopeNotificationSettings` in flight.
     pub scope_settings_loading: HashSet<NotificationSettingsScope>,
     /// Parity slice: `updateReactionNotificationSettings` cache. No getter
@@ -874,6 +881,8 @@ impl Session {
             saved_sounds_loaded: false,
             saved_sounds_stale: false,
             scope_notification_settings: HashMap::new(),
+            notification_exceptions: HashMap::new(),
+            notification_exceptions_loading: HashSet::new(),
             scope_settings_loading: HashSet::new(),
             reaction_notification_settings: None,
             storage_stats: None,

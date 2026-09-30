@@ -12,9 +12,9 @@ use crate::telegram::envelope::{
 };
 use crate::telegram::requests::{
     delete_account, disconnect_all_websites, disconnect_website, get_account_ttl,
-    get_active_sessions, get_connected_websites, get_saved_notification_sounds,
-    get_scope_notification_settings, get_storage_statistics, set_account_ttl,
-    set_chat_notification_settings, set_message_sender_block_list,
+    get_active_sessions, get_chat_notification_settings_exceptions, get_connected_websites,
+    get_saved_notification_sounds, get_scope_notification_settings, get_storage_statistics,
+    set_account_ttl, set_chat_notification_settings, set_message_sender_block_list,
     set_reaction_notification_settings, set_scope_notification_settings,
     terminate_all_other_sessions, terminate_session, toggle_session_can_accept_calls,
     toggle_session_can_accept_secret_chats,
@@ -262,6 +262,61 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// Parity slice: `getChatNotificationSettingsExceptions` (TDLib 1.8.67,
+    /// line 13659) for a scope not yet loaded and not in flight — once per
+    /// dialog open. `compare_sound=false` returns every chat with any
+    /// non-default setting (the exceptions list view).
+    pub fn maybe_fetch_notification_exceptions(
+        &mut self,
+        scope: NotificationSettingsScope,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.notification_exceptions.contains_key(&scope)
+            || self
+                .session
+                .notification_exceptions_loading
+                .contains(&scope)
+            || self
+                .session
+                .requests
+                .has_purpose_for_scope(RequestPurpose::GetChatNotificationSettingsExceptions, scope)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request_for_scope(RequestPurpose::GetChatNotificationSettingsExceptions, scope);
+        self.session.notification_exceptions_loading.insert(scope);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_notification_settings_exceptions(
+                extra, scope, false,
+            ))
+        {
+            self.session.requests.take(extra);
+            self.session.notification_exceptions_loading.remove(&scope);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Parity slice: reset a chat's notification settings to the scope
+    /// defaults (`setChatNotificationSettings` with every `use_default_*`
+    /// flag set). The change arrives back as
+    /// `updateChatNotificationSettings`, which prunes the chat from the
+    /// cached exceptions list.
+    pub fn reset_chat_notification_settings(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.send_notification_settings(chat_id, &ChatNotificationSettings::default())
     }
 
     /// Parity slice: set the chat's notification-sound exception.

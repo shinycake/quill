@@ -200,6 +200,7 @@ impl QuillApp {
         if self.notification_defaults_open {
             self.notification_defaults_open = false;
             self.defaults_sound_picker = None;
+            self.defaults_exceptions_scope = None;
             cx.notify();
             return;
         }

@@ -550,10 +550,25 @@ impl Session {
                 chat_id,
                 notification_settings,
             } => {
-                self.chats
+                let chat = self
+                    .chats
                     .entry(chat_id.0)
-                    .or_insert_with(|| placeholder_chat(chat_id))
-                    .notification_settings = notification_settings;
+                    .or_insert_with(|| placeholder_chat(chat_id));
+                let scope = scope_for_chat_kind(&chat.kind);
+                let fully_default = notification_settings == ChatNotificationSettings::default();
+                chat.notification_settings = notification_settings;
+                // Parity slice: the exceptions list for the chat's scope is
+                // stale now. A reset to the scope default (e.g. our own
+                // "Reset to default") just prunes the chat from the cached
+                // list; any other change drops the list so the next dialog
+                // open refetches it.
+                if fully_default {
+                    if let Some(list) = self.notification_exceptions.get_mut(&scope) {
+                        list.retain(|id| *id != chat_id.0);
+                    }
+                } else {
+                    self.notification_exceptions.remove(&scope);
+                }
             }
             // Slice CL1: `updateChatIsMarkedAsUnread` (schema 1.8.67,
             // line 10588) — the authoritative marked-as-unread flag; the

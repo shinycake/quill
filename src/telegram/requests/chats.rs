@@ -485,6 +485,24 @@ pub fn get_scope_notification_settings(
     .to_string()
 }
 
+/// `getChatNotificationSettingsExceptions` (TDLib 1.8.67, line 13659).
+/// `compare_sound=true` returns only chats whose sound differs from the
+/// scope default; `false` returns every chat with any non-default setting
+/// (the exceptions list view).
+pub fn get_chat_notification_settings_exceptions(
+    extra: RequestId,
+    scope: crate::telegram::envelope::NotificationSettingsScope,
+    compare_sound: bool,
+) -> String {
+    json!({
+        "@type": "getChatNotificationSettingsExceptions",
+        "@extra": extra.as_extra(),
+        "scope": { "@type": scope.type_name() },
+        "compare_sound": compare_sound,
+    })
+    .to_string()
+}
+
 /// `setScopeNotificationSettings` (TDLib 1.8.67, line 13665). Full settings
 /// object; callers copy the scope's current settings and change one field.
 pub fn set_scope_notification_settings(

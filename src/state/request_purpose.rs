@@ -162,6 +162,10 @@ pub enum RequestPurpose {
     /// Parity slice: `setReactionNotificationSettings`. Response is `ok`;
     /// the new values arrive as `updateReactionNotificationSettings`.
     SetReactionNotificationSettings,
+    /// Parity slice: `getChatNotificationSettingsExceptions`. Response is
+    /// `chats` (the exception chat ids); the scope is correlated via
+    /// `PendingRequest::scope`.
+    GetChatNotificationSettingsExceptions,
     /// Slice A3: `getActiveSessions`. Response is `sessions`; the list is
     /// replaced from the authoritative answer (never optimistic).
     GetActiveSessions,
