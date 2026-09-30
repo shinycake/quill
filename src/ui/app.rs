@@ -355,6 +355,11 @@ pub struct QuillApp {
     /// Parity slice: which scope section's notification exceptions list is
     /// expanded in the defaults dialog (`None` = all collapsed).
     pub(super) defaults_exceptions_scope: Option<NotificationSettingsScope>,
+    /// Parity slice: pending "Reset all" confirmation on the notification
+    /// defaults dialog (`resetAllNotificationSettings` wipes every
+    /// notification customization with no undo, so it gates behind an
+    /// explicit confirm).
+    pub(super) notifications_confirm: Option<NotificationsConfirm>,
     /// Parity slice: in-flight notification-sound workers; capped so a
     /// message burst cannot stack players.
     pub(super) notify_sound_inflight: Arc<AtomicUsize>,

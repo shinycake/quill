@@ -21,3 +21,13 @@ pub enum WebsitesConfirm {
     /// `disconnectAllWebsites`.
     DisconnectAll,
 }
+
+/// Parity slice: which destructive reset the notification-defaults dialog
+/// is confirming. `resetAllNotificationSettings` wipes every notification
+/// customization with no undo, so the footer's "Reset all" button gates
+/// behind this first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationsConfirm {
+    /// `resetAllNotificationSettings`.
+    ResetAll,
+}

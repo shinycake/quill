@@ -354,6 +354,32 @@ fn chat_action_choosing_sticker_label() {
 }
 
 #[test]
+fn reset_all_notification_settings_ok_clears_cached_scope_settings() {
+    // Parity slice: `resetAllNotificationSettings` (schema 1.8.67, line
+    // 13671) confirmed — the cached
+    // scope defaults drop so the next fetch (or the authoritative
+    // `updateScopeNotificationSettings` answers) shows the server-confirmed
+    // defaults instead of the stale pre-reset ones.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.scope_notification_settings.insert(
+        NotificationSettingsScope::GroupChats,
+        ScopeNotificationSettings {
+            mute_for: 2147483647,
+            ..ScopeNotificationSettings::default()
+        },
+    );
+    let extra = session.request(RequestPurpose::ResetAllNotificationSettings, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(session.scope_notification_settings.is_empty());
+}
+
+#[test]
 fn inapp_sounds_toggle_gates_notification_sound() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

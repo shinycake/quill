@@ -554,6 +554,18 @@ pub fn set_reaction_notification_settings(
     .to_string()
 }
 
+/// `resetAllNotificationSettings` (TDLib 1.8.67, line 13671): resets all
+/// chat and scope notification settings to their default values. The new
+/// values arrive as `updateScopeNotificationSettings` /
+/// `updateChatNotificationSettings`.
+pub fn reset_all_notification_settings(extra: RequestId) -> String {
+    json!({
+        "@type": "resetAllNotificationSettings",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 /// `addChatToList` (TDLib 1.8.67). Main and Archive are mutually exclusive.
 /// `sendChatAction` (TDLib 1.8.67). `typing` sends `chatActionTyping`;
 /// otherwise `chatActionCancel` (Unigram `CancelTyping`). `topic_id` null,
