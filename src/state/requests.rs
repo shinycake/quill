@@ -182,7 +182,7 @@ pub(crate) fn error_reason(err: &TdError) -> String {
     match err.class {
         ErrorClass::NotFound => "not found".to_string(),
         ErrorClass::Unauthorized => "not authorized".to_string(),
-        ErrorClass::Flood => "too many requests — try again later".to_string(),
+        ErrorClass::Flood => err.flood_line("too many requests — try again later"),
         ErrorClass::Invalid => "invalid request".to_string(),
         // S14: classified story-restriction errors keep the exact text
         // the code-based class produced before (400 → Invalid,

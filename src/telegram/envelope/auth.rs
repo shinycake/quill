@@ -53,10 +53,11 @@ impl TdError {
     }
 
     /// Slice parity:platform-flood-errors — the retry countdown line for
-    /// a flood error: "Try again in N seconds" when the wait is known,
+    /// a flood error: "try again in N seconds" when the wait is known,
     /// otherwise the honest generic line.
     pub fn flood_line(&self, generic: &str) -> String {
         match self.flood_wait_secs {
+            Some(1) => "try again in 1 second".to_string(),
             Some(secs) => format!("try again in {secs} seconds"),
             None => generic.to_string(),
         }
