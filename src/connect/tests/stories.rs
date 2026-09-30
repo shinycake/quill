@@ -485,9 +485,47 @@ fn driver_get_story_available_reactions_dedupes_and_caches() {
             .unwrap();
     let cached = driver.session.story_available_reactions.clone().unwrap();
     assert_eq!(cached.len(), 1);
-    assert_eq!(cached[0].emoji, "❤");
+    assert_eq!(
+        cached[0].kind,
+        crate::telegram::envelope::StoryAvailableReactionKind::Emoji("❤".into())
+    );
     // Cached: no new request.
     assert!(driver.get_story_available_reactions().unwrap().is_none());
+    assert_eq!(recorder.snapshot().len(), sent);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn driver_fetch_story_custom_emoji_stickers_dedupes_and_caches() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+    // One uncached id → one request.
+    let extra = driver
+        .maybe_fetch_story_custom_emoji_stickers(&[123])
+        .unwrap()
+        .expect("first call sends");
+    let json = recorder.snapshot().last().cloned().expect("sent");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "getCustomEmojiStickers");
+    assert_eq!(v["@extra"], extra.0.to_string());
+    assert_eq!(v["custom_emoji_ids"], serde_json::json!([123]));
+    let sent = recorder.snapshot().len();
+    // In-flight duplicate is deduped.
+    assert!(
+        driver
+            .maybe_fetch_story_custom_emoji_stickers(&[123])
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(recorder.snapshot().len(), sent);
 
     let _ = std::fs::remove_dir_all(&dir);
