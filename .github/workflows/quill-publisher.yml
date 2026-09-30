@@ -1,0 +1,48 @@
+# Quill publisher — deterministic mutation gate (workflow-redesign.md §1.5).
+#
+# MIGRATION STEP 3: installed DISABLED FOR MUTATION. While the control issue
+# is in `mode: shadow` this workflow REJECTS every artifact (exit 1) — that
+# rejection is itself the step-4 shadow proof. It holds no credentials now;
+# in active mode (migration step 9+) it will mint the Quill Control App
+# installation token from a protected environment and verify
+# (work issue, generation, artifact run id, role, base/head SHAs) from GitHub
+# before making any fast-forward commit. It never executes agent text.
+name: quill-publisher
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: "Worker run id that produced the artifact"
+        required: true
+      work_issue:
+        description: "GitHub work issue number"
+        required: true
+      generation:
+        description: "Claim generation (fencing)"
+        required: true
+
+permissions: {}
+
+jobs:
+  publish:
+    name: publish-artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Gate on control mode
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          N="$(gh api "repos/$REPO/issues?labels=quill-control&state=open&per_page=5" \
+            --jq '[.[] | select(.title | test("Quill Conductor control"))][0].number')"
+          MODE="$(gh api "repos/$REPO/issues/$N" --jq '.body' | grep -m1 '^mode:' | awk '{print $2}')"
+          echo "control mode: $MODE"
+          if [ "$MODE" = "shadow" ]; then
+            echo "::error::shadow mode: artifact from run ${{ inputs.artifact_run_id }} (issue #${{ inputs.work_issue }}, gen ${{ inputs.generation }}) REJECTED — no mutations allowed"
+            exit 1
+          fi
+          echo "::error::active mode not implemented yet (migration step 9+)"
+          exit 2
