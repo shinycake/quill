@@ -32,7 +32,8 @@ fn percent_decode(value: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len()
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
             && let (Some(hi), Some(lo)) = (
                 (bytes[i + 1] as char).to_digit(16),
                 (bytes[i + 2] as char).to_digit(16),
