@@ -12,10 +12,10 @@ on:
         required: true
         type: string
       run_name:
-        description: 'Unique run name for exact run tracking (SHA + nonce)'
-        required: true
+        description: 'Unique run name for exact run tracking (optional; defaults to ref + run id)'
+        required: false
         type: string
-run-name: ${{ inputs.run_name }}
+run-name: ${{ inputs.run_name || format('{0} (run {1})', inputs.ref, github.run_id) }}
 permissions:
   contents: read
 jobs:
