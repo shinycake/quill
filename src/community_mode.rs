@@ -27,20 +27,22 @@ pub fn community_member_ids(full_info: Option<&ParsedCommunityFullInfo>) -> Hash
         .unwrap_or_default()
 }
 
-/// Keep only `community_id`'s chats. `None` (mode cleared / never
-/// entered) keeps every chat; a missing full-info pack keeps none (the
-/// caller shows "Loading…" for that case).
-pub fn filter_chats_to_community<'a>(
-    chats: Vec<&'a ChatSummary>,
+/// Narrow `chats` to `community_id`'s member chats in place. `None`
+/// (mode cleared / never entered) keeps every chat; a missing full-info
+/// pack keeps none (the caller shows "Loading…" for that case).
+///
+/// This is the single production predicate for the community chat-list
+/// mode — the UI calls it directly, and the tests exercise it through
+/// the real `Session` reducer path, so there is exactly one
+/// implementation to keep in sync.
+pub fn retain_community_chats(
+    chats: &mut Vec<ChatSummary>,
     community_id: Option<i64>,
     full_infos: &HashMap<i64, ParsedCommunityFullInfo>,
-) -> Vec<&'a ChatSummary> {
+) {
     let Some(community_id) = community_id else {
-        return chats;
+        return;
     };
     let members = community_member_ids(full_infos.get(&community_id));
-    chats
-        .into_iter()
-        .filter(|chat| members.contains(&chat.id.0))
-        .collect()
+    chats.retain(|chat| members.contains(&chat.id.0));
 }

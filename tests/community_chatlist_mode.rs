@@ -2,15 +2,16 @@
 //! mode filter logic, through the real `Session` reducer path —
 //! `updateNewChat` / `updateChatPosition` build the chat list,
 //! `updateCommunityFullInfo` builds the membership pack, and
-//! `filter_chats_to_community` narrows it.
+//! `retain_community_chats` (the production predicate, called from the
+//! UI at the same shape) narrows it.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use quill::community_mode::{community_member_ids, filter_chats_to_community};
+use quill::community_mode::{community_member_ids, retain_community_chats};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::AccountKey;
-use quill::state::Session;
+use quill::state::{ChatSummary, Session};
 use quill::telegram::client::copy_and_parse;
 
 fn feed(session: &mut Session, seq: &AtomicU64, sink: &Arc<dyn DiagnosticSink>, json: &str) {
@@ -79,14 +80,9 @@ fn session_with_community() -> Session {
 }
 
 fn filtered_ids(session: &Session, community_id: Option<i64>) -> Vec<i64> {
-    filter_chats_to_community(
-        session.ordered_chats(),
-        community_id,
-        &session.community_full_infos,
-    )
-    .iter()
-    .map(|c| c.id.0)
-    .collect()
+    let mut chats: Vec<ChatSummary> = session.ordered_chats().into_iter().cloned().collect();
+    retain_community_chats(&mut chats, community_id, &session.community_full_infos);
+    chats.iter().map(|c| c.id.0).collect()
 }
 
 #[test]

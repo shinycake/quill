@@ -57,7 +57,7 @@ use gpui_kit::gpui::StyleRefinement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
-use quill::community_mode::community_member_ids;
+use quill::community_mode;
 use quill::composer::{
     AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
     ComposerScheduling, ComposerSnapshot, DeleteConfirm, FormatAction, ForwardDraft,
@@ -14555,23 +14555,6 @@ impl QuillApp {
                 .into_any_element()
         } else {
             tabs.into_any_element()
-        }
-    }
-
-    /// Parity slice `parity:communities-chatlist-mode`: narrow `chats`
-    /// to the community's chats when the mode is active. Membership is
-    /// the cached `communityFullInfo.chats` pack (state keeps no
-    /// per-chat `community_id`); `updateCommunityFullInfo` replaces the
-    /// pack wholesale, so a chat leaving the community drops out on the
-    /// next render. Hidden chats (`is_hidden`) stay included — see
-    /// `community_mode::community_member_ids`.
-    fn retain_community_chats(&self, chats: &mut Vec<ChatSummary>, filter: ChatListFilter) {
-        if let ChatListFilter::Community(community_id) = filter {
-            let members = community_member_ids(
-                self.session()
-                    .and_then(|s| s.community_full_infos.get(&community_id)),
-            );
-            chats.retain(|c| members.contains(&c.id.0));
         }
     }
 
@@ -40791,7 +40774,24 @@ impl QuillApp {
                         // Slice CL2: the Archived category shows only the
                         // archive section.
                         let show_main_list = filter != ChatListFilter::Archived;
-                        self.retain_community_chats(&mut chats, filter);
+                        // Parity slice `parity:communities-chatlist-mode`: narrow
+                        // `chats` to the community's chats when the mode is
+                        // active. Membership is the cached
+                        // `communityFullInfo.chats` pack (state keeps no
+                        // per-chat `community_id`); `updateCommunityFullInfo`
+                        // replaces the pack wholesale, so a chat leaving the
+                        // community drops out on the next render. Hidden
+                        // chats (`is_hidden`) stay included — see
+                        // `community_mode::community_member_ids`.
+                        if let (ChatListFilter::Community(community_id), Some(session)) =
+                            (filter, self.session())
+                        {
+                            community_mode::retain_community_chats(
+                                &mut chats,
+                                Some(community_id),
+                                &session.community_full_infos,
+                            );
+                        }
                         // Slice CL3: multi-select mode — rows toggle the
                         // check instead of opening the chat. Defined
                         // once here so the select bar, the main loop,
