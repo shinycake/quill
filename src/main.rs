@@ -84,6 +84,11 @@ fn ui_main(args: &[String]) {
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
             ui::set_theme_mode(startup_theme_mode(), None, cx);
+            // stories-high-contrast: screenshot demos can opt into the
+            // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
+            ui::set_high_contrast(
+                std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
+            );
             // kit Phase 9: honor the OS reduce-motion preference.
             cx.set_reduce_motion(os_prefers_reduced_motion());
             ui::bind_keys(cx);
@@ -516,6 +521,11 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
             ui::set_theme_mode(startup_theme_mode(), None, cx);
+            // stories-high-contrast: screenshot demos can opt into the
+            // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
+            ui::set_high_contrast(
+                std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
+            );
             // kit Phase 9: honor the OS reduce-motion preference.
             cx.set_reduce_motion(os_prefers_reduced_motion());
             ui::bind_keys(cx);

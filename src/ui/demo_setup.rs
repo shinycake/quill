@@ -631,7 +631,14 @@ impl QuillApp {
         // in-memory for the demo — `apply_appearance` (end of this fn)
         // picks them up; nothing is persisted.
         if matches!(demo, Some(ScreenshotDemo::ReadyAppearance)) {
-            self.appearance.theme = ThemeChoice::Dark;
+            // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
+            // captures the dialog with the HC theme selected.
+            self.appearance.theme =
+                if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast") {
+                    ThemeChoice::HighContrast
+                } else {
+                    ThemeChoice::Dark
+                };
             self.appearance.accent_rgb = 0x2f81f7;
             self.appearance.wallpaper_rgb = Some(0x0e1621);
             self.appearance.font_size_px = 16;

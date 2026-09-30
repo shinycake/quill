@@ -1,0 +1,2 @@
+# parity:platform-high-contrast — real high-contrast theme mode
+parity:platform-high-contrast

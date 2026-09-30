@@ -8,7 +8,7 @@
 //! `language_prefs.json` and applied on restart.
 
 use super::QuillApp;
-use super::chat_theme::set_theme_mode;
+use super::chat_theme::{set_high_contrast, set_theme_mode};
 use super::synthetic::BubbleLook;
 use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -72,24 +72,34 @@ impl QuillApp {
     /// palette, so the accent override is re-applied after every mode
     /// change, and `Theme::sync_base` mirrors the mutated fields (incl.
     /// accent) into the Base layer. Only notifies when the (mode,
-    /// accent) pair actually changed — the minute tick calls this and
-    /// must be free when idle.
+    /// accent, high-contrast) triple actually changed — the minute tick
+    /// calls this and must be free when idle.
+    ///
+    /// stories-high-contrast: `ThemeChoice::HighContrast` pairs the dark
+    /// kit theme with the high-contrast token palette and wins over
+    /// auto-night — an explicit accessibility choice is never silently
+    /// reverted by the schedule.
     pub(crate) fn apply_appearance(&mut self, cx: &mut Context<Self>) {
-        let dark = match self.appearance.auto_night {
-            AutoNight::Off => self.appearance.theme == ThemeChoice::Dark,
-            // On Linux without a desktop portal this reports Light; the
-            // mode is still honest — it follows what the platform says.
-            // Matches gpui-component's own `From<WindowAppearance>` map
-            // (Dark | VibrantDark → dark).
-            AutoNight::System => matches!(
-                cx.window_appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
-            ),
-            AutoNight::Scheduled => night_active(
-                self.appearance.night_start_minutes,
-                self.appearance.night_end_minutes,
-                local_minutes_since_midnight(),
-            ),
+        let hc = self.appearance.theme == ThemeChoice::HighContrast;
+        let dark = if hc {
+            true
+        } else {
+            match self.appearance.auto_night {
+                AutoNight::Off => self.appearance.theme == ThemeChoice::Dark,
+                // On Linux without a desktop portal this reports Light; the
+                // mode is still honest — it follows what the platform says.
+                // Matches gpui-component's own `From<WindowAppearance>` map
+                // (Dark | VibrantDark → dark).
+                AutoNight::System => matches!(
+                    cx.window_appearance(),
+                    WindowAppearance::Dark | WindowAppearance::VibrantDark
+                ),
+                AutoNight::Scheduled => night_active(
+                    self.appearance.night_start_minutes,
+                    self.appearance.night_end_minutes,
+                    local_minutes_since_midnight(),
+                ),
+            }
         };
         let mode = if dark {
             ThemeMode::Dark
@@ -97,10 +107,11 @@ impl QuillApp {
             ThemeMode::Light
         };
         let accent = self.appearance.accent_rgb;
-        if self.appearance_applied == Some((mode, accent)) {
+        if self.appearance_applied == Some((mode, accent, hc)) {
             return;
         }
         set_theme_mode(mode, None, cx);
+        set_high_contrast(hc);
         if accent != 0 {
             Theme::global_mut(cx).colors.accent = Hsla::from(rgb(accent));
         }
@@ -108,7 +119,7 @@ impl QuillApp {
         // (scrollbar styles, semantic tokens, text-view defaults) — they
         // only reach the Base layer once Theme::sync_base runs.
         Theme::sync_base(cx);
-        self.appearance_applied = Some((mode, accent));
+        self.appearance_applied = Some((mode, accent, hc));
         cx.notify();
     }
 
@@ -413,10 +424,10 @@ impl QuillApp {
     }
 
     fn appearance_theme_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let selected = Some(if self.appearance.theme == ThemeChoice::Light {
-            0
-        } else {
-            1
+        let selected = Some(match self.appearance.theme {
+            ThemeChoice::Light => 0,
+            ThemeChoice::Dark => 1,
+            ThemeChoice::HighContrast => 2,
         });
         // kit Phase 6 style: a kit RadioGroup (was: hand-rolled chips).
         let control = RadioGroup::horizontal("appearance-theme")
@@ -424,13 +435,14 @@ impl QuillApp {
             .children([
                 Radio::new("appearance-theme-light").label("☀️ Light"),
                 Radio::new("appearance-theme-dark").label("🌙 Dark"),
+                Radio::new("appearance-theme-hc").label("◐ High contrast"),
             ])
             .on_click(cx.listener(|this, &ix, _, cx| {
                 this.set_appearance(cx, |a| {
-                    a.theme = if ix == 0 {
-                        ThemeChoice::Light
-                    } else {
-                        ThemeChoice::Dark
+                    a.theme = match ix {
+                        0 => ThemeChoice::Light,
+                        1 => ThemeChoice::Dark,
+                        _ => ThemeChoice::HighContrast,
                     }
                 });
             }));
