@@ -3,8 +3,8 @@
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
     FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
-    OpenSearch, QuitApp, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme,
-    ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    OpenSearch, OpenShortcuts, QuitApp, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen,
+    ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -213,6 +213,10 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
                 let _ = this;
                 cx.open_url("https://github.com/shinycake/quill");
+            }))
+            .on_action(cx.listener(|this, _: &OpenShortcuts, _, cx| {
+                this.shortcuts_open = true;
+                cx.notify();
             }))
             .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                 this.composer

@@ -476,7 +476,6 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [x] Force-reply keyboards render the reply-keyboard bar (a ↩ {placeholder} ghost button above the composer, kit Button; tap focuses the composer) <!-- parity:bots-force-reply-keyboard -->
-- [ ] Stop button for streaming bot drafts (cancel an in-flight streaming bot reply) <!-- parity:bots-streaming-draft-stop -->
 - [x] Bot info panel with description and tappable /command buttons inserting into the composer (ui/mod.rs:13726) <!-- parity:bots-info-panel -->
 - [x] Bot START button / start_parameter deep links (partial: link parser + armed START state are wired, but Quill registers no t.me/tg: URL scheme so OS deep-link intake is out of this slice): t.me/<bot>?start=<param> parses to (bot, param); START button sends sendBotStartMessage with the parameter (state.rs, ui/mod.rs) <!-- parity:bots-start -->
 - [x] Restart bot: confirm-gated; clears the bot chat history (deleteChatHistory, kept in list) then re-sends sendBotStartMessage with an empty parameter (connect.rs:restart_bot) <!-- parity:bots-restart -->
@@ -555,7 +554,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Platform & edge cases
 
 - [x] Global keyboard shortcuts: 22 bindings wired in `bind_keys` (Quit, focus sidebar/composer, chat search, media viewer nav/zoom) (src/ui/mod.rs:125) <!-- parity:platform-keyboard-shortcuts -->
-- [ ] Keyboard shortcuts reference/help overlay listing all bindings <!-- parity:platform-shortcuts-reference -->
+- [x] Keyboard shortcuts reference/help overlay listing all bindings (Help → Keyboard Shortcuts opens a read-only kit dialog rendering every row of `src/ui/keybindings.rs::shortcut_rows()` — the same table `bind_keys` installs, grouped by section with kit `Kbd` chips, so the reference cannot drift from the real bindings) <!-- parity:platform-shortcuts-reference -->
 - [ ] Customizable key bindings <!-- parity:platform-custom-keybindings -->
 - [ ] Screen-reader accessible labels/roles on UI elements (no accessibility API usage in src) <!-- parity:platform-screen-reader-labels -->
 - [ ] VoiceOver support (blocked: Linux desktop has no VoiceOver; no accessibility tree backend in the UI layer) <!-- parity:platform-voiceover -->

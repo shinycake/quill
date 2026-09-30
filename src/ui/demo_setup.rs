@@ -365,6 +365,10 @@ impl QuillApp {
             self.status_note =
                 "screenshot demo — recording voice · locked · playing voice note".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyShortcuts)) {
+            self.shortcuts_open = true;
+            self.status_note = "screenshot demo — keyboard shortcuts reference".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyGameCard)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

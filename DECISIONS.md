@@ -6925,3 +6925,33 @@ name `platform-chat-export` is kept in code/comments.)
   trip (file presence is the verifiable proxy, and it is tested).
 - **Out of this slice:** Windows Run-key support; "start minimized" /
   tray-on-startup options; per-user vs system-wide autostart.
+
+## Slice parity:platform-shortcuts-reference — KEYBOARD SHORTCUTS REFERENCE (2026-09-30)
+
+- **Built:**
+  - `src/ui/keybindings.rs`: the hardcoded `bind_keys` list is now generated
+    from a single `shortcut_rows()` table (`ShortcutRow { keystroke, label,
+    section, binding }`) — the same rows the app binds are the rows the
+    reference dialog renders, so the reference can never drift. Sections:
+    General / Navigation / Search / Media viewer / Composer.
+  - `src/ui/shortcuts.rs` (new): read-only kit `Dialog` (`DialogKind::Shortcuts`,
+    `window.open_dialog` pattern) rendering the rows grouped by section with
+    kit `Kbd` chips; labels sharing bindings (`cmd-q`/`ctrl-q`) render as one
+    entry with both chips. Single Close button in the footer; Esc/backdrop/✕
+    clear `shortcuts_open`.
+  - New `OpenShortcuts` action; Help menu gains "Keyboard Shortcuts" above
+    "Quill on GitHub"; `DialogKind::KINDS` 36→37.
+  - README `parity:platform-shortcuts-reference` checked.
+- **Also in this PR:** removed the phantom checklist line
+  `parity:bots-streaming-draft-stop` ("Stop button for streaming bot drafts").
+  Concept-level search of the pinned TDLib 1.8.67 schema (all 16,313 lines of
+  `schema/td_api.tl`): every "stream" hit is video/RTMP/group-call streaming;
+  there is no streaming-bot-reply or streaming-draft concept in TDLib 1.8.67,
+  and no trace in Quill's codebase. Denominator 525 → 524.
+- **Key decisions (ponytail):** no new binding for the dialog itself — Help
+  menu entry is the standard discoverability path; no display-string field in
+  the table — kit's `Kbd` renders the keystroke with platform glyphs; no
+  separate grouping struct — `shortcut_rows()` is written in section order so
+  first-seen grouping is the display order.
+- **Out of this slice:** `parity:platform-custom-keybindings` (rebinding UI);
+  showing context-gated shortcuts' active context (viewer-only, composer-only).
