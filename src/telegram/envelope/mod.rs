@@ -1,0 +1,113 @@
+mod auth;
+mod bots;
+mod calls;
+mod chat;
+mod chat_drafts;
+mod chat_events;
+mod chat_invite;
+mod chat_list;
+mod chat_members;
+mod chat_notifications;
+mod communities;
+mod envelope_types;
+mod forum;
+mod inline_queries;
+mod json_helpers;
+mod keyboards;
+mod message;
+mod message_audio_video;
+mod message_contact;
+mod message_content;
+mod message_link_preview;
+mod message_location;
+mod message_media;
+mod message_poll;
+mod message_reactions;
+mod message_sponsored;
+mod message_sticker;
+mod payload;
+mod payments;
+mod secret_chat;
+mod sessions;
+mod statistics;
+mod storage;
+mod stories;
+mod users;
+
+#[cfg(test)]
+mod account_change_tests;
+#[cfg(test)]
+mod channel_tests_geo;
+#[cfg(test)]
+mod channel_tests_members;
+#[cfg(test)]
+mod channel_tests_polls;
+#[cfg(test)]
+mod channel_tests_service;
+#[cfg(test)]
+mod channel_tests_statistics;
+#[cfg(test)]
+mod channel_tests_stories;
+#[cfg(test)]
+mod channel_tests_supergroups;
+#[cfg(test)]
+mod channel_tests_updates;
+#[cfg(test)]
+mod channel_tests_users;
+#[cfg(test)]
+mod notification_sound_tests;
+#[cfg(test)]
+mod password_state_tests;
+#[cfg(test)]
+mod sessions_tests;
+#[cfg(test)]
+mod storage_statistics_tests;
+#[cfg(test)]
+mod tests_chats;
+#[cfg(test)]
+mod tests_core;
+#[cfg(test)]
+mod tests_keyboards;
+#[cfg(test)]
+mod tests_media;
+#[cfg(test)]
+mod tests_messages;
+#[cfg(test)]
+mod tests_payments;
+
+pub use super::story_areas::{StoryAreaKind, StoryAreaView};
+pub use auth::*;
+pub use bots::*;
+pub use calls::*;
+pub use chat::*;
+pub use chat_drafts::*;
+pub use chat_events::*;
+pub use chat_invite::*;
+pub use chat_list::*;
+pub use chat_members::*;
+pub use chat_notifications::*;
+pub use communities::*;
+pub use envelope_types::*;
+pub use forum::*;
+pub use inline_queries::*;
+pub(crate) use json_helpers::*;
+pub use keyboards::*;
+pub use message::*;
+pub use message_audio_video::*;
+pub use message_contact::*;
+pub use message_content::*;
+pub use message_link_preview::*;
+pub use message_location::*;
+pub use message_media::*;
+pub use message_poll::*;
+pub use message_reactions::*;
+pub use message_sponsored::*;
+pub use message_sticker::*;
+pub(crate) use payload::*;
+pub use payments::*;
+pub use secret_chat::*;
+pub use sessions::*;
+pub use statistics::*;
+pub use storage::*;
+pub use stories::*;
+pub use users::*;

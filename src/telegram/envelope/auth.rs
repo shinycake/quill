@@ -1,0 +1,159 @@
+use super::*;
+use serde_json::Value;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TdError {
+    pub code: i32,
+    /// Error *class* only. The TDLib `message` field is not stored; it can
+    /// contain phone numbers or other secrets.
+    pub class: ErrorClass,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorClass {
+    NotFound,
+    Unauthorized,
+    Flood,
+    Invalid,
+    /// S14: `canPostStory` failed with `CHAT_ADMIN_REQUIRED` — stories
+    /// are disabled for non-admins in the target chat. Classified from
+    /// the raw error message in `parse_error` (the only place it is
+    /// still available); the message text itself is dropped.
+    StoryChatDisabled,
+    /// S14: `canPostStory` failed with `USER_RESTRICTED`.
+    StoryUserRestricted,
+    Other,
+}
+
+impl TdError {
+    pub fn from_code(code: i32) -> Self {
+        let class = match code {
+            404 => ErrorClass::NotFound,
+            401 => ErrorClass::Unauthorized,
+            429 => ErrorClass::Flood,
+            400 => ErrorClass::Invalid,
+            _ => ErrorClass::Other,
+        };
+        Self { code, class }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthorizationState {
+    WaitTdlibParameters,
+    WaitPhoneNumber,
+    WaitPremiumPurchase,
+    WaitEmailAddress,
+    WaitEmailCode,
+    WaitCode { code_length: Option<i32> },
+    WaitOtherDeviceConfirmation { link: String },
+    WaitRegistration,
+    WaitPassword { has_recovery_email: bool },
+    Ready,
+    LoggingOut,
+    Closing,
+    Closed,
+    Unknown(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionState {
+    WaitingForNetwork,
+    ConnectingToProxy,
+    Connecting,
+    Updating,
+    Ready,
+    Unknown,
+}
+
+/// Slice A2: `passwordState` (TDLib 1.8.67, `schema/td_api.tl:273`):
+/// `passwordState has_password:Bool password_hint:string
+/// has_recovery_email_address:Bool has_passport_data:Bool
+/// recovery_email_address_code_info:emailAddressAuthenticationCodeInfo
+/// login_email_address_pattern:string pending_reset_date:int32 =
+/// PasswordState;`
+/// `recovery_email_address_code_info` is null unless a recovery-email
+/// confirmation is pending (`emailAddressAuthenticationCodeInfo
+/// email_address_pattern:string length:int32 = ...`, schema line 83).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PasswordState {
+    pub has_password: bool,
+    pub password_hint: String,
+    pub has_recovery_email_address: bool,
+    pub has_passport_data: bool,
+    /// Pattern of the pending recovery email (e.g. "i***@example.com"),
+    /// `None` when no confirmation is pending.
+    pub pending_email_pattern: Option<String>,
+    /// Expected confirmation-code length (`length` of the code info).
+    pub pending_email_code_length: i32,
+    pub login_email_address_pattern: String,
+    pub pending_reset_date: i32,
+}
+
+pub(crate) fn parse_auth(value: &Value) -> AuthorizationState {
+    let ty = value.get("@type").and_then(Value::as_str).unwrap_or("");
+    match ty {
+        "authorizationStateWaitTdlibParameters" => AuthorizationState::WaitTdlibParameters,
+        "authorizationStateWaitPhoneNumber" => AuthorizationState::WaitPhoneNumber,
+        "authorizationStateWaitPremiumPurchase" => AuthorizationState::WaitPremiumPurchase,
+        "authorizationStateWaitEmailAddress" => AuthorizationState::WaitEmailAddress,
+        "authorizationStateWaitEmailCode" => AuthorizationState::WaitEmailCode,
+        "authorizationStateWaitCode" => AuthorizationState::WaitCode {
+            code_length: value
+                .get("code_info")
+                .and_then(|info| info.get("type"))
+                .and_then(|ty| ty.get("length"))
+                .and_then(Value::as_i64)
+                .map(|n| n as i32),
+        },
+        "authorizationStateWaitOtherDeviceConfirmation" => {
+            // The `link` is the QR payload (a tg://login token). It is
+            // carried through to the UI for QR rendering and never logged.
+            AuthorizationState::WaitOtherDeviceConfirmation {
+                link: json_field_str(value, "link"),
+            }
+        }
+        "authorizationStateWaitRegistration" => AuthorizationState::WaitRegistration,
+        "authorizationStateWaitPassword" => AuthorizationState::WaitPassword {
+            has_recovery_email: value
+                .get("has_recovery_email_address")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
+        "authorizationStateReady" => AuthorizationState::Ready,
+        "authorizationStateLoggingOut" => AuthorizationState::LoggingOut,
+        "authorizationStateClosing" => AuthorizationState::Closing,
+        "authorizationStateClosed" => AuthorizationState::Closed,
+        other => AuthorizationState::Unknown(other.to_string()),
+    }
+}
+
+pub(crate) fn parse_connection(value: Option<&Value>) -> ConnectionState {
+    match value.and_then(|v| v.get("@type")).and_then(Value::as_str) {
+        Some("connectionStateWaitingForNetwork") => ConnectionState::WaitingForNetwork,
+        Some("connectionStateConnectingToProxy") => ConnectionState::ConnectingToProxy,
+        Some("connectionStateConnecting") => ConnectionState::Connecting,
+        Some("connectionStateUpdating") => ConnectionState::Updating,
+        Some("connectionStateReady") => ConnectionState::Ready,
+        _ => ConnectionState::Unknown,
+    }
+}
+
+pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
+    let code = value
+        .and_then(|v| v.get("code"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0) as i32;
+    // S14: story-posting restriction errors are classified here — the
+    // only place the raw message is still available (`TdError` drops it
+    // for secret-scrubbing). Anything unrecognized falls back to the
+    // code-based class, so every other flow is unchanged.
+    if let Some(class) = value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .and_then(crate::story_restriction::classify_server_message)
+    {
+        return TdError { code, class };
+    }
+    TdError::from_code(code)
+}
