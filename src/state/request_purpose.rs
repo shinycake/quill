@@ -110,6 +110,24 @@ pub enum RequestPurpose {
     ResolveInlineBot {
         generation: u64,
     },
+    /// `parity:platform-deep-links`: `getDeepLinkInfo` for a launch-time
+    /// `t.me` / `tg:` link (schema 1.8.67, line 16189). The answer lands
+    /// in `Session::deep_link`; `generation` drops stale answers.
+    DeepLinkInfo {
+        generation: u64,
+    },
+    /// `parity:platform-deep-links`: deep-link follow-up resolving to a
+    /// chat (`searchPublicChat` / `createPrivateChat`). The `chat` answer
+    /// is picked up in `apply_update_new_chat` and opens via `ChatReady`.
+    DeepLinkResolve {
+        generation: u64,
+    },
+    /// `parity:platform-deep-links`: `joinChatByInviteLink` (schema 1.8.67,
+    /// line 14166). The `chatJoinResult` answer is handled in
+    /// `session_apply.rs` against `Session::deep_link`.
+    DeepLinkJoin {
+        generation: u64,
+    },
     /// Bots slice: `sendInlineQueryResultMessage` (schema 1.8.67, line
     /// 12226). Response is the sent `message`; failures surface through
     /// the normal message-send failure path.

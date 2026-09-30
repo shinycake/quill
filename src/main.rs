@@ -76,6 +76,11 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    // `parity:platform-deep-links`: a `t.me` / `tg:` launch argument is
+    // stashed on the app and resolved via `getDeepLinkInfo` once auth is
+    // Ready (see `ui::deep_links`).
+    let pending_deep_link = quill::connect::detect_deep_link_arg(args);
+
     let credentials = quill::credentials::load();
     gpui_kit::application()
         .with_assets(QuillAssets)
@@ -101,7 +106,11 @@ fn ui_main(args: &[String]) {
                         ..quill_window_options("Quill")
                     },
                     move |window, cx| {
-                        let view = cx.new(|cx| ui::QuillApp::new(window, cx, credentials.clone()));
+                        let view = cx.new(|cx| {
+                            let mut app = ui::QuillApp::new(window, cx, credentials.clone());
+                            app.pending_deep_link = pending_deep_link.clone();
+                            app
+                        });
                         // parity:platform-tray-icon — system tray icon with
                         // unread count, synced on a 1s UI-thread timer. The
                         // tray module no-ops when the count is unchanged or

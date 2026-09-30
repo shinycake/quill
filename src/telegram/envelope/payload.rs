@@ -1811,6 +1811,19 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "chatInviteLink" => Ok(EnvelopePayload::ChatInviteLink {
             link: parse_chat_invite_link(Some(&value)).ok_or(ParseError::MissingField)?,
         }),
+        // `parity:platform-deep-links`: `deepLinkInfo` (schema 1.8.67,
+        // line 10087) — the `getDeepLinkInfo` answer.
+        "deepLinkInfo" => {
+            let text = parse_formatted_text(value.get("text"));
+            Ok(EnvelopePayload::DeepLinkInfo {
+                entities: parse_text_entities(&text, value.get("text")),
+                text,
+                need_update: value
+                    .get("need_update_application")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+        }
         "chatInviteLinks" => Ok(EnvelopePayload::ChatInviteLinks {
             total_count: int53(value.get("total_count")).map(|v| v as i32)?,
             links: value

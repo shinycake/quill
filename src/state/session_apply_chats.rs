@@ -88,6 +88,24 @@ impl Session {
                 }
             }
         }
+        // `parity:platform-deep-links`: the `searchPublicChat` /
+        // `createPrivateChat` answer for a deep-link follow-up. Any chat
+        // object the server returns is the link's destination (the UI
+        // consumes `ChatReady` once to open it). Generation-guarded like
+        // the bot-resolve slot above.
+        if let Some(p) = pending.as_ref()
+            && let RequestPurpose::DeepLinkResolve { generation } = p.purpose
+            && let Some(DeepLinkState::ResolvingChat {
+                action,
+                generation: slot_generation,
+            }) = self.deep_link.as_ref()
+            && *slot_generation == generation
+        {
+            self.deep_link = Some(DeepLinkState::ChatReady {
+                chat_id,
+                action: action.clone(),
+            });
+        }
         let chat = self
             .chats
             .entry(chat_id.0)

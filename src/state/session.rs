@@ -745,6 +745,11 @@ pub struct Session {
     /// Bots slice: generation counter for `ResolveInlineBot` request
     /// correlation (bumped per resolve; see the purpose docs).
     pub inline_bot_resolve_seq: u64,
+    /// `parity:platform-deep-links`: the single active deep-link flow
+    /// (launch link → `getDeepLinkInfo` → follow-up → open chat).
+    pub deep_link: Option<DeepLinkState>,
+    /// Generation counter for deep-link request correlation.
+    pub deep_link_seq: u64,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -1110,6 +1115,8 @@ impl Session {
             inline_query: None,
             inline_bot_resolve: None,
             inline_bot_resolve_seq: 0,
+            deep_link: None,
+            deep_link_seq: 0,
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),

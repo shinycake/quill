@@ -836,6 +836,34 @@ impl Session {
                     });
                 }
             }
+            // `parity:platform-deep-links`: a failed deep-link request
+            // surfaces TDLib's error as a dialog; stale failures (a newer
+            // flow is already in flight) are ignored via the generation
+            // guard.
+            Some(
+                RequestPurpose::DeepLinkInfo { generation }
+                | RequestPurpose::DeepLinkResolve { generation }
+                | RequestPurpose::DeepLinkJoin { generation },
+            ) => {
+                let stale = !matches!(
+                    &self.deep_link,
+                    Some(
+                        DeepLinkState::ResolvingInfo {
+                            generation: slot
+                        }
+                        | DeepLinkState::ResolvingChat {
+                            generation: slot,
+                            ..
+                        }
+                    ) if *slot == generation
+                );
+                if !stale {
+                    self.deep_link = Some(DeepLinkState::ShowText(format!(
+                        "Couldn't open the link (error {}).",
+                        err.code
+                    )));
+                }
+            }
             // Phase D3c: a failed first page lands in the fetch
             // state so the panel shows an honest error instead of
             // spinning forever. A failed "load more" keeps the
