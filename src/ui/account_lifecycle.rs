@@ -177,11 +177,18 @@ impl QuillApp {
     /// Account dialog closes — the blocking "Signing out" auth view
     /// takes over.
     pub(crate) fn submit_logout(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.request_logout()
+        {
+            // N2 fix-up: a failed send must not silently close the
+            // dialog — stay put and say so (near-impossible behind the
+            // Ready guard).
+            self.status_note = format!("log out failed: {err:?}");
+            cx.notify();
+            return;
+        }
         self.account_lifecycle.confirm_logout = false;
         self.account_lifecycle.open = false;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.request_logout();
-        }
         cx.notify();
     }
 
