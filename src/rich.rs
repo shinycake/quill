@@ -85,6 +85,9 @@ impl RichBlock {
             RichBlock::Document {
                 file_name, caption, ..
             } => len(file_name) + len(caption),
+            RichBlock::Photo { caption, .. } | RichBlock::Video { caption, .. } => {
+                len(caption)
+            }
             RichBlock::Table { rows } => rows.iter().flatten().map(|cell| len(cell)).sum(),
             RichBlock::ButtonRow { .. }
             | RichBlock::Divider
