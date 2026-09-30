@@ -90,12 +90,31 @@ pub fn start_live_connect(
     store: &(impl SecretStore + ?Sized),
     diagnostics: Arc<dyn DiagnosticSink>,
 ) -> Result<LiveConnect, ConnectBlocker> {
+    let app_root = safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
+    start_live_connect_for_account(
+        credentials,
+        store,
+        diagnostics,
+        crate::settings::active_account(&app_root),
+    )
+}
+
+/// Connect as a specific account. This is the account-switching seam: the
+/// account-switcher UI calls [`LiveConnect::shutdown`] on the current client
+/// and then this with the new key (plus
+/// [`crate::settings::set_active_account`] to persist it for next startup).
+pub fn start_live_connect_for_account(
+    credentials: TelegramCredentials,
+    store: &(impl SecretStore + ?Sized),
+    diagnostics: Arc<dyn DiagnosticSink>,
+    account: AccountKey,
+) -> Result<LiveConnect, ConnectBlocker> {
     match evaluate_gate(true) {
         ConnectGate::Blocked(b) => return Err(b),
         ConnectGate::Ready { .. } => {}
     }
     let app_root = safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
-    let prepared = prepare_connect(&app_root, AccountKey::primary(), store, &credentials)?;
+    let prepared = prepare_connect(&app_root, account, store, &credentials)?;
     let live = LiveTdJson::connect().map_err(|e| match e {
         TdJsonError::NotFound => ConnectBlocker::MissingTdjson,
         _ => ConnectBlocker::TdjsonLoad,
