@@ -239,10 +239,12 @@ impl Render for QuillApp {
                 // so the 60s auto-night tick can't silently revert the
                 // flip. Auto-night, when enabled, still overrides the
                 // manual choice while active — same as the dialog.
-                let next = if this.appearance.theme == ThemeChoice::Dark {
-                    ThemeChoice::Light
-                } else {
-                    ThemeChoice::Dark
+                // stories-high-contrast: the toggle cycles all three
+                // modes (Light → Dark → High contrast).
+                let next = match this.appearance.theme {
+                    ThemeChoice::Light => ThemeChoice::Dark,
+                    ThemeChoice::Dark => ThemeChoice::HighContrast,
+                    ThemeChoice::HighContrast => ThemeChoice::Light,
                 };
                 this.set_appearance(cx, |a| a.theme = next);
             }))
