@@ -257,6 +257,7 @@ pub fn sync_tray(session: Option<&Session>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chatlist_style::ChatPreviewStyle;
     use crate::diagnostics::MemorySink;
     use crate::ids::{AccountKey, ChatId, MessageId};
     use crate::settings::BadgePrefs;
@@ -282,6 +283,8 @@ mod tests {
             folder_positions: BTreeMap::new(),
             notification_settings: ChatNotificationSettings::default(),
             last_preview: String::new(),
+            last_preview_style: ChatPreviewStyle::default(),
+            last_preview_sender: String::new(),
             typing_senders: Vec::new(),
             choosing_sticker_senders: Vec::new(),
             draft: None,

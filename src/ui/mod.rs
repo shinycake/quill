@@ -2,6 +2,7 @@ mod account_lifecycle;
 mod appearance;
 mod auth_recovery;
 mod chat_theme;
+mod chatlist_style;
 mod force_reply;
 mod privacy;
 mod story_areas;
@@ -57,6 +58,7 @@ use gpui_kit::gpui::StyleRefinement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView, view_for};
+use quill::chatlist_style::ChatListRowStyle;
 use quill::community_mode;
 use quill::composer::{
     AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
@@ -41254,6 +41256,7 @@ impl QuillApp {
                                     let height = match item {
                                         ChatListItem::Chat { chat, .. } => chat_row_height(
                                             &chat_row_tags(chat, &folder_names, show_folder_tags),
+                                            self.appearance.preview_lines,
                                         ),
                                         ChatListItem::ArchiveHeader { .. } => px(32.),
                                         ChatListItem::ArchiveEmpty => px(24.),
@@ -45084,10 +45087,16 @@ fn chat_row_tags(chat: &ChatSummary, folders: &[(i32, String)], show_tags: bool)
 
 /// kit Phase 3: chat rows render at a fixed height so the kit
 /// `VirtualList` can position them from declared sizes — 56px base
-/// (avatar 40 + the old py_2), 80px when the folder-tag strip is present.
-/// `session_chat_row` enforces the same height on the element.
-fn chat_row_height(tags: &[String]) -> Pixels {
-    if tags.is_empty() { px(56.) } else { px(80.) }
+/// (avatar 40 + the old py_2), 80px when the folder-tag strip is present,
+/// +16px per preview line beyond the first (Settings → Appearance →
+/// Chat list rows). `session_chat_row` enforces the same height on the
+/// element. Delegates to the pure `chatlist_style` helper so the math is
+/// unit-testable.
+fn chat_row_height(tags: &[String], preview_lines: u8) -> Pixels {
+    px(quill::chatlist_style::chat_row_height_px(
+        !tags.is_empty(),
+        preview_lines,
+    ))
 }
 
 impl QuillApp {
@@ -45166,6 +45175,12 @@ impl QuillApp {
                     archived,
                     selecting,
                     checked,
+                    // Slice chatlist-list-style: Settings → Appearance.
+                    ChatListRowStyle::new(
+                        self.appearance.preview_lines,
+                        self.appearance.chat_list_media_icons,
+                        self.appearance.chat_list_rich_preview,
+                    ),
                     cx,
                 )
                 .into_any_element()
@@ -45254,6 +45269,9 @@ fn session_chat_row(
     // of opening the chat, and shows the check circle.
     selecting: bool,
     checked: bool,
+    // Slice chatlist-list-style: preview line count, media icons, and
+    // formatted preview (Settings → Appearance → Chat list rows).
+    row_style: ChatListRowStyle,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
@@ -45262,6 +45280,21 @@ fn session_chat_row(
     // `title` below).
     let drag_title = title.clone();
     let preview = chat.sidebar_preview();
+    // Slice chatlist-list-style: the icon/entities describe
+    // `last_preview` only — draft/typing/activity lines render unstyled.
+    // (When the shown text equals `last_preview` the entities describe
+    // it even if the text arrived via the draft path.)
+    let from_last = preview == chat.last_preview;
+    let icon: Option<&str> = if row_style.media_icons && from_last {
+        chat.last_preview_style.icon
+    } else {
+        None
+    };
+    let entities: &[TextEntity] = if row_style.rich_preview && from_last {
+        &chat.last_preview_style.entities
+    } else {
+        &[]
+    };
     // Slice CL1: a marked-as-unread chat shows the unread badge even
     // with zero unread messages (official clients show a dot); the count
     // wins when there are unread messages (TGX TGChat.java:396).
@@ -45293,9 +45326,10 @@ fn session_chat_row(
         .aria_label(row_label)
         // kit Phase 3: fixed height (see `chat_row_height`) — the
         // `VirtualList` positions rows from declared sizes, so the row
-        // enforces the same height and centers its content. Title and
-        // preview truncate to one line so content can never overflow it.
-        .h(chat_row_height(&tags))
+        // enforces the same height and centers its content. Title,
+        // sender and preview lines truncate to one line so content can
+        // never overflow it.
+        .h(chat_row_height(&tags, row_style.preview_lines))
         .flex()
         .flex_col()
         .justify_center()
@@ -45420,13 +45454,22 @@ fn session_chat_row(
                                         .when(has_mentions, |this| this.child(mention_badge())),
                                 ),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .truncate()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(preview),
-                        ),
+                        .when(row_style.preview_lines >= 3, |this| {
+                            // Slice chatlist-list-style: the third line
+                            // names the sender ("You" / author signature /
+                            // chat title).
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .truncate()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(chat.last_preview_sender.clone()),
+                            )
+                        })
+                        .child(chatlist_style::chat_list_preview_line(
+                            icon, &preview, entities, cx,
+                        )),
                 ),
         )
         .when(!tags.is_empty(), |this| {
