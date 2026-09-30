@@ -22,6 +22,12 @@ pub enum ErrorClass {
     StoryChatDisabled,
     /// S14: `canPostStory` failed with `USER_RESTRICTED`.
     StoryUserRestricted,
+    /// Slice msg-richtext-ai-tools: an AI compose/fix call failed with
+    /// `AICOMPOSE_FLOOD_PREMIUM` (schema documents it on all five AI
+    /// methods) — Telegram Premium is required for further requests.
+    /// Classified from the raw error message in `parse_error` (the only
+    /// place it is still available); the message text itself is dropped.
+    AiComposeFloodPremium,
     Other,
 }
 
@@ -154,6 +160,19 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         .and_then(crate::story_restriction::classify_server_message)
     {
         return TdError { code, class };
+    }
+    // Slice msg-richtext-ai-tools: the documented AI flood error
+    // (`AICOMPOSE_FLOOD_PREMIUM`) is a known constant, safe to match —
+    // it names a product state, not a secret.
+    if value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .is_some_and(|message| message == "AICOMPOSE_FLOOD_PREMIUM")
+    {
+        return TdError {
+            code,
+            class: ErrorClass::AiComposeFloodPremium,
+        };
     }
     TdError::from_code(code)
 }

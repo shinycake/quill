@@ -783,3 +783,79 @@ fn b1_delete_chat_reply_markup_shape_matches_1_8_67() {
     assert_eq!(v["chat_id"], 21);
     assert_eq!(v["message_id"], 306);
 }
+
+#[test]
+fn fix_text_with_ai_shape_matches_1_8_67() {
+    // Slice msg-richtext-ai-tools: `fixTextWithAi text:formattedText =
+    // FixedText` (schema 1.8.67, line 12172).
+    let json = fix_text_with_ai(RequestId(71), "teh draft");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "fixTextWithAi");
+    assert_eq!(v["@extra"], "71");
+    assert_eq!(v["text"]["@type"], "formattedText");
+    assert_eq!(v["text"]["text"], "teh draft");
+    assert_eq!(v["text"]["entities"], serde_json::json!([]));
+}
+
+#[test]
+fn compose_text_with_ai_shape_matches_1_8_67() {
+    // Slice msg-richtext-ai-tools: `composeTextWithAi
+    // text:formattedText translate_to_language_code:string style_name:string
+    // add_emojis:Bool = FormattedText` (schema 1.8.67, line 12154).
+    let json = compose_text_with_ai(RequestId(72), "draft", "es", "formal", true);
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "composeTextWithAi");
+    assert_eq!(v["@extra"], "72");
+    assert_eq!(v["text"]["@type"], "formattedText");
+    assert_eq!(v["text"]["text"], "draft");
+    assert_eq!(v["translate_to_language_code"], "es");
+    assert_eq!(v["style_name"], "formal");
+    assert_eq!(v["add_emojis"], true);
+}
+
+#[test]
+fn compose_rich_message_with_ai_shape_matches_1_8_67() {
+    // Slice msg-richtext-ai-tools: `composeRichMessageWithAi
+    // message:inputRichMessage translate_to_language_code:string
+    // style_name:string custom_prompt:string add_emojis:Bool = RichMessage`
+    // (schema 1.8.67, line 12162).
+    let message =
+        crate::rich::input_rich_message(&[crate::rich::RichBlock::Divider]).expect("blocks");
+    let json =
+        compose_rich_message_with_ai(RequestId(73), &message, "", "", "make it fun", false);
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "composeRichMessageWithAi");
+    assert_eq!(v["@extra"], "73");
+    assert_eq!(v["message"]["@type"], "inputRichMessage");
+    assert_eq!(v["translate_to_language_code"], "");
+    assert_eq!(v["style_name"], "");
+    assert_eq!(v["custom_prompt"], "make it fun");
+    assert_eq!(v["add_emojis"], false);
+}
+
+#[test]
+fn create_rich_message_with_ai_shape_matches_1_8_67() {
+    // Slice msg-richtext-ai-tools: `createRichMessageWithAi prompt:string
+    // language_code:string add_emojis:Bool = RichMessage` (schema 1.8.67,
+    // line 12168).
+    let json = create_rich_message_with_ai(RequestId(74), "write a haiku", "en", false);
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "createRichMessageWithAi");
+    assert_eq!(v["@extra"], "74");
+    assert_eq!(v["prompt"], "write a haiku");
+    assert_eq!(v["language_code"], "en");
+    assert_eq!(v["add_emojis"], false);
+}
+
+#[test]
+fn fix_rich_message_with_ai_shape_matches_1_8_67() {
+    // Slice msg-richtext-ai-tools: `fixRichMessageWithAi
+    // message:inputRichMessage = RichMessage` (schema 1.8.67, line 12176).
+    let message =
+        crate::rich::input_rich_message(&[crate::rich::RichBlock::Divider]).expect("blocks");
+    let json = fix_rich_message_with_ai(RequestId(75), &message);
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "fixRichMessageWithAi");
+    assert_eq!(v["@extra"], "75");
+    assert_eq!(v["message"]["@type"], "inputRichMessage");
+}

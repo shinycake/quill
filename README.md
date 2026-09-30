@@ -118,7 +118,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Compact tables in rich messages <!-- parity:msg-richtext-tables -->
 - [ ] Expandable block quotes (long block quotes collapse with an expand affordance; authoring covered by parity:msg-quote-block) <!-- parity:msg-blockquote-expandable -->
 - [x] Inline photos/videos in the rich-text composer (pageBlockPhoto/pageBlockVideo ↔ inputPageBlockPhoto/inputPageBlockVideo; emoji+caption tile render) <!-- parity:msg-richtext-inline-media -->
-- [ ] AI tools in the rich-text composer (composeTextWithAi, composeRichMessageWithAi, createRichMessageWithAi, fixTextWithAi, fixRichMessageWithAi) <!-- parity:msg-richtext-ai-tools -->
+- [x] AI tools in the rich-text composer: ✨ Fix (fixTextWithAi), ✨ Rewrite (composeTextWithAi), ✨ Create (createRichMessageWithAi) as rich-editor bar buttons; composeRichMessageWithAi and fixRichMessageWithAi wired at the driver level. Answers replace the open chat's draft (rich blocks flatten to text); errors surface in the status note, AICOMPOSE_FLOOD_PREMIUM gets a Premium line; refused in secret chats <!-- parity:msg-richtext-ai-tools -->
 - [x] Rich-text composer max length (32,768 chars) <!-- parity:msg-richtext-max-length -->
 - [ ] Premium gating of the rich-text editor <!-- parity:msg-richtext-premium-gate -->
 

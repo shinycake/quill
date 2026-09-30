@@ -432,6 +432,22 @@ pub enum EnvelopePayload {
     RichMessage {
         rich: RichMessageContent,
     },
+    /// Slice msg-richtext-ai-tools: `fixedText` (TDLib 1.8.67,
+    /// `schema/td_api.tl:157`) — the `fixTextWithAi` answer. `text` is
+    /// the fixed text the composer applies; `diff_text` is the plain
+    /// `diffText.text` description of the changes (kept for honesty,
+    /// not rendered — it would need a diff renderer).
+    FixedText {
+        text: String,
+        diff_text: String,
+    },
+    /// Slice msg-richtext-ai-tools: bare `formattedText` (TDLib 1.8.67,
+    /// `schema/td_api.tl:3046`) — the `composeTextWithAi` answer. The
+    /// composer applies `text` (entities are dropped: the draft is plain
+    /// text, documented in the driver).
+    FormattedText {
+        text: String,
+    },
     /// MED4: `webPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:4377`)
     /// — the `getWebPageInstantView` answer. `blocks` are the same
     /// `pageBlock*` list as `richMessage`, so the IV reader reuses the M2

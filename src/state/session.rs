@@ -65,6 +65,21 @@ pub struct Session {
     /// request errors. The UI drains it into the status note so the
     /// click never silently does nothing.
     pub message_link_error: Option<String>,
+    /// Slice msg-richtext-ai-tools: one-shot `fixTextWithAi` /
+    /// `composeTextWithAi` answer for the open chat's composer. The UI
+    /// drains it (replacing the draft) on the next frame; the chat id
+    /// guards against applying to a chat the user has since left.
+    pub ai_composer_text: Option<(ChatId, String)>,
+    /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
+    /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
+    /// the open chat's composer. Same drain contract as
+    /// `ai_composer_text`; blocks flatten to text on apply (the composer
+    /// is a text draft).
+    pub ai_composer_blocks: Option<(ChatId, RichMessageContent)>,
+    /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
+    /// errors. The UI drains it into the status note so the click never
+    /// silently does nothing.
+    pub ai_error: Option<String>,
     /// MED4: `getOption("message_caption_length_max")` via `updateOption`
     /// (TDLib 1.8.67, `schema/td_api.tl:10926`); default 1024 is TDLib's
     /// compiled default. Guards caption edits and media-send captions.
@@ -902,6 +917,9 @@ impl Session {
             composer_preview: None,
             composer_preview_urls: HashMap::new(),
             message_link_error: None,
+            ai_composer_text: None,
+            ai_composer_blocks: None,
+            ai_error: None,
             recognize_speech_error: None,
             resend_error: None,
             invite_link_error: None,

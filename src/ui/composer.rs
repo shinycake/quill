@@ -737,6 +737,36 @@ impl QuillApp {
         row
     }
 
+    /// Slice msg-richtext-ai-tools: run one AI action against the open
+    /// chat's composer draft. `send` issues the driver request; the
+    /// answer (or a TDLib error) lands through the session drain —
+    /// never silent, never fake success.
+    fn run_ai_composer_action(
+        &mut self,
+        cx: &mut Context<Self>,
+        working_note: &str,
+        send: impl FnOnce(
+            &mut quill::connect::LiveConnect,
+            ChatId,
+            &str,
+        ) -> Result<quill::ids::RequestId, quill::connect::ConnectSendError>,
+    ) {
+        let text = self.composer.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            self.status_note = "type something first — the AI works on the draft".into();
+        } else if let Some(live) = self.live.as_mut()
+            && let Some(chat_id) = live.driver.session.open_chat
+        {
+            self.status_note = match send(live, chat_id, &text) {
+                Ok(_) => working_note.into(),
+                Err(_) => "AI tools unavailable here".into(),
+            };
+        } else {
+            self.status_note = "AI tools unavailable here".into();
+        }
+        cx.notify();
+    }
+
     /// M2: rich editor bar — block buttons append markup templates to the
     /// composer text; below them a live preview renders the parsed blocks
     /// with the same block renderer as history. The ✕ button closes the
@@ -765,6 +795,43 @@ impl QuillApp {
                 },
             )));
         }
+        // Slice msg-richtext-ai-tools: AI actions on the draft. "Fix"
+        // runs `fixTextWithAi` (replaces the draft with the fixed text);
+        // "Rewrite" runs `composeTextWithAi` with the honest defaults
+        // (no translation, current style, no emoji); "Create" treats the
+        // draft as the prompt for `createRichMessageWithAi` and the
+        // created blocks replace the draft.
+        buttons = buttons.child(Button::new("rich-ai-fix").label("✨ Fix").ghost().on_click(
+            cx.listener(move |this, _, _, cx| {
+                this.run_ai_composer_action(cx, "AI fixing the text…", |live, chat_id, text| {
+                    live.driver.fix_text_with_ai(chat_id, text)
+                });
+            }),
+        ));
+        buttons = buttons.child(
+            Button::new("rich-ai-rewrite")
+                .label("✨ Rewrite")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(cx, "AI rewriting…", |live, chat_id, text| {
+                        live.driver.compose_text_with_ai(chat_id, text)
+                    });
+                })),
+        );
+        buttons = buttons.child(
+            Button::new("rich-ai-create")
+                .label("✨ Create")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(
+                        cx,
+                        "AI creating from the prompt…",
+                        |live, chat_id, text| {
+                            live.driver.create_rich_message_with_ai(chat_id, text)
+                        },
+                    );
+                })),
+        );
         buttons = buttons.child(
             Button::new("rich-editor-close")
                 .label("\u{2715}")

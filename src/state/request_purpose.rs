@@ -1160,6 +1160,26 @@ pub enum RequestPurpose {
     /// 15289). Response is `ok`; same no-local-state treatment as
     /// `DeleteSavedOrderInfo`.
     DeleteSavedCredentials,
+    /// Slice msg-richtext-ai-tools: `fixTextWithAi` (schema 1.8.67,
+    /// :12172). Response is `fixedText`; the fixed text replaces the
+    /// open chat's composer draft.
+    FixTextWithAi,
+    /// Slice msg-richtext-ai-tools: `composeTextWithAi` (schema 1.8.67,
+    /// :12154). Response is `formattedText`; the composed text replaces
+    /// the open chat's composer draft.
+    ComposeTextWithAi,
+    /// Slice msg-richtext-ai-tools: `composeRichMessageWithAi` (schema
+    /// 1.8.67, :12162). Response is `richMessage`; the parsed blocks
+    /// replace the open chat's composer draft (flattened to text).
+    ComposeRichMessageWithAi,
+    /// Slice msg-richtext-ai-tools: `createRichMessageWithAi` (schema
+    /// 1.8.67, :12168). Response is `richMessage`; the parsed blocks
+    /// replace the open chat's composer draft (flattened to text).
+    CreateRichMessageWithAi,
+    /// Slice msg-richtext-ai-tools: `fixRichMessageWithAi` (schema
+    /// 1.8.67, :12176). Response is `richMessage`; the parsed blocks
+    /// replace the open chat's composer draft (flattened to text).
+    FixRichMessageWithAi,
     Close,
     LogOut,
     Other,
