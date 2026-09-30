@@ -6853,3 +6853,46 @@ panel (`getGameHighScores`), send-game entry via `sendMessage`+`inputMessageGame
 - **Key decisions (ponytail):** no `logout_sent` flag on the driver — the `prev == LoggingOut && new == Closed` signal in `poll_live` already distinguishes the logout path from the quit path, so no new state was needed. No own-user name lookup for the `%1$s` slot — a generic "Log out of Quill?" question; plumbing `getMe` for one word of copy wasn't worth it. No separate confirm dialog — the inline banner is the established pattern for this dialog (delete account) and the shell renders only one kit dialog at a time.
 - **Not verifiable without live Telegram:** the real `logOut` round trip and the TDLib-driven `LoggingOut → Closed` timing against a live account (no credentials on the build VM).
 - **Out of this slice:** multi-account, delete account (separate, exists), session termination (exists), changing the login flow itself.
+## Slice platform-history-export — CHAT HISTORY EXPORT (2026-09-30)
+
+**Scope:** `parity:platform-history-export` — export a chat's full history
+to a JSON file. (Checklist tag is `platform-history-export`; the working
+name `platform-chat-export` is kept in code/comments.)
+
+- **Built:**
+  - `src/chat_export.rs` (new): `ChatExportState` (chat_id/title, message
+    buffer, in_flight/done_paging/failed/finished_path), `project_message`
+    (ParsedMessage → JSON-serializable `{id, date, outgoing, text?, media?}`;
+    captions kept, media labeled e.g. "photo"/"document: x.pdf"), and
+    `write_export` (pretty JSON to
+    `~/Downloads/quill-export-<title>-<unix>.json`).
+  - Driver (`src/connect/messages.rs`): `start_chat_export` (refuses while
+    another export runs; sends first `getChatHistory` page, limit 100) and
+    `pump_chat_export` (sends the next page from the oldest fetched id;
+    writes the file when a short page ends paging).
+  - Session: new `RequestPurpose::ExportChatHistory`; `messages` answers
+    for it append to the export buffer in `session_apply_messages.rs`
+    instead of merging into view history (mirrors the GetChatPreview
+    pattern). Short page (< 100) ⇒ `done_paging`.
+  - UI (`src/ui/conversation.rs`, `notifications.rs`): ghost "Export"
+    button in the chat header (live-only, next to "Media"); `poll_live`
+    pumps the export every 40ms and surfaces completion
+    ("Exported N messages to <path>") or failure as a status note, then
+    clears the state.
+- **Key decisions (ponytail):**
+  - No file picker (no rfd dep): exports land in Downloads with a
+    sanitized, timestamped name; the completion note shows the full path.
+  - No per-message sender names: Quill plumbs no sender identity anywhere
+    (the UI shows the chat title on rows); `outgoing` marks own messages.
+    Said in the README box note, not hidden.
+  - JSON only, no HTML: the checklist asks for "export to file"; JSON is
+    the interoperable half of what Telegram Desktop offers, and HTML can
+    be a follow-up.
+- **Tests:** 4 unit tests (projection incl. outgoing/text, generic label,
+  page_from oldest-id, write_export JSON shape) + driver test
+  `chat_export_pages_history_until_short_page` (request shape, 100-msg page
+  → next page from id 901, short page → done_paging; double-start refused).
+- **Not verifiable without live Telegram:** the real end-to-end export
+  against a live chat (paging + file write against real TDLib).
+- **Out of this slice:** full account data export
+  (`parity:platform-data-export`) — separate, much bigger slice.

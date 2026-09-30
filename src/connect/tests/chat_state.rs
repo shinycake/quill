@@ -849,3 +849,127 @@ fn cl1_remove_chat_from_list_sends_delete_history() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn chat_export_pages_history_until_short_page() {
+    // `parity:platform-chat-export`: starting an export sends
+    // `getChatHistory` (newest first, limit 100); a full page triggers the
+    // next page from the oldest id, a short page ends paging.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    driver
+        .start_chat_export(ChatId(16), "Export Chat".into())
+        .unwrap();
+    // A second export while one is running is refused.
+    assert!(
+        driver
+            .start_chat_export(ChatId(16), "Export Chat".into())
+            .is_err()
+    );
+    let first = recorder
+        .snapshot()
+        .into_iter()
+        .find(|j| j.contains("\"@type\":\"getChatHistory\""))
+        .expect("export history JSON sent");
+    let value: Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(value["chat_id"], 16);
+    assert_eq!(value["from_message_id"], 0);
+    assert_eq!(value["limit"], 100);
+
+    // Full page (100 messages, ids 1000..901) → not done, next page due.
+    let extra = driver
+        .session
+        .requests
+        .pending_extra_for(RequestPurpose::ExportChatHistory, Some(ChatId(16)))
+        .expect("export page in flight");
+    let msgs: Vec<String> = (0..100)
+        .map(|i| {
+            let id = 1000 - i;
+            format!(
+                r#"{{"id":{id},"chat_id":16,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m{id}","entities":[]}}}}}}"#
+            )
+        })
+        .collect();
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"messages","@extra":"{}","messages":[{}]}}"#,
+                    extra.0,
+                    msgs.join(",")
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let export = driver.session.chat_export.as_ref().expect("export active");
+    assert_eq!(export.messages.len(), 100);
+    assert_eq!(export.messages[0].text.as_deref(), Some("m1000"));
+    assert!(!export.done_paging);
+    assert!(!export.in_flight);
+
+    // Pump sends the next page from the oldest fetched id (901).
+    driver.pump_chat_export();
+    let second = recorder
+        .snapshot()
+        .into_iter()
+        .filter(|j| j.contains("\"@type\":\"getChatHistory\""))
+        .nth(1)
+        .expect("second export page sent");
+    let value: Value = serde_json::from_str(&second).unwrap();
+    assert_eq!(value["from_message_id"], 901);
+
+    // Short page (2 messages: the boundary id 901 re-included by TDLib's
+    // inclusive from_message_id, then 900) → boundary deduped, paging done.
+    let extra = driver
+        .session
+        .requests
+        .pending_extra_for(RequestPurpose::ExportChatHistory, Some(ChatId(16)))
+        .expect("second export page in flight");
+    let msg = |id: i64, text: &str| {
+        format!(
+            r#"{{"id":{id},"chat_id":16,"is_outgoing":true,"date":1699999999,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}"#
+        )
+    };
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"messages","@extra":"{}","messages":[{},{}]}}"#,
+                    extra.0,
+                    msg(901, "m901"),
+                    msg(900, "last"),
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let export = driver.session.chat_export.as_ref().expect("export active");
+    // 100 from page 1 + 1 new (901 was already there — no duplicate).
+    assert_eq!(export.messages.len(), 101);
+    assert_eq!(export.messages.iter().filter(|m| m.id == 901).count(), 1);
+    assert!(export.messages.last().unwrap().outgoing);
+    assert!(export.done_paging);
+    let _ = std::fs::remove_dir_all(&dir);
+}

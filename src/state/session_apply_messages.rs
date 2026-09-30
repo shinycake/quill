@@ -58,6 +58,36 @@ impl Session {
             });
             return;
         }
+        // `parity:platform-chat-export` — append the page to the export
+        // buffer. A short page means the server has no more history.
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::ExportChatHistory
+            && let Some(chat_id) = pending.chat_id
+        {
+            if let Some(export) = self.chat_export.as_mut()
+                && export.chat_id == chat_id
+            {
+                let short_page = messages.len() < crate::chat_export::EXPORT_PAGE_LIMIT as usize;
+                // `getChatHistory` is inclusive of `from_message_id`, so the
+                // first message of every non-first page is the boundary
+                // message already in the buffer — skip it (matched by id,
+                // not position, so a boundary deleted between pages doesn't
+                // cost a message) so each message exports exactly once.
+                let boundary_id = export.messages.last().map(|m| m.id);
+                for message in messages {
+                    let exported = crate::chat_export::project_message(&message);
+                    if Some(exported.id) == boundary_id {
+                        continue;
+                    }
+                    export.messages.push(exported);
+                }
+                export.in_flight = false;
+                if short_page {
+                    export.done_paging = true;
+                }
+            }
+            return;
+        }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetHistoryAround
         {

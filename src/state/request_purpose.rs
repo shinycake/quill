@@ -30,6 +30,10 @@ pub enum RequestPurpose {
     /// chat's history (the `GetHistory` branch drops answers for non-open
     /// chats, and the preview never calls `openChat`).
     GetChatPreview,
+    /// `parity:platform-chat-export` — `getChatHistory` pages for a chat
+    /// history export. The `messages` answer appends to
+    /// `Session::chat_export` instead of merging into view history.
+    ExportChatHistory,
     /// Any `sendMessage` (text / photo / document). Response `message` is pending.
     SendMessage,
     /// M2: `getFullRichMessage`. Response `richMessage` replaces the

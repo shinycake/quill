@@ -437,9 +437,43 @@ impl QuillApp {
                                         this.open_shared_media_ui(cx);
                                     })),
                             )
+                        })
+                        // `parity:platform-chat-export` — export the chat's
+                        // history to a JSON file in Downloads. Live only:
+                        // the export pages `getChatHistory` from TDLib.
+                        .when(self.live.is_some(), |this| {
+                            this.child(
+                                Button::new("chat-export-history")
+                                    .label("Export")
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.start_chat_export(chat_id, cx);
+                                    })),
+                            )
                         }),
                 )
             })
+    }
+
+    /// `parity:platform-chat-export` — start exporting a chat's history.
+    /// The driver pages `getChatHistory` in the background; completion (or
+    /// failure) surfaces as a status note from `poll_live`.
+    pub(super) fn start_chat_export(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let title = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .map(|c| c.title.clone())
+            .unwrap_or_else(|| "chat".to_string());
+        let started = self
+            .live
+            .as_mut()
+            .is_some_and(|live| live.driver.start_chat_export(chat_id, title).is_ok());
+        self.status_note = if started {
+            "Exporting chat history…".into()
+        } else {
+            "Could not start the export (another export is running).".into()
+        };
+        cx.notify();
     }
 
     pub(super) fn conversation(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
