@@ -97,7 +97,7 @@ use quill::rich::RichBlock;
 use quill::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
     AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, AppearancePrefs,
-    BadgePrefs, CallPrefs, MediaPrefs, ThemeChoice,
+    BadgePrefs, CallPrefs, ChatPrefs, MediaPrefs, ThemeChoice,
 };
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
@@ -715,6 +715,9 @@ pub struct QuillApp {
     /// (theme/auto-night/accent/wallpaper/font-size/bubbles), persisted
     /// to `appearance_prefs.json`.
     appearance: AppearancePrefs,
+    /// Chat prefs slice: chat-composer behavior (send-key mode),
+    /// persisted to `chat_prefs.json`.
+    chat_prefs: ChatPrefs,
     /// Settings → Appearance slice: the dialog is on screen.
     appearance_open: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
@@ -1645,11 +1648,16 @@ impl QuillApp {
         demo: Option<ScreenshotDemo>,
     ) -> Self {
         let chat = cx.new(SyntheticChat::new);
+        // Send-key mode drives kit's newline-vs-submit behavior: plain
+        // Enter submits only in Enter mode; in CtrlEnter mode it inserts
+        // a newline and Ctrl/Cmd+Enter sends.
+        let chat_prefs = Self::load_chat_prefs();
+        let submit_on_enter = chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Message — Enter sends, Shift+Enter newline. IME Enter must not send.")
                 .auto_grow(2, 6)
-                .submit_on_enter(true)
+                .submit_on_enter(submit_on_enter)
         });
         // Phase C2h: in-call group-chat composer for the voice-chat
         // overlay (sendGroupCallMessage).
@@ -1657,7 +1665,7 @@ impl QuillApp {
             TextareaState::new(window, cx)
                 .placeholder("Message the voice chat — Enter sends")
                 .auto_grow(1, 3)
-                .submit_on_enter(true)
+                .submit_on_enter(submit_on_enter)
         });
         // Phase C2i: comment field for the call-rating detail card.
         let rating_comment_input = cx.new(|cx| {
@@ -1816,13 +1824,21 @@ impl QuillApp {
                 }
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(quill::composer::enter_event_from_kit(
-                        *shift, *secondary, marked,
-                    )) {
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        this.chat_prefs.send_key_mode,
+                    ) {
                         if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
                         } else if !text.trim().is_empty() {
-                            this.submit_composer(text, window, cx);
+                            this.submit_composer(
+                                quill::composer::send_text_on_enter(
+                                    text,
+                                    this.chat_prefs.send_key_mode,
+                                ),
+                                window,
+                                cx,
+                            );
                         }
                     }
                 }
@@ -1835,9 +1851,10 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(quill::composer::enter_event_from_kit(
-                        *shift, *secondary, marked,
-                    )) {
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        this.chat_prefs.send_key_mode,
+                    ) {
                         this.send_group_call_message(window, cx);
                     }
                 }
@@ -1850,9 +1867,10 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(quill::composer::enter_event_from_kit(
-                        *shift, *secondary, marked,
-                    )) {
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
+                    ) {
                         this.submit_phone(window, cx);
                     }
                 }
@@ -1865,9 +1883,10 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(quill::composer::enter_event_from_kit(
-                        *shift, *secondary, marked,
-                    )) {
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
+                    ) {
                         this.submit_code(window, cx);
                     }
                 }
@@ -1880,9 +1899,10 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(quill::composer::enter_event_from_kit(
-                        *shift, *secondary, marked,
-                    )) {
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
+                    ) {
                         this.submit_password(window, cx);
                     }
                 }
@@ -1898,9 +1918,10 @@ impl QuillApp {
                 this.sync_search_query(&text, cx);
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(quill::composer::enter_event_from_kit(
-                        *shift, *secondary, marked,
-                    )) {
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
+                    ) {
                         this.activate_first_search_result(window, cx);
                     }
                 }
@@ -1915,9 +1936,10 @@ impl QuillApp {
                 this.sync_chat_search_query(&text, cx);
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(quill::composer::enter_event_from_kit(
-                        *shift, *secondary, marked,
-                    )) {
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
+                    ) {
                         this.jump_selected_chat_search_hit(cx);
                     }
                 }
@@ -1930,9 +1952,10 @@ impl QuillApp {
             |this, state, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(quill::composer::enter_event_from_kit(
-                        *shift, *secondary, marked,
-                    )) {
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        quill::composer::SendKeyMode::Enter, // not a chat composer — the send-key setting does not apply
+                    ) {
                         this.activate_first_forward_destination(cx);
                     }
                 }
@@ -3160,6 +3183,7 @@ impl QuillApp {
             event_log_admin_filter: None,
             storage_usage_open: false,
             appearance: Self::load_appearance(),
+            chat_prefs,
             appearance_open: false,
             appearance_applied: None,
             data_storage_editor: None,
@@ -27650,7 +27674,10 @@ impl QuillApp {
     /// `updateNewGroupCallMessage`. Clears on send — a send failure
     /// surfaces via `group_call_error`.
     fn send_group_call_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.group_call_composer.read(cx).value().to_string();
+        let text = quill::composer::send_text_on_enter(
+            self.group_call_composer.read(cx).value().to_string(),
+            self.chat_prefs.send_key_mode,
+        );
         if text.trim().is_empty() {
             return;
         }

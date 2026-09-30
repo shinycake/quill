@@ -428,6 +428,29 @@ pub fn save_contact_prefs(paths: &AccountPaths, prefs: &ContactPrefs) -> std::io
     std::fs::write(path, bytes)
 }
 
+/// Chat-composer behavior prefs, persisted as JSON next to the account
+/// root (`chat_prefs.json`). Client-side only (no TDLib setting):
+/// - `send_key_mode`: which keystroke sends a message
+///   (`composer::SendKeyMode`; parity:settings-enter-send,
+///   parity:settings-ctrlenter-send).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatPrefs {
+    #[serde(default)]
+    pub send_key_mode: crate::composer::SendKeyMode,
+}
+
+/// Load chat prefs; missing or corrupt files fall back to defaults
+/// (never a hard error — prefs must not block startup).
+pub fn load_chat_prefs(paths: &AccountPaths) -> ChatPrefs {
+    load_json_prefs(paths, "chat_prefs.json")
+}
+
+/// Persist chat prefs; failures are returned to the caller to surface
+/// in the status note.
+pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) -> std::io::Result<()> {
+    save_json_prefs(paths, "chat_prefs.json", prefs)
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountPaths {
     pub root: PathBuf,

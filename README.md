@@ -548,8 +548,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Storage usage view with per-chat / file-type breakdown <!-- parity:settings-storage-usage -->
 - [x] Clear cache <!-- parity:settings-clear-cache -->
 - [ ] App language selector (partial: `system_language_code:"en"` hardcoded in src/connect.rs:284) <!-- parity:settings-language -->
-- [ ] Enter-to-send toggle (partial: Enter always sends, hardcoded in src/composer.rs:19-20; no toggle) <!-- parity:settings-enter-send -->
-- [ ] Send by Cmd/Ctrl+Enter option <!-- parity:settings-ctrlenter-send -->
+- [x] Enter-to-send toggle (Settings → Appearance → Send messages with; `composer::SendKeyMode`, `chat_prefs.json`) <!-- parity:settings-enter-send -->
+- [x] Send by Cmd/Ctrl+Enter option (same setting; Ctrl/Cmd+Enter sends in CtrlEnter mode) <!-- parity:settings-ctrlenter-send -->
 
 ### Platform & edge cases
 

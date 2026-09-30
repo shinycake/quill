@@ -18,8 +18,9 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::AccountKey;
 use quill::settings::{
-    AccountPaths, AppearancePrefs, AutoNight, ThemeChoice, clamp_font_size, load_appearance_prefs,
-    local_minutes_since_midnight, night_active, safe_app_root, save_appearance_prefs,
+    AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, ThemeChoice, clamp_font_size,
+    load_appearance_prefs, load_chat_prefs, local_minutes_since_midnight, night_active,
+    safe_app_root, save_appearance_prefs, save_chat_prefs,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -126,6 +127,34 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Load persisted chat prefs (defaults when the file is missing/corrupt).
+    pub(crate) fn load_chat_prefs() -> ChatPrefs {
+        load_chat_prefs(&Self::appearance_paths())
+    }
+
+    /// The single funnel for chat-prefs controls: mutate, persist,
+    /// re-render. Same failure contract as `set_appearance`.
+    pub(crate) fn set_chat_prefs(
+        &mut self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut ChatPrefs),
+    ) {
+        f(&mut self.chat_prefs);
+        if let Err(err) = save_chat_prefs(&Self::appearance_paths(), &self.chat_prefs) {
+            self.status_note = format!("Couldn't save chat settings: {err}");
+        }
+        // Keep kit's newline-vs-submit behavior in sync with the mode on
+        // the two chat composers (other inputs always submit on Enter).
+        let submit = self.chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
+        self.composer.update(cx, |input, cx| {
+            input.set_submit_on_enter(submit, cx);
+        });
+        self.group_call_composer.update(cx, |input, cx| {
+            input.set_submit_on_enter(submit, cx);
+        });
+        cx.notify();
+    }
+
     /// Step the scheduled auto-night start/end time (30-minute steps,
     /// wraps past midnight).
     fn bump_night_time(&mut self, cx: &mut Context<Self>, is_start: bool, delta: i16) {
@@ -197,7 +226,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        "Theme, accent, wallpaper, text size, chat style and chat-list rows. \
+                        "Theme, accent, wallpaper, text size, chat style, chat-list rows and message send key. \
                          Changes apply immediately and are saved on this device.",
                     ),
             );
@@ -208,6 +237,7 @@ impl QuillApp {
             body = body.child(this.appearance_font_section(cx));
             body = body.child(this.appearance_bubble_section(cx));
             body = body.child(this.appearance_chat_list_section(cx));
+            body = body.child(this.appearance_send_key_section(cx));
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
                     .label("Close")
@@ -642,5 +672,39 @@ impl QuillApp {
             |a, on| a.chat_list_rich_preview = on,
         ));
         body.into_any_element()
+    }
+
+    /// Send-key mode section (parity:settings-enter-send,
+    /// parity:settings-ctrlenter-send): which keystroke sends a chat
+    /// message. Lives in the Appearance dialog — Quill has no separate
+    /// Chat Settings screen yet.
+    fn appearance_send_key_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        use quill::composer::SendKeyMode;
+        let current = self.chat_prefs.send_key_mode;
+        let control = RadioGroup::horizontal("appearance-send-key")
+            .selected_index(Some(if current == SendKeyMode::Enter { 0 } else { 1 }))
+            .children([
+                Radio::new("appearance-send-key-enter").label("⏎ Enter"),
+                Radio::new("appearance-send-key-ctrlenter").label(if cfg!(target_os = "macos") {
+                    "⌘⏎ Cmd+Enter"
+                } else {
+                    "⌃⏎ Ctrl+Enter"
+                }),
+            ])
+            .on_click(cx.listener(|this, &ix, _, cx| {
+                this.set_chat_prefs(cx, |c| {
+                    c.send_key_mode = if ix == 0 {
+                        SendKeyMode::Enter
+                    } else {
+                        SendKeyMode::CtrlEnter
+                    };
+                });
+            }));
+        self.appearance_section(
+            cx,
+            "Send messages with",
+            "Enter sends, or Enter inserts a newline and Ctrl/Cmd+Enter sends.",
+            control.into_any_element(),
+        )
     }
 }

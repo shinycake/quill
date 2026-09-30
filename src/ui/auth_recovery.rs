@@ -26,9 +26,12 @@ pub(crate) fn subscribe_recovery_input(
         |this, state, event: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { secondary, shift } = event {
                 let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                if should_send_on_enter(quill::composer::enter_event_from_kit(
-                    *shift, *secondary, marked,
-                )) {
+                if should_send_on_enter(
+                    quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                    // Recovery-code form: Enter always submits (not a chat
+                    // composer — the send-key setting does not apply).
+                    quill::composer::SendKeyMode::Enter,
+                ) {
                     this.submit_recovery_code(window, cx);
                 }
             }
