@@ -554,9 +554,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Slice msg-richtext-ai-tools: `fixTextWithAi` (TDLib 1.8.67,
     /// `schema/td_api.tl:12172`) on the composer draft. The `fixedText`
-    /// answer replaces the draft; the `diff_text` is intentionally not
-    /// rendered (it would need a diff renderer — the fixed text is the
-    /// honest result).
+    /// answer replaces the draft.
     pub fn fix_text_with_ai(
         &mut self,
         chat_id: ChatId,

@@ -798,7 +798,10 @@ impl QuillApp {
         // Slice msg-richtext-ai-tools: AI actions on the draft. "Fix"
         // runs `fixTextWithAi` (replaces the draft with the fixed text);
         // "Rewrite" runs `composeTextWithAi` with the honest defaults
-        // (no translation, current style, no emoji); "Create" treats the
+        // (no translation, current style, no emoji); "Fix rich" and
+        // "Rewrite rich" parse the draft to blocks with the same markup
+        // parser as the preview and run `fixRichMessageWithAi` /
+        // `composeRichMessageWithAi` on them; "Create" treats the
         // draft as the prompt for `createRichMessageWithAi` and the
         // created blocks replace the draft.
         buttons = buttons.child(Button::new("rich-ai-fix").label("✨ Fix").ghost().on_click(
@@ -828,6 +831,36 @@ impl QuillApp {
                         "AI creating from the prompt…",
                         |live, chat_id, text| {
                             live.driver.create_rich_message_with_ai(chat_id, text)
+                        },
+                    );
+                })),
+        );
+        buttons = buttons.child(
+            Button::new("rich-ai-fix-rich")
+                .label("✨ Fix rich")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(
+                        cx,
+                        "AI fixing the blocks…",
+                        |live, chat_id, text| {
+                            let blocks = quill::rich::preview_blocks(text);
+                            live.driver.fix_rich_message_with_ai(chat_id, &blocks)
+                        },
+                    );
+                })),
+        );
+        buttons = buttons.child(
+            Button::new("rich-ai-rewrite-rich")
+                .label("✨ Rewrite rich")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(
+                        cx,
+                        "AI rewriting the blocks…",
+                        |live, chat_id, text| {
+                            let blocks = quill::rich::preview_blocks(text);
+                            live.driver.compose_rich_message_with_ai(chat_id, &blocks)
                         },
                     );
                 })),

@@ -434,12 +434,10 @@ pub enum EnvelopePayload {
     },
     /// Slice msg-richtext-ai-tools: `fixedText` (TDLib 1.8.67,
     /// `schema/td_api.tl:157`) — the `fixTextWithAi` answer. `text` is
-    /// the fixed text the composer applies; `diff_text` is the plain
-    /// `diffText.text` description of the changes (kept for honesty,
-    /// not rendered — it would need a diff renderer).
+    /// the fixed text the composer applies (`diffText` is not parsed —
+    /// nothing renders it; parsing what you never use is slop).
     FixedText {
         text: String,
-        diff_text: String,
     },
     /// Slice msg-richtext-ai-tools: bare `formattedText` (TDLib 1.8.67,
     /// `schema/td_api.tl:3046`) — the `composeTextWithAi` answer. The
