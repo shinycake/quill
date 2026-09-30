@@ -1,0 +1,1017 @@
+//! Connect driver: the message send pipeline.
+use super::*;
+use crate::composer::{
+    AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm, ForwardDraft,
+    SendOptions,
+};
+use crate::ids::{ChatId, MessageId, RequestId};
+use crate::rich::RichBlock;
+use crate::state::{ForwardFlight, RequestPurpose};
+use crate::telegram::envelope::ChatKind;
+use crate::telegram::requests::{
+    AnimationSend, SendReply, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
+    VoiceNoteSend, delete_messages, edit_message_caption, edit_message_text, forward_messages,
+    get_chat_history, get_chat_scheduled_messages, get_full_rich_message, input_message_photo,
+    input_message_video, open_message_content, recognize_speech, resend_messages, send_animation,
+    send_document, send_message_album, send_photo, send_rich_message, send_sticker, send_text,
+    send_video, send_video_note, send_voice_note,
+};
+use crate::voice::VoiceDraft;
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
+    pub fn fetch_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .is_some_and(|h| h.loaded_complete)
+        {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetHistory, chat_id)
+        {
+            return Ok(None);
+        }
+        let from = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|h| h.oldest_id())
+            .unwrap_or(MessageId(0));
+        let extra = self
+            .session
+            .request(RequestPurpose::GetHistory, Some(chat_id));
+        self.sender.send_json(&get_chat_history(
+            extra,
+            chat_id,
+            from,
+            0,
+            HISTORY_PAGE_SIZE,
+            false,
+        ))?;
+        Ok(Some(extra))
+    }
+
+    /// Parity slice 4: the forum topic a send to `chat_id` is addressed to.
+    /// `Some` only when `chat_id` is the open chat and a topic is selected
+    /// there; the `sendMessage` request then carries
+    /// `topic_id = messageTopicForum{forum_topic_id}` (schema 1.8.67, lines
+    /// 12200 and 3004). Story replies keep a null topic — they address the
+    /// poster chat, never a topic.
+    pub(crate) fn send_topic(&self, chat_id: ChatId) -> Option<i32> {
+        if self.session.open_chat == Some(chat_id) {
+            self.session.open_topic
+        } else {
+            None
+        }
+    }
+
+    /// Parity slice 4: rejects sends into a closed forum topic. The
+    /// composer is hidden there; this guards a stale-snapshot race.
+    pub(crate) fn topic_send_is_closed(&self, chat_id: ChatId) -> bool {
+        self.send_topic(chat_id).is_some_and(|_| {
+            self.session
+                .open_topic_info(chat_id)
+                .is_some_and(|topic| topic.is_closed)
+        })
+    }
+
+    /// `sendMessage` + `inputMessageAnimation` / `inputAnimation` / `inputFileId`.
+    pub fn send_animation(
+        &mut self,
+        chat_id: ChatId,
+        animation: AnimationSend,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || animation.file_id.0 == 0 || self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let animation = AnimationSend {
+            topic_id,
+            ..animation
+        };
+        let json = send_animation(extra, chat_id, animation);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `sendMessage` + `inputMessageSticker` / `inputFileId` (Unigram compose).
+    pub fn send_sticker(
+        &mut self,
+        chat_id: ChatId,
+        sticker: StickerSend<'_>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || sticker.file_id.0 == 0 || self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let sticker = StickerSend {
+            topic_id,
+            ..sticker
+        };
+        let json = send_sticker(extra, chat_id, sticker);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Send `sendMessage` for a snapshot frozen at composer submit.
+    /// Caption / path are not logged.
+    pub fn send_text_snapshot(
+        &mut self,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.send_snapshot(snapshot)
+    }
+
+    /// Send text, photo, document, or local video via `sendMessage` (TDLib 1.8.67).
+    /// MED4: caption-length gate against the runtime
+    /// `message_caption_length_max` option (TDLib 1.8.67, `schema/td_api.tl:6088`).
+    /// Counts Unicode scalar values; TDLib's exact limit unit is not
+    /// source-verified (assumption — TDLib remains the final gate, and a
+    /// server refusal surfaces in the status note). Plain-text sends use the
+    /// separate `message_text_length_max` option (untracked here — out of
+    /// this slice).
+    fn check_caption_length(&self, caption: &str) -> Result<(), ConnectSendError> {
+        let limit = self.session.message_caption_length_max;
+        if caption.chars().count() as i64 > i64::from(limit.max(0)) {
+            Err(ConnectSendError::CaptionTooLong { limit })
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn send_snapshot(
+        &mut self,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if snapshot.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if snapshot.is_media_album() {
+            return self.send_album_snapshot(snapshot);
+        }
+        let chat_id = snapshot.chat_id();
+        // Phase 2.3: channel posting is admin-gated (`can_post` derives the
+        // right from own membership); the driver rejects non-admin channel
+        // sends the same way the hidden composer does.
+        let can_post = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_post());
+        if !can_post {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Parity slice 4: never send into a closed forum topic (the
+        // composer is hidden there; this guards a stale-snapshot race).
+        if self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let caption = snapshot.caption();
+        if snapshot.attachment.is_none() && caption.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // MED4: caption-length gate (runtime option; the counter in the
+        // composer shows the same limit). Only the caption-carrying
+        // paths are gated — plain text has its own (untracked) limit.
+        if snapshot.attachment.is_some() || snapshot.is_media_album() {
+            self.check_caption_length(caption)?;
+        }
+        // Slice G1: quote-carrying reply (`inputTextQuote`).
+        let reply_to = snapshot.send_reply();
+        // Validate the picked path before allocating `@extra`.
+        let media_path = match snapshot.attachment.as_ref() {
+            Some(att) => Some(
+                att.send_path_str()
+                    .ok_or(ConnectSendError::InvalidRequest)?,
+            ),
+            None => None,
+        };
+        let video_probe = match snapshot.attachment.as_ref() {
+            Some(att) if att.kind == AttachmentKind::Video => Some(
+                crate::video::probe_local_video(&att.path)
+                    .map_err(|_| ConnectSendError::InvalidRequest)?,
+            ),
+            _ => None,
+        };
+        let video_note = match snapshot.attachment.as_ref() {
+            Some(att) if att.kind == AttachmentKind::VideoNote => {
+                let probe = crate::video::probe_local_video_note(&att.path)
+                    .map_err(|_| ConnectSendError::InvalidRequest)?;
+                let thumbnail = crate::video::write_video_note_thumbnail(&att.path).map(|thumb| {
+                    VideoNoteThumbnailSend {
+                        path: thumb.path.to_string_lossy().into_owned(),
+                        width: thumb.width,
+                        height: thumb.height,
+                    }
+                });
+                Some(VideoNoteSend {
+                    duration: probe.duration,
+                    length: probe.length,
+                    thumbnail,
+                })
+            }
+            _ => None,
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        // Parity slice 4: sends from a topic view address the open topic.
+        let topic_id = self.send_topic(chat_id);
+        // Phase B3: TDLib accepts `inputMessagePhoto`/`inputMessageVideo`
+        // `self_destruct_type` only in `chatTypePrivate` chats (its runtime
+        // check is `dialog_id.get_type() != DialogType::User` → 400, and the
+        // schema says "private chats only"). The choice is stripped for
+        // every other chat kind here (defense in depth — the composer
+        // picker is gated the same way), so a stale snapshot can never
+        // turn a secret-chat send into a 400.
+        let self_destruct = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .filter(|chat| matches!(chat.kind, ChatKind::Private { .. }))
+            .and(snapshot.self_destruct);
+        // M1 fix-up: `textEntityTypeBlockQuote` is not supported in secret
+        // chats (schema) — strip it from captions here; the text path
+        // does the same via `SendOptions::is_secret`.
+        let is_secret = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        // Contains caption / path — do not log `json`.
+        let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
+            (Some(att), Some(path)) => match att.kind {
+                AttachmentKind::Photo => send_photo(
+                    extra,
+                    chat_id,
+                    topic_id,
+                    path,
+                    caption,
+                    snapshot.caption_above_media,
+                    reply_to,
+                    self_destruct,
+                    is_secret,
+                ),
+                AttachmentKind::Document => {
+                    send_document(extra, chat_id, topic_id, path, caption, reply_to, is_secret)
+                }
+                AttachmentKind::Video => {
+                    let probe = video_probe.ok_or_else(|| {
+                        self.session.requests.take(extra);
+                        ConnectSendError::InvalidRequest
+                    })?;
+                    send_video(
+                        extra,
+                        chat_id,
+                        topic_id,
+                        path,
+                        &VideoSend {
+                            duration: probe.duration,
+                            width: probe.width,
+                            height: probe.height,
+                            supports_streaming: probe.supports_streaming,
+                            self_destruct,
+                        },
+                        caption,
+                        snapshot.caption_above_media,
+                        reply_to,
+                        is_secret,
+                    )
+                }
+                AttachmentKind::VideoNote => {
+                    let note = video_note.ok_or_else(|| {
+                        self.session.requests.take(extra);
+                        ConnectSendError::InvalidRequest
+                    })?;
+                    send_video_note(extra, chat_id, topic_id, path, &note, reply_to)
+                }
+            },
+            (None, None) => {
+                // Phase S1: secret chats never get link previews (TGX
+                // default-off; previews are generated on Telegram servers,
+                // which can't see E2E content).
+                let is_secret = self
+                    .session
+                    .chats
+                    .get(&chat_id.0)
+                    .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+                // M1: the composer send options ride the snapshot; secret
+                // chats force the preview toggle off regardless, and mark
+                // the send so `textEntityTypeBlockQuote` is stripped
+                // (unsupported in secret chats).
+                let mut send_options = snapshot.send_options;
+                if is_secret {
+                    send_options.link_preview_disabled = true;
+                    send_options.is_secret = true;
+                }
+                send_text(extra, chat_id, topic_id, caption, reply_to, &send_options)
+            }
+            _ => {
+                self.session.requests.take(extra);
+                return Err(ConnectSendError::InvalidRequest);
+            }
+        };
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M2: `sendMessage` with `inputMessageRichMessage` (TDLib 1.8.67, line
+    /// 6084) — sends the rich editor's blocks. The composer clears only
+    /// after a `message` response or a surfaced error; a failed send never
+    /// reports success (the error is shown, the draft stays). No optimistic
+    /// local row — M1's optimistic send is text-only, so a failed rich send
+    /// can't strand a fake row.
+    pub fn send_rich_snapshot(
+        &mut self,
+        chat_id: ChatId,
+        blocks: &[RichBlock],
+        reply_to: Option<SendReply>,
+        options: &SendOptions,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Phase 2.3: channel posting is admin-gated, same as `send_snapshot`.
+        let can_post = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_post());
+        if !can_post {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Parity slice 4: never send into a closed forum topic.
+        if self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let rich =
+            crate::rich::input_rich_message(blocks).ok_or(ConnectSendError::InvalidRequest)?;
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let json = send_rich_message(extra, chat_id, topic_id, &rich, reply_to, options);
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// M2: `getFullRichMessage` (TDLib 1.8.67, line 11554) for a
+    /// partially-received rich message (`is_full == false`). The reducer
+    /// replaces the history row's blocks with the full ones on success; a
+    /// failed fetch leaves the partial blocks in place (honest).
+    pub fn fetch_full_rich_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::GetFullRichMessage {
+                chat_id,
+                message_id,
+            },
+            Some(chat_id),
+        );
+        let json = get_full_rich_message(extra, chat_id, message_id);
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
+    /// `sendMessageAlbum` for 2–10 local photos and/or videos.
+    pub(crate) fn send_album_snapshot(
+        &mut self,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
+        let chat_id = snapshot.chat_id();
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || !snapshot.is_media_album() || self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let caption = snapshot.caption();
+        let last = snapshot.album.len() - 1;
+        // MED4: caption-length gate (same runtime option as single
+        // sends — `send_snapshot` returns here before its own check).
+        self.check_caption_length(caption)?;
+        // Phase B3: same private-chat gate as `send_snapshot` — the timer
+        // applies per album item (the schema allows it per
+        // `inputMessagePhoto`/`inputMessageVideo`).
+        let self_destruct = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .filter(|chat| matches!(chat.kind, ChatKind::Private { .. }))
+            .and(snapshot.self_destruct);
+        // M1 fix-up: same secret-chat blockquote strip as `send_snapshot`.
+        let is_secret = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        let mut contents = Vec::with_capacity(snapshot.album.len());
+        for (index, att) in snapshot.album.iter().enumerate() {
+            let path = att
+                .send_path_str()
+                .ok_or(ConnectSendError::InvalidRequest)?;
+            let item_caption = if index == last { caption } else { "" };
+            let content = match att.kind {
+                AttachmentKind::Photo => input_message_photo(
+                    &path,
+                    item_caption,
+                    snapshot.caption_above_media,
+                    self_destruct,
+                    is_secret,
+                ),
+                AttachmentKind::Video => {
+                    let probe = crate::video::probe_local_video(&att.path)
+                        .map_err(|_| ConnectSendError::InvalidRequest)?;
+                    input_message_video(
+                        &path,
+                        &VideoSend {
+                            duration: probe.duration,
+                            width: probe.width,
+                            height: probe.height,
+                            supports_streaming: probe.supports_streaming,
+                            self_destruct,
+                        },
+                        item_caption,
+                        snapshot.caption_above_media,
+                        is_secret,
+                    )
+                }
+                AttachmentKind::Document | AttachmentKind::VideoNote => {
+                    return Err(ConnectSendError::InvalidRequest);
+                }
+            };
+            contents.push(content);
+        }
+        // Slice G1: quote-carrying reply (`inputTextQuote`).
+        let reply_to = snapshot.send_reply();
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessageAlbum, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let json = send_message_album(extra, chat_id, topic_id, reply_to, contents);
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `sendMessage` + `inputMessageVoiceNote` for a finished local capture.
+    pub fn send_voice_note(
+        &mut self,
+        draft: &VoiceDraft,
+        caption: &str,
+        reply_to: Option<SendReply>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let path = crate::local_path::pick_send_path(&draft.path)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let path = path.to_string_lossy().into_owned();
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let json = send_voice_note(
+            extra,
+            chat_id,
+            VoiceNoteSend {
+                path: &path,
+                duration: draft.duration_secs,
+                waveform_b64: &draft.waveform_b64(),
+                caption,
+                reply_to,
+                topic_id,
+            },
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                let _ = self.sync_voice_recording(false, 0);
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `sendMessage` + `inputMessageVideoNote` for a finished camera
+    /// capture. Mirrors `send_voice_note`; the draft is already squared
+    /// and probed by `VideoNoteCapture::finish`.
+    pub fn send_recorded_video_note(
+        &mut self,
+        draft: &crate::video::VideoNoteDraft,
+        reply_to: Option<SendReply>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported || self.topic_send_is_closed(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let path = crate::local_path::pick_send_path(&draft.path)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        let path = path.to_string_lossy().into_owned();
+        let thumbnail = crate::video::write_video_note_thumbnail(&draft.path).map(|thumb| {
+            VideoNoteThumbnailSend {
+                path: thumb.path.to_string_lossy().into_owned(),
+                width: thumb.width,
+                height: thumb.height,
+            }
+        });
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let json = send_video_note(
+            extra,
+            chat_id,
+            topic_id,
+            &path,
+            &VideoNoteSend {
+                duration: draft.duration_secs,
+                length: draft.length,
+                thumbnail,
+            },
+            reply_to,
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => {
+                let _ = self.cancel_outgoing_typing();
+                let _ = self.sync_video_note_recording(false, 0);
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// MED2: `recognizeSpeech` for a voice/video note message. Only real
+    /// (non-pending) messages qualify; the transcript arrives later via
+    /// `updateMessageContent`. A refused request is an error, never a
+    /// faked transcript.
+    pub fn recognize_speech(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if message.pending || message.id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::RecognizeSpeech, Some(chat_id));
+        let json = recognize_speech(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `openMessageContent` when playback of a voice note starts.
+    pub fn open_voice_content(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::OpenMessageContent, Some(chat_id));
+        let json = open_message_content(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Save an own-message edit via `editMessageText` or `editMessageCaption`.
+    pub fn edit_snapshot(
+        &mut self,
+        edit: &ComposerEdit,
+        text: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&edit.chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // M1: scheduled sends live in `session.scheduled_messages`
+        // (`ParsedMessage`, never pending), not in history
+        // (`HistoryMessage`) — same `editMessageText` request, different
+        // validation source.
+        let owned = if edit.scheduled {
+            self.session
+                .scheduled_messages
+                .iter()
+                .find(|m| m.chat_id == edit.chat_id && m.id == edit.message_id)
+                .map(|m| (m.chat_id, m.id, m.is_outgoing, false, &m.content))
+        } else {
+            self.session
+                .histories
+                .get(&edit.chat_id.0)
+                .and_then(|history| history.messages.get(&edit.message_id.0))
+                .map(|m| (m.chat_id, m.id, m.is_outgoing, m.pending, &m.content))
+        };
+        let Some((chat_id, message_id, is_outgoing, pending, content)) = owned else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if ComposerEdit::from_own_content(chat_id, message_id, is_outgoing, pending, content)
+            .is_none()
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let caption = text.trim();
+        if matches!(edit.kind, ComposerEditKind::Text) && caption.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // MED4: caption-length gate for caption edits (same runtime
+        // option as media sends).
+        if matches!(edit.kind, ComposerEditKind::Caption) {
+            self.check_caption_length(caption)?;
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::EditMessage, Some(edit.chat_id));
+        // M1 fix-up: secret chats strip `textEntityTypeBlockQuote` from
+        // the edited caption too (unsupported in secret chats).
+        let strip_blockquote = self
+            .session
+            .chats
+            .get(&edit.chat_id.0)
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        let json = match edit.kind {
+            ComposerEditKind::Text => edit_message_text(
+                extra,
+                edit.chat_id,
+                edit.message_id,
+                caption,
+                strip_blockquote,
+            ),
+            ComposerEditKind::Caption => edit_message_caption(
+                extra,
+                edit.chat_id,
+                edit.message_id,
+                caption,
+                // MED4 review nit: secret chats force caption-below on send
+                // too (TGX `allowShowCaptionAboveMedia`).
+                edit.caption_above && !strip_blockquote,
+                strip_blockquote,
+            ),
+        };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// After UI confirm (tdesktop `DeleteMessagesBox`), send `deleteMessages`.
+    /// `revoke: true` deletes for everyone (own outgoing default), false only
+    /// for the current user (schema 1.8.67 line 12282).
+    pub fn delete_confirmed(
+        &mut self,
+        confirm: &DeleteConfirm,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&confirm.chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(message) = self
+            .session
+            .histories
+            .get(&confirm.chat_id.0)
+            .and_then(|history| history.messages.get(&confirm.message_id.0))
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        // M1: any sent message may be deleted; the for-everyone toggle is
+        // only honored for own outgoing (schema 1.8.67 lines 6228–6229).
+        if DeleteConfirm::for_message(
+            message.chat_id,
+            message.id,
+            message.is_outgoing,
+            message.pending,
+        )
+        .is_none()
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // M1: extract the borrow before the mutable `request` call below.
+        let revoke = confirm.revoke && message.is_outgoing;
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteMessages, Some(confirm.chat_id));
+        let json = delete_messages(extra, confirm.chat_id, &[confirm.message_id], revoke);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Send `forwardMessages` after the dest picker chooses a supported chat.
+    /// `send_copy: false` preserves official "Forwarded from" attribution.
+    pub fn forward_messages(
+        &mut self,
+        dest: ChatId,
+        draft: &ForwardDraft,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if draft.is_empty() || draft.message_ids.len() > 100 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let dest_ok = self
+            .session
+            .chats
+            .get(&dest.0)
+            .is_some_and(|chat| chat.supported());
+        let from_ok = self
+            .session
+            .chats
+            .get(&draft.from_chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !dest_ok || !from_ok {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        for id in &draft.message_ids {
+            let Some(message) = self
+                .session
+                .histories
+                .get(&draft.from_chat_id.0)
+                .and_then(|history| history.messages.get(&id.0))
+            else {
+                return Err(ConnectSendError::InvalidRequest);
+            };
+            if message.pending || id.0 <= 0 {
+                return Err(ConnectSendError::InvalidRequest);
+            }
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ForwardMessages, Some(dest));
+        self.session.in_flight_forward = Some(ForwardFlight {
+            extra,
+            dest_chat_id: dest,
+            from_chat_id: draft.from_chat_id,
+            requested: draft.message_ids.len(),
+        });
+        let json = forward_messages(
+            extra,
+            dest,
+            draft.from_chat_id,
+            &draft.message_ids,
+            draft.send_copy,
+            draft.remove_caption,
+        );
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.in_flight_forward = None;
+                Err(err)
+            }
+        }
+    }
+
+    pub fn delete_scheduled_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // M1: delete a scheduled send. Scheduled messages live in
+        // `session.scheduled_messages`, not in history, so the
+        // history-validated `delete_confirmed` can't take them. `revoke`
+        // is always false (no for-everyone distinction before sending).
+        let known = self
+            .session
+            .scheduled_messages
+            .iter()
+            .any(|m| m.chat_id == chat_id && m.id == message_id);
+        if !known {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteMessages, Some(chat_id));
+        let json = delete_messages(extra, chat_id, &[message_id], false);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M1: retry a failed send (`resendMessages`, TDLib 1.8.67,
+    /// `schema/td_api.tl:12251`; `message.sending_state.can_retry`, schema
+    /// line 3038). The driver only retries rows the reducer marked
+    /// `failed` **and** retryable — not every failed send may be
+    /// retried, and the context menu offers "Retry send" on the same
+    /// gate.
+    pub fn resend_failed_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_retry = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .is_some_and(|message| message.failed && message.can_retry);
+        if !can_retry {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ResendMessages, Some(chat_id));
+        let json = resend_messages(extra, chat_id, &[message_id]);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// M1: load a chat's scheduled (pending) sends into
+    /// `session.scheduled_messages` (TDLib 1.8.67,
+    /// `schema/td_api.tl:12000`).
+    pub fn get_chat_scheduled_messages(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatScheduledMessages, Some(chat_id));
+        let json = get_chat_scheduled_messages(extra, chat_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+}
