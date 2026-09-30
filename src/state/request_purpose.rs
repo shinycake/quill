@@ -338,6 +338,10 @@ pub enum RequestPurpose {
     /// B1: `getCallbackQueryAnswer` with `callbackQueryPayloadGame` (game
     /// button); the answer URL (if any) opens the game in the OS browser.
     GetCallbackQueryAnswerGame,
+    /// Slice bots-games: `getGameHighScores` after a Scores press.
+    /// Response is `gameHighScores`; the panel shows a loading row until
+    /// it lands, and an error closes the panel with a status note.
+    GetGameHighScores,
     /// B1: `getLoginUrlInfo` for a login-URL button press. Response is
     /// `loginUrlInfo*`; on error the button degrades to a plain URL button
     /// (schema 1.8.67 doc on `getLoginUrl`).

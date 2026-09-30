@@ -293,7 +293,7 @@ impl ComposerEdit {
             // M2: rich messages are edited in the rich editor, not here.
             | MessageContent::RichMessage(_)
             // B1: games are not editable.
-            | MessageContent::Game { .. }
+            | MessageContent::Game(_)
             // Slice P1: invoices and payment notices are not editable.
             | MessageContent::Invoice(_)
             | MessageContent::PaymentSuccessful(_)

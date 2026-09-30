@@ -867,7 +867,7 @@ impl QuillApp {
                         // legacy text/caption path.
                         | MessageContent::RichMessage(_)
                         // B1: games carry no editable caption.
-                        | MessageContent::Game { .. }
+                        | MessageContent::Game(_)
                         // Slice P1: invoices and payment notices carry no
                         // editable caption.
                         | MessageContent::Invoice(_)

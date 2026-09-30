@@ -3,6 +3,7 @@
 use super::app::{PaneMode, QuillApp};
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::forward::forward_from_strip;
+use super::message_games::game_card;
 use super::message_media::{
     animation_attachment, audio_row, contact_row, dice_row, document_chip, location_row,
     photo_attachment, sticker_attachment, venue_row, video_attachment, video_note_attachment,
@@ -769,6 +770,20 @@ pub(super) fn session_history_row(
             look.font,
             cx,
         )),
+        // Slice bots-games: the game card is the message's primary
+        // content (thumbnail/title/text/description + Play/Scores).
+        MessageContent::Game(game) => Some(game_card(
+            message.chat_id,
+            message.id,
+            game,
+            session,
+            files,
+            downloading,
+            media_roots,
+            revealed,
+            look.font,
+            cx,
+        )),
         _ => None,
     };
     let extra_media = match effective_content(&message.content, message.ephemeral.as_ref()) {
@@ -871,7 +886,7 @@ pub(super) fn session_history_row(
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
         MessageContent::Text(_)
         | MessageContent::RichMessage(_)
-        | MessageContent::Game { .. }
+        | MessageContent::Game(_)
         | MessageContent::GroupCallInvitation { .. }
         | MessageContent::Call { .. }
         | MessageContent::ChatTtlChanged { .. }

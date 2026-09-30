@@ -1124,6 +1124,9 @@ pub enum EnvelopePayload {
     /// `callbackQueryAnswer` — response to `getCallbackQueryAnswer` after an
     /// inline keyboard callback-button press (Phase 3.2).
     CallbackQueryAnswer(CallbackQueryAnswer),
+    /// Slice bots-games: `gameHighScores` — response to `getGameHighScores`
+    /// (TDLib 1.8.67, `schema/td_api.tl:13174`).
+    GameHighScores(Vec<GameHighScore>),
     /// B1: `loginUrlInfo*` — response to `getLoginUrlInfo` after a
     /// login-URL button press.
     LoginUrlInfo(LoginUrlInfo),

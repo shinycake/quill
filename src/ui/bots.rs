@@ -671,6 +671,45 @@ impl QuillApp {
                 ));
             }
         }
+        // Slice bots-games: games seen in this bot's chat (`messageGame`,
+        // schema 1.8.67 line 5234). Each offers Send → `inputMessageGame`
+        // to the open chat (schema:6156). Only games TDLib delivered are
+        // listed — short names are never invented.
+        if let Some(games) = session.bot_games.get(&bot_id)
+            && !games.is_empty()
+        {
+            let mut section = div().id("bot-games").flex().flex_col().gap_1().child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Games"),
+            );
+            for game in games {
+                let title = if game.title.is_empty() {
+                    game.short_name.clone()
+                } else {
+                    game.title.clone()
+                };
+                let short_name = game.short_name.clone();
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().text_sm().child("🎮"))
+                        .child(div().text_sm().flex_1().child(title))
+                        .child(
+                            Button::new(format!("bot-send-game-{short_name}"))
+                                .label("Send")
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.press_send_game(open, bot_id, &short_name, cx);
+                                })),
+                        ),
+                );
+            }
+            panel = panel.child(section);
+        }
         // Slice B2: profile actions row.
         let mut actions = div().id("bot-actions").flex().flex_wrap().gap_1();
         actions = actions.child(

@@ -784,6 +784,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "callbackQueryAnswer" => Ok(EnvelopePayload::CallbackQueryAnswer(
             parse_callback_query_answer(&value),
         )),
+        // Slice bots-games: `getGameHighScores` answer (TDLib 1.8.67,
+        // `schema/td_api.tl:13174`).
+        "gameHighScores" => Ok(EnvelopePayload::GameHighScores(parse_game_high_scores(
+            &value,
+        ))),
         // B1: `getLoginUrlInfo` answers (TDLib 1.8.67, `schema/td_api.tl:3862`
         // / `:3869`).
         "loginUrlInfoOpen" => Ok(EnvelopePayload::LoginUrlInfo(LoginUrlInfo::Open {

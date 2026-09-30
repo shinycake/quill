@@ -723,6 +723,32 @@ fn b1_callback_query_game_shape_matches_1_8_67() {
 }
 
 #[test]
+fn bots_games_get_high_scores_shape_matches_1_8_67() {
+    // Slice bots-games: `getGameHighScores` (schema 1.8.67, line 13174).
+    let json = get_game_high_scores(RequestId(64), ChatId(21), MessageId(301), 42);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "getGameHighScores");
+    assert_eq!(v["@extra"], "64");
+    assert_eq!(v["chat_id"], 21);
+    assert_eq!(v["message_id"], 301);
+    assert_eq!(v["user_id"], 42);
+}
+
+#[test]
+fn bots_games_send_game_shape_matches_1_8_67() {
+    // Slice bots-games: `sendMessage` + `inputMessageGame` (schema 1.8.67,
+    // line 6156).
+    let json = send_game(RequestId(66), ChatId(21), None, 7, "chess");
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "sendMessage");
+    assert_eq!(v["@extra"], "66");
+    assert_eq!(v["chat_id"], 21);
+    assert_eq!(v["input_message_content"]["@type"], "inputMessageGame");
+    assert_eq!(v["input_message_content"]["bot_user_id"], 7);
+    assert_eq!(v["input_message_content"]["game_short_name"], "chess");
+}
+
+#[test]
 fn b1_get_login_url_info_shape_matches_1_8_67() {
     // B1: `getLoginUrlInfo` (schema 1.8.67, line 12985).
     let json = get_login_url_info(RequestId(63), ChatId(21), MessageId(301), 7);

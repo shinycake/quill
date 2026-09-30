@@ -1100,6 +1100,22 @@ impl Session {
             self.sponsored_report = None;
             self.sponsored_report_target = None;
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGameHighScores) {
+            // Slice bots-games: a refused `getGameHighScores` closes the
+            // scores panel (it never spins forever) and surfaces as a
+            // status note via the callback-answer channel.
+            if let Some(pending) = pending
+                && let (Some(chat_id), Some(message_id)) =
+                    (pending.chat_id, pending.around_message_id)
+            {
+                self.game_scores.remove(&(chat_id.0, message_id.0));
+            }
+            self.last_callback_answer = Some(CallbackQueryAnswer {
+                text: "couldn't load the scores".to_string(),
+                show_alert: false,
+                url: String::new(),
+            });
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCallbackQueryAnswer) {
             // TDLib returns error 502 when the bot misses the query
             // timeout: surface it as an answer note (no TDLib text is

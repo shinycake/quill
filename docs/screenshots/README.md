@@ -39,6 +39,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 | `ready-typing.png` | Ready chat open with **typing…** in the header and the sidebar row. Injected `updateChatAction` / `chatActionTyping`, no live Telegram. Driven by `quill --screenshot-demo ready-typing`. |
 | `ready-stickers.png` | Ready chat open, **Stickers** panel (installed set + thumb) and a sticker in history. Injected `getInstalledStickerSets` / `getStickerSet` / `messageSticker`, no live Telegram. Driven by `quill --screenshot-demo ready-stickers`. |
 | `ready-voice.png` | Ready chat open, **Recording voice · locked** bar (duration, waveform, Lock/Unlock, Cancel, Send) plus history voice notes — incoming note shows its transcription ("don't forget the milk"), outgoing has a **Transcribe** button. Injected `messageVoiceNote` + `speechRecognitionResultText`, no live Telegram. Driven by `quill --screenshot-demo ready-voice`. |
+| `ready-game-card.png` | Slice bots-games: `messageGame` card (🎮 glyph when the game carries no thumbnail, title, text, description, ▶ Play + Scores buttons) with the inline high-score panel open below (#1 Ada 9000, #2 Grace 1500). Injected `messageGame` + `game_scores` rows, no live Telegram. Driven by `quill --screenshot-demo ready-game-card`. |
 | `ready-link-preview.png` | Ready chat open, a message URL plus a **link preview** card (site name, title, description, photo). Injected `messageText` / `textEntityTypeUrl` / `linkPreview`, no live Telegram. Driven by `quill --screenshot-demo ready-link-preview`. |
 | `ready-composer-preview.png` | **MED4b**: Composer with a detected URL (`https://example.com/story`), the **link preview chip** with the prefetched preview line (title — description), **Preview on** toggle, **Media: small** size toggle (preview offers large media), and **Below text** position toggle. Driven by `quill --screenshot-demo ready-composer-preview`. |
 | `ready-preview-cards.png` | **MED4**: **Embedded video player** preview card (thumbnail with ▶ play badge + 1:35 duration) and **album** preview card (thumbnail strip). Injected `linkPreview` with `linkPreviewTypeEmbeddedVideoPlayer` / `linkPreviewTypeAlbum`, no live Telegram. Driven by `quill --screenshot-demo ready-preview-cards`. |
@@ -122,6 +123,7 @@ bash scripts/capture-connect-screenshots.sh
 #   cargo run --features ui -- --screenshot-demo ready-typing docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-stickers docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-voice docs/screenshots
+#   cargo run --features ui -- --screenshot-demo ready-game-card docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-link-preview docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-gifs docs/screenshots
 #   cargo run --features ui -- --screenshot-demo ready-video docs/screenshots

@@ -8,9 +8,10 @@ use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
     delete_chat_reply_markup as delete_chat_reply_markup_request, get_bot_similar_bots,
     get_callback_query_answer, get_callback_query_answer_game,
-    get_callback_query_answer_with_password, get_commands, get_inline_query_results, get_login_url,
-    get_login_url_info, get_user_full_info, search_public_chat,
-    send_bot_start_message as send_bot_start_message_request, send_inline_query_result_message,
+    get_callback_query_answer_with_password, get_commands, get_game_high_scores,
+    get_inline_query_results, get_login_url, get_login_url_info, get_user_full_info,
+    search_public_chat, send_bot_start_message as send_bot_start_message_request,
+    send_game as send_game_request, send_inline_query_result_message,
     set_message_sender_block_list,
 };
 
@@ -269,6 +270,58 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetCallbackQueryAnswerGame,
         )?;
         let json = get_callback_query_answer_game(extra, chat_id, message_id, game_short_name);
+        self.send_json_request(extra, &json)
+    }
+
+    /// Slice bots-games: `getGameHighScores` (TDLib 1.8.67,
+    /// `schema/td_api.tl:13174`). The message id is stamped on the pending
+    /// request (`request_for_message`) so the answer lands in the right
+    /// scores panel.
+    pub fn send_game_high_scores(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        user_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request_for_message(
+            RequestPurpose::GetGameHighScores,
+            chat_id,
+            message_id,
+        );
+        let json = get_game_high_scores(extra, chat_id, message_id, user_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// Slice bots-games: `sendMessage` + `inputMessageGame` (TDLib 1.8.67,
+    /// line 6156) — send the bot's game to the chat. Not supported in
+    /// channels or secret chats; the driver pre-checks the same way the
+    /// other `sendMessage` paths do. Rides `RequestPurpose::SendMessage`
+    /// so the optimistic row flows through the normal send path.
+    pub fn send_game_message(
+        &mut self,
+        chat_id: ChatId,
+        bot_user_id: i64,
+        game_short_name: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_post = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported() && chat.can_post());
+        if !can_post {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SendMessage, Some(chat_id));
+        let topic_id = self.send_topic(chat_id);
+        let json = send_game_request(extra, chat_id, topic_id, bot_user_id, game_short_name);
         self.send_json_request(extra, &json)
     }
 

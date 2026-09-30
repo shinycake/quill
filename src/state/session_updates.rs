@@ -122,6 +122,22 @@ impl Session {
     pub(crate) fn upsert_message(&mut self, message: ParsedMessage, pending: bool) {
         self.remember_files(&message.files);
         let chat_id = message.chat_id;
+        // Slice bots-games: remember games seen in a bot's chat so the bot
+        // info panel can offer to send them. Keyed by the chat's bot user
+        // id — only short names TDLib actually delivered are cached, so
+        // `inputMessageGame` never gets an invented short name.
+        if let MessageContent::Game(game) = &message.content
+            && !game.short_name.is_empty()
+            && let Some(bot_id) = self.bot_user_id_for_chat(chat_id)
+        {
+            let games = self.bot_games.entry(bot_id).or_default();
+            if !games.iter().any(|g| g.short_name == game.short_name) {
+                games.push(GameInfo {
+                    short_name: game.short_name.clone(),
+                    title: game.title.clone(),
+                });
+            }
+        }
         let topic_id = message.topic_id;
         let row = history_message(message, pending);
         let history = self.histories.entry(chat_id.0).or_default();

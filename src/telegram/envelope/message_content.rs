@@ -84,14 +84,12 @@ pub enum MessageContent {
     /// list (possibly partial when `is_full` is false — the renderer
     /// fetches the rest via `getFullRichMessage`, schema line 11554).
     RichMessage(RichMessageContent),
-    /// B1: `messageGame` (TDLib 1.8.67, `schema/td_api.tl:5234`). Only the
-    /// game's `short_name` (schema:673) is kept — it is the
-    /// `callbackQueryPayloadGame.game_short_name` (schema:7743) for the
-    /// `CallbackGame` button press. The game itself keeps rendering as an
-    /// unsupported placeholder (games UI is out of this slice).
-    Game {
-        short_name: String,
-    },
+    /// Slice bots-games: `messageGame` (TDLib 1.8.67,
+    /// `schema/td_api.tl:5234`; the `game` object at lines 665-673).
+    /// The card renders the title, text/description, a thumbnail, and
+    /// Play / Scores actions. `short_name` feeds
+    /// `callbackQueryPayloadGame.game_short_name` (schema:7743) on Play.
+    Game(GameContent),
     /// Slice P1: `messageInvoice` (TDLib 1.8.67, `schema/td_api.tl:5270`) —
     /// a bot's invoice card. Only the fields the card renders are kept.
     Invoice(InvoiceContent),
@@ -106,6 +104,23 @@ pub enum MessageContent {
     Unsupported {
         type_name: String,
     },
+}
+
+/// Slice bots-games: parsed `messageGame` (TDLib 1.8.67,
+/// `schema/td_api.tl:5234` / `game` at lines 665-673).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameContent {
+    /// `game.short_name` (schema:673) — the
+    /// `callbackQueryPayloadGame.game_short_name` (schema:7743).
+    pub short_name: String,
+    pub title: String,
+    /// `game.text` (`formattedText`, schema:670).
+    pub text: TextContent,
+    pub description: String,
+    /// Thumbnail source: `game.photo` sizes, falling back to the
+    /// animation's thumbnail when the photo carries no sizes. Empty
+    /// sizes → the card renders a glyph placeholder.
+    pub photo: PhotoContent,
 }
 
 /// M2: parsed `richMessage` (TDLib 1.8.67, `schema/td_api.tl:123`).
@@ -357,9 +372,15 @@ impl MessageContent {
                 )
             }
             MessageContent::Unsupported { type_name } => format!("({type_name})"),
-            // B1: games keep rendering as unsupported placeholders (games
-            // UI is out of this slice).
-            MessageContent::Game { .. } => "(messageGame)".to_string(),
+            // Slice bots-games: chat-list preview for a game card.
+            MessageContent::Game(game) => {
+                let title = game.title.trim();
+                if title.is_empty() {
+                    "🎮 Game".to_string()
+                } else {
+                    format!("🎮 {}", title.chars().take(76).collect::<String>())
+                }
+            }
             // Phase S1: chat-list preview for `messageScreenshotTaken`
             // (TGX ChatContentScreenshot).
             MessageContent::ScreenshotTaken => "Took a screenshot".to_string(),
@@ -476,19 +497,8 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
         ),
         // M2: `messageRichMessage` (schema 1.8.67, line 5143).
         Some("messageRichMessage") => parse_message_rich_message(value),
-        // B1: `messageGame` (schema 1.8.67, line 5234) — keep only
-        // `game.short_name` for the `CallbackGame` press payload.
-        Some("messageGame") => (
-            MessageContent::Game {
-                short_name: value
-                    .get("game")
-                    .and_then(|game| game.get("short_name"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-            },
-            Vec::new(),
-        ),
+        // Slice bots-games: `messageGame` (schema 1.8.67, line 5234).
+        Some("messageGame") => parse_message_game(value),
         // Slice P1: `messageInvoice` (schema 1.8.67, line 5270).
         Some("messageInvoice") => parse_message_invoice(value),
         // Slice P1: `messagePaymentSuccessful` (schema 1.8.67, line 5436).
@@ -568,6 +578,53 @@ pub(crate) fn parse_message_text(value: &Value) -> (MessageContent, Vec<ParsedFi
     let (preview, files) = parse_link_preview(value.get("link_preview"));
     content.link_preview = preview.filter(LinkPreview::has_card);
     (MessageContent::Text(content), files)
+}
+
+/// Slice bots-games: `messageGame` → `MessageContent::Game` (schema
+/// 1.8.67, lines 5234 / 665-673). Thumbnail: `game.photo` sizes, falling
+/// back to the animation's thumbnail when the photo carries no sizes;
+/// both absent → empty sizes and the card renders a glyph. The parsed
+/// files ride the files vec so `remember_files` registers them (same as
+/// `parse_message_photo`).
+pub(crate) fn parse_message_game(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
+    let game = value.get("game");
+    let field = |name: &str| {
+        game.and_then(|g| g.get(name))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let (mut sizes, mut files) = game
+        .and_then(|g| g.get("photo"))
+        .map(parse_photo_sizes)
+        .unwrap_or_default();
+    if sizes.is_empty() {
+        let (anim_sizes, anim_files) = game
+            .and_then(|g| g.get("animation"))
+            .and_then(|a| a.get("thumbnail"))
+            .and_then(|t| t.get("photo"))
+            .map(parse_photo_sizes)
+            .unwrap_or_default();
+        sizes = anim_sizes;
+        files = anim_files;
+    }
+    (
+        MessageContent::Game(GameContent {
+            short_name: field("short_name"),
+            title: field("title"),
+            text: parse_text_content(game.and_then(|g| g.get("text"))),
+            description: field("description"),
+            photo: PhotoContent {
+                caption: String::new(),
+                caption_entities: Vec::new(),
+                show_caption_above_media: false,
+                sizes,
+                is_secret: false,
+                has_spoiler: false,
+            },
+        }),
+        files,
+    )
 }
 
 /// M2: `messageRichMessage` → `MessageContent::RichMessage` (schema 1.8.67,
