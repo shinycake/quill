@@ -137,6 +137,9 @@ impl QuillApp {
         ) {
             Ok(live) => {
                 self.live = Some(live);
+                // Clear any earlier restore-blocked label — the switch
+                // succeeded and the connect is live again.
+                self.connect_status = ConnectUiStatus::Live;
                 self.status_note = format!("Switched to “{display_name}” — connecting…");
             }
             Err(blocker) => {
@@ -199,6 +202,12 @@ impl QuillApp {
         self.accounts_ui.remove_confirm = None;
         match remove_account(&root, key) {
             Ok(()) => {
+                // Drop the account's keychain item too: otherwise the
+                // lowest-free-id recycling in `add_account` hands a later
+                // account the deleted account's stale DB key. Best-effort —
+                // the account data is already gone; a locked keychain is
+                // just an orphaned item, not a failure.
+                let _ = live_secret_store().delete(key);
                 self.accounts_ui.error = None;
             }
             Err(e) => {
