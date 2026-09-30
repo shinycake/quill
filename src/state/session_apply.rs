@@ -2006,6 +2006,10 @@ impl Session {
             // M2: handled by the driver before `apply` (blocks land in
             // history there); nothing to reduce here.
             EnvelopePayload::RichMessage { .. } => {}
+            // Slice msg-richtext-ai-tools: `fixedText` / `formattedText`
+            // answers — captured by the driver before `apply` into
+            // `Session::ai_composer_text`; nothing to reduce here.
+            EnvelopePayload::FixedText { .. } | EnvelopePayload::FormattedText { .. } => {}
             // MED4: `webPageInstantView` — captured by the driver before
             // `apply` into `Session::instant_view` (success) or
             // `Session::instant_view_fallback_url` (error); nothing to

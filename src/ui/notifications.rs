@@ -217,6 +217,17 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // Slice msg-richtext-ai-tools: a failed AI request surfaces in
+        // the status note instead of silently doing nothing after "AI
+        // working…".
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.ai_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
         if let Some(err) = self
             .live
             .as_mut()

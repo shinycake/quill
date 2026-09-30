@@ -320,6 +320,103 @@ pub fn get_full_rich_message(extra: RequestId, chat_id: ChatId, message_id: Mess
     .to_string()
 }
 
+/// Slice msg-richtext-ai-tools: `fixTextWithAi` (TDLib 1.8.67,
+/// `schema/td_api.tl:12172`):
+/// `fixTextWithAi text:formattedText = FixedText;`
+/// The composer draft is plain text, so it rides as a `formattedText`
+/// with no entities.
+pub fn fix_text_with_ai(extra: RequestId, text: &str) -> String {
+    json!({
+        "@type": "fixTextWithAi",
+        "@extra": extra.as_extra(),
+        "text": { "@type": "formattedText", "text": text, "entities": [] },
+    })
+    .to_string()
+}
+
+/// Slice msg-richtext-ai-tools: `composeTextWithAi` (TDLib 1.8.67,
+/// `schema/td_api.tl:12154`):
+/// `composeTextWithAi text:formattedText translate_to_language_code:string
+/// style_name:string add_emojis:Bool = FormattedText;`
+pub fn compose_text_with_ai(
+    extra: RequestId,
+    text: &str,
+    translate_to_language_code: &str,
+    style_name: &str,
+    add_emojis: bool,
+) -> String {
+    json!({
+        "@type": "composeTextWithAi",
+        "@extra": extra.as_extra(),
+        "text": { "@type": "formattedText", "text": text, "entities": [] },
+        "translate_to_language_code": translate_to_language_code,
+        "style_name": style_name,
+        "add_emojis": add_emojis,
+    })
+    .to_string()
+}
+
+/// Slice msg-richtext-ai-tools: `composeRichMessageWithAi` (TDLib 1.8.67,
+/// `schema/td_api.tl:12162`):
+/// `composeRichMessageWithAi message:inputRichMessage
+/// translate_to_language_code:string style_name:string custom_prompt:string
+/// add_emojis:Bool = RichMessage;`
+/// `message` is the `inputRichMessage` object built by
+/// `quill::rich::input_rich_message`.
+pub fn compose_rich_message_with_ai(
+    extra: RequestId,
+    message: &Value,
+    translate_to_language_code: &str,
+    style_name: &str,
+    custom_prompt: &str,
+    add_emojis: bool,
+) -> String {
+    json!({
+        "@type": "composeRichMessageWithAi",
+        "@extra": extra.as_extra(),
+        "message": message,
+        "translate_to_language_code": translate_to_language_code,
+        "style_name": style_name,
+        "custom_prompt": custom_prompt,
+        "add_emojis": add_emojis,
+    })
+    .to_string()
+}
+
+/// Slice msg-richtext-ai-tools: `createRichMessageWithAi` (TDLib 1.8.67,
+/// `schema/td_api.tl:12168`):
+/// `createRichMessageWithAi prompt:string language_code:string
+/// add_emojis:Bool = RichMessage;`
+pub fn create_rich_message_with_ai(
+    extra: RequestId,
+    prompt: &str,
+    language_code: &str,
+    add_emojis: bool,
+) -> String {
+    json!({
+        "@type": "createRichMessageWithAi",
+        "@extra": extra.as_extra(),
+        "prompt": prompt,
+        "language_code": language_code,
+        "add_emojis": add_emojis,
+    })
+    .to_string()
+}
+
+/// Slice msg-richtext-ai-tools: `fixRichMessageWithAi` (TDLib 1.8.67,
+/// `schema/td_api.tl:12176`):
+/// `fixRichMessageWithAi message:inputRichMessage = RichMessage;`
+/// `message` is the `inputRichMessage` object built by
+/// `quill::rich::input_rich_message`.
+pub fn fix_rich_message_with_ai(extra: RequestId, message: &Value) -> String {
+    json!({
+        "@type": "fixRichMessageWithAi",
+        "@extra": extra.as_extra(),
+        "message": message,
+    })
+    .to_string()
+}
+
 pub(crate) fn formatted_caption(caption: &str, strip_blockquote: bool) -> Value {
     // M1 fix-up: captions get the same markup→entities treatment as
     // message text (the toolbar is always visible above the composer,

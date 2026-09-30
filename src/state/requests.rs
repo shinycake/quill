@@ -159,7 +159,12 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
         ErrorClass::StoryUserRestricted => {
             return format!("Could not {action} (error {})", err.code);
         }
-        ErrorClass::Other => return format!("Could not {action} (error {})", err.code),
+        // Slice msg-richtext-ai-tools: AI errors never reach the sessions
+        // screen, so AiComposeFloodPremium shares the generic code-based
+        // line (kept as an explicit arm: the match must stay exhaustive).
+        ErrorClass::AiComposeFloodPremium | ErrorClass::Other => {
+            return format!("Could not {action} (error {})", err.code);
+        }
     };
     format!("Could not {action}: {detail}")
 }
@@ -178,6 +183,10 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         // 403 → Other), so non-story flows render byte-identical text.
         ErrorClass::StoryChatDisabled => "invalid request".to_string(),
         ErrorClass::StoryUserRestricted => format!("error {}", err.code),
+        // Slice msg-richtext-ai-tools: the documented AI flood error —
+        // the AI arm in `apply_error` phrases this for the user; this
+        // is the fallback for any generic path.
+        ErrorClass::AiComposeFloodPremium => "AI request limit reached".to_string(),
         ErrorClass::Other => format!("error {}", err.code),
     }
 }

@@ -1567,6 +1567,22 @@ impl QuillApp {
             self.rich_editor_open = true;
             self.status_note = "screenshot demo — rich editor".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRichAiTools)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_chat(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.composer.update(cx, |input, cx| {
+                input.set_value(
+                    "Please fix this sentance and rewrite it as a short invite.",
+                    window,
+                    cx,
+                );
+            });
+            self.rich_editor_open = true;
+            self.status_note =
+                "screenshot demo — rich editor AI tools: Fix · Rewrite · Create".into();
+        }
         if matches!(
             demo,
             Some(ScreenshotDemo::ReadyProfileEdit | ScreenshotDemo::ReadyUsername)

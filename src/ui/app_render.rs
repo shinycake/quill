@@ -38,6 +38,42 @@ impl Render for QuillApp {
         {
             dialog.prefill_from_form(&form, window, cx);
         }
+        // Slice msg-richtext-ai-tools: an AI answer for the open chat's
+        // composer replaces the draft (this needs `&mut Window` for the
+        // input, so it can't live in `poll_live`). A late answer for a
+        // chat the user has since left is dropped, never applied blindly.
+        // Rich answers are written back as editor markup
+        // (`blocks_to_markup`, the inverse of `markup_to_blocks`) so the
+        // rich send path rebuilds headings, lists, details, and dividers.
+        let ai_text = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.ai_composer_text.take());
+        let ai_blocks = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.ai_composer_blocks.take());
+        let open_chat = self
+            .live
+            .as_ref()
+            .and_then(|live| live.driver.session.open_chat);
+        if let Some((chat_id, text)) = ai_text
+            && open_chat == Some(chat_id)
+        {
+            self.composer.update(cx, |input, cx| {
+                input.set_value(&text, window, cx);
+            });
+            self.status_note = "AI updated the draft".into();
+        }
+        if let Some((chat_id, rich, note)) = ai_blocks
+            && open_chat == Some(chat_id)
+        {
+            let text = quill::rich::blocks_to_markup(&rich.blocks);
+            self.composer.update(cx, |input, cx| {
+                input.set_value(&text, window, cx);
+            });
+            self.status_note = note.into();
+        }
         // Phase A1: keep the slow-mode countdown ticking while the open
         // chat is gated (spawns at most one 1s task per open chat).
         self.ensure_slow_mode_tick(cx);

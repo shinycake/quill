@@ -860,6 +860,133 @@ pub fn markup_to_blocks(text: &str) -> Vec<RichBlock> {
     blocks
 }
 
+/// Serialize blocks to the composer markup [`markup_to_blocks`] parses.
+///
+/// Inverse of the editor's block markers (`#` / `##` / `###`, `-` and
+/// `1.` lists, `[ ]` / `[x]` checkboxes, `>>` collapsible blocks, `---`).
+/// Rich AI answers are written back through this so the rich send path
+/// rebuilds the same structure. Clipboard
+/// [`crate::telegram::envelope::RichMessageContent::copy_text`] drops those
+/// markers, and the send path then sees flat paragraph(s).
+///
+/// Inline `TextEntity` spans stay plain text: the editor stores styling as
+/// markup characters inside the block text, and incoming entity spans have
+/// no marker here. Tables, captions, and document names have no block
+/// marker either — their text is kept as paragraphs so the words are not
+/// dropped. Button rows, anchors, and unsupported blocks contribute nothing.
+pub fn blocks_to_markup(blocks: &[RichBlock]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for block in blocks {
+        if let Some(chunk) = block_to_markup(block)
+            && !chunk.is_empty()
+        {
+            parts.push(chunk);
+        }
+    }
+    parts.join("\n\n")
+}
+
+fn one_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn block_to_markup(block: &RichBlock) -> Option<String> {
+    match block {
+        RichBlock::Paragraph { text, .. } => {
+            let text = text.trim();
+            if text.is_empty() {
+                None
+            } else {
+                Some(text.to_string())
+            }
+        }
+        RichBlock::Heading { level, text, .. } => {
+            let level = (*level).clamp(1, 3) as usize;
+            Some(format!("{} {}", "#".repeat(level), one_line(text)))
+        }
+        RichBlock::List { ordered, items } => {
+            if items.is_empty() {
+                return None;
+            }
+            let lines: Vec<String> = items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let marker = if *ordered {
+                        format!("{}. ", index + 1)
+                    } else {
+                        String::from("- ")
+                    };
+                    let check = match item.checked {
+                        Some(true) => "[x] ",
+                        Some(false) => "[ ] ",
+                        None => "",
+                    };
+                    format!("{marker}{check}{}", one_line(&item.text))
+                })
+                .collect();
+            Some(lines.join("\n"))
+        }
+        RichBlock::Collapsible { header, body, .. } => {
+            let mut lines = vec![format!(">> {}", one_line(header))];
+            let body = body
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !body.is_empty() {
+                lines.push(body);
+            }
+            Some(lines.join("\n"))
+        }
+        RichBlock::Divider => Some("---".to_string()),
+        RichBlock::Table { rows } => {
+            let lines: Vec<String> = rows
+                .iter()
+                .filter_map(|row| {
+                    let line = row
+                        .iter()
+                        .map(String::as_str)
+                        .map(str::trim)
+                        .filter(|cell| !cell.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    if line.is_empty() { None } else { Some(line) }
+                })
+                .collect();
+            if lines.is_empty() {
+                None
+            } else {
+                Some(lines.join("\n"))
+            }
+        }
+        RichBlock::Document {
+            file_name, caption, ..
+        } => nonempty_lines(&[file_name, caption]),
+        RichBlock::Photo { caption, .. } | RichBlock::Video { caption, .. } => {
+            nonempty_lines(&[caption])
+        }
+        RichBlock::ButtonRow { .. } | RichBlock::Empty | RichBlock::Unsupported { .. } => None,
+    }
+}
+
+fn nonempty_lines(parts: &[&str]) -> Option<String> {
+    let lines: Vec<&str> = parts
+        .iter()
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
 /// M2: resolve editor markup to clean text + render entities for the live
 /// block preview. `parse_format_markup` yields UTF-16 offsets;
 /// `TextEntity` needs UTF-8 byte offsets (converted with
@@ -1210,6 +1337,48 @@ mod tests {
         assert!(
             matches!(&blocks[5], RichBlock::Paragraph { text, .. } if text.contains("**bold**"))
         );
+    }
+
+    #[test]
+    fn blocks_to_markup_round_trips_structure_copy_text_flattens() {
+        // Rich AI answers must land as editor markup the send path
+        // re-parses. `copy_text` drops the markers, so the same blocks
+        // become flat paragraph(s).
+        let source = "# Title\n\n## Sub\n\n### Small\n\n- a\n- [ ] b\n- [x] c\n\n1. first\n2. second\n\n>> More\nbody line\nstill body\n\n---\n\nplain **bold** tail";
+        let blocks = markup_to_blocks(source);
+        let markup = blocks_to_markup(&blocks);
+        assert_eq!(markup_to_blocks(&markup), blocks);
+
+        let sent = input_rich_message(&markup_to_blocks(&markup)).expect("sendable");
+        let types: Vec<&str> = sent["source"]["blocks"]
+            .as_array()
+            .expect("blocks")
+            .iter()
+            .map(|block| block["@type"].as_str().unwrap_or(""))
+            .collect();
+        for kind in [
+            "inputPageBlockSectionHeading",
+            "inputPageBlockList",
+            "inputPageBlockDetails",
+            "inputPageBlockDivider",
+            "inputPageBlockParagraph",
+        ] {
+            assert!(types.contains(&kind), "missing {kind} in {types:?}");
+        }
+
+        let flat = crate::telegram::envelope::RichMessageContent {
+            blocks: blocks.clone(),
+            is_full: true,
+        }
+        .copy_text();
+        let flat_blocks = markup_to_blocks(&flat);
+        assert!(
+            flat_blocks
+                .iter()
+                .all(|block| matches!(block, RichBlock::Paragraph { .. })),
+            "copy_text must flatten, got {flat_blocks:?}"
+        );
+        assert!(flat_blocks.len() < blocks.len());
     }
 
     #[test]

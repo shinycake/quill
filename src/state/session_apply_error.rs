@@ -991,6 +991,26 @@ impl Session {
                     "Could not transcribe this message",
                 ));
             }
+            // Slice msg-richtext-ai-tools: a failed AI request surfaces
+            // in the status note instead of vanishing into `_ => {}` —
+            // the button said "AI working…" and the user deserves an
+            // answer either way. `AICOMPOSE_FLOOD_PREMIUM` (classified in
+            // `parse_error`) gets the documented plain-language line.
+            Some(
+                RequestPurpose::FixTextWithAi
+                | RequestPurpose::ComposeTextWithAi
+                | RequestPurpose::ComposeRichMessageWithAi
+                | RequestPurpose::CreateRichMessageWithAi
+                | RequestPurpose::FixRichMessageWithAi,
+            ) => {
+                self.ai_error = Some(match err.class {
+                    ErrorClass::AiComposeFloodPremium => {
+                        "AI limit reached — Telegram Premium is required for more requests"
+                            .to_string()
+                    }
+                    _ => format!("AI tools failed: {}", error_reason(&err)),
+                });
+            }
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404 {

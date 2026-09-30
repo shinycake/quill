@@ -620,6 +620,16 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 rich: RichMessageContent { blocks, is_full },
             })
         }
+        // Slice msg-richtext-ai-tools: `fixedText` (schema:157) — the
+        // `fixTextWithAi` answer.
+        "fixedText" => Ok(EnvelopePayload::FixedText {
+            text: parse_formatted_text(value.get("text")),
+        }),
+        // Slice msg-richtext-ai-tools: bare `formattedText` (schema:3046)
+        // — the `composeTextWithAi` answer.
+        "formattedText" => Ok(EnvelopePayload::FormattedText {
+            text: parse_formatted_text(Some(&value)),
+        }),
         // MED4: `webPageInstantView` (schema:4377) — same `blocks` /
         // `is_full` shape as `richMessage`, so the M2 parser applies.
         "webPageInstantView" => {
