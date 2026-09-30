@@ -4,7 +4,9 @@ use crate::data_settings::{AutoDownloadNetSettings, NetworkKind, save_data_stora
 use crate::ids::{ChatId, RequestId};
 use crate::notify::NotificationSoundKind;
 use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
-use crate::settings::{load_preferences, save_badge_prefs, save_call_prefs, save_preferences};
+use crate::settings::{
+    load_preferences, save_badge_prefs, save_call_prefs, save_language_prefs, save_preferences,
+};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{
     ChatNotificationSettings, MUTE_FOREVER, NotificationSettingsScope,
@@ -1088,5 +1090,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut prefs = load_preferences(&self.paths);
         prefs.inapp_sounds_enabled = self.session.inapp_sounds_enabled;
         save_preferences(&self.paths, &prefs)
+    }
+
+    /// Slice parity:settings-language: persist the app language pref
+    /// (`language_prefs.json`) next to the account.
+    pub fn save_language_prefs(&mut self) -> std::io::Result<()> {
+        save_language_prefs(&self.paths, &self.session.language_prefs)
     }
 }

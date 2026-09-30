@@ -468,6 +468,85 @@ pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) -> std::io::Resu
     save_json_prefs(paths, "chat_prefs.json", prefs)
 }
 
+/// Slice parity:settings-language: local-only app language preference,
+/// persisted as JSON next to the account root (`language_prefs.json`).
+/// `system_language_code` is the IETF tag sent in TDLib's
+/// `setTdlibParameters` (hardcoded `"en"` before this slice). TDLib
+/// parameters are sent once at startup, so a change takes effect on
+/// restart — no runtime application is attempted:
+/// `setOption("language_pack_id")` is real (schema 1.8.67 :15662) but it
+/// only names a downloaded language-pack database whose strings the
+/// client then fetches via `getLanguagePackString`/`updateLanguagePackStrings`
+/// (schema 1.8.67 :10970); Quill's own strings are hardcoded English, so
+/// the option would change nothing visible. Full UI-string translation is
+/// a separate project and out of scope.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LanguagePrefs {
+    /// IETF language tag, e.g. "en", "es", "zh".
+    #[serde(default = "default_language_code")]
+    pub system_language_code: String,
+}
+
+/// Default app language tag.
+pub const DEFAULT_LANGUAGE_CODE: &str = "en";
+
+fn default_language_code() -> String {
+    DEFAULT_LANGUAGE_CODE.to_string()
+}
+
+/// TDLib `setTdlibParameters` tags offered in Settings (code, native
+/// name). Language tags only — Quill's UI strings stay English.
+pub const SUPPORTED_LANGUAGES: &[(&str, &str)] = &[
+    ("en", "English"),
+    ("es", "Español"),
+    ("de", "Deutsch"),
+    ("fr", "Français"),
+    ("it", "Italiano"),
+    ("pt", "Português"),
+    ("ru", "Русский"),
+    ("uk", "Українська"),
+    ("ar", "العربية"),
+    ("he", "עברית"),
+    ("fa", "فارسی"),
+    ("zh", "中文"),
+    ("ja", "日本語"),
+    ("ko", "한국어"),
+    ("tr", "Türkçe"),
+    ("nl", "Nederlands"),
+    ("pl", "Polski"),
+    ("id", "Bahasa Indonesia"),
+];
+
+impl Default for LanguagePrefs {
+    fn default() -> Self {
+        Self {
+            system_language_code: default_language_code(),
+        }
+    }
+}
+
+/// Load language prefs; missing or corrupt files fall back to defaults
+/// (never a hard error — prefs must not block startup). A stored tag
+/// that isn't in `SUPPORTED_LANGUAGES` (hand-edited JSON, removed
+/// entries) falls back to `DEFAULT_LANGUAGE_CODE`.
+pub fn load_language_prefs(paths: &AccountPaths) -> LanguagePrefs {
+    let prefs: LanguagePrefs = load_json_prefs(paths, "language_prefs.json");
+    if SUPPORTED_LANGUAGES
+        .iter()
+        .any(|(code, _)| *code == prefs.system_language_code)
+    {
+        prefs
+    } else {
+        LanguagePrefs::default()
+    }
+}
+
+/// Persist language prefs; failures are returned to the caller to
+/// surface in the status note.
+pub fn save_language_prefs(paths: &AccountPaths, prefs: &LanguagePrefs) -> std::io::Result<()> {
+    save_json_prefs(paths, "language_prefs.json", prefs)
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountPaths {
     pub root: PathBuf,
@@ -948,6 +1027,37 @@ mod tests {
         assert_eq!(prefs.font_size_px, 16);
         assert_eq!(prefs.night_start_minutes, 1380);
         assert_eq!(prefs.night_end_minutes, 420);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Slice parity:settings-language: the stored language tag survives
+    /// a save/load roundtrip; a missing file defaults to "en"; an
+    /// unsupported tag (hand-edited JSON) falls back to "en" rather
+    /// than being reported to TDLib.
+    #[test]
+    fn language_prefs_roundtrip_default_and_sanitize() {
+        let dir = std::env::temp_dir().join(format!("quill-language-prefs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        // Missing file → "en".
+        assert_eq!(load_language_prefs(&paths), LanguagePrefs::default());
+        assert_eq!(LanguagePrefs::default().system_language_code, "en");
+        // Roundtrip.
+        let prefs = LanguagePrefs {
+            system_language_code: "de".to_string(),
+        };
+        save_language_prefs(&paths, &prefs).unwrap();
+        assert_eq!(load_language_prefs(&paths), prefs);
+        // Unsupported tag → default, never an error.
+        fs::write(
+            paths.root.join("language_prefs.json"),
+            br#"{"system_language_code": "xx"}"#,
+        )
+        .unwrap();
+        assert_eq!(load_language_prefs(&paths), LanguagePrefs::default());
+        // A file from before the field existed (empty object) still loads.
+        fs::write(paths.root.join("language_prefs.json"), b"{}").unwrap();
+        assert_eq!(load_language_prefs(&paths), LanguagePrefs::default());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
