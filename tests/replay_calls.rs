@@ -6,7 +6,7 @@ use replay_common::*;
 /// Phase C1: the full call-signaling lifecycle through the reducer —
 /// incoming pending → exchanging keys → ready (with honestly queued
 /// signaling data) → discarded (summary + rating flag); a second
-/// incoming call while one is active is queued for busy-decline; a
+/// incoming call while one is active raises the swap prompt; a
 /// failed `createCall` surfaces `call_error`.
 #[test]
 fn replay_call_signaling_lifecycle() {
@@ -39,7 +39,8 @@ fn replay_call_signaling_lifecycle() {
     ));
     assert!(session.call_summary.is_none());
 
-    // A second incoming call while one is active → busy-decline queue.
+    // A second incoming call while one is active raises the swap
+    // prompt (the busy-decline queue stays empty for the first one).
     apply_all_seq(
         &mut session,
         &sink,
@@ -49,7 +50,8 @@ fn replay_call_signaling_lifecycle() {
         ],
     );
     assert_eq!(session.active_call.as_ref().expect("still call 77").id, 77);
-    assert_eq!(session.call_busy_decline_queue, vec![(78, 42, false)]);
+    assert_eq!(session.call_swap_pending, Some((78, 42, false)));
+    assert!(session.call_busy_decline_queue.is_empty());
 
     // Keys exchange, then Ready; signaling data is queued honestly.
     apply_all_seq(
@@ -167,8 +169,8 @@ fn replay_call_signaling_lifecycle() {
 /// exchanging keys → ready → discard keeps `is_video: true` on the
 /// summary; an incoming video call tracks `is_video` from `updateCall`
 /// itself (the `call` type carries it, schema 1.8.67 :7287); a second
-/// incoming video call while one is active is queued for busy-decline
-/// with `is_video: true` so `discardCall` reports it (schema :14227).
+/// incoming video call while one is active raises the swap prompt
+/// with `is_video: true`.
 #[test]
 fn replay_video_call_signaling() {
     use quill::telegram::envelope::CallState;
@@ -214,8 +216,8 @@ fn replay_video_call_signaling() {
     assert!(call.is_video);
     assert!(call.ready_at.is_some());
 
-    // A second incoming video call while one is active → busy-decline
-    // queue keeps its `is_video`.
+    // A second incoming video call while one is active raises the
+    // swap prompt, keeping its `is_video`.
     apply_all_seq(
         &mut session,
         &sink,
@@ -225,7 +227,7 @@ fn replay_video_call_signaling() {
         ],
     );
     assert_eq!(session.active_call.as_ref().expect("still call 90").id, 90);
-    assert_eq!(session.call_busy_decline_queue, vec![(91, 42, true)]);
+    assert_eq!(session.call_swap_pending, Some((91, 42, true)));
 
     // Remote hangup → the summary keeps `is_video: true` (the driver
     // sends it back in `discardCall`).

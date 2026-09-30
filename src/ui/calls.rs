@@ -22,6 +22,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
+use std::time::Instant;
 /// Scheduled video-chat fixture — the "Design voice" supergroup (id
 /// 51) has a scheduled (not yet started) video chat (id 555, starts
 /// in ~2h), so the overlay renders the "Scheduled voice chat" card:
@@ -152,6 +153,33 @@ pub(super) fn apply_ready_call(session: &mut Session, sink: &Arc<MemorySink>, se
             r#"{{"@type":"updateUser","user":{{"id":{user_id},"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
         ),
         r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+/// Swap-prompt fixture — an active outgoing voice call with Zed
+/// (user 41) plus an incoming pending video call from Ada (user 42),
+/// so the state machine raises `call_swap_pending` and the kit dialog
+/// renders the swap prompt. Injected, no live Telegram.
+pub(super) fn apply_ready_call_swap(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let jsons = [
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":41,"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"98","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateExchangingKeys"}}}"#.to_string(),
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":42,"first_name":"Ada","last_name":"Lovelace","usernames":{{"@type":"usernames","active_usernames":["adalovelace"],"disabled_usernames":[],"editable_username":"adalovelace","collectible_usernames":[]}},"phone_number":"+15550101042","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ),
+        r#"{"@type":"updateCall","call":{"@type":"call","id":78,"unique_id":"97","user_id":42,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#.to_string(),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
@@ -904,6 +932,142 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(format!("Start {kind} with {name}?"))
+                .content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// Swap prompt: answer the pending incoming call — the driver
+    /// ends the current call first (TDLib allows a single active call)
+    /// and accepts the incoming one once the discard lands.
+    pub(super) fn answer_swap_call(&mut self, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self.live.as_mut().expect("live").driver.accept_swap_call();
+            self.status_note = match result {
+                Ok(_) => "ending current call, answering…".into(),
+                Err(_) => "could not answer the call".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            if let Some((call_id, user_id, is_video)) = session.call_swap_pending.take() {
+                session.active_call = None;
+                session.call_summary = None;
+                session.active_call = Some(ActiveCall {
+                    id: call_id,
+                    user_id,
+                    is_outgoing: false,
+                    is_video,
+                    state: CallState::Pending {
+                        is_created: false,
+                        is_received: true,
+                    },
+                    started_at: Instant::now(),
+                    ready_at: None,
+                    ready: None,
+                    transport: None,
+                    transport_error: None,
+                    signaling_queue: Vec::new(),
+                    signaling_dropped: 0,
+                    muted: false,
+                    camera_on: is_video,
+                    screen_sharing: false,
+                    remote_video: quill::calls::engine::RemoteVideoState::Inactive,
+                    remote_screen: quill::calls::engine::RemoteVideoState::Inactive,
+                });
+            }
+            self.status_note = "demo: swap accepted (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Swap prompt: decline the pending incoming call as busy.
+    pub(super) fn decline_swap_call(&mut self, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            let result = self.live.as_mut().expect("live").driver.decline_swap_call();
+            self.status_note = match result {
+                Ok(_) => "incoming call declined".into(),
+                Err(_) => "could not decline the call".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.call_swap_pending = None;
+            self.status_note = "demo: swap declined (no live Telegram)".into();
+        }
+        cx.notify();
+    }
+
+    /// Swap prompt hosted in a kit `Dialog` via `window.open_dialog`
+    /// (the kit Phase 2 redo pattern). Esc / backdrop / ✕ declines the
+    /// incoming call as busy — the same honest outcome the old
+    /// auto-decline produced.
+    pub(super) fn build_call_swap_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::CallSwap, |this, _, cx| {
+                this.decline_swap_call(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some((_call_id, user_id, is_video)) =
+                this.session().and_then(|s| s.call_swap_pending)
+            else {
+                return dialog
+                    .overlay(true)
+                    .title("Incoming call")
+                    .on_close(on_close.clone());
+            };
+            let name = this
+                .session()
+                .and_then(|session| session.user(user_id))
+                .map(|user| user.display_name())
+                .unwrap_or_else(|| format!("User {user_id}"));
+            let kind = if is_video { "video call" } else { "call" };
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("You're already in a call. Telegram doesn't support putting a call on hold — answering ends the current one."),
+                )
+                .into_any_element();
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("call-swap-decline")
+                        .label("Decline")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.decline_swap_call(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CallSwap, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("call-swap-answer")
+                        .label("End & answer")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.answer_swap_call(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CallSwap, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title(format!("{name} is calling ({kind})"))
                 .content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {

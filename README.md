@@ -359,7 +359,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Call state indicators (calling / connecting / exchanging keys) <!-- parity:calls-states --> (ui/mod.rs:9768)
 - [x] Mute / unmute microphone during call <!-- parity:calls-mute --> (toggle_call_mute ui/mod.rs:4483; set_call_muted connect.rs:1871)
 - [x] Microphone and speaker output selection during call <!-- parity:calls-devices --> (select_call_devices connect.rs:1891; picker ui/mod.rs:4523)
-- [ ] Incoming-call-while-busy swap prompt (partial: no Telegram-level hold/swap API; incoming call is auto-declined with an explanatory banner, state.rs) <!-- parity:calls-swap-prompt -->
+- [x] Incoming-call-while-busy swap prompt: kit dialog (End & answer / Decline) when a call arrives mid-call; answering discards the current call then `acceptCall`s the pending one once the discard lands (no Telegram hold API — true hold-and-answer stays impossible, said honestly in the dialog); Esc/backdrop/dismiss declines busy; further incoming calls while the prompt is open auto-decline busy with the banner (src/state/session_calls.rs, src/connect/calls.rs, src/ui/calls.rs) <!-- parity:calls-swap-prompt -->
 - [x] Call failed / offline / microphone-missing error states <!-- parity:calls-errors --> ("Call failed" card ui/mod.rs:9668)
 - [x] Reconnect indicator when audio transport drops <!-- parity:calls-reconnect --> (TransportState::Reconnecting calls/engine.rs:27; shown ui/mod.rs:9787)
 - [x] Call end summary screen with duration <!-- parity:calls-summary --> (CallSummary state.rs:2006)

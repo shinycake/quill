@@ -504,6 +504,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C1: incoming calls that arrived while another call was
         // active are declined (busy).
         let _ = self.maybe_decline_busy_calls();
+        // Swap prompt: the queued post-swap acceptCall fires once the
+        // old call's terminal updateCall has cleared active_call.
+        let _ = self.maybe_accept_queued_swap();
         // Phase C3a: freshly created voice chats get their full
         // `groupCall` via `getGroupCall`.
         let _ = self.maybe_fetch_group_calls();

@@ -8,8 +8,8 @@ use super::bots::{
 };
 use super::calls::apply_ready_call;
 use super::calls::{
-    apply_ready_call_video, apply_ready_calls_settings, apply_ready_group_call,
-    apply_ready_group_call_invitation, apply_ready_group_call_invite,
+    apply_ready_call_swap, apply_ready_call_video, apply_ready_calls_settings,
+    apply_ready_group_call, apply_ready_group_call_invitation, apply_ready_group_call_invite,
     apply_ready_group_call_manage, apply_ready_group_call_scheduled,
 };
 use super::chat::apply_ready_slow_mode;
@@ -732,6 +732,17 @@ impl QuillApp {
             }
             self.status_note =
                 "screenshot demo — incoming call from Zed (injected, no live Telegram)".into();
+        }
+        // Swap prompt: active outgoing call with Zed + incoming pending
+        // video call from Ada, so the state machine raises the swap
+        // prompt and the kit dialog renders (End & answer / Decline).
+        if matches!(demo, Some(ScreenshotDemo::ReadyCallSwap)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_call_swap(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note =
+                "screenshot demo — swap prompt: Ada calling while in a call with Zed (injected, no live Telegram)".into();
         }
         // Phase C1b: connected-video-call fixture — Zed's incoming
         // video call goes pending → exchanging keys → ready, so the

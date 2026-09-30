@@ -166,3 +166,84 @@ fn call_privacy_loading_clears_only_after_both_gets_land() {
     );
     assert_eq!(session.call_privacy_p2p, Some(PrivacyWho::Everybody));
 }
+
+fn swap_pending_json(id: i32, user_id: i64, is_video: bool) -> String {
+    format!(
+        r#"{{"@type":"updateCall","call":{{"@type":"call","id":{id},"unique_id":"99","user_id":{user_id},"is_outgoing":false,"is_video":{is_video},"state":{{"@type":"callStatePending","is_created":true,"is_received":false}}}}}}"#
+    )
+}
+
+fn swap_active_json(id: i32, user_id: i64) -> String {
+    format!(
+        r#"{{"@type":"updateCall","call":{{"@type":"call","id":{id},"unique_id":"98","user_id":{user_id},"is_outgoing":true,"is_video":false,"state":{{"@type":"callStateExchangingKeys"}}}}}}"#
+    )
+}
+
+fn swap_discarded_json(id: i32, user_id: i64) -> String {
+    format!(
+        r#"{{"@type":"updateCall","call":{{"@type":"call","id":{id},"unique_id":"97","user_id":{user_id},"is_outgoing":false,"is_video":false,"state":{{"@type":"callStateDiscarded","reason":{{"@type":"callDiscardReasonHungUp"}},"need_rating":false,"need_debug_information":false,"need_log":false}}}}}}"#
+    )
+}
+
+#[test]
+fn incoming_while_active_raises_swap_prompt() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    assert!(session.active_call.is_some());
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
+    assert_eq!(session.call_swap_pending, Some((78, 42, false)));
+    assert!(
+        session.call_busy_decline_queue.is_empty(),
+        "first incoming raises the prompt, not the busy queue"
+    );
+}
+
+#[test]
+fn second_incoming_while_prompt_open_busy_declines() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(79, 43, true));
+    assert_eq!(session.call_swap_pending, Some((78, 42, false)));
+    assert_eq!(session.call_busy_decline_queue, vec![(79, 43, true)]);
+}
+
+#[test]
+fn caller_hangup_clears_swap_prompt() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
+    apply_json(&mut session, &seq, &sink, &swap_discarded_json(78, 42));
+    assert_eq!(session.call_swap_pending, None);
+    assert!(session.active_call.is_some(), "active call untouched");
+}
+
+#[test]
+fn active_call_end_clears_open_swap_prompt() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
+    apply_json(&mut session, &seq, &sink, &swap_discarded_json(77, 41));
+    assert!(session.active_call.is_none());
+    assert_eq!(
+        session.call_swap_pending, None,
+        "moot prompt clears when the active call ends on its own"
+    );
+}
+
+#[test]
+fn swap_accept_queued_survives_active_call_end() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
+    // User chose "End & answer": prompt moves to the accept queue.
+    session.call_swap_pending = None;
+    session.call_swap_accept_queued = Some((78, false));
+    apply_json(&mut session, &seq, &sink, &swap_discarded_json(77, 41));
+    assert_eq!(session.call_swap_accept_queued, Some((78, false)));
+}
