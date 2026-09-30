@@ -275,6 +275,23 @@ pub struct AppearancePrefs {
     /// Bubble style (true) vs plain full-width rows (false).
     #[serde(default = "default_true")]
     pub bubbles: bool,
+    /// Parity slice chatlist-list-style: chat-list density — two-line
+    /// rows (title + last message) vs three-line rows (the preview gets
+    /// a second line; TGX "Chats List Style", telegram.org: "select
+    /// Three lines ... to see up to three lines per chat instead of the
+    /// usual two"). Pure client-side, like the rest of this struct.
+    #[serde(default)]
+    pub chat_list_three_lines: bool,
+    /// Parity slice chatlist-list-style: media-type glyph (📷/🎬/…)
+    /// before the preview of media messages (TGX 0.22.2 "Icons in the
+    /// chats list for media messages").
+    #[serde(default = "default_true")]
+    pub chat_list_media_icons: bool,
+    /// Parity slice chatlist-list-style: render message-entity
+    /// formatting (bold/italic/…) in chat-list previews instead of
+    /// plain text.
+    #[serde(default = "default_true")]
+    pub chat_list_rich_preview: bool,
 }
 
 fn default_night_start() -> u16 {
@@ -300,7 +317,54 @@ impl Default for AppearancePrefs {
             wallpaper_rgb: None,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
+            chat_list_three_lines: false,
+            chat_list_media_icons: true,
+            chat_list_rich_preview: true,
         }
+    }
+}
+
+/// Parity slice chatlist-list-style: the chat-list row style, read once
+/// per frame from `AppearancePrefs` and passed down to the row
+/// renderer — one struct instead of three bools threaded through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChatListStyle {
+    /// Three-line rows (title + two preview lines) vs two-line rows.
+    pub three_lines: bool,
+    /// Media-type glyph before media-message previews.
+    pub media_icons: bool,
+    /// Entity formatting (bold/italic/…) in previews vs plain text.
+    pub rich_preview: bool,
+}
+
+impl AppearancePrefs {
+    pub fn chat_list_style(&self) -> ChatListStyle {
+        ChatListStyle {
+            three_lines: self.chat_list_three_lines,
+            media_icons: self.chat_list_media_icons,
+            rich_preview: self.chat_list_rich_preview,
+        }
+    }
+}
+
+impl ChatListStyle {
+    /// Preview lines per chat: 1 for two-line rows, 2 for three-line
+    /// rows (telegram.org: three-line rows show "up to three lines per
+    /// chat instead of the usual two" — the title keeps its line).
+    pub fn preview_lines(self) -> u8 {
+        if self.three_lines { 2 } else { 1 }
+    }
+
+    /// Whether the media-type glyph is shown before this preview —
+    /// the toggle AND an actual media icon must both be present.
+    pub fn shows_media_icon(self, icon: Option<&str>) -> bool {
+        self.media_icons && icon.is_some()
+    }
+
+    /// Whether this preview renders with entity formatting (bold,
+    /// italic, …) — the toggle AND at least one entity are needed.
+    pub fn formats_preview(self, has_entities: bool) -> bool {
+        self.rich_preview && has_entities
     }
 }
 
@@ -620,10 +684,97 @@ mod tests {
             wallpaper_rgb: Some(0x0e1621),
             font_size_px: 17,
             bubbles: false,
+            chat_list_three_lines: true,
+            chat_list_media_icons: false,
+            chat_list_rich_preview: false,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_appearance_prefs(&paths), prefs);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Parity slice chatlist-list-style: what the new prefs are
+    /// ultimately validating — (a) an old prefs file without the new
+    /// keys loads with the new defaults (two lines, icons on, rich
+    /// previews on); (b) the style struct mirrors the prefs; (c) the
+    /// new values round-trip through save/load.
+    #[test]
+    fn chat_list_style_prefs_backward_compatible_and_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("quill-chatlist-style-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        fs::create_dir_all(&paths.root).unwrap();
+
+        // (a) old file without the new keys → new defaults.
+        fs::write(
+            paths.root.join("appearance_prefs.json"),
+            br#"{"theme": "dark", "font_size_px": 16, "bubbles": true}"#,
+        )
+        .unwrap();
+        let prefs = load_appearance_prefs(&paths);
+        // The old keys parsed (proves the file loaded, not defaulted)…
+        assert_eq!(prefs.theme, ThemeChoice::Dark);
+        assert_eq!(prefs.font_size_px, 16);
+        // …while the missing new keys fell back to their defaults.
+        assert!(!prefs.chat_list_three_lines);
+        assert!(prefs.chat_list_media_icons);
+        assert!(prefs.chat_list_rich_preview);
+        let style = prefs.chat_list_style();
+        assert_eq!(
+            style,
+            ChatListStyle {
+                three_lines: false,
+                media_icons: true,
+                rich_preview: true,
+            }
+        );
+
+        // (b) non-default values round-trip.
+        let prefs = AppearancePrefs {
+            chat_list_three_lines: true,
+            chat_list_media_icons: false,
+            chat_list_rich_preview: false,
+            ..AppearancePrefs::default()
+        };
+        save_appearance_prefs(&paths, &prefs).unwrap();
+        let loaded = load_appearance_prefs(&paths);
+        assert!(loaded.chat_list_style().three_lines);
+        assert!(!loaded.chat_list_style().media_icons);
+        assert!(!loaded.chat_list_style().rich_preview);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Parity slice chatlist-list-style: what the rendering branches are
+    /// ultimately validating — the row renderer delegates its three
+    /// decisions (preview lines, icon shown, formatting applied) to
+    /// these pure methods, so this test covers the branches the UI
+    /// cannot reach in a unit test.
+    #[test]
+    fn chat_list_style_rendering_decisions() {
+        let two = ChatListStyle {
+            three_lines: false,
+            media_icons: true,
+            rich_preview: true,
+        };
+        assert_eq!(two.preview_lines(), 1);
+        assert!(two.shows_media_icon(Some("📷")));
+        assert!(!two.shows_media_icon(None));
+        assert!(two.formats_preview(true));
+        assert!(!two.formats_preview(false));
+
+        let three = ChatListStyle {
+            three_lines: true,
+            ..two
+        };
+        assert_eq!(three.preview_lines(), 2);
+
+        let plain = ChatListStyle {
+            media_icons: false,
+            rich_preview: false,
+            ..two
+        };
+        assert!(!plain.shows_media_icon(Some("📷")));
+        assert!(!plain.formats_preview(true));
     }
 
     /// Settings → Appearance: a corrupt prefs file falls back to

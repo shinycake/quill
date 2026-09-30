@@ -269,6 +269,8 @@ mod tests {
             folder_positions: BTreeMap::new(),
             notification_settings: ChatNotificationSettings::default(),
             last_preview: String::new(),
+            last_preview_icon: None,
+            last_preview_entities: Vec::new(),
             typing_senders: Vec::new(),
             choosing_sticker_senders: Vec::new(),
             draft: None,

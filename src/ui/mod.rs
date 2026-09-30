@@ -94,7 +94,7 @@ use quill::rich::RichBlock;
 use quill::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
     AUTO_DOWNLOAD_VIDEO, AUTO_DOWNLOAD_VIDEO_NOTE, AUTO_DOWNLOAD_VOICE, AppearancePrefs, CallPrefs,
-    MediaPrefs, ThemeChoice,
+    ChatListStyle, MediaPrefs, ThemeChoice,
 };
 use quill::state::{
     ActiveCall, ActiveGroupCall, AdminListFetch, AdminRightsFetch, CallSummary, ChatEventLogFetch,
@@ -40433,6 +40433,11 @@ impl QuillApp {
                                     let height = match item {
                                         ChatListItem::Chat { chat, .. } => chat_row_height(
                                             &chat_row_tags(chat, &folder_names, show_folder_tags),
+                                            // Parity slice chatlist-list-style:
+                                            // declared sizes must match the
+                                            // rendered rows (see
+                                            // `chat_row_height`).
+                                            self.appearance.chat_list_three_lines,
                                         ),
                                         ChatListItem::ArchiveHeader { .. } => px(32.),
                                         ChatListItem::ArchiveEmpty => px(24.),
@@ -44264,9 +44269,17 @@ fn chat_row_tags(chat: &ChatSummary, folders: &[(i32, String)], show_tags: bool)
 /// kit Phase 3: chat rows render at a fixed height so the kit
 /// `VirtualList` can position them from declared sizes — 56px base
 /// (avatar 40 + the old py_2), 80px when the folder-tag strip is present.
-/// `session_chat_row` enforces the same height on the element.
-fn chat_row_height(tags: &[String]) -> Pixels {
-    if tags.is_empty() { px(56.) } else { px(80.) }
+/// Parity slice chatlist-list-style: three-line rows give the preview a
+/// second line (title + two preview lines), so the base grows by one
+/// preview line (16px). `session_chat_row` enforces the same height on
+/// the element.
+fn chat_row_height(tags: &[String], three_lines: bool) -> Pixels {
+    let base = if three_lines { px(72.) } else { px(56.) };
+    if tags.is_empty() {
+        base
+    } else {
+        base + px(24.)
+    }
 }
 
 impl QuillApp {
@@ -44338,6 +44351,10 @@ impl QuillApp {
                 session_chat_row(
                     &chat,
                     selected,
+                    // Parity slice chatlist-list-style: row style from
+                    // the appearance prefs (two/three lines, media
+                    // icons, formatted previews).
+                    self.appearance.chat_list_style(),
                     &folder_names,
                     show_folder_tags,
                     photo.as_deref(),
@@ -44345,6 +44362,7 @@ impl QuillApp {
                     archived,
                     selecting,
                     checked,
+                    &self.spoiler_revealed,
                     cx,
                 )
                 .into_any_element()
@@ -44411,9 +44429,83 @@ impl QuillApp {
     }
 }
 
+/// Parity slice chatlist-list-style: the preview line(s) of a chat row —
+/// media-type glyph prefix, entity-formatted vs plain text, and the
+/// one/two-line clamp for two/three-line rows. A free function next to
+/// `session_chat_row` (which owns no app state); the caller passes the
+/// spoiler reveal set.
+fn chat_row_preview(
+    chat: &ChatSummary,
+    style: ChatListStyle,
+    revealed: &HashSet<(i64, u64, u64, bool)>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let preview = chat.sidebar_preview();
+    // Media icons (TGX 0.22.2 "Icons in the chats list for media
+    // messages"): the glyph prefixes the preview; the toggle hides it.
+    let icon = if style.shows_media_icon(chat.last_preview_icon) {
+        chat.last_preview_icon
+    } else {
+        None
+    };
+    // Formatted previews: the entities pair with the same truncated text
+    // `sidebar_preview` returns for message previews. Draft / typing /
+    // unread labels carry no entities, so the rich path never fires for
+    // them.
+    let rich = style.formats_preview(!chat.last_preview_entities.is_empty());
+    let text: AnyElement = if rich {
+        rich_text_line(
+            &preview,
+            &chat.last_preview_entities,
+            (chat.id.0, 0),
+            false,
+            revealed,
+            px(12.),
+            cx,
+        )
+    } else {
+        div().child(preview).into_any_element()
+    };
+    // telegram.org: three-line rows show "up to three lines per chat
+    // instead of the usual two" — the title keeps its line, the preview
+    // gets up to two (clipped, never overflowing the fixed row height).
+    let three_line_preview = style.preview_lines() == 2;
+    let mut line = div().flex().items_center().gap_1().min_w_0();
+    if let Some(icon) = icon {
+        line = line.child(div().flex_shrink_0().child(icon));
+    }
+    line = line.child(
+        div()
+            .min_w_0()
+            .flex_1()
+            .overflow_hidden()
+            // `preview_lines`: three-line rows give the preview up to two
+            // lines; two-line rows clamp it to one (clipped, never
+            // overflowing the fixed row height).
+            .when(three_line_preview, |this| this.max_h(px(36.)))
+            .when(!three_line_preview, |this| {
+                if rich {
+                    // Single text_xs line of the wrapped runs.
+                    this.max_h(px(18.))
+                } else {
+                    this.truncate()
+                }
+            })
+            .child(text),
+    );
+    div()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(line)
+        .into_any_element()
+}
+
 fn session_chat_row(
     chat: &ChatSummary,
     selected: bool,
+    // Parity slice chatlist-list-style: row density + preview display
+    // options, read once per frame from `AppearancePrefs`.
+    style: ChatListStyle,
     // Parity slice: `(folder id, name)` for folder-tag chips.
     folders: &[(i32, String)],
     // Parity slice: show folder-tag chips (`are_folder_tags_enabled`).
@@ -44433,6 +44525,9 @@ fn session_chat_row(
     // of opening the chat, and shows the check circle.
     selecting: bool,
     checked: bool,
+    // Parity slice chatlist-list-style: spoiler reveal state for
+    // formatted previews (owned by the app, keyed per chat).
+    revealed: &HashSet<(i64, u64, u64, bool)>,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
@@ -44473,8 +44568,8 @@ fn session_chat_row(
         // kit Phase 3: fixed height (see `chat_row_height`) — the
         // `VirtualList` positions rows from declared sizes, so the row
         // enforces the same height and centers its content. Title and
-        // preview truncate to one line so content can never overflow it.
-        .h(chat_row_height(&tags))
+        // preview clip to their lines so content can never overflow it.
+        .h(chat_row_height(&tags, style.three_lines))
         .flex()
         .flex_col()
         .justify_center()
@@ -44599,13 +44694,7 @@ fn session_chat_row(
                                         .when(has_mentions, |this| this.child(mention_badge())),
                                 ),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .truncate()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(preview),
-                        ),
+                        .child(chat_row_preview(chat, style, revealed, cx)),
                 ),
         )
         .when(!tags.is_empty(), |this| {

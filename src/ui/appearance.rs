@@ -11,6 +11,7 @@ use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::theme::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -196,7 +197,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        "Theme, accent, wallpaper, text size and chat style. \
+                        "Theme, accent, wallpaper, text size, chat style and chat list. \
                          Changes apply immediately and are saved on this device.",
                     ),
             );
@@ -206,6 +207,9 @@ impl QuillApp {
             body = body.child(this.appearance_wallpaper_section(cx));
             body = body.child(this.appearance_font_section(cx));
             body = body.child(this.appearance_bubble_section(cx));
+            // Parity slice chatlist-list-style: chat-list density and
+            // preview display.
+            body = body.child(this.appearance_chat_list_section(cx));
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
                     .label("Close")
@@ -553,6 +557,72 @@ impl QuillApp {
             cx,
             "Chat style",
             "Bubbles or plain rows without bubble backgrounds.",
+            control.into_any_element(),
+        )
+    }
+
+    /// Parity slice chatlist-list-style: chat-list density and preview
+    /// display, in Settings → Appearance (kit Phase 6 section style).
+    /// TGX 0.22.2 ships the same options under Themes and Chats →
+    /// Chats List Style.
+    fn appearance_chat_list_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let style = self.appearance.chat_list_style();
+        let lines = RadioGroup::horizontal("appearance-chat-list-lines")
+            .selected_index(Some(usize::from(style.three_lines)))
+            .children([
+                Radio::new("appearance-chat-list-two").label("Two lines"),
+                Radio::new("appearance-chat-list-three").label("Three lines"),
+            ])
+            .on_click(cx.listener(|this, &ix, _, cx| {
+                this.set_appearance(cx, |a| a.chat_list_three_lines = ix == 1);
+            }));
+        let muted = cx.theme().muted_foreground;
+        let switch_row = |label: &'static str, hint: &'static str, switch: Switch| -> AnyElement {
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_4()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(label)
+                        .child(div().text_xs().text_color(muted).child(hint)),
+                )
+                .child(switch)
+                .into_any_element()
+        };
+        let control = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(lines)
+            .child(switch_row(
+                "Media icons",
+                "Show a type glyph (📷, 🎬, 🎙…) before media message previews.",
+                Switch::new("appearance-chat-list-media-icons")
+                    .checked(style.media_icons)
+                    .accessibility_label("Media icons")
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_appearance(cx, |a| a.chat_list_media_icons = on);
+                    })),
+            ))
+            .child(switch_row(
+                "Formatted previews",
+                "Render bold, italic and other formatting in message previews.",
+                Switch::new("appearance-chat-list-rich-preview")
+                    .checked(style.rich_preview)
+                    .accessibility_label("Formatted previews")
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_appearance(cx, |a| a.chat_list_rich_preview = on);
+                    })),
+            ));
+        self.appearance_section(
+            cx,
+            "Chat list",
+            "Two or three lines per chat, media icons and formatted previews.",
             control.into_any_element(),
         )
     }

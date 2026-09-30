@@ -47,6 +47,7 @@ use crate::telegram::requests::{
     ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
 };
 use crate::telegram::requests_privacy::PrivacySettingKey;
+use crate::text::TextEntity;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
@@ -2123,6 +2124,14 @@ pub struct ChatSummary {
     pub notification_settings: ChatNotificationSettings,
     /// Sidebar preview from `updateChatLastMessage`. Not logged.
     pub last_preview: String,
+    /// Parity slice chatlist-list-style: the media-type glyph for
+    /// `last_preview` (`MessageContent::preview_icon`), shown when the
+    /// media-icons appearance toggle is on.
+    pub last_preview_icon: Option<&'static str>,
+    /// Parity slice chatlist-list-style: the text entities behind
+    /// `last_preview` (`MessageContent::preview_entities`), rendered
+    /// when the formatted-previews appearance toggle is on.
+    pub last_preview_entities: Vec<TextEntity>,
     /// Senders with an active `chatActionTyping` (`updateChatAction`).
     pub typing_senders: Vec<MessageSender>,
     /// Senders with an active `chatActionChoosingSticker` (`updateChatAction`).
@@ -2597,6 +2606,8 @@ fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         folder_positions: BTreeMap::new(),
         notification_settings: ChatNotificationSettings::default(),
         last_preview: String::new(),
+        last_preview_icon: None,
+        last_preview_entities: Vec::new(),
         typing_senders: Vec::new(),
         choosing_sticker_senders: Vec::new(),
         draft: None,
@@ -7214,12 +7225,20 @@ impl Session {
                     .chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id));
-                chat.last_preview = last_message
+                // Parity slice chatlist-list-style: the preview triple
+                // (text, media icon, entities) is computed together so
+                // text and entities always pair; a missing last message
+                // clears all three.
+                let (preview, icon, entities) = last_message
                     .as_ref()
                     .map(|message| {
-                        effective_content(&message.content, message.ephemeral.as_ref()).preview()
+                        effective_content(&message.content, message.ephemeral.as_ref())
+                            .preview_parts()
                     })
                     .unwrap_or_default();
+                chat.last_preview = preview;
+                chat.last_preview_icon = icon;
+                chat.last_preview_entities = entities;
                 // `positions` is the full set of lists this chat belongs to.
                 self.replace_main_list_from_positions(chat_id, &positions);
                 self.rebuild_main_order();
@@ -7640,7 +7659,7 @@ impl Session {
                 files,
             } => {
                 self.remember_files(&files);
-                let preview = content.preview();
+                let (preview, icon, entities) = content.preview_parts();
                 // M1 fix-up: the edited message may be a scheduled send —
                 // refresh the scheduled-list entry too, not just history.
                 if let Some(slot) = self
@@ -7662,6 +7681,8 @@ impl Session {
                         == Some(message_id.0);
                     if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
                         chat.last_preview = preview;
+                        chat.last_preview_icon = icon;
+                        chat.last_preview_entities = entities;
                     }
                 }
             }
@@ -7686,16 +7707,18 @@ impl Session {
                         .and_then(|history| history.messages.keys().next_back().copied())
                         == Some(message_id.0);
                     if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                        let preview = self
+                        let parts = self
                             .histories
                             .get(&chat_id.0)
                             .and_then(|history| history.messages.get(&message_id.0))
                             .map(|message| {
                                 effective_content(&message.content, message.ephemeral.as_ref())
-                                    .preview()
+                                    .preview_parts()
                             });
-                        if let Some(preview) = preview {
+                        if let Some((preview, icon, entities)) = parts {
                             chat.last_preview = preview;
+                            chat.last_preview_icon = icon;
+                            chat.last_preview_entities = entities;
                         }
                     }
                 }

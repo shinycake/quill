@@ -6394,6 +6394,51 @@ impl MessageContent {
         }
     }
 
+    /// Parity slice chatlist-list-style: the media-type glyph for the
+    /// chat-list row (TGX 0.22.2 "Icons in the chats list for media
+    /// messages"). Variants whose `preview()` label already carries a
+    /// glyph (📍 Location, 👤 Contact, 🧾 Invoice, 📞/📹 calls) return
+    /// `None`; the sticker's own emoji is its icon.
+    pub fn preview_icon(&self) -> Option<&'static str> {
+        match self {
+            MessageContent::Photo(_) => Some("📷"),
+            MessageContent::Video(_) => Some("🎬"),
+            MessageContent::VideoNote(_) => Some("📹"),
+            MessageContent::VoiceNote(_) => Some("🎙"),
+            MessageContent::Audio(_) => Some("🎵"),
+            MessageContent::Document(_) => Some("📎"),
+            MessageContent::Animation(_) => Some("🎞"),
+            MessageContent::Poll(_) => Some("📊"),
+            _ => None,
+        }
+    }
+
+    /// Parity slice chatlist-list-style: the text entities behind the
+    /// `preview()` string, for the formatted-preview toggle. Offsets
+    /// are byte offsets into the untruncated text; the row pairs them
+    /// with the same 80-char truncation `preview()` produces, and
+    /// `styled_runs` drops entities that extend past the cut.
+    pub fn preview_entities(&self) -> Vec<TextEntity> {
+        match self {
+            MessageContent::Text(text) => text.entities.clone(),
+            MessageContent::Photo(photo) => photo.caption_entities.clone(),
+            MessageContent::Video(video) => video.caption_entities.clone(),
+            MessageContent::Document(doc) => doc.caption_entities.clone(),
+            MessageContent::Animation(animation) => animation.caption_entities.clone(),
+            MessageContent::VoiceNote(note) => note.caption_entities.clone(),
+            MessageContent::Audio(audio) => audio.caption_entities.clone(),
+            // Video notes carry no caption in TDLib.
+            _ => Vec::new(),
+        }
+    }
+
+    /// Parity slice chatlist-list-style: the chat-list preview triple —
+    /// plain text, media icon, text entities — computed together so the
+    /// text and the entities always pair.
+    pub fn preview_parts(&self) -> (String, Option<&'static str>, Vec<TextEntity>) {
+        (self.preview(), self.preview_icon(), self.preview_entities())
+    }
+
     /// `updateMessageContentOpened` sets `messageVoiceNote.is_listened` and
     /// `messageVideoNote.is_viewed`.
     pub fn mark_content_opened(&mut self) {
@@ -14705,6 +14750,122 @@ mod tests {
         assert!(message.files.iter().any(|file| file.id == FileId(7)));
         assert!(message.files.iter().any(|file| file.id == FileId(8)));
         assert!(message.files.iter().any(|file| file.id == FileId(9)));
+    }
+
+    /// Parity slice chatlist-list-style: what the icon mapping is
+    /// ultimately validating — every media variant maps to its
+    /// TGX-style glyph, while variants whose preview label already
+    /// carries a glyph (location, contact) or is its own icon
+    /// (sticker emoji) map to `None`.
+    #[test]
+    fn preview_icon_maps_media_variants() {
+        fn icon_for(content_json: &str) -> Option<&'static str> {
+            let json = format!(
+                "{{\"@type\":\"updateNewMessage\",\"message\":{{\"id\":1,\"chat_id\":1,\
+                 \"is_outgoing\":false,\"content\":{content_json}}}}}"
+            );
+            let env = parse_envelope(&json).expect("content parses");
+            match env.payload {
+                EnvelopePayload::UpdateNewMessage(message) => message.content.preview_icon(),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        let file = local_file_json(1, "", false, true);
+        let caption = r#"{"@type":"formattedText","text":"","entities":[]}"#;
+        let photo = format!(
+            "{{\"@type\":\"messagePhoto\",\"photo\":{{\"@type\":\"photo\",\"has_stickers\":false,\
+             \"sizes\":[]}},\"caption\":{caption},\"show_caption_above_media\":false,\
+             \"has_spoiler\":false,\"is_secret\":false}}"
+        );
+        let video = format!(
+            "{{\"@type\":\"messageVideo\",\"video\":{{\"@type\":\"video\",\"duration\":5,\
+             \"width\":100,\"height\":100,\"video\":{file}}},\"caption\":{caption}}}"
+        );
+        let video_note = format!(
+            "{{\"@type\":\"messageVideoNote\",\"video_note\":{{\"@type\":\"videoNote\",\
+             \"duration\":8,\"length\":240,\"video\":{file}}},\"is_viewed\":false,\"is_secret\":false}}"
+        );
+        let voice_note = format!(
+            "{{\"@type\":\"messageVoiceNote\",\"voice_note\":{{\"@type\":\"voiceNote\",\
+             \"duration\":12,\"mime_type\":\"audio/ogg\",\"voice\":{file}}},\"caption\":{caption},\
+             \"is_listened\":false}}"
+        );
+        let audio = format!(
+            "{{\"@type\":\"messageAudio\",\"audio\":{{\"@type\":\"audio\",\"duration\":12,\
+             \"audio\":{file}}},\"caption\":{caption}}}"
+        );
+        let document = format!(
+            "{{\"@type\":\"messageDocument\",\"document\":{{\"@type\":\"document\",\
+             \"file_name\":\"n.txt\",\"mime_type\":\"text/plain\",\"document\":{file}}},\
+             \"caption\":{caption}}}"
+        );
+        let animation = format!(
+            "{{\"@type\":\"messageAnimation\",\"animation\":{{\"@type\":\"animation\",\
+             \"duration\":2,\"width\":240,\"height\":140,\"animation\":{file}}},\"caption\":{caption},\
+             \"show_caption_above_media\":false,\"has_spoiler\":false,\"is_secret\":false}}"
+        );
+        let poll = r#"{"@type":"messagePoll","poll":{"@type":"poll","question":{"@type":"formattedText","text":"Q?","entities":[]}}}"#;
+        let location = r#"{"@type":"messageLocation","location":{"@type":"location","latitude":1.0,"longitude":2.0}}"#;
+        let contact = r#"{"@type":"messageContact","contact":{"@type":"contact","phone_number":"+1555","first_name":"A","last_name":""}}"#;
+        let sticker = format!(
+            "{{\"@type\":\"messageSticker\",\"sticker\":{{\"@type\":\"sticker\",\"id\":\"9001\",\
+             \"width\":512,\"height\":512,\"emoji\":\"😀\",\
+             \"format\":{{\"@type\":\"stickerFormatWebp\"}},\
+             \"full_type\":{{\"@type\":\"stickerFullTypeRegular\"}},\"sticker\":{file}}}}}"
+        );
+        let text =
+            r#"{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}"#;
+        let table: &[(&str, Option<&'static str>)] = &[
+            (&photo, Some("📷")),
+            (&video, Some("🎬")),
+            (&video_note, Some("📹")),
+            (&voice_note, Some("🎙")),
+            (&audio, Some("🎵")),
+            (&document, Some("📎")),
+            (&animation, Some("🎞")),
+            (poll, Some("📊")),
+            (location, None),
+            (contact, None),
+            (&sticker, None),
+            (text, None),
+        ];
+        for (json, expected) in table {
+            assert_eq!(icon_for(json), *expected, "icon for {json}");
+        }
+    }
+
+    /// Parity slice chatlist-list-style: what the entity pairing is
+    /// ultimately validating — `preview_parts` keeps the same 80-char
+    /// truncation as `preview()`, and the entities still pair with that
+    /// truncated text (in-range entities style, past-the-cut entities
+    /// are dropped by `styled_runs` instead of panicking).
+    #[test]
+    fn preview_entities_pair_with_truncated_preview() {
+        let long = format!("{}tail", "a".repeat(100));
+        let content = MessageContent::Text(TextContent {
+            text: long,
+            entities: vec![
+                TextEntity {
+                    utf8_start: 0,
+                    utf8_end: 4,
+                    kind: TextEntityKind::Bold,
+                },
+                TextEntity {
+                    utf8_start: 90,
+                    utf8_end: 94,
+                    kind: TextEntityKind::Italic,
+                },
+            ],
+            link_preview: None,
+        });
+        let (text, icon, entities) = content.preview_parts();
+        assert_eq!(text, content.preview());
+        assert_eq!(text.chars().count(), 80);
+        assert_eq!(icon, None);
+        assert_eq!(entities.len(), 2);
+        let runs = crate::text::styled_runs(&text, &entities);
+        assert!(runs.iter().any(|run| run.style.bold));
+        assert!(!runs.iter().any(|run| run.style.italic));
     }
 }
 

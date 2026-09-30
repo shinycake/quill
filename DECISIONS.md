@@ -6598,3 +6598,61 @@ null filter.
   results from the server.
 - **Out of this slice:** other `searchMessagesChatTypeFilter*` variants
   (separate boxes).
+
+## Slice chatlist-list-style — chat-list style: two/three lines, media icons, formatted previews (2026-09-30)
+
+- **Evidence (Telegram X 0.22.2 + telegram.org):** TGX ships "Icons in the
+  chats list for media messages" under Settings → Themes and Chats → Chats
+  List Style; telegram.org: "select Three lines ... to see up to three
+  lines per chat instead of the usual two". Behavior: two-line = title +
+  one preview line; three-line = title + preview allowed two lines.
+- **Built:**
+  - `settings.rs` +151: `AppearancePrefs` gains `chat_list_three_lines`
+    (default false), `chat_list_media_icons` (default true),
+    `chat_list_rich_preview` (default true) — serde-defaulted so old
+    `appearance_prefs.json` files load; `ChatListStyle` struct +
+    `chat_list_style()` accessor + pure decision methods
+    `preview_lines()`, `shows_media_icon()`, `formats_preview()` that the
+    row renderer delegates its three branches to (unit tests cover the
+    branches the UI cannot reach in a test).
+  - `telegram/envelope.rs` +161: `MessageContent::preview_icon()`
+    (📷/🎬/📹/🎙/🎵/📎/🎞/📊; `None` for variants whose preview label
+    already carries a glyph or is its own icon), `preview_entities()`
+    (text + caption entities), `preview_parts()` triple so text and
+    entities always pair.
+  - `state.rs` +35: `ChatSummary` gains `last_preview_icon` /
+    `last_preview_entities`; all three preview-write sites
+    (`UpdateChatLastMessage`, `UpdateMessageContent`,
+    `UpdateMessageEphemeralContent`) set the triple together; draft /
+    typing / unread labels keep empty icon/entities.
+  - `ui/mod.rs` +115: `chat_row_height` takes `three_lines` (56/72px
+    base, +24px with folder tags); new `chat_row_preview` free fn — icon
+    prefix (toggleable), `rich_text_line` formatted vs plain preview,
+    one/two-line clamp; `session_chat_row` takes `ChatListStyle` + the
+    spoiler set; the virtual-list declared sizes use the same height fn
+    so sizes always match rendered rows.
+  - `ui/appearance.rs` +72: Settings → Appearance "Chat list" section —
+    kit `RadioGroup` (Two lines / Three lines) + two kit `Switch`es
+    (media icons, formatted previews), all through `set_appearance` so
+    they persist to `appearance_prefs.json`.
+  - Tests: icon mapping per media variant, entities pair with the
+    truncated preview text, prefs backward-compat + round-trip, pure
+    rendering-decision branches.
+  - README box `parity:chatlist-list-style` checked.
+- **Gates:** `cargo fmt --all -- --check` ✓; `cargo clippy
+  --no-default-features --all-targets --locked -- -D warnings` ✓;
+  `cargo test --no-default-features --locked` ✓ (1123 lib + 59 replay +
+  others, 0 failed); `cargo build --features ui` ✓ (needs
+  `LIBRARY_PATH=/tmp/xkb-lib` per the standing AGENTS.md note; one real
+  UI-only error caught: `shrink_0` → `flex_shrink_0` on `Div`).
+- **Key decisions (ponytail):** one `ChatListStyle` struct instead of
+  three bools threaded through; icon/entities computed in
+  `preview_parts()` so they can't desync from the truncated text; no new
+  modules, no new files; `styled_runs` reused for formatted previews.
+- **Not verifiable without a live UI run:** exact pixel rendering of the
+  2-line rich clamp (`max_h` 18px vs the font's natural line height —
+  bounded by `overflow_hidden`), the three-line row look, and the
+  Appearance section layout.
+- **Out of this slice:** per-chat density overrides (TGX exposes the
+  style globally only); search-result rows keep plain single-line
+  previews.
