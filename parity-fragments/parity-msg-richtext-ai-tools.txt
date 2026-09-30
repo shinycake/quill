@@ -1,2 +1,0 @@
-# slice parity/msg-richtext-ai-tools — AI tools in the rich-text composer
-parity:msg-richtext-ai-tools
