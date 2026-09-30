@@ -836,7 +836,7 @@ impl QuillApp {
                         .child(
                             div()
                                 .text_xs()
-                                .font_mono()
+                                .font_family(super::message_text::MONO_FONT)
                                 .px_2()
                                 .py_1()
                                 .rounded_md()

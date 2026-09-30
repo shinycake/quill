@@ -209,13 +209,16 @@ fn app_menus() -> Vec<Menu> {
         Copy as CopyAction, Cut as CutAction, Paste as PasteAction, Redo as RedoAction,
         SelectAll as SelectAllAction, Undo as UndoAction,
     };
-    let mut file_items = vec![MenuItem::action("Close Window", CloseWindow)];
-    // HIG: on macOS Quit lives in the app menu, not File.
-    #[cfg(not(target_os = "macos"))]
-    {
-        file_items.push(MenuItem::separator());
-        file_items.push(MenuItem::action("Quit Quill", QuitApp));
-    }
+    let file_items = {
+        let mut items = vec![MenuItem::action("Close Window", CloseWindow)];
+        // HIG: on macOS Quit lives in the app menu, not File.
+        #[cfg(not(target_os = "macos"))]
+        {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::action("Quit Quill", QuitApp));
+        }
+        items
+    };
     let mut menus = Vec::new();
     // HIG: on macOS Quit lives in the app menu, not File.
     #[cfg(target_os = "macos")]
