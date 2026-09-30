@@ -46,6 +46,9 @@ pub enum RequestPurpose {
     DownloadFile,
     /// MED3: `cancelDownloadFile`. Response is `Ok`.
     CancelDownloadFile,
+    /// Slice media-downloads-pause: `toggleDownloadIsPaused`. Response is
+    /// `Ok`; the pause state itself arrives on `updateFileDownload`.
+    ToggleDownloadIsPaused,
     SearchChats,
     SearchMessages,
     SearchRecentlyFoundChats,

@@ -1177,7 +1177,8 @@ pub(super) fn audio_row(
 /// media cancels it): ready → open with the system viewer; downloading →
 /// cancel (`cancelDownloadFile`); failed / not downloaded → download
 /// (retry). A second action row offers "Show in folder" (ready), "Cancel"
-/// (downloading), "Retry" (failed). Progress comes from
+/// + "Pause"/"Resume" (downloading — the toggle only appears for
+/// user-initiated listed downloads), "Retry" (failed). Progress comes from
 /// `file.download_progress()` — `updateFile`'s `downloaded_size` over the
 /// known total (TGX `TD.getFileProgress` semantics).
 pub(super) fn document_chip(
@@ -1186,6 +1187,9 @@ pub(super) fn document_chip(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     failed: &std::collections::HashSet<i32>,
+    // Slice media-downloads-pause: `None` when the file isn't a pausable
+    // (user-initiated, listed) download; `Some(paused)` otherwise.
+    paused: Option<bool>,
     sponsored: Option<(ChatId, i64)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -1193,12 +1197,15 @@ pub(super) fn document_chip(
     let file = files.get(&file_id.0);
     let ready = file.and_then(|f| f.usable_path()).is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
+    let paused_now = downloading_now && paused == Some(true);
     let failed_now = !ready && !downloading_now && failed.contains(&file_id.0);
     let progress = file.and_then(|f| f.download_progress());
     let size = file.map(|f| f.display_size()).unwrap_or(0);
     let size_label = format_bytes(size);
     let state = if ready {
         "ready".to_string()
+    } else if paused_now {
+        "paused".to_string()
     } else if downloading_now {
         match progress {
             Some(p) => format!("downloading… {}%", (p * 100.0).round() as i32),
@@ -1231,6 +1238,13 @@ pub(super) fn document_chip(
         Some("Cancel")
     } else if failed_now {
         Some("Retry")
+    } else {
+        None
+    };
+    // Slice media-downloads-pause: Pause/Resume toggle beside Cancel, only
+    // for user-initiated (listed) downloads — `None` hides it.
+    let pause_label = if downloading_now {
+        paused.map(|is_paused| if is_paused { "Resume" } else { "Pause" })
     } else {
         None
     };
@@ -1295,6 +1309,25 @@ pub(super) fn document_chip(
                             this.cancel_media_download(file_id, cx);
                         } else {
                             this.request_media_download(file_id, sponsored, cx);
+                        }
+                    })),
+            )
+        })
+        .when_some(pause_label, |this, label| {
+            this.child(
+                div()
+                    .id(("doc-pause", row_id))
+                    .cursor_pointer()
+                    .pressable(cx.theme())
+                    .mt_1()
+                    .text_xs()
+                    .text_color(accent())
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if paused_now {
+                            this.resume_media_download(file_id, cx);
+                        } else {
+                            this.pause_media_download(file_id, cx);
                         }
                     })),
             )

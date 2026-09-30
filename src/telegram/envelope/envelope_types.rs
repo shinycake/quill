@@ -638,6 +638,14 @@ pub enum EnvelopePayload {
     },
     UpdateFile(ParsedFile),
     File(ParsedFile),
+    /// Slice media-downloads-pause: `updateFileDownload` — pause state and
+    /// completion for a file in the persistent download list (schema
+    /// 1.8.67, line 10795). `counts` is not kept (no list-wide UI).
+    UpdateFileDownload {
+        file_id: i32,
+        is_paused: bool,
+        complete_date: i32,
+    },
     /// `stickerSets` — `getInstalledStickerSets`.
     StickerSets {
         total_count: i32,

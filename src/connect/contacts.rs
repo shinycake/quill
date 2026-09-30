@@ -234,6 +234,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .map(|user| FileId(user.photo_small_file_id))
                     .unwrap_or(FileId(0))
             });
-        self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY, false)
+        self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)
     }
 }

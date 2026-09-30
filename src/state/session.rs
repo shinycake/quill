@@ -446,6 +446,10 @@ pub struct Session {
     /// viewer) — these surface in the downloads manager. Automatic
     /// thumbs/avatars/sounds are not tracked here.
     pub user_downloads: HashSet<i32>,
+    /// Subset of `user_downloads` currently paused via
+    /// `toggleDownloadIsPaused`. Pause is list state (`updateFileDownload`)
+    /// tracked separately from the in-flight download above.
+    pub paused_downloads: HashSet<i32>,
     /// `downloadFile` requests TDLib answered with an error (file id → still
     /// in `downloading` until unstuck; the UI shows "failed — retry").
     /// Cleared when a new download starts or the file completes.
@@ -938,6 +942,7 @@ impl Session {
             files: HashMap::new(),
             downloading: HashSet::new(),
             user_downloads: HashSet::new(),
+            paused_downloads: HashSet::new(),
             failed_downloads: HashSet::new(),
             completed_downloads: VecDeque::new(),
             downloads_panel_open: false,
