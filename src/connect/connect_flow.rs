@@ -55,10 +55,15 @@ pub fn prepare_connect<S: SecretStore + ?Sized>(
 
 /// Build `setTdlibParameters` from loaded credentials + local paths/key.
 /// The returned JSON includes `api_hash`; callers must not log it.
+/// Slice parity:settings-language: `system_language_code` comes from the
+/// persisted app language pref (`settings::LanguagePrefs`, "en" by
+/// default) instead of a hardcoded `"en"`. TDLib reads the tag once at
+/// startup, so a changed pref applies on restart.
 pub fn build_set_tdlib_parameters(
     credentials: &TelegramCredentials,
     paths: &AccountPaths,
     database_key: &DatabaseKey,
+    system_language_code: &str,
 ) -> SetTdlibParameters {
     SetTdlibParameters {
         use_test_dc: std::env::var("QUILL_USE_TEST_DC")
@@ -72,7 +77,7 @@ pub fn build_set_tdlib_parameters(
         device_model: "Desktop".into(),
         system_version: std::env::consts::OS.into(),
         application_version: env!("CARGO_PKG_VERSION").into(),
-        system_language_code: "en".into(),
+        system_language_code: system_language_code.into(),
     }
 }
 

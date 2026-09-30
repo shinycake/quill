@@ -53,13 +53,16 @@ fn set_tdlib_parameters_shape_includes_hash_but_debug_redacts_credentials() {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let creds = test_credentials();
-    let params = build_set_tdlib_parameters(&creds, &prepared.paths, &prepared.database_key);
+    // Slice parity:settings-language: the params carry the persisted
+    // language pref instead of a hardcoded "en".
+    let params = build_set_tdlib_parameters(&creds, &prepared.paths, &prepared.database_key, "de");
     let json = params.to_json(RequestId(7));
     let v: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "setTdlibParameters");
     assert_eq!(v["@extra"], "7");
     assert_eq!(v["api_id"], 99);
     assert_eq!(v["api_hash"], "unit-test-hash-not-for-network");
+    assert_eq!(v["system_language_code"], "de");
     assert_eq!(v["use_secret_chats"], true);
     assert_eq!(v["use_file_database"], true);
     assert!(v["database_directory"].as_str().unwrap().contains("tdlib"));

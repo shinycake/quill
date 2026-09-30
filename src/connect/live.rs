@@ -6,7 +6,8 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::ids::AccountKey;
 use crate::platform::SecretStore;
 use crate::settings::{
-    load_badge_prefs, load_call_prefs, load_contact_prefs, load_media_prefs, safe_app_root,
+    load_badge_prefs, load_call_prefs, load_contact_prefs, load_language_prefs, load_media_prefs,
+    safe_app_root,
 };
 use crate::state::Session;
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
@@ -113,6 +114,9 @@ pub fn start_live_connect(
     // Slice parity:chatlist-badge-settings: local badge-counter prefs
     // load the same way.
     session.badge_prefs = load_badge_prefs(&prepared.paths);
+    // Slice parity:settings-language: the app language tag load the same
+    // way (defaults to "en" when unset).
+    session.language_prefs = load_language_prefs(&prepared.paths);
     // Slice S4: local per-network auto-download settings load the same
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).

@@ -372,6 +372,10 @@ pub struct Session {
     /// persisted via `settings::BadgePrefs`. Loaded at startup like
     /// `call_prefs`; the UI saves on toggle.
     pub badge_prefs: BadgePrefs,
+    /// Slice parity:settings-language: the app language tag sent in
+    /// `setTdlibParameters`, persisted via `settings::LanguagePrefs`.
+    /// Loaded at startup like `call_prefs`; the UI saves on change.
+    pub language_prefs: LanguagePrefs,
     /// Phase C3a: the tracked group call / voice chat, if any.
     /// **Signaling only** — TDLib transports no audio/video; the
     /// `joinVideoChat` response payload is stored (`join_payload`) and
@@ -924,6 +928,7 @@ impl Session {
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),
+            language_prefs: LanguagePrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
             open_topic: None,

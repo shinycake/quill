@@ -547,7 +547,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Use less data for calls <!-- parity:settings-less-data-calls -->
 - [x] Storage usage view with per-chat / file-type breakdown <!-- parity:settings-storage-usage -->
 - [x] Clear cache <!-- parity:settings-clear-cache -->
-- [ ] App language selector (partial: `system_language_code:"en"` hardcoded in src/connect.rs:284) <!-- parity:settings-language -->
+- [x] App language selector (Settings → Appearance → Language; `system_language_code` in `language_prefs.json`, default "en", applies on restart — full UI-string translation out of scope; `setOption("language_pack_id")` is real but only names a downloaded language-pack database Quill doesn't use, so no runtime application) <!-- parity:settings-language -->
 - [x] Enter-to-send toggle (Settings → Appearance → Send messages with; `composer::SendKeyMode`, `chat_prefs.json`) <!-- parity:settings-enter-send -->
 - [x] Send by Cmd/Ctrl+Enter option (same setting; Ctrl/Cmd+Enter sends in CtrlEnter mode) <!-- parity:settings-ctrlenter-send -->
 
