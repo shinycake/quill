@@ -153,13 +153,27 @@ fn fixed_bindings() -> Vec<KeyBinding> {
 fn default_bindings() -> Vec<KeyBinding> {
     let mut bindings = fixed_bindings();
     for ra in REBINDABLE_ACTIONS {
-        for default in ra.defaults {
-            if let Some(kb) = keybinding_for(ra.id, default) {
-                bindings.push(kb);
-            }
-        }
+        push_defaults(ra, &mut bindings);
     }
     bindings
+}
+
+/// Push a rebindable action's default key bindings.
+fn push_defaults(ra: &RebindableAction, bindings: &mut Vec<KeyBinding>) {
+    for default in ra.defaults {
+        if let Some(kb) = keybinding_for(ra.id, default) {
+            bindings.push(kb);
+        }
+    }
+}
+
+/// The keystrokes reserved by the fixed (window-chrome/app-lifecycle)
+/// bindings — a custom binding may never take one of these.
+fn fixed_keystrokes() -> Vec<Keystroke> {
+    fixed_bindings()
+        .iter()
+        .flat_map(|b| b.keystrokes().iter().map(|k| k.inner().clone()))
+        .collect()
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -168,29 +182,43 @@ pub fn bind_keys(cx: &mut App) {
 
 /// Parity slice (platform-custom-keybindings): rebuild the keymap from
 /// defaults with the user's overrides applied. An override replaces all
-/// default keystrokes for its action. Invalid overrides fall back to defaults.
+/// default keystrokes for its action. Overrides that are unparsable — or
+/// that collide with a fixed (window-chrome/app-lifecycle) keystroke — fall
+/// back to the action's defaults.
 pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
-    let mut bindings = fixed_bindings();
+    // Review fix (#242 defect 1): `clear_key_bindings` wipes the whole app
+    // keymap, including kit-internal bindings (List / command-palette
+    // navigation) registered by `gpui_kit::init`. Keep everything that isn't
+    // Quill-managed — Quill's own set is rebuilt below. Every Quill action
+    // lives in the `quill_ui` actions! namespace (src/ui/actions.rs).
+    let mut bindings: Vec<KeyBinding> = cx
+        .key_bindings()
+        .borrow()
+        .bindings()
+        .filter(|kb| !kb.action().name().starts_with("quill_ui::"))
+        .cloned()
+        .collect();
+
+    let fixed = fixed_bindings();
+    // Review fix (#242 defect 3): fixed bindings are added first and GPUI
+    // resolves same-keystroke ties later-added-wins, so a custom keystroke
+    // on cmd-q/cmd-w/cmd-m/f11 would silently disable Quit — reject it and
+    // fall back to defaults, exactly like unparsable input.
+    let fixed_keys = fixed_keystrokes();
+    bindings.extend(fixed);
     for ra in REBINDABLE_ACTIONS {
-        match customs.iter().find(|c| c.id == ra.id) {
-            Some(custom) => {
-                if let Some(kb) = keybinding_for(ra.id, &custom.keystroke) {
-                    bindings.push(kb);
-                } else {
-                    for default in ra.defaults {
-                        if let Some(kb) = keybinding_for(ra.id, default) {
-                            bindings.push(kb);
-                        }
-                    }
-                }
-            }
-            None => {
-                for default in ra.defaults {
-                    if let Some(kb) = keybinding_for(ra.id, default) {
-                        bindings.push(kb);
-                    }
-                }
-            }
+        let custom = customs
+            .iter()
+            .find(|c| c.id == ra.id)
+            .and_then(|c| keybinding_for(ra.id, &c.keystroke))
+            .filter(|kb| {
+                !kb.keystrokes()
+                    .iter()
+                    .any(|k| fixed_keys.contains(k.inner()))
+            });
+        match custom {
+            Some(kb) => bindings.push(kb),
+            None => push_defaults(ra, &mut bindings),
         }
     }
     cx.clear_key_bindings();
@@ -262,7 +290,10 @@ pub fn setup_app_menus(cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // NOTE: explicit imports, not `use super::*` — `gpui_kit::*` re-exports
+    // gpui's `#[test]` proc macro, which would shadow the builtin test
+    // attribute and fail macro expansion ("recursion limit reached").
+    use super::{Action, Keystroke, QuitApp, REBINDABLE_ACTIONS, fixed_keystrokes, keybinding_for};
 
     #[test]
     fn keybinding_for_valid_id_and_keystroke() {
@@ -288,5 +319,24 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), REBINDABLE_ACTIONS.len());
+    }
+
+    #[test]
+    fn quill_action_names_match_preserve_filter() {
+        // apply_custom_bindings keeps bindings whose action name does NOT
+        // start with this prefix; if the actions! namespace ever changes,
+        // the filter must change with it.
+        assert!(QuitApp.name().starts_with("quill_ui::"));
+    }
+
+    #[test]
+    fn custom_keystroke_on_fixed_keystroke_is_rejected() {
+        // Mirrors apply_custom_bindings' collision rule: a custom "cmd-q"
+        // for Search must not shadow the fixed Quit binding.
+        let fixed = fixed_keystrokes();
+        let kb = keybinding_for("open-search", "cmd-q").unwrap();
+        assert!(kb.keystrokes().iter().any(|k| fixed.contains(k.inner())));
+        let ok = keybinding_for("open-search", "ctrl-k").unwrap();
+        assert!(!ok.keystrokes().iter().any(|k| fixed.contains(k.inner())));
     }
 }

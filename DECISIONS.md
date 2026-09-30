@@ -6949,4 +6949,8 @@ name `platform-chat-export` is kept in code/comments.)
   - The capture UI uses a focused div with `on_key_down`; `Keystroke::to_string()` gives the canonical keystroke string. Escape cancels capture.
   - Startup application is a one-shot in `poll_live` when the live driver (and its prefs paths) is first ready — `bind_keys` in main.rs runs before prefs are loadable.
 - **Tests:** `keybinding_for_valid_id_and_keystroke`, `keybinding_for_unknown_id_is_none`, `keybinding_for_invalid_keystroke_is_none`, `rebindable_ids_are_unique` (UI tests, run with the ui feature).
+- **Review fixes (#242):**
+  - `apply_custom_bindings` no longer wipes the whole keymap: it snapshots `cx.key_bindings()`, keeps non-Quill bindings (action name not under the `quill_ui::` namespace — kit's List/command-palette keys), then clears and re-adds kept + Quill set.
+  - Custom keystrokes colliding with a fixed binding (cmd-q/cmd-w/cmd-m/f11/…) are rejected and fall back to defaults, since GPUI resolves same-keystroke ties later-added-wins.
+  - Rebasing onto origin/main also fixed the stale-base diff: `parity:platform-os-notifications` stays checked and its DECISIONS entry is preserved.
 - **Out of this slice:** none identified.
