@@ -30501,9 +30501,6 @@ impl QuillApp {
             settings.show_preview = show_preview;
             session.reaction_notification_settings = Some(settings);
             self.status_note = "reaction preview updated".into();
-            settings.disable_pinned_message_notifications = !notify;
-            session.scope_notification_settings.insert(scope, settings);
-            self.status_note = "default pinned-message notifications updated".into();
         }
         cx.notify();
     }
