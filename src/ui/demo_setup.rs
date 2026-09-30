@@ -666,6 +666,9 @@ impl QuillApp {
                 session.password_state_loading = false;
             }
             self.account_lifecycle.open = true;
+            // Slice auth-logout-warning: arm the logout confirm so the
+            // screenshot shows the SignOutHint2 warning.
+            self.account_lifecycle.confirm_logout = true;
             self.status_note = "screenshot demo — account lifecycle".into();
         }
         // Slice A3: Active Sessions fixture — fixture sessions (current

@@ -8,7 +8,7 @@ use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, EnvelopePayload, MessageContent, RichMessageContent, UsernameCheckResult,
 };
-use crate::telegram::requests::{close_request, get_authorization_state, load_chats};
+use crate::telegram::requests::{close_request, get_authorization_state, load_chats, log_out};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -580,6 +580,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.begin_close();
         let extra = self.session.request(RequestPurpose::Close, None);
         self.sender.send_json(&close_request(extra))?;
+        Ok(extra)
+    }
+
+    /// Slice auth-logout-warning: send `logOut` (not `close`). TDLib
+    /// answers `ok`, then drives `Ready → authorizationStateLoggingOut →
+    /// authorizationStateClosed` (`Session::set_auth` handles both); the
+    /// UI restarts the live connection on Closed so the user lands back
+    /// on the login screen. Only valid while authorized.
+    pub fn request_logout(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::Ready) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.begin_logout();
+        let extra = self.session.request(RequestPurpose::LogOut, None);
+        self.sender.send_json(&log_out(extra))?;
         Ok(extra)
     }
 }

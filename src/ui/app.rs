@@ -110,6 +110,11 @@ pub struct QuillApp {
     pub(super) connect_status: ConnectUiStatus,
     pub(super) live: Option<LiveConnect>,
     pub(super) status_note: String,
+    /// Slice auth-logout-warning: the startup credentials, kept so a
+    /// `logOut`-driven Closed can restart the live connection and return
+    /// the user to the login screen (same sensitivity class as the
+    /// driver's own copy).
+    pub(super) credentials: Option<TelegramCredentials>,
     /// Phase 1 (kit adoption): the note text a dismiss timer is already armed
     /// for. The permanent debug status bar is gone; `status_note` now shows
     /// as a kit notification (auto-dismissing) instead.    /// Screenshot / synthetic demo: show the matching auth field without a live client.

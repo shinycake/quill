@@ -945,6 +945,89 @@ fn wait_closed_sends_close_and_reaches_closed_via_injection() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Slice auth-logout-warning: `request_logout` sends `logOut` (not
+/// `close`), is guarded on Ready, and the
+/// `LoggingOut → Closed` transition lands the session in Closed.
+#[test]
+fn request_logout_sends_logout_then_logging_out_then_closed() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+
+    // Guard: no logout before authorization.
+    assert!(driver.request_logout().is_err());
+
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    let extra = driver.request_logout().unwrap();
+    assert_eq!(
+        driver.session.requests.purpose(extra),
+        Some(RequestPurpose::LogOut)
+    );
+    let sent = recorder.snapshot();
+    let logout_json = sent.last().expect("logOut request");
+    assert!(logout_json.contains("\"@type\":\"logOut\""));
+    assert!(logout_json.contains(&format!("\"@extra\":\"{}\"", extra.0)));
+    assert!(!sink.rendered().contains("unit-test-hash"));
+
+    // TDLib's answer is `ok`; the teardown arrives as auth-state updates.
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.as_extra()),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateLoggingOut"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(matches!(
+        driver.session.auth,
+        AuthorizationState::LoggingOut
+    ));
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosed"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(matches!(driver.session.auth, AuthorizationState::Closed));
+
+    // No second logout once closed (guarded: Ready only).
+    assert!(driver.request_logout().is_err());
+    drop(driver);
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn missing_tdjson_message_is_actionable() {
     let msg = ConnectBlocker::MissingTdjson.user_message();
