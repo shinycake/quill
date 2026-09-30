@@ -6740,7 +6740,7 @@ panel (`getGameHighScores`), send-game entry via `sendMessage`+`inputMessageGame
     "not supported for channels or secret chats".
   - `getGameHighScores chat_id:int53 message_id:int53 user_id:int53` (:13174).
   - `gameHighScores scores:vector<gameHighScore>` (:7758);
-    `gameHighScore position:int53 user_id:int53 score:int53` (:7755).
+    `gameHighScore position:int32 user_id:int53 score:int32` (:7755).
   - Play rides the existing B1 `callbackQueryPayloadGame` path (:7743) —
     `send_game_callback_query` → `callbackQueryAnswer` → URL opens in the OS
     browser. `chatActionStartPlayingGame` (:6388) deliberately not sent

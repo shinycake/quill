@@ -1672,8 +1672,12 @@ impl Session {
                     && let (Some(chat_id), Some(message_id)) =
                         (pending.chat_id, pending.around_message_id)
                 {
-                    self.game_scores
-                        .insert((chat_id.0, message_id.0), Some(scores));
+                    // Guard: a panel the user closed while the answer was in
+                    // flight must stay closed — only fill the loading entry.
+                    if self.game_scores.contains_key(&(chat_id.0, message_id.0)) {
+                        self.game_scores
+                            .insert((chat_id.0, message_id.0), Some(scores));
+                    }
                 }
             }
             EnvelopePayload::LoginUrlInfo(info) => {
