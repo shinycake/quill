@@ -120,7 +120,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Inline photos/videos in the rich-text composer (partial: inline documents/files/music done — parity:msg-richtext-inline-doc) <!-- parity:msg-richtext-inline-media -->
 - [ ] AI tools in the rich-text composer (composeTextWithAi, composeRichMessageWithAi, createRichMessageWithAi, fixTextWithAi, fixRichMessageWithAi) <!-- parity:msg-richtext-ai-tools -->
 - [x] Rich-text composer max length (32,768 chars) <!-- parity:msg-richtext-max-length -->
-- [ ] Premium gating of the rich-text editor <!-- parity:msg-richtext-premium-gate -->
+- [x] Premium gating of the rich-text editor <!-- parity:msg-richtext-premium-gate -->
 
 ### Chat list
 

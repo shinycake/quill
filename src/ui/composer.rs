@@ -315,6 +315,22 @@ impl QuillApp {
                     .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
             )
         };
+        // Premium gate (`premiumFeatureRichMessages`): the editor can only
+        // be opened by Premium users, but double-check here too — the
+        // server would reject `inputMessageRichMessage` from a non-Premium
+        // user and we never want to fake a successful send.
+        let premium = self
+            .live
+            .as_ref()
+            .expect("live")
+            .driver
+            .session
+            .my_is_premium();
+        if !premium {
+            self.status_note = "Rich messages require Telegram Premium".into();
+            cx.notify();
+            return;
+        }
         let Some(chat_id) = open_chat else {
             self.status_note = "select a chat to send".into();
             cx.notify();
@@ -706,14 +722,26 @@ impl QuillApp {
         // M2: the rich editor opens via ⛶ after typing more than 3 lines
         // (anniversary post). The button hides again while the editor is
         // open (a ✕ close button takes its place in the editor bar).
+        // Premium gate (`premiumFeatureRichMessages`, schema 1.8.67 line
+        // 8160 — "The ability to send rich messages"): non-Premium users
+        // get the button but tapping it explains the requirement instead
+        // of opening the editor.
         if !self.rich_editor_open && self.composer.read(cx).value().lines().count() > 3 {
             row = row.child(
                 Button::new("rich-editor-open")
                     .label("⛶ Rich editor")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.rich_editor_open = true;
-                        this.status_note = "rich editor — markup becomes blocks".into();
+                        let premium = this
+                            .live
+                            .as_ref()
+                            .is_some_and(|live| live.driver.session.my_is_premium());
+                        if premium {
+                            this.rich_editor_open = true;
+                            this.status_note = "rich editor — markup becomes blocks".into();
+                        } else {
+                            this.status_note = "Rich messages require Telegram Premium".into();
+                        }
                         cx.notify();
                     })),
             );
