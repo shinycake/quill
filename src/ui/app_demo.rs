@@ -449,6 +449,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — payments: invoice + checkout".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadySubscriptions => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ⭐ subscriptions (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyLocation => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

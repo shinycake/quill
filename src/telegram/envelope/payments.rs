@@ -495,3 +495,113 @@ pub fn format_payment_price(currency: &str, amount: i64) -> String {
         _ => format!("{currency} {whole}.{frac:02}"),
     }
 }
+
+/// Slice `parity:bots-payment-recurring`: `starSubscriptionType*` (TDLib
+/// 1.8.67, `schema/td_api.tl:1239` / `:1246`). Unknown future variants
+/// parse to `Unknown`, never `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StarSubscriptionTypeData {
+    /// `starSubscriptionTypeChannel` — a subscription to a channel chat.
+    Channel {
+        can_reuse: bool,
+        invite_link: String,
+    },
+    /// `starSubscriptionTypeBot` — a subscription in a bot.
+    Bot {
+        is_canceled_by_bot: bool,
+        title: String,
+        invoice_link: String,
+    },
+    Unknown,
+}
+
+/// Slice `parity:bots-payment-recurring`: `starSubscription` (TDLib 1.8.67,
+/// `schema/td_api.tl:1262`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StarSubscriptionData {
+    pub id: String,
+    pub chat_id: i64,
+    pub expiration_date: i32,
+    pub is_canceled: bool,
+    pub is_expiring: bool,
+    pub pricing: StarSubscriptionPricing,
+    pub sub_type: StarSubscriptionTypeData,
+}
+
+/// Slice `parity:bots-payment-recurring`: `starSubscriptions` (TDLib 1.8.67,
+/// `schema/td_api.tl:1269`) — the `getStarSubscriptions` answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StarSubscriptionsData {
+    /// The user's current Stars balance (whole stars; nanostars dropped —
+    /// the UI shows whole stars only).
+    pub star_amount: i64,
+    pub subscriptions: Vec<StarSubscriptionData>,
+    pub required_star_count: i64,
+    pub next_offset: String,
+}
+
+/// Slice `parity:bots-payment-recurring`: parse one `starSubscription`.
+pub(crate) fn parse_star_subscription(value: &Value) -> Option<StarSubscriptionData> {
+    let type_value = value.get("type")?;
+    let sub_type = match type_value.get("@type").and_then(Value::as_str)? {
+        "starSubscriptionTypeChannel" => StarSubscriptionTypeData::Channel {
+            can_reuse: type_value
+                .get("can_reuse")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            invite_link: json_field_str(type_value, "invite_link"),
+        },
+        "starSubscriptionTypeBot" => StarSubscriptionTypeData::Bot {
+            is_canceled_by_bot: type_value
+                .get("is_canceled_by_bot")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            title: json_field_str(type_value, "title"),
+            invoice_link: json_field_str(type_value, "invoice_link"),
+        },
+        _ => StarSubscriptionTypeData::Unknown,
+    };
+    Some(StarSubscriptionData {
+        id: json_field_str(value, "id"),
+        chat_id: int53(value.get("chat_id")).unwrap_or(0),
+        expiration_date: value
+            .get("expiration_date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        is_canceled: value
+            .get("is_canceled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        is_expiring: value
+            .get("is_expiring")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        pricing: parse_star_subscription_pricing(value.get("pricing"))?,
+        sub_type,
+    })
+}
+
+/// Slice `parity:bots-payment-recurring`: parse the `getStarSubscriptions`
+/// answer (`starSubscriptions`, schema:1269). `None` when the JSON is
+/// malformed.
+pub(crate) fn parse_star_subscriptions(value: &Value) -> Option<StarSubscriptionsData> {
+    let star_amount = value
+        .get("star_amount")
+        .and_then(|a| a.get("amount"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let subscriptions = value
+        .get("subscriptions")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(parse_star_subscription).collect())
+        .unwrap_or_default();
+    Some(StarSubscriptionsData {
+        star_amount,
+        subscriptions,
+        required_star_count: value
+            .get("required_star_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        next_offset: json_field_str(value, "next_offset"),
+    })
+}

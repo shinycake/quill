@@ -1150,6 +1150,9 @@ pub enum EnvelopePayload {
     /// Slice P1: `paymentReceipt` — the `getPaymentReceipt` answer
     /// (schema/td_api.tl:4765).
     PaymentReceipt(PaymentReceiptData),
+    /// Slice `parity:bots-payment-recurring`: `starSubscriptions` — the
+    /// `getStarSubscriptions` answer (schema/td_api.tl:1269).
+    StarSubscriptions(StarSubscriptionsData),
     /// `updateChatFolders` (TDLib 1.8.67, `schema/td_api.tl:10606`) — the
     /// full ordered folder list. There is no `getChatFolders` function in
     /// 1.8.67; TDLib pushes this update after authorization and whenever

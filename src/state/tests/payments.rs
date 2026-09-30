@@ -155,3 +155,107 @@ fn payment_receipt_opens_dialog() {
     assert_eq!(receipt.credentials_title, "Visa •• 4242");
     assert!(session.payment_receipt_open);
 }
+
+#[test]
+fn star_subscriptions_apply_only_to_own_request() {
+    // Slice `parity:bots-payment-recurring`: the `starSubscriptions`
+    // answer applies only when `@extra` matches our `getStarSubscriptions`.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let subs_json = |extra: &str| {
+        format!(
+            r#"{{"@type":"starSubscriptions","@extra":"{extra}","star_amount":{{"@type":"starAmount","amount":500,"nanostar_amount":0}},"required_star_count":0,"next_offset":"","subscriptions":[{{"@type":"starSubscription","id":"sub1","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{{"@type":"starSubscriptionPricing","period":2592000,"star_count":100}},"type":{{"@type":"starSubscriptionTypeChannel","invite_link":null}}}}]}}"#
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &subs_json("999"));
+    assert!(session.star_subscriptions.is_none());
+    let extra = session.request(RequestPurpose::GetStarSubscriptions { append: false }, None);
+    session.star_subscriptions_loading = true;
+    apply_json(&mut session, &seq, &sink, &subs_json(&extra.0.to_string()));
+    let subs = session.star_subscriptions.as_ref().expect("list applies");
+    assert_eq!(subs.subscriptions.len(), 1);
+    assert_eq!(subs.subscriptions[0].id, "sub1");
+    assert_eq!(subs.star_amount, 500);
+    assert!(!session.star_subscriptions_loading);
+}
+
+#[test]
+fn star_subscriptions_append_page_merges() {
+    // Slice `parity:bots-payment-recurring`: a follow-up
+    // `getStarSubscriptions` page (offset) appends; a fresh fetch
+    // replaces.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let subs_json = |extra: &str, id: &str, next: &str| {
+        format!(
+            r#"{{"@type":"starSubscriptions","@extra":"{extra}","star_amount":{{"@type":"starAmount","amount":500,"nanostar_amount":0}},"required_star_count":0,"next_offset":"{next}","subscriptions":[{{"@type":"starSubscription","id":"{id}","chat_id":-1001,"expiration_date":1790000000,"is_canceled":false,"is_expiring":false,"pricing":{{"@type":"starSubscriptionPricing","period":2592000,"star_count":100}},"type":{{"@type":"starSubscriptionTypeChannel","invite_link":null}}}}]}}"#
+        )
+    };
+    let extra = session.request(RequestPurpose::GetStarSubscriptions { append: false }, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &subs_json(&extra.0.to_string(), "sub1", "50"),
+    );
+    assert_eq!(session.star_subscriptions_offset, "50");
+    let extra = session.request(RequestPurpose::GetStarSubscriptions { append: true }, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &subs_json(&extra.0.to_string(), "sub2", ""),
+    );
+    let subs = session.star_subscriptions.as_ref().expect("list applies");
+    assert_eq!(subs.subscriptions.len(), 2);
+    assert_eq!(subs.subscriptions[0].id, "sub1");
+    assert_eq!(subs.subscriptions[1].id, "sub2");
+    assert_eq!(session.star_subscriptions_offset, "");
+}
+
+#[test]
+fn star_subscription_mutation_ok_marks_stale() {
+    // Slice `parity:bots-payment-recurring`: an `editStarSubscription`
+    // `ok` marks the list stale (refetch) instead of flipping the row
+    // optimistically.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::EditStarSubscription, None);
+    session.star_subscriptions_mutating = true;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(session.star_subscriptions_stale);
+    assert!(!session.star_subscriptions_mutating);
+    assert!(session.star_subscriptions_error.is_none());
+}
+
+#[test]
+fn star_subscriptions_error_surfaces() {
+    // Slice `parity:bots-payment-recurring`: a failed
+    // `getStarSubscriptions` surfaces the reason and stops the spinner.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetStarSubscriptions { append: false }, None);
+    session.star_subscriptions_loading = true;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"SUBSCRIPTION_NOT_FOUND"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.star_subscriptions_loading);
+    // `error_reason` never echoes the native TDLib message (it can
+    // contain secrets) — the classified reason surfaces instead.
+    let err = session
+        .star_subscriptions_error
+        .as_ref()
+        .expect("error surfaces");
+    assert_eq!(err, "Couldn't load subscriptions: invalid request");
+}

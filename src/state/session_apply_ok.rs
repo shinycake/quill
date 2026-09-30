@@ -129,6 +129,18 @@ impl Session {
             self.websites_mutating = false;
             self.websites_error = None;
         }
+        // Slice `parity:bots-payment-recurring`: an
+        // `editStarSubscription` / `reuseStarSubscription` succeeded —
+        // same stale pattern: the old cache stays visible until the
+        // server-confirmed refetch replaces it (never optimistic).
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
+        ) {
+            self.star_subscriptions_stale = true;
+            self.star_subscriptions_mutating = false;
+            self.star_subscriptions_error = None;
+        }
         // Slice S8: a sticker-set mutation succeeded — invalidate
         // the affected cache so the next fetch shows the
         // server-confirmed list instead of a stale one.

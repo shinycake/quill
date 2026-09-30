@@ -14,7 +14,9 @@ use quill::state::{RequestPurpose, Session, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatNotificationSettings, MessageContent, ParsedSession,
-    ParsedWebsite, PasswordState, StorageFileTypeStats, StorageStats, toggle_chosen_emoji_reaction,
+    ParsedWebsite, PasswordState, StarSubscriptionData, StarSubscriptionPricing,
+    StarSubscriptionTypeData, StarSubscriptionsData, StorageFileTypeStats, StorageStats,
+    toggle_chosen_emoji_reaction,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -1255,5 +1257,68 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
+    }
+}
+
+/// Slice `parity:bots-payment-recurring`: subscriptions dialog fixture —
+/// one active channel subscription ("Demo channel", chat 13 in the
+/// `ReadyChats` seed), one canceled bot subscription with its own title,
+/// and one expired channel subscription to show the Rejoin row.
+/// Injected, no live Telegram.
+pub(super) fn demo_star_subscriptions() -> StarSubscriptionsData {
+    // Far-future / fixed dates so the demo is stable: sub1 renews,
+    // sub2 was canceled, sub3 already expired.
+    StarSubscriptionsData {
+        star_amount: 500,
+        required_star_count: 100,
+        next_offset: String::new(),
+        subscriptions: vec![
+            StarSubscriptionData {
+                id: "demo-sub-1".into(),
+                chat_id: 13,
+                expiration_date: 1893456000, // 2030-01-01
+                is_canceled: false,
+                is_expiring: false,
+                pricing: StarSubscriptionPricing {
+                    period: 2_592_000,
+                    star_count: 100,
+                },
+                sub_type: StarSubscriptionTypeData::Channel {
+                    can_reuse: true,
+                    invite_link: "https://t.me/+demo".into(),
+                },
+            },
+            StarSubscriptionData {
+                id: "demo-sub-2".into(),
+                chat_id: 42,
+                expiration_date: 1893456000,
+                is_canceled: true,
+                is_expiring: false,
+                pricing: StarSubscriptionPricing {
+                    period: 604_800,
+                    star_count: 25,
+                },
+                sub_type: StarSubscriptionTypeData::Bot {
+                    is_canceled_by_bot: false,
+                    title: "Demo Poll Bot".into(),
+                    invoice_link: "https://t.me/$demo-invoice".into(),
+                },
+            },
+            StarSubscriptionData {
+                id: "demo-sub-3".into(),
+                chat_id: 13,
+                expiration_date: 1700000000, // 2023-11-14, expired
+                is_canceled: false,
+                is_expiring: true,
+                pricing: StarSubscriptionPricing {
+                    period: 2_592_000,
+                    star_count: 50,
+                },
+                sub_type: StarSubscriptionTypeData::Channel {
+                    can_reuse: true,
+                    invite_link: String::new(),
+                },
+            },
+        ],
     }
 }

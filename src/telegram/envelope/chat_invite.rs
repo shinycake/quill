@@ -4,7 +4,7 @@ use serde_json::Value;
 /// Phase D3a: `starSubscriptionPricing` (TDLib 1.8.67,
 /// `schema/td_api.tl:1252`): `starSubscriptionPricing period:int32
 /// star_count:int53 = StarSubscriptionPricing;`
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StarSubscriptionPricing {
     pub period: i32,
     pub star_count: i64,

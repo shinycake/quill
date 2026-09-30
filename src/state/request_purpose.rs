@@ -366,6 +366,19 @@ pub enum RequestPurpose {
     /// `receipt_message_id`. Response is `paymentReceipt` (schema 1.8.67,
     /// line 15280).
     GetPaymentReceipt,
+    /// Slice `parity:bots-payment-recurring`: `getStarSubscriptions`.
+    /// Response is `starSubscriptions` (schema 1.8.67, line 16075).
+    /// `append` = this is a follow-up page (offset was non-empty).
+    GetStarSubscriptions {
+        append: bool,
+    },
+    /// Slice `parity:bots-payment-recurring`: `editStarSubscription`
+    /// (cancel / re-enable). Response is `ok` (schema 1.8.67, line 16086).
+    EditStarSubscription,
+    /// Slice `parity:bots-payment-recurring`: `reuseStarSubscription`
+    /// (rejoin an expired channel subscription). Response is `ok`
+    /// (schema 1.8.67, line 16095).
+    ReuseStarSubscription,
     /// B1: `getLoginUrl` after the user consented to a
     /// `loginUrlInfoRequestConfirmation`. Response is `httpUrl`; on error
     /// the button degrades to a plain URL button (schema 1.8.67 doc on

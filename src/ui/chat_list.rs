@@ -1433,6 +1433,19 @@ impl QuillApp {
                                 this.open_data_storage(cx);
                             })),
                     );
+                    // Slice `parity:bots-payment-recurring`: Subscriptions
+                    // dialog entry (`getStarSubscriptions` — the
+                    // `starSubscriptions` management list). Quill has no
+                    // settings screen, so it sits next to the storage
+                    // entry; the list fetches on open (guarded: once per
+                    // session unless a mutation marks it stale).
+                    list = list.child(
+                        Button::new("star-subscriptions")
+                            .label("⭐ Subscriptions")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_subscriptions(cx);
+                            })),
+                    );
                     // Settings → Appearance slice: theme, auto-night,
                     // accent, wallpaper, font size, bubble style
                     // (client-side only — no TDLib setting exists for

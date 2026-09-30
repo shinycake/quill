@@ -39,6 +39,7 @@ use crate::telegram::envelope::{
     ReactionNotificationSettings, ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption,
     ReportSponsoredResult, ReportStoryResult, RichMessageContent, ScopeNotificationSettings,
     SecretChatState, SponsoredMessage, StickerFormat, StickerItem, StickerSetInfo, StorageStats,
+
     StoryAvailableReactionView, StoryInteractionView, StoryInteractionsView, StoryListView,
     TdError, UsernameCheckResult, ValidatedOrderInfoData, effective_content,
     reply_markup_demands_reply,

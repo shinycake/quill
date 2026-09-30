@@ -127,6 +127,24 @@ impl Session {
                 self.payment_receipt_error =
                     Some(format!("Receipt failed: {}", error_reason(&err)));
             }
+            // Slice `parity:bots-payment-recurring`: a subscriptions
+            // request failed — surface the reason in the dialog
+            // instead of spinning forever; a failed mutation also
+            // releases the disabled buttons.
+            Some(RequestPurpose::GetStarSubscriptions { .. }) => {
+                self.star_subscriptions_loading = false;
+                self.star_subscriptions_error = Some(format!(
+                    "Couldn't load subscriptions: {}",
+                    error_reason(&err)
+                ));
+            }
+            Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription) => {
+                self.star_subscriptions_mutating = false;
+                self.star_subscriptions_error = Some(format!(
+                    "Couldn't update the subscription: {}",
+                    error_reason(&err)
+                ));
+            }
             // kit Phase 9: a failed first `getChatHistory` must not
             // leave the message list without a history entry — the
             // skeleton shimmer would run forever. Create the entry

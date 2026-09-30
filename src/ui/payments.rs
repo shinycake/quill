@@ -16,8 +16,8 @@ use quill::ids::{ChatId, MessageId};
 use quill::state::{LoginUrlRequest, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    LoginUrlInfo, PaymentFormData, PaymentFormTypeData, PaymentProviderKind, format_payment_price,
-    price_parts_total,
+    LoginUrlInfo, PaymentFormData, PaymentFormTypeData, PaymentProviderKind, StarSubscriptionData,
+    StarSubscriptionPricing, StarSubscriptionTypeData, format_payment_price, price_parts_total,
 };
 use quill::telegram::requests::{input_credentials_new, input_credentials_saved};
 use std::cell::RefCell;
@@ -864,4 +864,357 @@ impl QuillApp {
                 .on_close(on_close)
         })
     }
+
+    /// Slice `parity:bots-payment-recurring`: "⭐ Subscriptions" — the
+    /// `starSubscriptions` list (`getStarSubscriptions`, schema 1.8.67,
+    /// line 16075) hosted in a kit `Dialog` via `window.open_dialog`.
+    /// Cancel / re-enable (`editStarSubscription`) and rejoin
+    /// (`reuseStarSubscription`) act on the row; the list refetches from
+    /// the authoritative `ok` — the rows never flip optimistically.
+    pub(super) fn build_subscriptions_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::Subscriptions, |this, _, cx| {
+                this.close_subscriptions(cx);
+            });
+        app.update(cx, |this, cx| {
+            let dialog = dialog.overlay(true).title("⭐ Subscriptions");
+            let Some(session) = this.session() else {
+                return dialog.on_close(on_close);
+            };
+            let mut body = div().flex().flex_col().gap_3();
+            if let Some(subs) = session.star_subscriptions.as_ref() {
+                body = body.child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .text_sm()
+                        .child(div().child("Star balance"))
+                        .child(
+                            div()
+                                .font_semibold()
+                                .child(format!("⭐ {}", subs.star_amount)),
+                        ),
+                );
+                if subs.required_star_count > 0 {
+                    body = body.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!(
+                                "⭐ {} needed to extend expiring subscriptions",
+                                subs.required_star_count
+                            )),
+                    );
+                }
+            }
+            if session.star_subscriptions_loading && session.star_subscriptions.is_none() {
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading subscriptions…"),
+                );
+            }
+            if let Some(err) = session.star_subscriptions_error.as_ref() {
+                body = body.child(div().text_sm().child(err.clone()));
+            }
+            if let Some(subs) = session.star_subscriptions.as_ref() {
+                if subs.subscriptions.is_empty() && !session.star_subscriptions_loading {
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No active subscriptions."),
+                    );
+                }
+                let mutating = session.star_subscriptions_mutating;
+                let confirming = session.subscription_cancel_confirm.clone();
+                let chat_titles: std::collections::HashMap<i64, String> = session
+                    .chats
+                    .iter()
+                    .map(|(id, chat)| (*id, chat.title.clone()))
+                    .collect();
+                for sub in &subs.subscriptions {
+                    body = body.child(subscription_row(
+                        sub,
+                        &chat_titles,
+                        mutating,
+                        confirming.as_deref(),
+                        cx,
+                    ));
+                }
+                if !subs.next_offset.is_empty() {
+                    let label = if session.star_subscriptions_loading {
+                        "Loading…"
+                    } else {
+                        "Load more"
+                    };
+                    body = body.child(
+                        Button::new("subs-load-more")
+                            .label(label)
+                            .ghost()
+                            .disabled(session.star_subscriptions_loading)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.load_more_subscriptions(cx);
+                            })),
+                    );
+                }
+            }
+            let body = body.into_any_element();
+            dialog
+                .content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                })
+                .on_close(on_close)
+        })
+    }
+
+    /// Slice `parity:bots-payment-recurring`: open the Subscriptions
+    /// dialog and fetch the list (`getStarSubscriptions`).
+    pub(super) fn open_subscriptions(&mut self, cx: &mut Context<Self>) {
+        let sent = self.live.as_mut().map(|live| {
+            live.driver.session.subscriptions_open = true;
+            live.driver.maybe_fetch_star_subscriptions()
+        });
+        if !matches!(sent, Some(Ok(_))) {
+            self.status_note = "could not load subscriptions".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice `parity:bots-payment-recurring`: close the Subscriptions dialog.
+    pub(super) fn close_subscriptions(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.subscriptions_open = false;
+            live.driver.session.subscription_cancel_confirm = None;
+        }
+        cx.notify();
+    }
+
+    /// Slice `parity:bots-payment-recurring`: "Load more" — the next
+    /// `getStarSubscriptions` page.
+    pub(super) fn load_more_subscriptions(&mut self, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.fetch_more_star_subscriptions());
+        if !matches!(sent, Some(Ok(_))) {
+            self.status_note = "could not load more subscriptions".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice `parity:bots-payment-recurring`: "Cancel" on a row — asks
+    /// for inline confirmation first (`editStarSubscription` is a real
+    /// money action).
+    pub(super) fn ask_cancel_subscription(&mut self, id: String, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.subscription_cancel_confirm = Some(id);
+        }
+        cx.notify();
+    }
+
+    /// Slice `parity:bots-payment-recurring`: "Yes, cancel" —
+    /// `editStarSubscription` with `is_canceled: true`.
+    pub(super) fn confirm_cancel_subscription(&mut self, cx: &mut Context<Self>) {
+        let id = self
+            .session()
+            .and_then(|s| s.subscription_cancel_confirm.clone());
+        let Some(id) = id else {
+            return;
+        };
+        let sent = self.live.as_mut().map(|live| {
+            live.driver.session.subscription_cancel_confirm = None;
+            live.driver.edit_star_subscription(&id, true)
+        });
+        if !matches!(sent, Some(Ok(_))) {
+            self.status_note = "could not cancel the subscription".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice `parity:bots-payment-recurring`: "Keep" — dismiss the inline
+    /// cancel confirmation without touching the subscription.
+    pub(super) fn dismiss_cancel_confirm(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.subscription_cancel_confirm = None;
+        }
+        cx.notify();
+    }
+
+    /// Slice `parity:bots-payment-recurring`: "Re-enable" —
+    /// `editStarSubscription` with `is_canceled: false`.
+    pub(super) fn reenable_subscription(&mut self, id: String, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.edit_star_subscription(&id, false));
+        if !matches!(sent, Some(Ok(_))) {
+            self.status_note = "could not re-enable the subscription".into();
+        }
+        cx.notify();
+    }
+
+    /// Slice `parity:bots-payment-recurring`: "Rejoin" —
+    /// `reuseStarSubscription` on an expired channel subscription.
+    pub(super) fn rejoin_subscription(&mut self, id: String, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.reuse_star_subscription(&id));
+        if !matches!(sent, Some(Ok(_))) {
+            self.status_note = "could not rejoin the subscription".into();
+        }
+        cx.notify();
+    }
+}
+
+/// Slice `parity:bots-payment-recurring`: one `starSubscription` row —
+/// title, status, price, and the Cancel / Re-enable / Rejoin actions.
+/// `starSubscription` carries no title (schema 1.8.67, line 1262), so the
+/// chat cache supplies it; the type names are the honest fallback.
+fn subscription_row(
+    sub: &StarSubscriptionData,
+    chat_titles: &std::collections::HashMap<i64, String>,
+    mutating: bool,
+    confirming: Option<&str>,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement {
+    let title = match &sub.sub_type {
+        // `starSubscriptionTypeBot` carries its own title (schema:1246);
+        // channel subscriptions resolve through the chat cache.
+        StarSubscriptionTypeData::Bot { title, .. } if !title.is_empty() => title.clone(),
+        _ => chat_titles
+            .get(&sub.chat_id)
+            .cloned()
+            .unwrap_or_else(|| match sub.sub_type {
+                StarSubscriptionTypeData::Channel { .. } => "Channel subscription".to_string(),
+                StarSubscriptionTypeData::Bot { .. } => "Bot subscription".to_string(),
+                StarSubscriptionTypeData::Unknown => "Subscription".to_string(),
+            }),
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let expired = (sub.expiration_date as i64) <= now;
+    let date = format_unix_date_time(sub.expiration_date as i64);
+    let status = if expired {
+        format!("Expired {}", date)
+    } else if sub.is_canceled {
+        format!("Canceled — active until {}", date)
+    } else if sub.is_expiring {
+        format!("Expiring {}", date)
+    } else {
+        format!("Renews {}", date)
+    };
+    let mut row = div()
+        .flex()
+        .justify_between()
+        .items_center()
+        .gap_3()
+        .py_2()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(div().text_sm().font_semibold().child(title))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "{} · {}",
+                            status,
+                            subscription_price_label(&sub.pricing)
+                        )),
+                ),
+        );
+    if confirming == Some(sub.id.as_str()) {
+        let id = sub.id.clone();
+        let keep_id = sub.id.clone();
+        row = row.child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().text_xs().child("Cancel this subscription?"))
+                .child(
+                    Button::new(format!("subs-confirm-cancel-{id}"))
+                        .label("Yes, cancel")
+                        .danger()
+                        .disabled(mutating)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.confirm_cancel_subscription(cx);
+                        })),
+                )
+                .child(
+                    Button::new(format!("subs-keep-{keep_id}"))
+                        .label("Keep")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.dismiss_cancel_confirm(cx);
+                        })),
+                ),
+        );
+    } else if expired {
+        if matches!(sub.sub_type, StarSubscriptionTypeData::Channel { .. }) {
+            let id = sub.id.clone();
+            row = row.child(
+                Button::new(format!("subs-rejoin-{id}"))
+                    .label("Rejoin")
+                    .disabled(mutating)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.rejoin_subscription(id.clone(), cx);
+                    })),
+            );
+        }
+    } else if sub.is_canceled {
+        let id = sub.id.clone();
+        row = row.child(
+            Button::new(format!("subs-reenable-{id}"))
+                .label("Re-enable")
+                .disabled(mutating)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.reenable_subscription(id.clone(), cx);
+                })),
+        );
+    } else {
+        let id = sub.id.clone();
+        row = row.child(
+            Button::new(format!("subs-cancel-{id}"))
+                .label("Cancel")
+                .ghost()
+                .disabled(mutating)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.ask_cancel_subscription(id.clone(), cx);
+                })),
+        );
+    }
+    row
+}
+
+/// Slice `parity:bots-payment-recurring`: "⭐ 100 / month" from a
+/// `starSubscriptionPricing` (period is seconds; a month is 2_592_000).
+fn subscription_price_label(pricing: &StarSubscriptionPricing) -> String {
+    let period = match pricing.period {
+        2_592_000 => "month".to_string(),
+        604_800 => "week".to_string(),
+        p if p > 0 => format!("{}d", p / 86_400),
+        _ => "period".to_string(),
+    };
+    format!("⭐ {} / {}", pricing.star_count, period)
 }
