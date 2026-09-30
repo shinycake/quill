@@ -821,8 +821,7 @@ fn compose_rich_message_with_ai_shape_matches_1_8_67() {
     // (schema 1.8.67, line 12162).
     let message =
         crate::rich::input_rich_message(&[crate::rich::RichBlock::Divider]).expect("blocks");
-    let json =
-        compose_rich_message_with_ai(RequestId(73), &message, "", "", "make it fun", false);
+    let json = compose_rich_message_with_ai(RequestId(73), &message, "", "", "make it fun", false);
     let v: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "composeRichMessageWithAi");
     assert_eq!(v["@extra"], "73");

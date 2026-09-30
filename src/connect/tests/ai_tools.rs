@@ -132,9 +132,7 @@ fn ai_tools_refused_in_secret_chat() {
     assert_invalid(driver.compose_text_with_ai(ChatId(31), "draft"));
     assert_invalid(driver.create_rich_message_with_ai(ChatId(31), "prompt"));
     assert_invalid(driver.fix_rich_message_with_ai(ChatId(31), &[RichBlock::Divider]));
-    assert_invalid(
-        driver.compose_rich_message_with_ai(ChatId(31), &[RichBlock::Divider]),
-    );
+    assert_invalid(driver.compose_rich_message_with_ai(ChatId(31), &[RichBlock::Divider]));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -160,10 +158,7 @@ fn ai_flood_premium_error_surfaces_premium_line() {
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse error");
     driver.ingest(owned).expect("ingest error");
     let err = driver.session.ai_error.expect("AI error stored");
-    assert!(
-        err.contains("Premium"),
-        "premium line surfaced, got: {err}"
-    );
+    assert!(err.contains("Premium"), "premium line surfaced, got: {err}");
     // Never applied as a success.
     assert!(driver.session.ai_composer_text.is_none());
     let _ = std::fs::remove_dir_all(&dir);
