@@ -1244,6 +1244,7 @@ impl Session {
             self.last_auth_error = Some(AuthRequestError {
                 purpose: pending.purpose,
                 class: err.class,
+                flood_wait_secs: err.flood_wait_secs,
             });
         }
     }
