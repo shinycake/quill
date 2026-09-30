@@ -1,5 +1,13 @@
 //! Shared helpers for the `tests/replay_*` integration tests.
 //! Split from `tests/replay.rs` — pure code motion.
+//!
+//! Cargo compiles every top-level file under `tests/` as its own test
+//! target, so this file is also built standalone where none of its items
+//! are referenced; each `replay_*` binary additionally only uses a subset.
+//! The items are genuinely shared across the binaries, hence the allows.
+//! (Moving this to `tests/common/` would need touching every consumer for
+//! zero behavioral gain.)
+#![allow(dead_code, unused_imports)]
 pub use quill::diagnostics::{Diagnostic, DiagnosticSink, MemorySink};
 pub use quill::ids::AccountKey;
 pub use quill::state::{MemberListFilter, RequestPurpose, Session};
