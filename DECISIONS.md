@@ -6925,3 +6925,44 @@ name `platform-chat-export` is kept in code/comments.)
   trip (file presence is the verifiable proxy, and it is tested).
 - **Out of this slice:** Windows Run-key support; "start minimized" /
   tray-on-startup options; per-user vs system-wide autostart.
+
+## Slice parity:gifts-signed-comment (2026-09-30)
+
+- **What:** The personal comment ("signed" message) attached when buying a
+  collectible gift via the Marketplace — TDLib `sendResoldGift`'s `text`
+  field (schema `td_api.tl:15404`, pinned 1.8.67).
+- **Why this shape:** No gift-purchase flow existed in the repo (no
+  Marketplace code, no `sendResoldGift` builder, no gift UI — the only gift
+  mentions were story areas/emoji). The checklist item requires a
+  user-visible purchase path, so the slice builds the minimal vehicle around
+  the comment field: builder + driver + "Buy Collectible Gift…" dialog
+  (File menu).
+- **Implementation:**
+  - `GiftResalePrice` enum (`Star(i64)` / `Gram(i64)`) + `send_resold_gift()`
+    builder in `src/telegram/requests/payments.rs`; `formattedText` carries
+    the comment with empty entities; `owner_id` as `messageSenderUser`.
+  - `RequestPurpose::SendResoldGift` + `ConnectDriver::request_send_resold_gift()`
+    (Ready-guard, `InvalidRequest` otherwise).
+  - `GiftPurchaseDialog` (`src/ui/dialogs/gift_purchase.rs`): gift name,
+    owner user ID, price amount + Stars/TON toggle, personal comment
+    textarea, private-purchase switch. Submit validates (non-empty name,
+    numeric positive price) and sends; failures keep the dialog open with a
+    status note.
+  - Wired into the `DialogKind` system (`GiftPurchase`, priority with the
+    payment dialogs) and the File menu via the `OpenGiftPurchase` action.
+  - Screenshot demo `"ready-gift-purchase"` (`docs/screenshots/ready-gift-purchase.png`).
+- **Tests:** `send_resold_gift_dispatches_with_comment_and_star_price` and
+  `send_resold_gift_dispatches_ton_price` assert the exact JSON shape
+  (`giftResalePriceStar`/`giftResalePriceGram`, `messageSenderUser`,
+  comment in `text`, `is_private`).
+- **Key decisions (ponytail):**
+  - No gift browsing/discovery: the dialog takes gift name + owner ID as
+    manual input. Browsing is a separate slice; this one is the comment
+    field, which is what the checklist item names.
+  - No `.disabled()` on the Buy button (kit `Disableable` trait friction):
+    submit-time validation with a status note is simpler and already the
+    pattern elsewhere.
+  - Currency is a Stars/TON toggle (two buttons), not a dropdown — two
+    options don't need a dropdown.
+- **Out of this slice:** gift browsing/discovery UI; gift display in
+  profiles/chats; `gifts-signed-signature` (blocked: no API).

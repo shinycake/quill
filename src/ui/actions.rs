@@ -29,6 +29,9 @@ actions!(
         ToggleTheme,
         /// kit Phase 7: open the Quill repo in the browser (Help menu).
         OpenHelp,
+        /// Slice parity:gifts-signed-comment: open the "Buy collectible
+        /// gift" dialog (File menu).
+        OpenGiftPurchase,
         SubmitPhone,
         SubmitCode,
         SubmitPassword,

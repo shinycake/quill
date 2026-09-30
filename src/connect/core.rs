@@ -8,6 +8,7 @@ use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, EnvelopePayload, MessageContent, RichMessageContent, UsernameCheckResult,
 };
+use crate::telegram::requests::{GiftResalePrice, send_resold_gift};
 use crate::telegram::requests::{close_request, get_authorization_state, load_chats, log_out};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -595,6 +596,33 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.begin_logout();
         let extra = self.session.request(RequestPurpose::LogOut, None);
         self.sender.send_json(&log_out(extra))?;
+        Ok(extra)
+    }
+
+    /// Slice parity:gifts-signed-comment: send `sendResoldGift` — an offer
+    /// to purchase an upgraded (collectible) gift via the Marketplace,
+    /// with the personal `text` comment attached. Only valid while
+    /// authorized; TDLib answers `giftResaleResult`.
+    pub fn request_send_resold_gift(
+        &mut self,
+        gift_name: &str,
+        owner_user_id: crate::ids::UserId,
+        price: GiftResalePrice,
+        text: &str,
+        is_private: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::Ready) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::SendResoldGift, None);
+        self.sender.send_json(&send_resold_gift(
+            extra,
+            gift_name,
+            owner_user_id,
+            price,
+            text,
+            is_private,
+        ))?;
         Ok(extra)
     }
 }

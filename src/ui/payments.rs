@@ -1080,6 +1080,58 @@ impl QuillApp {
         }
         cx.notify();
     }
+
+    /// Slice parity:gifts-signed-comment: open the "Buy collectible gift"
+    /// dialog.
+    pub(super) fn open_gift_purchase_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.gift_purchase_dialog = Some(GiftPurchaseDialog::new(window, cx));
+        cx.notify();
+    }
+
+    /// Slice parity:gifts-signed-comment: close the dialog, discarding the
+    /// inputs.
+    pub(super) fn close_gift_purchase_dialog(&mut self, cx: &mut Context<Self>) {
+        self.gift_purchase_dialog = None;
+        cx.notify();
+    }
+
+    /// Slice parity:gifts-signed-comment: validate the dialog fields and
+    /// send `sendResoldGift` with the personal comment. The dialog stays
+    /// open on validation/driver failure with a status note.
+    pub(super) fn submit_gift_purchase_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.gift_purchase_dialog.take() else {
+            return;
+        };
+        let Some(args) = dialog.to_request_args(cx) else {
+            self.gift_purchase_dialog = Some(dialog);
+            self.status_note = "Fill in the gift name, owner ID, and a positive price".into();
+            cx.notify();
+            return;
+        };
+        let sent = self.live.as_mut().map(|live| {
+            live.driver.request_send_resold_gift(
+                &args.gift_name,
+                args.owner_user_id,
+                args.price,
+                &args.comment,
+                args.is_private,
+            )
+        });
+        match sent {
+            Some(Ok(_)) => {
+                self.status_note = "Gift purchase offer sent".into();
+            }
+            _ => {
+                self.gift_purchase_dialog = Some(dialog);
+                self.status_note = "Could not send the gift purchase offer".into();
+            }
+        }
+        cx.notify();
+    }
 }
 
 /// Slice `parity:bots-payment-recurring`: one `starSubscription` row —

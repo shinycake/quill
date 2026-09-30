@@ -1504,6 +1504,13 @@ impl QuillApp {
             self.status_note = "screenshot demo — communities G10".into();
             cx.notify();
         }
+        // Slice parity:gifts-signed-comment: open the "Buy collectible gift"
+        // dialog over the seeded chat list.
+        if matches!(demo, Some(ScreenshotDemo::ReadyGiftPurchase)) {
+            self.open_gift_purchase_dialog(window, cx);
+            self.status_note = "screenshot demo — gift purchase dialog".into();
+            cx.notify();
+        }
     }
 
     /// Screenshot-demo fixture setup (bots_profile): applies the `bots_profile` demo

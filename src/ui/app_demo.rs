@@ -392,6 +392,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — communities G10".into(),
             AuthorizationState::Ready,
         ),
+        // Slice parity:gifts-signed-comment: gift purchase dialog over the
+        // seeded chat list.
+        ScreenshotDemo::ReadyGiftPurchase => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — gift purchase dialog".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBotChat => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1349,6 +1357,7 @@ impl QuillApp {
             poll_dialog: None,
             payment_dialog: None,
             invite_link_dialog: None,
+            gift_purchase_dialog: None,
             admin_dialog: None,
             create_chat_dialog: None,
             member_dialog: None,

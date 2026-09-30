@@ -188,3 +188,55 @@ pub fn reuse_star_subscription(extra: RequestId, subscription_id: &str) -> Strin
     })
     .to_string()
 }
+
+/// Slice parity:gifts-signed-comment — the resale price of a collectible
+/// gift (TDLib 1.8.67, `schema/td_api.tl:1154`): either Stars or TON grams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiftResalePrice {
+    /// Price in Telegram Stars (`giftResalePriceStar`).
+    Star(i64),
+    /// Price in TON gram cents (`giftResalePriceGram`).
+    Gram(i64),
+}
+
+impl GiftResalePrice {
+    fn to_json(self) -> serde_json::Value {
+        match self {
+            GiftResalePrice::Star(star_count) => {
+                serde_json::json!({ "@type": "giftResalePriceStar", "star_count": star_count })
+            }
+            GiftResalePrice::Gram(gram_cent_count) => {
+                serde_json::json!({ "@type": "giftResalePriceGram", "gram_cent_count": gram_cent_count })
+            }
+        }
+    }
+}
+
+/// Slice parity:gifts-signed-comment — `sendResoldGift` (TDLib 1.8.67,
+/// `schema/td_api.tl:15404`): sends an offer to purchase an upgraded
+/// (collectible) gift via the Marketplace. `text` is the personal comment
+/// ("signed" message) attached to the offer; `is_private` hides the buyer
+/// from the gift's public history. Response is `giftResaleResult`.
+pub fn send_resold_gift(
+    extra: RequestId,
+    gift_name: &str,
+    owner_user_id: crate::ids::UserId,
+    price: GiftResalePrice,
+    text: &str,
+    is_private: bool,
+) -> String {
+    json!({
+        "@type": "sendResoldGift",
+        "@extra": extra.as_extra(),
+        "gift_name": gift_name,
+        "owner_id": { "@type": "messageSenderUser", "user_id": owner_user_id.0 },
+        "price": price.to_json(),
+        "text": {
+            "@type": "formattedText",
+            "text": text,
+            "entities": []
+        },
+        "is_private": is_private,
+    })
+    .to_string()
+}

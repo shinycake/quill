@@ -1160,6 +1160,10 @@ pub enum RequestPurpose {
     /// 15289). Response is `ok`; same no-local-state treatment as
     /// `DeleteSavedOrderInfo`.
     DeleteSavedCredentials,
+    /// Slice parity:gifts-signed-comment: `sendResoldGift` from the gift
+    /// purchase dialog. Response is `giftResaleResult` (schema 1.8.67,
+    /// line 15404).
+    SendResoldGift,
     Close,
     LogOut,
     Other,

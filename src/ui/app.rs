@@ -451,6 +451,9 @@ pub struct QuillApp {
     pub(super) payment_dialog: Option<PaymentDialog>,
     /// Phase D3a: invite-link create dialog state.
     pub(super) invite_link_dialog: Option<InviteLinkDialog>,
+    /// Slice parity:gifts-signed-comment: "Buy collectible gift" dialog
+    /// state (`sendResoldGift` with the personal comment).
+    pub(super) gift_purchase_dialog: Option<GiftPurchaseDialog>,
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     pub(super) admin_dialog: Option<AdminDialog>,

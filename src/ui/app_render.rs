@@ -2,9 +2,10 @@
 
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
-    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
-    OpenSearch, QuitApp, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme,
-    ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch,
+    OpenGiftPurchase, OpenHelp, OpenSearch, QuitApp, SubmitCode, SubmitPassword, SubmitPhone,
+    ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut,
+    ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -213,6 +214,11 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
                 let _ = this;
                 cx.open_url("https://github.com/shinycake/quill");
+            }))
+            // Slice parity:gifts-signed-comment: open the "Buy collectible
+            // gift" dialog (`sendResoldGift` with the personal comment).
+            .on_action(cx.listener(|this, _: &OpenGiftPurchase, window, cx| {
+                this.open_gift_purchase_dialog(window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                 this.composer

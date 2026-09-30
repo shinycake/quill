@@ -1,8 +1,8 @@
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
-    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
-    OpenSearch, QuitApp, ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn,
-    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch,
+    OpenGiftPurchase, OpenHelp, OpenSearch, QuitApp, ToggleFullscreen, ToggleTheme, ViewerNext,
+    ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -60,7 +60,12 @@ fn app_menus() -> Vec<Menu> {
         Copy as CopyAction, Cut as CutAction, Paste as PasteAction, Redo as RedoAction,
         SelectAll as SelectAllAction, Undo as UndoAction,
     };
-    let mut file_items = vec![MenuItem::action("Close Window", CloseWindow)];
+    let mut file_items = vec![
+        MenuItem::action("Close Window", CloseWindow),
+        // Slice parity:gifts-signed-comment: "Buy collectible gift" dialog
+        // (`sendResoldGift` with the personal comment).
+        MenuItem::action("Buy Collectible Gift…", OpenGiftPurchase),
+    ];
     // HIG: on macOS Quit lives in the app menu, not File.
     #[cfg(not(target_os = "macos"))]
     {

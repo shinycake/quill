@@ -162,6 +162,11 @@ pub enum ScreenshotDemo {
     /// Telegram): the create dialog open over the seeded chat list, so
     /// the name field, chat picker, and hide-checkbox render directly.
     ReadyCommunityCreate,
+    /// Slice parity:gifts-signed-comment: "Buy collectible gift" dialog
+    /// (injected, no live Telegram): the `sendResoldGift` dialog open
+    /// over the seeded chat list, showing the gift fields and the
+    /// personal comment input.
+    ReadyGiftPurchase,
     /// Slice G10: communities hub dialog (injected, no live Telegram):
     /// two injected communities with the hub open.
     ReadyCommunityHub,
