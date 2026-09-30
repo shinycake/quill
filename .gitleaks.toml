@@ -14,13 +14,20 @@ id = "telegram-api-hash"
 regex = '''(?i)(?:api[_-]?hash|telegram[_-]?api[_-]?hash)["']?\s*[:=]\s*["']?[0-9a-f]{32}["']?'''
 tags = ["telegram", "api"]
 
-# Exact allowlists for the two reviewed synthetic fixtures. Each entry is the
-# literal secret value — a match anywhere else with a different value still
-# fails the scan.
-[[allowlists]]
-description = "synthetic secret-chat key_hash test fixture: base64 of bytes 0x00..0x1f (src/telegram/envelope.rs test)"
-regexes = ['''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj''']
-
-[[allowlists]]
-description = "synthetic secret-chat key fingerprint demo fixture: deterministic xorshift output, commented NOT a real key (src/ui/mod.rs screenshot demo and the same fixture in a src/state.rs test)"
-regexes = ['''GUYMUT5VLuA6j7l7taiDAR9tM\+Y30on50Cklur/t\+/w57sWo''']
+# Global allowlist for the two reviewed synthetic fixtures. NOTE: this MUST
+# be the singular [allowlist] table — gitleaks silently ignores the plural
+# [[allowlists]] form for the global allowlist (its config struct only
+# defines `Allowlist`), so the previous [[allowlists]] entries had no effect
+# and any split PR re-adding these fixture lines failed the secret scan.
+# Each entry is the literal secret value — a match anywhere else with a
+# different value still fails the scan.
+[allowlist]
+regexes = [
+    # synthetic secret-chat key_hash test fixture: base64 of bytes 0x00..0x1f
+    # (src/telegram/envelope.rs test)
+    '''AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj''',
+    # synthetic secret-chat key fingerprint demo fixture: deterministic
+    # xorshift output, commented NOT a real key (src/ui screenshot demo and
+    # the same fixture in a src/state.rs test)
+    '''GUYMUT5VLuA6j7l7taiDAR9tM\+Y30on50Cklur/t\+/w57sWo''',
+]
