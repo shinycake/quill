@@ -31,6 +31,14 @@ impl Default for Preferences {
 /// the account root (`call_prefs.json`). These are client-side (no
 /// TDLib setting exists for them):
 /// - `confirm_before_calling`: ask before placing an outgoing call.
+/// - `use_proxy_for_calls`: route call media through the enabled proxy.
+///   The TDLib schema (1.8.67) has no such option — the only
+///   `use-for-calls` mention is the `proxy/use-for-calls` settings
+///   deep-link subsection (`schema/td_api.tl:9276`) — so, like the
+///   official clients, this is a client-side toggle: when on, the client
+///   hands the enabled proxy to its VoIP engine (SOCKS5 only; MTProto
+///   and HTTP proxies cannot carry call media). Default off, matching
+///   the official clients (opt-in).
 ///
 /// Slice S4: the old `less_data_for_calls` flag was deleted — "Use less
 /// data for calls" is a real TDLib setting now
@@ -40,6 +48,7 @@ impl Default for Preferences {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CallPrefs {
     pub confirm_before_calling: bool,
+    pub use_proxy_for_calls: bool,
 }
 
 /// Shared load: a missing or corrupt prefs file falls back to defaults —
@@ -487,6 +496,7 @@ mod tests {
         assert_eq!(load_call_prefs(&paths), CallPrefs::default());
         let prefs = CallPrefs {
             confirm_before_calling: true,
+            use_proxy_for_calls: true,
         };
         save_call_prefs(&paths, &prefs).expect("save works");
         assert_eq!(load_call_prefs(&paths), prefs);

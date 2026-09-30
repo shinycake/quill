@@ -374,7 +374,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Who can call me" privacy setting (getUserPrivacySettingRules / setUserPrivacySettingRules) <!-- parity:calls-privacy -->
 - [x] Peer-to-peer call relay toggle (getUserPrivacySettingRules / setUserPrivacySettingRules) <!-- parity:calls-p2p -->
 - [ ] Less data for calls setting (partial: persisted in call_prefs.json, but the native call engine exposes no data-saving API) <!-- parity:calls-less-data -->
-- [ ] Use proxy for calls setting <!-- parity:calls-proxy -->
+- [x] Use proxy for calls setting (persisted per-account call_prefs.json; client-side toggle — the TDLib schema has no such option; SOCKS5-only proxy selection for call media wired to the extent the ntgcalls C API allows) <!-- parity:calls-proxy -->
 - [ ] Echo cancellation / noise suppression toggles (partial: ntgcalls defaults only, no settings UI) <!-- parity:calls-audio-fx -->
 - [x] Start video call with working video (video negotiated when a camera exists via `video_wanted`; peer frames flow through the engine callbacks to the video stage — verified in code + screenshot; real camera/peer still unverified) <!-- parity:calls-start-video -->
 - [x] Camera preview (local video tile) in video call (renders latest driver frame as a 160x120 PiP; "Starting camera…" / "Camera off" states when no frame) <!-- parity:calls-camera-preview -->
