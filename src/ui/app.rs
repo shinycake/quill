@@ -309,6 +309,14 @@ pub struct QuillApp {
     /// TTL). Working state lives in the named module; this is the one
     /// field the dialog machinery reads.
     pub(super) account_lifecycle: AccountLifecycleState,
+    /// Slice parity:auth-multi-account (UI): the Accounts dialog state
+    /// (list / switch / add / remove). Working state lives in
+    /// `accounts.rs`; this is the one field the dialog machinery reads.
+    pub(super) accounts_ui: AccountsUiState,
+    /// Slice parity:auth-multi-account: API credentials kept for the app
+    /// lifetime so the account switcher can reconnect as another account
+    /// (the same values `bootstrap_connect` used at startup).
+    pub(super) credentials: Option<TelegramCredentials>,
     /// Slice A3: Active Sessions overlay (TGX Settings → Devices /
     /// `SettingsSessionsController`).
     pub(super) sessions_open: bool,

@@ -1516,6 +1516,14 @@ impl QuillApp {
                                 this.open_account_lifecycle(cx);
                             })),
                     );
+                    // Slice parity:auth-multi-account (UI): multi-account
+                    // switcher — list / switch / add / remove accounts.
+                    // Sits next to the other account entries.
+                    list = list.child(Button::new("accounts").label("👤 Accounts").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.open_accounts(cx);
+                        }),
+                    ));
                     // Phase 9.1/9.3: tdesktop-style active-stories tray above
                     // the chat rows (leading "+" tile opens the story
                     // composer); omitted for the contacts tab.

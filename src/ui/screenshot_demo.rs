@@ -375,6 +375,10 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Slice parity:auth-multi-account (UI): the Accounts dialog open
+    /// over the ReadyChats fixture (injected, no live Telegram). The
+    /// account list reads the real local registry (read-only).
+    ReadyAccounts,
     /// Slice A3: Active Sessions overlay (injected, no live Telegram) —
     /// fixture `getActiveSessions` sessions (current device + two other
     /// sessions + one incomplete login attempt), dialog open.

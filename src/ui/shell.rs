@@ -172,6 +172,9 @@ pub enum DialogKind {
     Appearance,
     /// Slice A9: account lifecycle (delete account + self-destruct TTL).
     AccountLifecycle,
+    /// Slice parity:auth-multi-account (UI): the Accounts dialog (list /
+    /// switch / add / remove accounts).
+    Accounts,
     /// Slice G10: communities create dialog.
     CommunityCreate,
     /// Slice G10: communities hub dialog.
@@ -241,6 +244,7 @@ impl QuillShell {
             DialogKind::Welcome => app.welcome_dialog.is_some(),
             DialogKind::Appearance => app.appearance_open,
             DialogKind::AccountLifecycle => app.account_lifecycle.open,
+            DialogKind::Accounts => app.accounts_ui.open,
             // Slice G10: communities create + hub dialogs.
             DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
             DialogKind::CommunityHub => app.community_ui.hub_open,
@@ -283,6 +287,7 @@ impl QuillShell {
             DialogKind::Welcome => QuillApp::build_welcome_dialog,
             DialogKind::Appearance => QuillApp::build_appearance_dialog,
             DialogKind::AccountLifecycle => QuillApp::build_account_lifecycle_dialog,
+            DialogKind::Accounts => QuillApp::build_accounts_dialog,
             // Slice G10: community builders live in dialogs/community.rs.
             DialogKind::CommunityCreate => community::build_create_community_dialog,
             DialogKind::CommunityHub => community::build_community_hub_dialog,
@@ -291,7 +296,7 @@ impl QuillShell {
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 36] = [
+    const KINDS: [DialogKind; 37] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -330,6 +335,9 @@ impl QuillShell {
         // Slice G10: communities dialogs render last (lowest priority).
         DialogKind::CommunityCreate,
         DialogKind::CommunityHub,
+        // Slice parity:auth-multi-account (UI): accounts sit with the
+        // other settings-level dialogs (lowest priority band).
+        DialogKind::Accounts,
     ];
 
     /// Keep the single kit dialog in sync with the app-side open flags.
