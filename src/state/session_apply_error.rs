@@ -156,6 +156,18 @@ impl Session {
                     self.histories.entry(chat_id.0).or_default();
                 }
             }
+            // `parity:platform-chat-export` — a failed export page must not
+            // strand the export with `in_flight` set: mark it failed (and
+            // clear `in_flight`) so the UI surfaces the error and the state
+            // can be cleared and retried.
+            Some(RequestPurpose::ExportChatHistory) => {
+                if let Some(export) = self.chat_export.as_mut()
+                    && pending.and_then(|p| p.chat_id) == Some(export.chat_id)
+                {
+                    export.failed = Some(error_reason(&err).to_string());
+                    export.in_flight = false;
+                }
+            }
             // Phase 9.7: a story-page mutation error — the page's
             // status line shows it instead of spinning forever.
             Some(

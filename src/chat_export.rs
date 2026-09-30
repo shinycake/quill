@@ -124,6 +124,9 @@ fn unix_now() -> u64 {
 
 /// Write the finished export as pretty JSON into `dir`. Returns the path
 /// written. The file name is `quill-export-<sanitized-title>-<unix>.json`.
+// ponytail: the whole history is buffered in RAM and written synchronously
+// from the poll loop — stream the JSON and move the write off the loop if
+// giant-chat exports ever freeze the app.
 pub fn write_export(state: &ChatExportState, dir: &Path) -> io::Result<PathBuf> {
     let safe: String = state
         .chat_title
@@ -142,12 +145,20 @@ pub fn write_export(state: &ChatExportState, dir: &Path) -> io::Result<PathBuf> 
     } else {
         safe
     };
-    let target = dir.join(format!("quill-export-{safe}-{}.json", unix_now()));
+    let now = unix_now();
+    let mut target = dir.join(format!("quill-export-{safe}-{now}.json"));
+    // Same-second re-exports must not silently overwrite each other.
+    for suffix in 1.. {
+        if !target.exists() {
+            break;
+        }
+        target = dir.join(format!("quill-export-{safe}-{now}-{suffix}.json"));
+    }
     let payload = serde_json::json!({
         "app": "quill",
         "chat_id": state.chat_id.0,
         "chat_title": state.chat_title,
-        "exported_at": unix_now(),
+        "exported_at": now,
         "message_count": state.messages.len(),
         "messages": state.messages,
     });

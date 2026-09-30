@@ -68,10 +68,18 @@ impl Session {
                 && export.chat_id == chat_id
             {
                 let short_page = messages.len() < crate::chat_export::EXPORT_PAGE_LIMIT as usize;
+                // `getChatHistory` is inclusive of `from_message_id`, so the
+                // first message of every non-first page is the boundary
+                // message already in the buffer — skip it (matched by id,
+                // not position, so a boundary deleted between pages doesn't
+                // cost a message) so each message exports exactly once.
+                let boundary_id = export.messages.last().map(|m| m.id);
                 for message in messages {
-                    export
-                        .messages
-                        .push(crate::chat_export::project_message(&message));
+                    let exported = crate::chat_export::project_message(&message);
+                    if Some(exported.id) == boundary_id {
+                        continue;
+                    }
+                    export.messages.push(exported);
                 }
                 export.in_flight = false;
                 if short_page {

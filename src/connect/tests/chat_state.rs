@@ -938,18 +938,26 @@ fn chat_export_pages_history_until_short_page() {
     let value: Value = serde_json::from_str(&second).unwrap();
     assert_eq!(value["from_message_id"], 901);
 
-    // Short page (1 message) → paging done, ready for the file write.
+    // Short page (2 messages: the boundary id 901 re-included by TDLib's
+    // inclusive from_message_id, then 900) → boundary deduped, paging done.
     let extra = driver
         .session
         .requests
         .pending_extra_for(RequestPurpose::ExportChatHistory, Some(ChatId(16)))
         .expect("second export page in flight");
+    let msg = |id: i64, text: &str| {
+        format!(
+            r#"{{"id":{id},"chat_id":16,"is_outgoing":true,"date":1699999999,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}"#
+        )
+    };
     driver
         .ingest(
             copy_and_parse(
                 &format!(
-                    r#"{{"@type":"messages","@extra":"{}","messages":[{{"id":900,"chat_id":16,"is_outgoing":true,"date":1699999999,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"last","entities":[]}}}}}}]}}"#,
-                    extra.0
+                    r#"{{"@type":"messages","@extra":"{}","messages":[{},{}]}}"#,
+                    extra.0,
+                    msg(901, "m901"),
+                    msg(900, "last"),
                 ),
                 &seq,
                 &dyn_sink,
@@ -958,7 +966,9 @@ fn chat_export_pages_history_until_short_page() {
         )
         .unwrap();
     let export = driver.session.chat_export.as_ref().expect("export active");
+    // 100 from page 1 + 1 new (901 was already there — no duplicate).
     assert_eq!(export.messages.len(), 101);
+    assert_eq!(export.messages.iter().filter(|m| m.id == 901).count(), 1);
     assert!(export.messages.last().unwrap().outgoing);
     assert!(export.done_paging);
     let _ = std::fs::remove_dir_all(&dir);
