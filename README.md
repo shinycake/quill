@@ -579,7 +579,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Reconnect state labels ("Connecting…", "Waiting for network…", "Updating…", "Connecting to proxy…") <!-- parity:platform-reconnect-states -->
 - [ ] "You're offline" error messaging when sending/calling while offline <!-- parity:platform-offline-errors -->
 - [x] TDLib request errors surfaced on the originating surface (e.g. failed createCall → error line on call overlay) (src/state.rs:4547) <!-- parity:platform-error-surfacing -->
-- [ ] Flood/rate-limit errors with retry countdown (e.g. "Try again in N seconds") <!-- parity:platform-flood-errors -->
+- [x] Flood/rate-limit errors with retry countdown (e.g. "Try again in N seconds") <!-- parity:platform-flood-errors -->
 - [x] Unread badge on the app/taskbar icon <!-- parity:platform-app-icon-badge -->
 - [x] OS desktop notifications (in-app toast queue with burst coalescing in src/notify.rs; OS dispatch via notify-send on Linux / osascript on macOS on worker threads, click-to-focus on Linux) <!-- parity:platform-os-notifications -->
 - [ ] Drag-and-drop files into the composer <!-- parity:platform-drag-drop-files -->
