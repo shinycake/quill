@@ -352,7 +352,8 @@ pub struct ContactRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeepLinkAction {
     /// `tg://resolve?domain=<username>` with optional `start=`,
-    /// `startgroup=`, `post=`, `story=` query params.
+    /// `post=`, `story=` query params. (`startgroup=` is out of slice
+    /// and ignored.)
     OpenUsername {
         domain: String,
         start_param: Option<String>,
@@ -363,6 +364,13 @@ pub enum DeepLinkAction {
     JoinInvite { hash: String },
     /// `tg://openmessage?user_id=<id>&message_id=<id>`.
     OpenMessage { user_id: i64, message_id: i64 },
+    /// `tg://privatepost?channel=<id>&post=<id>` (the `t.me/c/<id>/<msg>`
+    /// form for private channels/supergroups). Resolved via `getChat`
+    /// with the TDLib channel dialog id `-(10^12) - channel_id`, then
+    /// jumps to the post like `post=`.
+    OpenChannelPost { channel_id: i64, post: i64 },
+    /// `tg://user?id=<id>`.
+    OpenUser { user_id: i64 },
 }
 
 /// `parity:platform-deep-links`: the single active deep-link flow. One
@@ -381,7 +389,7 @@ pub enum DeepLinkState {
         generation: u64,
     },
     /// Follow-up request (`searchPublicChat` / `createPrivateChat` /
-    /// `joinChatByInviteLink`) in flight.
+    /// `joinChatByInviteLink` / `getChat`) in flight.
     ResolvingChat {
         action: DeepLinkAction,
         generation: u64,

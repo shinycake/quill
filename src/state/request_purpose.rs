@@ -117,8 +117,9 @@ pub enum RequestPurpose {
         generation: u64,
     },
     /// `parity:platform-deep-links`: deep-link follow-up resolving to a
-    /// chat (`searchPublicChat` / `createPrivateChat`). The `chat` answer
-    /// is picked up in `apply_update_new_chat` and opens via `ChatReady`.
+    /// chat (`searchPublicChat` / `createPrivateChat` / `getChat`). The
+    /// `chat` answer is picked up in `apply_update_new_chat` and opens
+    /// via `ChatReady`.
     DeepLinkResolve {
         generation: u64,
     },

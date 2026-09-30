@@ -220,7 +220,7 @@ pub fn get_deep_link_info(extra: RequestId, link: &str) -> String {
 /// `parity:platform-deep-links`: `joinChatByInviteLink invite_link:string
 /// = ChatJoinResult;` (schema 1.8.67, line 14166). `invite_link` is the
 /// full `https://t.me/+<hash>` / `tg://join?invite=<hash>` link TDLib
-/// resolved.
+/// requires.
 pub fn join_chat_by_invite_link(extra: RequestId, invite_link: &str) -> String {
     json!({
         "@type": "joinChatByInviteLink",

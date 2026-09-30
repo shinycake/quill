@@ -103,6 +103,7 @@ impl QuillApp {
                     post: Some(post), ..
                 } => Some(*post),
                 DeepLinkAction::OpenMessage { message_id, .. } => Some(*message_id),
+                DeepLinkAction::OpenChannelPost { post, .. } => Some(*post),
                 _ => None,
             };
             if let Some(message_id) = jump_to

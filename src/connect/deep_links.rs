@@ -8,10 +8,10 @@
 //! follow-up answer becomes `DeepLinkState::ChatReady`, which the UI
 //! consumes to open the chat.
 use super::*;
-use crate::ids::RequestId;
+use crate::ids::{ChatId, RequestId};
 use crate::state::{DeepLinkAction, DeepLinkState, RequestPurpose};
 use crate::telegram::requests::{
-    create_private_chat, get_deep_link_info, join_chat_by_invite_link, search_public_chat,
+    create_private_chat, get_chat, get_deep_link_info, join_chat_by_invite_link, search_public_chat,
 };
 use crate::text::{TextEntity, TextEntityKind};
 
@@ -64,8 +64,10 @@ fn tg_query_params(url: &str) -> Vec<(String, String)> {
 /// Parse a `tg://` URL into a [`DeepLinkAction`]. Documented forms
 /// (core.telegram.org/api/links): `tg://resolve?domain=` (with optional
 /// `start=`, `post=`, `story=`), `tg://join?invite=`,
-/// `tg://openmessage?user_id=&message_id=`. Anything else (`tg://proxy`,
-/// unknown hosts) is `None` and the UI falls back to TDLib's info text.
+/// `tg://openmessage?user_id=&message_id=`,
+/// `tg://privatepost?channel=&post=`, `tg://user?id=`. Anything else
+/// (`tg://proxy`, unknown hosts) is `None` and the UI falls back to
+/// TDLib's info text.
 pub fn parse_tg_url(url: &str) -> Option<DeepLinkAction> {
     let rest = url.strip_prefix("tg://")?;
     let host = rest.split('?').next().unwrap_or("");
@@ -93,6 +95,13 @@ pub fn parse_tg_url(url: &str) -> Option<DeepLinkAction> {
         "openmessage" => Some(DeepLinkAction::OpenMessage {
             user_id: param("user_id")?.parse().ok()?,
             message_id: param("message_id")?.parse().ok()?,
+        }),
+        "privatepost" => Some(DeepLinkAction::OpenChannelPost {
+            channel_id: param("channel")?.parse().ok()?,
+            post: param("post")?.parse().ok()?,
+        }),
+        "user" => Some(DeepLinkAction::OpenUser {
+            user_id: param("id")?.parse().ok()?,
         }),
         _ => None,
     }
@@ -154,9 +163,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `parity:platform-deep-links`: fire the follow-up request for a
     /// parsed deep-link action — `searchPublicChat` for a username (or the
-    /// story author's), `createPrivateChat` for `openmessage`,
-    /// `joinChatByInviteLink` for an invite hash. The answer becomes
-    /// `DeepLinkState::ChatReady` in `Session::apply`.
+    /// story author's), `createPrivateChat` for `openmessage` / `user`,
+    /// `getChat` for `privatepost`, `joinChatByInviteLink` for an invite
+    /// hash. The answer becomes `DeepLinkState::ChatReady` in
+    /// `Session::apply`.
     pub fn resolve_deep_link(
         &mut self,
         action: DeepLinkAction,
@@ -176,8 +186,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             DeepLinkAction::JoinInvite { hash } => {
                 join_chat_by_invite_link(extra, &format!("https://t.me/+{hash}"))
             }
-            DeepLinkAction::OpenMessage { user_id, .. } => {
+            DeepLinkAction::OpenMessage { user_id, .. } | DeepLinkAction::OpenUser { user_id } => {
                 create_private_chat(extra, *user_id, false)
+            }
+            DeepLinkAction::OpenChannelPost { channel_id, .. } => {
+                // TDLib channel dialog encoding: -(10^12) - channel_id.
+                get_chat(extra, ChatId(-1_000_000_000_000 - channel_id))
             }
         };
         self.session.deep_link = Some(DeepLinkState::ResolvingChat { action, generation });
@@ -250,6 +264,24 @@ mod tests {
         // Missing params are not actionable.
         assert_eq!(parse_tg_url("tg://openmessage?user_id=123"), None);
         assert_eq!(parse_tg_url("tg://join?invite="), None);
+    }
+
+    #[test]
+    fn parse_privatepost_and_user() {
+        assert_eq!(
+            parse_tg_url("tg://privatepost?channel=123&post=456"),
+            Some(DeepLinkAction::OpenChannelPost {
+                channel_id: 123,
+                post: 456
+            })
+        );
+        assert_eq!(
+            parse_tg_url("tg://user?id=987"),
+            Some(DeepLinkAction::OpenUser { user_id: 987 })
+        );
+        // Missing params are not actionable.
+        assert_eq!(parse_tg_url("tg://privatepost?channel=123"), None);
+        assert_eq!(parse_tg_url("tg://user"), None);
     }
 
     #[test]
