@@ -386,3 +386,156 @@ fn inapp_sounds_toggle_gates_notification_sound() {
     let chat = session.chats.get(&14).unwrap();
     assert!(session.notification_sound_for(chat).is_none());
 }
+
+/// Parity slice: `chatNotificationSettings` JSON with every
+/// `use_default_*` flag set — a "reset to default" payload.
+fn default_chat_notification_settings_json() -> &'static str {
+    r#"{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}"#
+}
+
+/// Parity slice: `getChatNotificationSettingsExceptions` answer lands
+/// per scope (correlated via `pending.scope`) and clears the
+/// in-flight mark.
+#[test]
+fn notification_exceptions_answer_lands_per_scope() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_scope(
+        RequestPurpose::GetChatNotificationSettingsExceptions,
+        NotificationSettingsScope::PrivateChats,
+    );
+    session
+        .notification_exceptions_loading
+        .insert(NotificationSettingsScope::PrivateChats);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chats","total_count":2,"chat_ids":[11,12],"@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(
+        session.notification_exceptions[&NotificationSettingsScope::PrivateChats],
+        vec![11, 12]
+    );
+    assert!(
+        !session
+            .notification_exceptions_loading
+            .contains(&NotificationSettingsScope::PrivateChats)
+    );
+}
+
+/// Parity slice: a failed `getChatNotificationSettingsExceptions` must
+/// not keep the scope in `notification_exceptions_loading` — otherwise
+/// every later dialog open skips the fetch and the list stays
+/// unfetchable.
+#[test]
+fn failed_notification_exceptions_fetch_retries() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_scope(
+        RequestPurpose::GetChatNotificationSettingsExceptions,
+        NotificationSettingsScope::GroupChats,
+    );
+    session
+        .notification_exceptions_loading
+        .insert(NotificationSettingsScope::GroupChats);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":500,"message":"CANARY_EXC_ERR","@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    assert!(
+        !session
+            .notification_exceptions_loading
+            .contains(&NotificationSettingsScope::GroupChats)
+    );
+    assert!(
+        !session
+            .notification_exceptions
+            .contains_key(&NotificationSettingsScope::GroupChats)
+    );
+}
+
+/// Parity slice: `local_notification_exceptions` finds chats with any
+/// non-default setting in the right scope (the screenshot demo's
+/// answer path).
+#[test]
+fn local_notification_exceptions_scans_chats() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    // Private chat with a custom sound.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"m","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0,"use_default_sound":false,"sound_id":"1","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}}"#,
+    );
+    // Group chat with fully default settings.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    assert_eq!(
+        session.local_notification_exceptions(NotificationSettingsScope::PrivateChats),
+        vec![7]
+    );
+    assert!(
+        session
+            .local_notification_exceptions(NotificationSettingsScope::GroupChats)
+            .is_empty()
+    );
+}
+
+/// Parity slice: `updateChatNotificationSettings` keeps the cached
+/// exceptions list honest — a reset to the scope default prunes just
+/// the chat; any other change drops the scope's list so the next
+/// dialog open refetches it.
+#[test]
+fn chat_notification_settings_update_refreshes_exceptions() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"m","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    );
+    session
+        .notification_exceptions
+        .insert(NotificationSettingsScope::PrivateChats, vec![7, 9]);
+    // Reset to default prunes just the chat.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{}}}"#,
+            default_chat_notification_settings_json()
+        ),
+    );
+    assert_eq!(
+        session.notification_exceptions[&NotificationSettingsScope::PrivateChats],
+        vec![9]
+    );
+    // A custom change drops the whole cached list.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}"#,
+    );
+    assert!(
+        !session
+            .notification_exceptions
+            .contains_key(&NotificationSettingsScope::PrivateChats)
+    );
+}

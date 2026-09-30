@@ -485,6 +485,16 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
             self.story_post_as_chats = chat_ids.iter().map(|id| id.0).collect();
         }
+        // Parity slice: `getChatNotificationSettingsExceptions`
+        // answer — the scope is correlated via `pending.scope`
+        // (the `chats` response carries no scope field).
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
+            && let Some(scope) = pending.and_then(|p| p.scope)
+        {
+            self.notification_exceptions
+                .insert(scope, chat_ids.iter().map(|id| id.0).collect());
+            self.notification_exceptions_loading.remove(&scope);
+        }
         if self.search.matches_generation(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {

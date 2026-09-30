@@ -1293,6 +1293,7 @@ impl QuillApp {
             notif_sound_picker_open: false,
             notification_defaults_open: false,
             defaults_sound_picker: None,
+            defaults_exceptions_scope: None,
             notify_sound_inflight: Arc::new(AtomicUsize::new(0)),
             voice_capture: None,
             video_note_capture: None,

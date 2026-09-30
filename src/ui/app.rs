@@ -31,6 +31,7 @@ use quill::state::{ForwardResult, Session};
 use quill::story_composer::StoryComposer;
 use quill::story_viewer::{StoryPlayback, StoryViewer};
 use quill::telegram::envelope::AuthorizationState;
+use quill::telegram::envelope::NotificationSettingsScope;
 use quill::telegram::requests::SelfDestructSend;
 use quill::video::VideoNoteCapture;
 use quill::voice::VoiceCapture;
@@ -351,6 +352,9 @@ pub struct QuillApp {
     /// Parity slice: which defaults-dialog section's sound picker is
     /// expanded (`None` = all collapsed).
     pub(super) defaults_sound_picker: Option<SoundPickerTarget>,
+    /// Parity slice: which scope section's notification exceptions list is
+    /// expanded in the defaults dialog (`None` = all collapsed).
+    pub(super) defaults_exceptions_scope: Option<NotificationSettingsScope>,
     /// Parity slice: in-flight notification-sound workers; capped so a
     /// message burst cannot stack players.
     pub(super) notify_sound_inflight: Arc<AtomicUsize>,

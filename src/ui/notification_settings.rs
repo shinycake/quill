@@ -119,6 +119,28 @@ pub(super) fn apply_ready_notification_sound(
             session.apply(owned);
         }
     }
+    // Parity slice: answer `getChatNotificationSettingsExceptions` per
+    // scope from the demo chats' own settings, through the real
+    // request/response correlation — chat 11's custom settings above make
+    // it a PrivateChats exception.
+    for scope in NotificationSettingsScope::ALL {
+        let extra =
+            session.request_for_scope(RequestPurpose::GetChatNotificationSettingsExceptions, scope);
+        let ids = session.local_notification_exceptions(scope);
+        let json = format!(
+            r#"{{"@type":"chats","total_count":{n},"chat_ids":[{ids}],"@extra":"{extra}"}}"#,
+            n = ids.len(),
+            ids = ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            extra = extra.0,
+        );
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
 }
 
 impl QuillApp {
@@ -178,6 +200,7 @@ impl QuillApp {
             |this, _, cx| {
                 this.notification_defaults_open = false;
                 this.defaults_sound_picker = None;
+                this.defaults_exceptions_scope = None;
                 cx.notify();
             },
         );
@@ -217,6 +240,7 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.notification_defaults_open = false;
                         this.defaults_sound_picker = None;
+                        this.defaults_exceptions_scope = None;
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::NotificationDefaults, window, cx);
                     })),
@@ -608,6 +632,9 @@ impl QuillApp {
                     if let Some(live) = this.live.as_mut() {
                         let _ = live.driver.maybe_fetch_scope_notification_settings();
                         let _ = live.driver.maybe_fetch_notification_sounds();
+                        for scope in NotificationSettingsScope::ALL {
+                            let _ = live.driver.maybe_fetch_notification_exceptions(scope);
+                        }
                     }
                     cx.notify();
                 })),
@@ -1595,7 +1622,7 @@ impl QuillApp {
                 saved_sounds,
             ));
         }
-        section
+        section = section
             .child(
                 // Parity slice: story fields of `scopeNotificationSettings`
                 // (schema line 3369-3375) — no story-sound picker (the
@@ -1641,8 +1668,149 @@ impl QuillApp {
                                 this.apply_scope_story_poster(scope, on, cx);
                             })),
                     ),
-            )
-            .into_any_element()
+            );
+        // Parity slice: per-scope notification exceptions
+        // (`getChatNotificationSettingsExceptions`) — fetched on dialog
+        // open; "Loading…" while the request is in flight.
+        let exceptions = self
+            .session()
+            .and_then(|s| s.notification_exceptions.get(&scope));
+        let exceptions_loading = self
+            .session()
+            .is_some_and(|s| s.notification_exceptions_loading.contains(&scope));
+        let exceptions_label = match (exceptions, exceptions_loading) {
+            (Some(ids), _) => {
+                if ids.len() == 1 {
+                    "1 chat".to_string()
+                } else {
+                    format!("{} chats", ids.len())
+                }
+            }
+            (None, true) => "Loading…".to_string(),
+            (None, false) => "—".to_string(),
+        };
+        section = section.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("Exceptions: {exceptions_label}")),
+                )
+                .child(
+                    Button::new(format!("scope-exceptions-{scope:?}"))
+                        .label(if self.defaults_exceptions_scope == Some(scope) {
+                            "Hide"
+                        } else {
+                            "View"
+                        })
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.defaults_exceptions_scope =
+                                if this.defaults_exceptions_scope == Some(scope) {
+                                    None
+                                } else {
+                                    Some(scope)
+                                };
+                            cx.notify();
+                        })),
+                ),
+        );
+        if self.defaults_exceptions_scope == Some(scope) {
+            section = section.child(self.exceptions_list(cx, scope));
+        }
+        section.into_any_element()
+    }
+
+    /// Parity slice: the expanded exceptions sub-view for one scope — the
+    /// exception chats (titles resolved from the session chats map) with a
+    /// "Reset to default" button per chat.
+    pub(super) fn exceptions_list(
+        &self,
+        cx: &mut Context<Self>,
+        scope: NotificationSettingsScope,
+    ) -> AnyElement {
+        let session = self.session();
+        let cached: Option<&Vec<i64>> = session
+            .as_ref()
+            .and_then(|s| s.notification_exceptions.get(&scope));
+        let loading = session
+            .as_ref()
+            .is_some_and(|s| s.notification_exceptions_loading.contains(&scope));
+        let mut list = div().flex().flex_col().gap_1().px_2().py_1();
+        let Some(ids) = cached else {
+            // Fetch failed or never fired — the next dialog open retries.
+            return list
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(if loading {
+                            "Loading…"
+                        } else {
+                            "Exceptions unavailable — reopen the dialog to retry."
+                        }),
+                )
+                .into_any_element();
+        };
+        if ids.is_empty() {
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No exceptions — every chat uses the scope default."),
+            );
+        }
+        for &id in ids {
+            let title = session
+                .as_ref()
+                .and_then(|s| s.chats.get(&id))
+                .map(|c| c.title.clone())
+                .unwrap_or_else(|| format!("Chat {id}"));
+            list = list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(div().text_sm().child(title))
+                    .child(
+                        Button::new(format!("exception-reset-{id}"))
+                            .label("Reset to default")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.reset_notification_exception(ChatId(id), cx);
+                            })),
+                    ),
+            );
+        }
+        list.into_any_element()
+    }
+
+    /// Parity slice: reset one exception chat to the scope defaults
+    /// (`setChatNotificationSettings` with every `use_default_*` flag set).
+    pub(super) fn reset_notification_exception(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.reset_chat_notification_settings(chat_id);
+            self.status_note = match result {
+                Ok(_) => "exception reset…".into(),
+                Err(_) => "could not reset exception".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // Screenshot demo: apply locally so the list reflects it.
+            if let Some(chat) = session.chats.get_mut(&chat_id.0) {
+                chat.notification_settings = ChatNotificationSettings::default();
+            }
+            for list in session.notification_exceptions.values_mut() {
+                list.retain(|id| *id != chat_id.0);
+            }
+            self.status_note = "exception reset".into();
+        }
+        cx.notify();
     }
 
     /// Parity slice: reaction + poll-vote notification settings section in

@@ -416,8 +416,10 @@ pub struct PendingRequest {
     /// `LoadFolderChats`) so responses correlate to the folder.
     pub folder_id: Option<i32>,
     /// Parity slice: `scope` for `GetScopeNotificationSettings` /
-    /// `SetScopeNotificationSettings` so the id-less
-    /// `scopeNotificationSettings` response lands on the right scope.
+    /// `SetScopeNotificationSettings` /
+    /// `GetChatNotificationSettingsExceptions` so the id-less
+    /// `scopeNotificationSettings` / `chats` response lands on the right
+    /// scope.
     pub scope: Option<NotificationSettingsScope>,
     /// Phase B1: `secret_chat_id` for `GetSecretChat` /
     /// `CloseSecretChat` so the id-less `secretChat` response and
