@@ -1,5 +1,6 @@
 //! Connect gate: live TDLib connection bootstrap and shutdown.
 use super::*;
+use crate::accounts::AccountRegistry;
 use crate::credentials::TelegramCredentials;
 use crate::data_settings::load_data_storage_prefs;
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
@@ -13,6 +14,7 @@ use crate::state::Session;
 use crate::telegram::client::{LiveTdJson, OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::ffi::TdJsonError;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -89,13 +91,14 @@ pub fn start_live_connect(
     credentials: TelegramCredentials,
     store: &(impl SecretStore + ?Sized),
     diagnostics: Arc<dyn DiagnosticSink>,
+    account: &AccountKey,
 ) -> Result<LiveConnect, ConnectBlocker> {
     match evaluate_gate(true) {
         ConnectGate::Blocked(b) => return Err(b),
         ConnectGate::Ready { .. } => {}
     }
     let app_root = safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
-    let prepared = prepare_connect(&app_root, AccountKey::primary(), store, &credentials)?;
+    let prepared = prepare_connect(&app_root, account.clone(), store, &credentials)?;
     let live = LiveTdJson::connect().map_err(|e| match e {
         TdJsonError::NotFound => ConnectBlocker::MissingTdjson,
         _ => ConnectBlocker::TdjsonLoad,
@@ -147,4 +150,91 @@ pub fn start_live_connect(
         bridge,
         _live: live,
     })
+}
+
+/// Multi-account part 2: switch the live client to another known account.
+///
+/// The account must be in the registry — an unknown key is rejected with
+/// `UnknownAccount` and the current client is left untouched. Otherwise the
+/// old client is shut down (dropped) *before* the new one starts, the
+/// registry's current account is persisted, and a fresh client boots under
+/// the new key (a never-authorized key lands on the auth screens, which is
+/// how accounts get added).
+///
+/// If persisting the registry fails, the switch still happened in memory and
+/// the error is `StoreError` — the next launch will revert to the previously
+/// persisted current account.
+pub fn switch_live_account(
+    live: &mut Option<LiveConnect>,
+    account: &AccountKey,
+    app_root: &Path,
+    credentials: TelegramCredentials,
+    store: &(impl SecretStore + ?Sized),
+    diagnostics: Arc<dyn DiagnosticSink>,
+) -> Result<(), ConnectBlocker> {
+    let mut registry = AccountRegistry::load(app_root);
+    if registry.get(account).is_none() {
+        return Err(ConnectBlocker::UnknownAccount);
+    }
+    // Shut down the old client before the new one starts.
+    *live = None;
+    registry.set_current(account);
+    let save_err = registry.save(app_root).err();
+    *live = Some(start_live_connect(
+        credentials,
+        store,
+        diagnostics,
+        account,
+    )?);
+    if save_err.is_some() {
+        return Err(ConnectBlocker::StoreError);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostics::MemorySink;
+    use crate::platform::MemorySecretStore;
+
+    fn test_credentials() -> TelegramCredentials {
+        TelegramCredentials {
+            api_id: 99,
+            api_hash: "unit-test-hash-not-for-network".into(),
+        }
+    }
+
+    fn tmp_root() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "quill-switch-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Multi-account part 2: switching to an unknown account is rejected
+    /// before the current client is touched (no live TDLib needed — the
+    /// rejection happens before any shutdown or connect).
+    #[test]
+    fn switch_to_unknown_account_rejected_and_client_untouched() {
+        let dir = tmp_root();
+        let store = MemorySecretStore::new();
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let mut live: Option<LiveConnect> = None;
+        let ghost = AccountKey("ghost".to_string());
+        let err = switch_live_account(&mut live, &ghost, &dir, test_credentials(), &store, sink)
+            .unwrap_err();
+        assert!(matches!(err, ConnectBlocker::UnknownAccount));
+        assert!(live.is_none());
+        // The failed switch wrote nothing.
+        assert!(!dir.join("accounts.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

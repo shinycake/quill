@@ -107,6 +107,8 @@ pub enum ConnectBlocker {
     LockedStore,
     StoreError,
     TdjsonLoad,
+    /// Multi-account: the requested account key is not in the registry.
+    UnknownAccount,
 }
 
 impl ConnectBlocker {
@@ -126,6 +128,7 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => {
                 "tdjson library found but failed to load (missing symbols or wrong arch)"
             }
+            ConnectBlocker::UnknownAccount => "unknown account — not in the account registry",
         }
     }
 
@@ -138,6 +141,7 @@ impl ConnectBlocker {
             ConnectBlocker::LockedStore => "locked-store",
             ConnectBlocker::StoreError => "store-error",
             ConnectBlocker::TdjsonLoad => "tdjson-load",
+            ConnectBlocker::UnknownAccount => "unknown-account",
         }
     }
 }

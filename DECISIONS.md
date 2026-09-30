@@ -6837,3 +6837,38 @@ dirs).
 - **Out of this slice (parts 2–3):** add-account auth flow, account switching
   (restart driver under a different key), settings UI for the account list.
   The README box stays unchecked until switching works end to end.
+
+## Slice auth-multi-account part 2 — STARTUP WIRING + SWITCH BACKEND (2026-09-30)
+
+**Scope:** `parity:auth-multi-account` — wire the part-1 registry into
+startup and add the account-switch backend. No UI yet (part 3).
+
+- **Built:**
+  - `connect/live.rs`: `start_live_connect` now takes `account: &AccountKey`
+    instead of hardcoding `AccountKey::primary()` (`prepare_connect` already
+    took the key — the hardcode was the only seam).
+  - New `switch_live_account(live: &mut Option<LiveConnect>, account,
+    app_root, credentials, store, diagnostics)`: rejects unknown keys with
+    new `ConnectBlocker::UnknownAccount` *before* touching the current
+    client; otherwise drops the old client first, persists the registry's new
+    current, then boots a fresh client under the new key (a never-authorized
+    key lands on the auth screens — that is how accounts get added). A
+    registry-save failure after a successful boot surfaces `StoreError`; the
+    switch happened, the next launch reverts to the previously persisted
+    account — said honestly in the doc comment.
+  - `ui/connect_ui.rs` `bootstrap_connect` and `--connect-smoke` boot the
+    registry's current account (missing registry = single primary, unchanged
+    behavior for existing installs).
+- **Key decisions (ponytail):**
+  - No `startup_account()` one-line wrapper — callers read
+    `AccountRegistry::load(&root).current` directly.
+  - `&mut Option<LiveConnect>` (not by-value) so a rejected switch leaves the
+    caller's client untouched without an awkward return-the-client error type.
+- **Tests:** `switch_to_unknown_account_rejected_and_client_untouched`
+  (rejection needs no live TDLib — it happens before any shutdown/connect;
+  also asserts the failed switch wrote nothing).
+- **Not verifiable without live Telegram:** the actual switch round-trip
+  (old client closes, new client boots under the new key, auth screens for a
+  fresh key).
+- **Out of this slice (part 3):** settings UI — account list, add/switch/
+  remove rows. The README box stays unchecked until then.

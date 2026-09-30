@@ -136,10 +136,15 @@ pub fn run_connect_smoke(timeout: Duration) -> SmokeOutcome {
     let credentials = credentials.expect("preflight required credentials");
     let store = live_secret_store();
     let sink = std::sync::Arc::new(crate::diagnostics::MemorySink::new());
-    let mut live: LiveConnect = match start_live_connect(credentials, store.as_ref(), sink) {
-        Ok(live) => live,
-        Err(blocker) => return SmokeOutcome::Blocked(blocker),
-    };
+    // Multi-account part 2: the smoke run boots the registry's current account.
+    let account = crate::settings::safe_app_root()
+        .map(|root| crate::accounts::AccountRegistry::load(&root).current)
+        .unwrap_or_else(crate::ids::AccountKey::primary);
+    let mut live: LiveConnect =
+        match start_live_connect(credentials, store.as_ref(), sink, &account) {
+            Ok(live) => live,
+            Err(blocker) => return SmokeOutcome::Blocked(blocker),
+        };
     let outcome = drive_until_terminal(
         &mut live.driver,
         |wait| live.bridge.next_timeout(wait),

@@ -5,6 +5,7 @@ use quill::connect::{ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, st
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::platform::live_secret_store;
+use quill::settings::safe_app_root;
 use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
 
@@ -66,7 +67,12 @@ pub(super) fn bootstrap_connect(
             };
             let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
             let store = live_secret_store();
-            match start_live_connect(credentials, store.as_ref(), sink) {
+            // Multi-account part 2: boot the registry's current account,
+            // not a hardcoded primary (missing registry = single primary).
+            let account = safe_app_root()
+                .map(|root| quill::accounts::AccountRegistry::load(&root).current)
+                .unwrap_or_else(quill::ids::AccountKey::primary);
+            match start_live_connect(credentials, store.as_ref(), sink, &account) {
                 Ok(live) => (
                     ConnectUiStatus::Live,
                     Some(live),
