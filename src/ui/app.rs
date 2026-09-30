@@ -113,7 +113,8 @@ pub struct QuillApp {
     /// Slice auth-logout-warning: the startup credentials, kept so a
     /// `logOut`-driven Closed can restart the live connection and return
     /// the user to the login screen (same sensitivity class as the
-    /// driver's own copy).
+    /// driver's own copy). Also read by the account switcher
+    /// (parity:auth-multi-account) to reconnect as another account.
     pub(super) credentials: Option<TelegramCredentials>,
     /// Phase 1 (kit adoption): the note text a dismiss timer is already armed
     /// for. The permanent debug status bar is gone; `status_note` now shows
@@ -313,10 +314,6 @@ pub struct QuillApp {
     /// (list / switch / add / remove). Working state lives in
     /// `accounts.rs`; this is the one field the dialog machinery reads.
     pub(super) accounts_ui: AccountsUiState,
-    /// Slice parity:auth-multi-account: API credentials kept for the app
-    /// lifetime so the account switcher can reconnect as another account
-    /// (the same values `bootstrap_connect` used at startup).
-    pub(super) credentials: Option<TelegramCredentials>,
     /// Slice A3: Active Sessions overlay (TGX Settings → Devices /
     /// `SettingsSessionsController`).
     pub(super) sessions_open: bool,

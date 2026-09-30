@@ -1143,9 +1143,6 @@ impl QuillApp {
 
         let demo_sink = Arc::new(MemorySink::new());
         let mut demo_session = None;
-        // Slice parity:auth-multi-account: keep the startup credentials so
-        // the account switcher can reconnect as another account.
-        let saved_credentials = credentials.clone();
         let (connect_status, live, status_note, auth_demo) = match demo {
             Some(d) => {
                 let (seed, status, note, auth) = demo_seed_for(d);
@@ -1195,7 +1192,7 @@ impl QuillApp {
             twofa_notice: None,
             account_lifecycle: AccountLifecycleState::new(window, cx),
             accounts_ui: AccountsUiState::new(window, cx),
-            credentials: saved_credentials,
+            credentials,
             // Slice S3: privacy screen state.
             privacy_open: false,
             privacy_editor: None,
@@ -1228,7 +1225,6 @@ impl QuillApp {
             connect_status,
             live,
             status_note,
-            credentials,
             demo_auth_inputs: matches!(
                 demo,
                 Some(
