@@ -1,5 +1,7 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::ids::ChatId;
 /// Slice G2: chat welcome-message editor (info panel → "Welcome
 /// message", admins with `can_send_welcome_messages` only).
 /// `new_input` feeds `addChatWelcomeMessage`; `editing` +

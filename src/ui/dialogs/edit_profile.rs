@@ -1,5 +1,6 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
 /// A5: edit-profile dialog — the profile edit UI entry point
 /// (`parity:auth-edit-name`). One dialog with per-section saves, mirroring
 /// TGX's edit-profile rows: name (`setName`), bio (`setBio`), username

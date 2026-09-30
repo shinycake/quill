@@ -1,5 +1,11 @@
-use super::*;
-
+use super::actions::{
+    CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
+    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
+    OpenSearch, QuitApp, ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn,
+    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+};
+use gpui_kit::component::*;
+use gpui_kit::*;
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-q", QuitApp, None),

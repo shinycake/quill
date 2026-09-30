@@ -24,7 +24,6 @@ use quill::settings::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-
 /// Accent presets (0xRRGGBB); the "Default" chip keeps the theme accent.
 const ACCENT_PRESETS: &[(u32, &str)] = &[
     (0x2f81f7, "Blue"),

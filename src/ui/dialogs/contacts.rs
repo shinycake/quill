@@ -1,5 +1,6 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
 /// Phase 6: add-contact dialog opened from the user info panel. The phone
 /// number is required — `addContact` needs an `importedContact` and Quill
 /// does not offer adding by bare user id.

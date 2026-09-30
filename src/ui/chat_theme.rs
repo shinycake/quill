@@ -15,7 +15,6 @@
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Rgba, Window};
 use std::sync::atomic::{AtomicU8, Ordering};
-
 const fn hex(hex: u32) -> Rgba {
     Rgba {
         r: ((hex >> 16) & 0xff) as f32 / 255.0,

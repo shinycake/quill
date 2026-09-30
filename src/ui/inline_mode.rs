@@ -13,20 +13,19 @@
 //! module, holds the three fields, and calls in at the existing
 //! composer/keystroke/render sites.
 
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::time::Duration;
-
-use super::gpui::{AnyElement, Context, Window, div, prelude::*};
-use super::{PressableDiv, QuillApp};
+use super::QuillApp;
+use super::pressable::PressableDiv;
 use gpui_kit::component::theme::ActiveTheme;
+use gpui_kit::gpui::{AnyElement, Context, Window, div, prelude::*};
 use quill::composer::inline_query_trigger;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
 use quill::state::{InlineBotResolve, InlineQueryFetch, InlineQuerySlot, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::InlineQueryResultSummary;
-
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::time::Duration;
 /// One dropdown row: a status line, a result, or the "load more" row.
 #[derive(Clone)]
 enum InlineRow {
@@ -543,7 +542,7 @@ pub(super) fn apply_ready_inline_results(
     sink: &Arc<MemorySink>,
     seq: &AtomicU64,
 ) {
-    super::apply_ready_bot_chat(session, sink, seq);
+    super::bots::apply_ready_bot_chat(session, sink, seq);
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     // Re-inject the bot user with a username and inline capability (the
     // `updateUser` reducer replaces the cached object).

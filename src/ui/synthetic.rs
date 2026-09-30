@@ -3,7 +3,6 @@ use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerStat
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use std::time::Duration;
-
 #[derive(Clone)]
 pub enum SyntheticKind {
     Text,

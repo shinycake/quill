@@ -1,5 +1,7 @@
 use super::*;
-
+use quill::ids::MessageId;
+use quill::state::{HistoryMessage, OutboxReceipt};
+use std::path::PathBuf;
 /// kit Phase 3: everything `session_history_row` needs for one message,
 /// snapshotted per render so the `MessageScroller` renderer can build
 /// visible rows without re-deriving per frame.

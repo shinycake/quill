@@ -2,8 +2,11 @@
 //! Pure style inputs (`icon`, `entities`) come from
 //! `quill::chatlist_style`; this module only paints them.
 
+use super::message_text::MONO_FONT;
 use super::*;
-
+use gpui_kit::component::*;
+use gpui_kit::*;
+use quill::text::{TextEntity, styled_runs};
 /// The chat-row preview line — optional media icon plus the preview
 /// text, plain or formatted via `styled_runs`. Single line: the
 /// container truncates, so runs never wrap. Spoilers render hidden

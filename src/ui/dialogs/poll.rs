@@ -1,5 +1,7 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::poll::{POLL_OPTIONS_MIN, PollDraft};
 /// Phase 4.2: poll creation dialog above the composer. Textarea entities are
 /// created when the dialog opens (option rows are dynamic); the dialog
 /// freezes into a validated `PollDraft` on "Create poll".

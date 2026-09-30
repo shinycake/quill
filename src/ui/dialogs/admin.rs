@@ -1,5 +1,8 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::ids::ChatId;
+use quill::telegram::envelope::ChatAdminRights;
 /// Phase D3b: admin-management dialog above the composer. Three flows
 /// share one slot:
 /// - `Promote`: member picker (search + member list from

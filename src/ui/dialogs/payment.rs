@@ -1,5 +1,7 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::telegram::envelope::{AddressData, OrderInfoData, PaymentFormData, PaymentFormTypeData};
 /// Slice P1: the payment checkout dialog. The text inputs mirror the
 /// `orderInfo` fields the invoice needs (`need_name` / `need_phone_number`
 /// / `need_email_address` / `need_shipping_address`, schema:4655); only

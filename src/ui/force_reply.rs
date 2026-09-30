@@ -17,9 +17,14 @@
 //! `deleteChatReplyMarkup`. A `replyMarkupShowKeyboard` carrying the
 //! `force_reply` flag keeps its keyboard (TGX renders it).
 
+use super::app::QuillApp;
 use super::*;
+use gpui_kit::component::button::*;
+use gpui_kit::*;
 use quill::force_reply::active_force_reply;
-
+use quill::ids::{ChatId, MessageId};
+use quill::state::{ForceReplyTarget, active_custom_keyboard};
+use quill::telegram::envelope::{ReplyKeyboard, ReplyMarkup};
 impl QuillApp {
     /// Drain one armed force-reply target: arm the composer reply-to +
     /// focus (B1 behavior), then dismiss the chat's custom keyboard when

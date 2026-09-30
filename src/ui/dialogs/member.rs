@@ -1,5 +1,8 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::ids::ChatId;
+use quill::state::MemberListFilter;
 /// Slice G1: member-management dialog tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemberTab {

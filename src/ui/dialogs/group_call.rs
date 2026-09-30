@@ -1,5 +1,7 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::ids::ChatId;
 /// Phase C2h: voice-chat start dialog (`createVideoChat`, schema
 /// 1.8.67, line 14256) — title plus schedule presets. `start_date: 0`
 /// starts immediately; otherwise a Unix timestamp. Presets are

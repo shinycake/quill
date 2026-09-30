@@ -2,8 +2,12 @@
 //! photo story on Demo chat A (id 11) carrying one of every
 //! `storyAreaType`, through the real reducer.
 
-use super::*;
-
+use super::demo::{demo_file_json, demo_thumb_png_path};
+use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::state::Session;
+use quill::telegram::client::copy_and_parse;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 /// `ReadyStoryAreas` fixture: inject a photo story on Demo chat A (id 11)
 /// carrying one of every `storyAreaType` — location, venue, suggested
 /// reaction, message, link, weather, gift — through the real reducer, no

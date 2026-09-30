@@ -1,5 +1,4 @@
-use super::super::*;
-
+use quill::state::LoginUrlRequest;
 /// B1: a `loginUrlInfoRequestConfirmation` (schema 1.8.67,
 /// `schema/td_api.tl:12985` / `:3869`) awaiting user consent before the
 /// `getLoginUrl` round-trip.

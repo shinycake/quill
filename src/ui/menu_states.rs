@@ -1,5 +1,5 @@
-use super::*;
-
+use gpui_kit::*;
+use quill::ids::{ChatId, MessageId};
 /// M1: right-click context menu state — the target message plus the
 /// window position where the menu opens (`MouseDownEvent.position` is in
 /// window coordinates, so the panel renders absolute at that point).
