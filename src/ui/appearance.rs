@@ -672,6 +672,8 @@ impl QuillApp {
             |a, on| a.chat_list_rich_preview = on,
         ));
         body.into_any_element()
+    }
+
     /// Send-key mode section (parity:settings-enter-send,
     /// parity:settings-ctrlenter-send): which keystroke sends a chat
     /// message. Lives in the Appearance dialog — Quill has no separate
