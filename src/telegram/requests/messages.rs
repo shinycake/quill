@@ -710,6 +710,54 @@ fn get_callback_query_answer_payload(
     .to_string()
 }
 
+/// Slice bots-games: `getGameHighScores` (TDLib 1.8.67,
+/// `schema/td_api.tl:13174`) — high scores for the game in `message_id`,
+/// with the table range around `user_id`. Response is `gameHighScores`.
+pub fn get_game_high_scores(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    user_id: i64,
+) -> String {
+    json!({
+        "@type": "getGameHighScores",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "user_id": user_id,
+    })
+    .to_string()
+}
+
+/// Slice bots-games: `sendMessage` + `inputMessageGame` (TDLib 1.8.67,
+/// `schema/td_api.tl:6156`) — send the bot's game to the chat. Not
+/// supported for channels or secret chats (the driver pre-checks).
+/// Rides `RequestPurpose::SendMessage` so the optimistic row flows
+/// through the normal send path.
+pub fn send_game(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic_id: Option<i32>,
+    bot_user_id: i64,
+    game_short_name: &str,
+) -> String {
+    json!({
+        "@type": "sendMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": message_topic_value(topic_id),
+        "reply_to": send_reply_value(None),
+        "options": message_send_options(&SendOptions::default()),
+        "reply_markup": Value::Null,
+        "input_message_content": {
+            "@type": "inputMessageGame",
+            "bot_user_id": bot_user_id,
+            "game_short_name": game_short_name,
+        }
+    })
+    .to_string()
+}
+
 /// B1: `getLoginUrlInfo` (TDLib 1.8.67, `schema/td_api.tl:12985`) — resolve
 /// an `inlineKeyboardButtonTypeLoginUrl` button (`id`, schema:3780) to the
 /// authorized URL. Response is `loginUrlInfo*`.

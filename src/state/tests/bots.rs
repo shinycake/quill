@@ -324,3 +324,66 @@ fn resolve_inline_bot_error_fails_slot() {
         session.inline_bot_resolve
     );
 }
+
+#[test]
+fn bots_games_message_game_cached_for_bot_chat() {
+    // Slice bots-games: a `messageGame` in a bot's private chat caches the
+    // game under the bot's user id; duplicates are ignored; a non-bot
+    // private chat caches nothing.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.bot_user_ids.insert(21);
+    let mut chat = placeholder_chat(ChatId(7));
+    chat.kind = ChatKind::Private {
+        user_id: crate::ids::UserId(21),
+    };
+    session.chats.insert(7, chat);
+    let mut other = placeholder_chat(ChatId(8));
+    other.kind = ChatKind::Private {
+        user_id: crate::ids::UserId(22),
+    };
+    session.chats.insert(8, other);
+    let game = |chat_id: i64| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":308,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageGame","game":{{"@type":"game","id":"1","short_name":"chess","title":"Chess","text":{{"@type":"formattedText","text":"Challenge me!","entities":[]}},"description":"A classic.","photo":null,"animation":null}}}}}}}}"#
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &game(7));
+    apply_json(&mut session, &seq, &sink, &game(7));
+    apply_json(&mut session, &seq, &sink, &game(8));
+    let games = session.bot_games.get(&21).expect("game cached");
+    assert_eq!(games.len(), 1);
+    assert_eq!(games[0].short_name, "chess");
+    assert_eq!(games[0].title, "Chess");
+    assert!(!session.bot_games.contains_key(&22));
+}
+
+#[test]
+fn bots_games_high_scores_answer_lands_in_panel() {
+    // Slice bots-games: a `gameHighScores` answer to our
+    // `getGameHighScores` request flips the panel from loading to rows.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra =
+        session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
+    session.game_scores.insert((7, 301), None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"gameHighScores","@extra":"{}","scores":[{{"@type":"gameHighScore","position":1,"user_id":21,"score":9000}},{{"@type":"gameHighScore","position":2,"user_id":22,"score":100}}]}}"#,
+            extra.0
+        ),
+    );
+    let rows = session
+        .game_scores
+        .get(&(7, 301))
+        .and_then(|panel| panel.as_ref())
+        .expect("scores loaded");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].position, 1);
+    assert_eq!(rows[0].user_id, 21);
+    assert_eq!(rows[0].score, 9000);
+    assert_eq!(rows[1].position, 2);
+}

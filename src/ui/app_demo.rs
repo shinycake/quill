@@ -239,6 +239,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — voice record bar + history playback".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyGameCard => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — game card + high scores".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyLinkPreview => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

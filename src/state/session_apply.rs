@@ -1682,6 +1682,24 @@ impl Session {
                     self.last_callback_answer = Some(answer);
                 }
             }
+            EnvelopePayload::GameHighScores(scores) => {
+                // Slice bots-games: `getGameHighScores` answer to our own
+                // Scores press (matched by `@extra`). The message id rides
+                // `around_message_id` (`request_for_message`); the panel
+                // flips from its loading row to the rows.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGameHighScores)
+                    && let Some(pending) = pending
+                    && let (Some(chat_id), Some(message_id)) =
+                        (pending.chat_id, pending.around_message_id)
+                {
+                    // Guard: a panel the user closed while the answer was in
+                    // flight must stay closed — only fill the loading entry.
+                    if self.game_scores.contains_key(&(chat_id.0, message_id.0)) {
+                        self.game_scores
+                            .insert((chat_id.0, message_id.0), Some(scores));
+                    }
+                }
+            }
             EnvelopePayload::LoginUrlInfo(info) => {
                 // B1: `getLoginUrlInfo` response to our own login-button
                 // press (matched by `@extra`).

@@ -12,6 +12,22 @@ impl Session {
             .register(self.account_generation, purpose, chat_id, view)
     }
 
+    /// Slice bots-games: like `request`, but also stamps the message id for
+    /// `GetGameHighScores` correlation (`PendingRequest::around_message_id`
+    /// — the pending record has no message field).
+    pub fn request_for_message(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> RequestId {
+        let extra = self.request(purpose, Some(chat_id));
+        if let Some(pending) = self.requests.pending_mut(extra) {
+            pending.around_message_id = Some(message_id);
+        }
+        extra
+    }
+
     /// Parity slice: like `request`, but also stamps the notification
     /// settings scope for `GetScopeNotificationSettings` /
     /// `SetScopeNotificationSettings` correlation (`PendingRequest::scope`).

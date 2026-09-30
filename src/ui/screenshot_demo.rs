@@ -82,6 +82,9 @@ pub enum ScreenshotDemo {
     ReadyGifs,
     /// Video bubble with Play/Pause in history (injected, no live Telegram).
     ReadyVideo,
+    /// Slice bots-games: `messageGame` card with an open high-score panel
+    /// (injected, no live Telegram).
+    ReadyGameCard,
     /// Round video note with Play/Pause in history (injected, no live Telegram).
     ReadyVideoNote,
     /// Music file bubble with title, performer, cover, and Play/Pause.

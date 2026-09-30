@@ -500,6 +500,15 @@ pub struct Session {
     /// for the similar-bots section of the bot profile, keyed by bot
     /// user id. The `users` ids resolve to names via `Session::users`.
     pub similar_bots: HashMap<i64, SimilarBotsFetch>,
+    /// Slice bots-games: games seen via `messageGame` in a bot's chat,
+    /// keyed by bot user id. Only short names TDLib actually delivered
+    /// are cached — the bot info panel's Send buttons never offer an
+    /// invented short name.
+    pub bot_games: HashMap<i64, Vec<GameInfo>>,
+    /// Slice bots-games: high-score panels, keyed by
+    /// `(chat_id, message_id)`. Present = panel open; `None` = request in
+    /// flight (the panel shows a loading row); `Some` = loaded rows.
+    pub game_scores: HashMap<(i64, i64), Option<Vec<GameHighScore>>>,
     /// Cached `getCommands` results for the default scope (a null `scope`
     /// selects `botCommandScopeDefault`, Phase 3.3), keyed by bot user id. Presence records "fetched"
     /// so the driver never retries — including when the response was an
@@ -970,6 +979,8 @@ impl Session {
             bot_info: HashMap::new(),
             bot_start_params: HashMap::new(),
             similar_bots: HashMap::new(),
+            bot_games: HashMap::new(),
+            game_scores: HashMap::new(),
             bot_commands: HashMap::new(),
             draft_dirty: HashSet::new(),
             draft_clears: Vec::new(),

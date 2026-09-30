@@ -34,8 +34,8 @@ pub(super) fn inline_keyboard(
     };
     // B1: game buttons need the game's short name from the message's
     // `messageGame` content (schema 1.8.67, line 7743).
-    let game_short_name = if let MessageContent::Game { short_name } = &message.content {
-        Some(short_name.as_str())
+    let game_short_name = if let MessageContent::Game(game) = &message.content {
+        Some(game.short_name.as_str())
     } else {
         None
     };

@@ -109,3 +109,41 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
             .to_string(),
     })
 }
+
+/// Slice bots-games: `gameHighScore` (TDLib 1.8.67, `schema/td_api.tl:7755`)
+/// — one row of the `gameHighScores` answer (`getGameHighScores`, line
+/// 13174).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameHighScore {
+    pub position: i32,
+    pub user_id: i64,
+    pub score: i32,
+}
+
+/// Slice bots-games: parse a `gameHighScores` payload into rows.
+pub(crate) fn parse_game_high_scores(value: &Value) -> Vec<GameHighScore> {
+    value
+        .get("scores")
+        .and_then(Value::as_array)
+        .map(|scores| {
+            scores
+                .iter()
+                .map(|score| GameHighScore {
+                    position: score.get("position").and_then(Value::as_i64).unwrap_or(0) as i32,
+                    user_id: score.get("user_id").and_then(Value::as_i64).unwrap_or(0),
+                    score: score.get("score").and_then(Value::as_i64).unwrap_or(0) as i32,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Slice bots-games: a game seen via `messageGame` in a bot's chat —
+/// what the bot info panel offers to send. Only short names TDLib
+/// actually delivered are ever offered: `inputMessageGame` needs a
+/// short name the bot owns, and invented ones are never offered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameInfo {
+    pub short_name: String,
+    pub title: String,
+}

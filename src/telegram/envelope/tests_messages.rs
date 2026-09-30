@@ -4,18 +4,23 @@ use crate::ids::{ChatId, FileId};
 
 #[test]
 fn b1_message_game_parsed() {
-    // `messageGame` (schema 1.8.67, line 5234): only the short name is
-    // kept — the game launches via `callbackQueryPayloadGame`
-    // (schema:7743), games UI is out of this slice.
+    // `messageGame` (schema 1.8.67, line 5234): title, text, description
+    // and short name are kept — the game launches via
+    // `callbackQueryPayloadGame` (schema:7743).
     let env = parse_envelope(
-            r#"{"@type":"updateNewMessage","message":{"id":308,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageGame","game":{"@type":"game","id":"1","short_name":"chess","title":"Chess","description":"d","photo":null,"animation":null},"game_message_id":308,"failed_to_load":false,"not_found":false}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":308,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageGame","game":{"@type":"game","id":"1","short_name":"chess","title":"Chess","text":{"@type":"formattedText","text":"Challenge me!","entities":[]},"description":"A classic.","photo":null,"animation":null},"game_message_id":308,"failed_to_load":false,"not_found":false}}}"#,
         )
         .unwrap();
     match env.payload {
         EnvelopePayload::UpdateNewMessage(message) => {
-            assert!(
-                matches!(&message.content, MessageContent::Game { short_name } if short_name == "chess")
-            );
+            let MessageContent::Game(game) = &message.content else {
+                panic!("expected Game, got {:?}", message.content)
+            };
+            assert_eq!(game.short_name, "chess");
+            assert_eq!(game.title, "Chess");
+            assert_eq!(game.text.text, "Challenge me!");
+            assert_eq!(game.description, "A classic.");
+            assert!(game.photo.sizes.is_empty());
         }
         other => panic!("{other:?}"),
     }

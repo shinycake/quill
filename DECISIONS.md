@@ -6747,3 +6747,70 @@ type `@botname query` at the composer start → bot resolution → debounced
   - The `inlineQueryResultsButton` (start-bot/web-app row) is parsed but not rendered — out of slice.
 - **Not verifiable without live Telegram:** real `searchPublicChat`/`getInlineQueryResults` round trips against a live inline bot; real `updateMessageSendFailed` for a failed inline-result send (no dedicated error dispatch — the purpose exists for request tracking only).
 - **Out of this slice:** inline mode in captions/attachments; `switch_pm` button row rendering; GIF-search UI still rides the S9 backend path.
+
+## Slice bots-games — GAMES: RENDER / PLAY / SEND / HIGH SCORES (2026-09-30)
+
+**Scope:** `parity:bots-games` — `messageGame` card in history, Play, high-score
+panel (`getGameHighScores`), send-game entry via `sendMessage`+`inputMessageGame`.
+
+- **Schema (pinned TDLib 1.8.67, `schema/td_api.tl`, verified verbatim):**
+  - `game` (:665–673) — `id short_name title text description photo animation`;
+    `thumbnail = game.photo sizes`, fallback `game.animation.thumbnail.photo sizes`.
+  - `inputMessageGame bot_user_id:int53 game_short_name:string` (:6156) —
+    "not supported for channels or secret chats".
+  - `getGameHighScores chat_id:int53 message_id:int53 user_id:int53` (:13174).
+  - `gameHighScores scores:vector<gameHighScore>` (:7758);
+    `gameHighScore position:int32 user_id:int53 score:int32` (:7755).
+  - Play rides the existing B1 `callbackQueryPayloadGame` path (:7743) —
+    `send_game_callback_query` → `callbackQueryAnswer` → URL opens in the OS
+    browser. `chatActionStartPlayingGame` (:6388) deliberately not sent
+    (nothing renders it; YAGNI).
+- **Built:**
+  - Envelope: `GameHighScore`/`GameInfo` structs + parsers (bots.rs);
+    `EnvelopePayload::GameHighScores`; `MessageContent::Game(GameContent)`
+    carrying short_name/title/text/description/photo — thumbnail files ride
+    the `files` vec so `remember_files` registers them; chat-list preview
+    changed from `(messageGame)` to `🎮 {title}`.
+  - Requests: `get_game_high_scores`, `send_game` builders + verbatim shape tests.
+  - State: `RequestPurpose::GetGameHighScores`; `Session::bot_games`
+    (bot user id → `Vec<GameInfo>`, cached in the shared `upsert_message`
+    choke point covering history load + `updateNewMessage`, deduped by
+    short_name, empty short names ignored) and `Session::game_scores`
+    (`(chat_id, message_id)` → `Option<Vec<GameHighScore>>`: present = panel
+    open, `None` = loading, `Some` = loaded); apply arm for
+    `GameHighScores` (keyed on the pending purpose, resolves
+    `around_message_id`); error arm removes the panel and surfaces
+    "couldn't load the scores" via `present_callback_answer`.
+  - Driver (`connect/bots.rs`): `send_game_high_scores` (purpose stamped on
+    `request_for_message` so the answer lands in the right panel);
+    `send_game_message` (pre-checks `chats_path_active` + supported/can_post,
+    sends on the chat's topic, rides `RequestPurpose::SendMessage` for the
+    optimistic row).
+  - UI (new named module `src/ui/message_games.rs`): `game_card` (thumbnail
+    via `photo_attachment`, 🎮 glyph when no sizes, title, `rich_text_line`,
+    description, Play + Scores buttons), inline scores panel below the card
+    (Loading / rows with names from the user cache / "No scores yet"),
+    `press_scores_button` (toggle; fetch failure removes the panel + status
+    note), `press_send_game`. Bot info panel (`bots.rs`) gains a Games
+    section listing the cached games with Send buttons.
+  - Tests: request shape tests (2), game-cache reducer test (dedup, non-bot
+    exclusion), high-scores answer reducer test.
+  - README box `parity:bots-games` checked.
+- **Key decisions (ponytail):**
+  - Scores UI is an inline expandable panel, not a kit Dialog — laziest:
+    no `DialogKind`/shell changes, the task explicitly allowed "dialog/panel".
+  - Play is the B1 button flow — no in-app webview (the slice already says
+    "no game code at all"); the URL opens in the OS browser via the
+    existing `present_callback_answer` drain.
+  - Send entry = bot info panel Games section, driven by the `bot_games`
+    cache — only TDLib-delivered short names are ever offered (no invention).
+    The cache lives in the envelope *apply* path, not the parse path
+    (parse has no session access).
+  - No new request purpose for sends: `RequestPurpose::SendMessage` reuses
+    the normal optimistic send path.
+- **Not verifiable without live Telegram:** real `getGameHighScores` /
+  `inputMessageGame` round trips; real callback-game answer URLs.
+- **Out of this slice:** in-app game webview; game animation playback beyond
+  the thumbnail; sending a bot's game to a different chat (composer
+  attachment path); `inlineKeyboardButtonTypeCallbackGame` inline buttons
+  (already flow through `press_game_button` when rendered).
