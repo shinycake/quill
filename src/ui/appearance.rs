@@ -255,29 +255,41 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let mut body = div().flex().flex_col().gap_3();
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language, startup and keyboard shortcuts. \
-                         Changes apply immediately (language applies after restart) and are saved on this device.",
-                    ),
-            );
-            body = body.child(this.appearance_theme_section(cx));
-            body = body.child(this.appearance_auto_night_section(cx));
-            body = body.child(this.appearance_accent_section(cx));
-            body = body.child(this.appearance_wallpaper_section(cx));
-            body = body.child(this.appearance_font_section(cx));
-            body = body.child(this.appearance_bubble_section(cx));
-            body = body.child(this.appearance_chat_list_section(cx));
-            body = body.child(this.appearance_send_key_section(cx));
-            // Slice parity:settings-language: the app language picker
-            // (the tag TDLib gets in `setTdlibParameters`).
-            body = body.child(this.appearance_language_section(cx));
-            body = body.child(this.general_autostart_section(cx));
-            // Parity slice (platform-custom-keybindings).
-            body = body.child(this.appearance_keybindings_section(cx));
+            if this.keybindings_screenshot {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Keyboard shortcuts. Changes apply immediately and are saved on this device.",
+                        ),
+                );
+                body = body.child(this.appearance_keybindings_section(cx));
+            } else {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language, startup and keyboard shortcuts. \
+                             Changes apply immediately (language applies after restart) and are saved on this device.",
+                        ),
+                );
+                body = body.child(this.appearance_theme_section(cx));
+                body = body.child(this.appearance_auto_night_section(cx));
+                body = body.child(this.appearance_accent_section(cx));
+                body = body.child(this.appearance_wallpaper_section(cx));
+                body = body.child(this.appearance_font_section(cx));
+                body = body.child(this.appearance_bubble_section(cx));
+                body = body.child(this.appearance_chat_list_section(cx));
+                body = body.child(this.appearance_send_key_section(cx));
+                // Slice parity:settings-language: the app language picker
+                // (the tag TDLib gets in `setTdlibParameters`).
+                body = body.child(this.appearance_language_section(cx));
+                body = body.child(this.general_autostart_section(cx));
+                // Parity slice (platform-custom-keybindings).
+                body = body.child(this.appearance_keybindings_section(cx));
+            }
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
                     .label("Close")
@@ -834,30 +846,40 @@ impl QuillApp {
             let id = ra.id.to_string();
             let label = ra.label.to_string();
             let is_capturing = capturing.as_deref() == Some(ra.id);
+            // A joined pair like "cmd-shift-g / ctrl-shift-g" is wider than
+            // the row; stack those so the label does not paint under the chip.
+            let key_lines: Vec<String> = if is_capturing {
+                vec!["press keys…".to_string()]
+            } else if current.chars().count() > 20 {
+                current.split(" / ").map(str::to_string).collect()
+            } else {
+                vec![current]
+            };
             let row = div()
                 .flex()
                 .items_center()
                 .justify_between()
+                .gap_2()
                 .py_1()
-                .child(div().text_sm().child(label))
+                .child(div().flex_1().min_w_0().text_sm().child(label))
                 .child(
                     div()
                         .flex()
+                        .flex_shrink_0()
                         .items_center()
                         .gap_2()
                         .child(
                             div()
+                                .flex()
+                                .flex_col()
+                                .items_end()
                                 .text_xs()
                                 .font_family(super::message_text::MONO_FONT)
                                 .px_2()
                                 .py_1()
                                 .rounded_md()
                                 .bg(cx.theme().muted)
-                                .child(if is_capturing {
-                                    "press keys…".to_string()
-                                } else {
-                                    current
-                                }),
+                                .children(key_lines.into_iter().map(|line| div().child(line))),
                         )
                         .child(
                             Button::new(format!("kb-change-{id}"))

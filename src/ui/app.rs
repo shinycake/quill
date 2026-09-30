@@ -278,6 +278,9 @@ pub struct QuillApp {
     /// Parity slice (platform-custom-keybindings): saved shortcut overrides
     /// applied to the keymap once the live driver is ready.
     pub(super) keybindings_applied: bool,
+    /// Screenshot proof for the keyboard-shortcuts section. The Appearance
+    /// dialog then shows that section alone so the frame is the rebind UI.
+    pub(super) keybindings_screenshot: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.

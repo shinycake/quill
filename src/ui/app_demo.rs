@@ -82,7 +82,13 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAccounts => (
+        ScreenshotDemo::ReadyDeepLinkInfo
+        | ScreenshotDemo::ReadyDeepLinkInvite
+        | ScreenshotDemo::ReadyChats
+        | ScreenshotDemo::ReadyChatsComposer
+        | ScreenshotDemo::ReadyAppearance
+        | ScreenshotDemo::ReadyKeybindings
+        | ScreenshotDemo::ReadyAccounts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -1322,6 +1328,7 @@ impl QuillApp {
             keybinding_capture: None,
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
+            keybindings_screenshot: false,
             appearance_applied: None,
             data_storage_editor: None,
             data_storage_confirm_clear: false,
