@@ -828,26 +828,42 @@ pub(super) fn rich_block_element(
             Some(col.into_any_element())
         }
         RichBlock::Table { rows } => {
+            // Compact bordered grid: hairline dividers, tight cell padding,
+            // header row (row 0 — matches rich.rs serialize `is_header`)
+            // in semibold on a muted band.
+            let border = cx.theme().border;
             let mut table = div()
                 .id(format!("rich-table-{row_id}-{index}"))
                 .flex()
                 .flex_col()
-                .gap_1();
+                .border_1()
+                .border_color(border)
+                .rounded_md()
+                .overflow_hidden();
             for (row_index, row) in rows.iter().enumerate() {
                 let mut line = div()
                     .id(format!("rich-table-row-{row_id}-{index}-{row_index}"))
-                    .flex()
-                    .gap_2();
+                    .flex();
+                if row_index > 0 {
+                    line = line.border_t_1().border_color(border);
+                }
                 for (cell_index, cell) in row.iter().enumerate() {
-                    line = line.child(
-                        div()
-                            .id(format!(
-                                "rich-table-cell-{row_id}-{index}-{row_index}-{cell_index}"
-                            ))
-                            .flex_1()
-                            .text_sm()
-                            .child(cell.clone()),
-                    );
+                    let mut cell_div = div()
+                        .id(format!(
+                            "rich-table-cell-{row_id}-{index}-{row_index}-{cell_index}"
+                        ))
+                        .flex_1()
+                        .px_2()
+                        .py_1()
+                        .text_sm()
+                        .child(cell.clone());
+                    if cell_index > 0 {
+                        cell_div = cell_div.border_l_1().border_color(border);
+                    }
+                    if row_index == 0 {
+                        cell_div = cell_div.font_semibold().bg(fill_muted());
+                    }
+                    line = line.child(cell_div);
                 }
                 table = table.child(line);
             }
