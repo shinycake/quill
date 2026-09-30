@@ -1,7 +1,7 @@
 //! poll loop, OS notification threads, push_status_note.
 
 use super::app::QuillApp;
-use super::connect_ui::live_status_for;
+use super::connect_ui::{bootstrap_connect, live_status_for};
 use super::notification_settings::{
     MAX_OS_NOTIFICATION_SOUND_THREADS, MAX_OS_NOTIFICATION_THREADS,
 };
@@ -79,10 +79,17 @@ impl QuillApp {
         let prev_auth = live.driver.session.auth.clone();
         let mut progressed = false;
         let mut send_failed = false;
+        // Slice auth-logout-warning D1 fix-up: latch `LoggingOut` inside
+        // the drain loop. TDLib can queue both `LoggingOut` and `Closed`
+        // before one poll runs; a `prev_auth`-only check then sees
+        // Ready → Closed and misses the restart entirely.
+        let mut saw_logging_out = matches!(prev_auth, AuthorizationState::LoggingOut);
         while let Some(owned) = live.bridge.next_timeout(Duration::from_millis(0)) {
             if live.driver.ingest(owned).is_err() {
                 send_failed = true;
             }
+            saw_logging_out = saw_logging_out
+                || matches!(live.driver.session.auth, AuthorizationState::LoggingOut);
             progressed = true;
         }
         // Parity slice: the selected folder tab may have been deleted or
@@ -99,6 +106,12 @@ impl QuillApp {
         }
         let err = live.driver.session.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
+        // Slice auth-logout-warning: the `logOut` flow ends in Closed —
+        // restart the live connection at the end of this poll so the user
+        // lands back on the login screen instead of the dead "Closed"
+        // view. The quit path (`close`) also ends in Closed but never
+        // passes through LoggingOut, so it never restarts.
+        let logged_out = logout_restart_trigger(saw_logging_out, &new_auth);
         // Slice A10: recovery-code entry only makes sense in WaitPassword.
         if !matches!(new_auth, AuthorizationState::WaitPassword { .. }) {
             self.recovery_mode = false;
@@ -279,6 +292,31 @@ impl QuillApp {
         self.resume_pending_audio(cx);
         // Parity slice 5: a viewer video whose clip just finished downloading.
         self.resume_pending_viewer_video(cx);
+        if logged_out {
+            self.restart_live_connection(cx);
+        }
+    }
+
+    /// Slice auth-logout-warning: drop the logged-out client and start a
+    /// fresh connection — the auth flow resumes at
+    /// `WaitTdlibParameters` → phone entry, i.e. the login screen. The
+    /// old client is already Closed, so `Drop` joins its receive thread
+    /// immediately instead of waiting out the 5s close timeout. If the
+    /// restart fails the status line says so and the poll loop (which
+    /// breaks on `live.is_none()`) stops.
+    fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
+        let old = self.live.take();
+        drop(old);
+        // D2 fix-up: the warning promises "Downloaded media will be
+        // erased from this device" — TDLib destroyed its own data, but
+        // Quill's decrypted media scratch is only swept at startup.
+        quill::local_path::sweep_media_caches();
+        let (status, live, note, auth) = bootstrap_connect(self.credentials.clone());
+        self.live = live;
+        self.connect_status = status;
+        self.status_note = note;
+        self.auth_demo = auth;
+        cx.notify();
     }
 
     /// Phase 8.1: drain notification click callbacks (focus the chat) and
@@ -431,5 +469,35 @@ impl QuillApp {
                 let _ = live.driver.clear_draft_after_send(chat_id, true);
             }
         }
+    }
+}
+
+/// Slice auth-logout-warning D1 fix-up: whether this poll restarts the
+/// live connection. `saw_logging_out` is latched through the drain loop
+/// (not just `prev_auth`) so a `LoggingOut → Closed` batch arriving in
+/// one poll still triggers the restart. The quit path never passes
+/// through `LoggingOut`, so it never restarts.
+fn logout_restart_trigger(saw_logging_out: bool, new_auth: &AuthorizationState) -> bool {
+    saw_logging_out && matches!(new_auth, AuthorizationState::Closed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::logout_restart_trigger;
+    use quill::telegram::envelope::AuthorizationState;
+
+    #[test]
+    fn logout_restart_trigger_covers_batched_transition() {
+        // D1: `LoggingOut` and `Closed` batched in one poll — the latch
+        // saw LoggingOut even though prev_auth was Ready.
+        assert!(logout_restart_trigger(true, &AuthorizationState::Closed));
+        // Quit path: Closed without ever seeing LoggingOut — no restart.
+        assert!(!logout_restart_trigger(false, &AuthorizationState::Closed));
+        // LogOut sent but Closed not reached yet — keep polling.
+        assert!(!logout_restart_trigger(
+            true,
+            &AuthorizationState::LoggingOut
+        ));
+        assert!(!logout_restart_trigger(false, &AuthorizationState::Ready));
     }
 }

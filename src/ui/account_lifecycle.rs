@@ -46,6 +46,17 @@ pub(crate) fn format_account_ttl(days: i32) -> String {
     }
 }
 
+/// Slice auth-logout-warning: TGX `SignOutHint2` warning copy, verified
+/// verbatim from translations.telegram.org (android_x/settings/SignOutHint2,
+/// 2026-09-30): "Are you sure you want to log out as %1$s? Note that you
+/// can seamlessly use Telegram on all your devices at once. Remember,
+/// logging out kills all your Secret Chats. Downloaded media will be
+/// erased from this device." Quill keeps the two consequence sentences
+/// (the checklist item); the multi-device note is TGX-mobile context and
+/// doesn't apply to this single-account client. `%1$s` (the account name)
+/// is skipped — the dialog already sits in the account section.
+pub(crate) const LOGOUT_WARNING_COPY: &str = "Remember, logging out kills all your Secret Chats. Downloaded media will be erased from this device.";
+
 /// TGX option labels (`xMonths` plural): "1 month", "3 months", ….
 fn ttl_option_label(months: u8) -> String {
     if months == 1 {
@@ -61,6 +72,10 @@ fn ttl_option_label(months: u8) -> String {
 pub(crate) struct AccountLifecycleState {
     pub(crate) open: bool,
     pub(crate) confirm_delete: bool,
+    /// Slice auth-logout-warning: the log-out confirm banner is armed
+    /// (the `confirm_delete` pattern — an inline confirm, since kit
+    /// dialogs never stack).
+    pub(crate) confirm_logout: bool,
     pub(crate) reason: Entity<TextareaState>,
     pub(crate) password: Entity<TextareaState>,
 }
@@ -82,6 +97,7 @@ impl AccountLifecycleState {
         Self {
             open: false,
             confirm_delete: false,
+            confirm_logout: false,
             reason,
             password,
         }
@@ -96,6 +112,7 @@ impl QuillApp {
     pub(crate) fn open_account_lifecycle(&mut self, cx: &mut Context<Self>) {
         self.account_lifecycle.open = true;
         self.account_lifecycle.confirm_delete = false;
+        self.account_lifecycle.confirm_logout = false;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.get_account_ttl();
             let _ = live.driver.fetch_password_state();
@@ -108,6 +125,7 @@ impl QuillApp {
     pub(crate) fn close_account_lifecycle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.account_lifecycle.open = false;
         self.account_lifecycle.confirm_delete = false;
+        self.account_lifecycle.confirm_logout = false;
         for input in [
             &self.account_lifecycle.reason,
             &self.account_lifecycle.password,
@@ -152,6 +170,28 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Slice auth-logout-warning: send `logOut`; the driver guards on
+    /// Ready. TDLib drives `authorizationStateLoggingOut → Closed`
+    /// (`Session::set_auth`); `poll_live` restarts the live connection
+    /// on Closed so the user lands back on the login screen. The
+    /// Account dialog closes — the blocking "Signing out" auth view
+    /// takes over.
+    pub(crate) fn submit_logout(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.request_logout()
+        {
+            // N2 fix-up: a failed send must not silently close the
+            // dialog — stay put and say so (near-impossible behind the
+            // Ready guard).
+            self.status_note = format!("log out failed: {err:?}");
+            cx.notify();
+            return;
+        }
+        self.account_lifecycle.confirm_logout = false;
+        self.account_lifecycle.open = false;
+        cx.notify();
+    }
+
     /// Slice A9: the Account dialog, hosted in a kit `Dialog` via
     /// `window.open_dialog` (the kit Phase 2 redo pattern). Esc /
     /// backdrop / ✕ clear state via `on_close`.
@@ -191,6 +231,10 @@ impl QuillApp {
                 );
             }
             body = this.account_ttl_body(cx, body, ttl_days, ttl_loading, mutating);
+            // Slice auth-logout-warning: Log out sits between the TTL
+            // picker and the delete-account danger zone (least → most
+            // destructive).
+            body = this.account_logout_body(cx, body);
             body = this.account_delete_body(cx, body, has_password, pw_loading, mutating);
 
             let footer = div().flex().justify_end().child(
@@ -419,6 +463,89 @@ impl QuillApp {
                     ),
             )
     }
+
+    /// Slice auth-logout-warning: the Log out section — it lives in the
+    /// Account dialog (the account section; no new top-level section
+    /// for one row). The button arms the inline confirm banner (the
+    /// delete-account pattern — kit dialogs never stack, so the
+    /// confirmation is inline); the banner carries the TGX `SignOutHint2`
+    /// warning (`LOGOUT_WARNING_COPY`).
+    fn account_logout_body(&self, cx: &mut Context<Self>, mut body: Div) -> Div {
+        body = body
+            .child(div().font_semibold().text_sm().child("Log out"))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Sign out of this Telegram account on this device."),
+            );
+        if self.account_lifecycle.confirm_logout {
+            body = body.child(self.account_logout_confirm_banner(cx));
+        } else {
+            body = body.child(
+                Button::new("account-logout")
+                    .label("Log out")
+                    .danger()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.account_lifecycle.confirm_logout = true;
+                        cx.notify();
+                    })),
+            );
+        }
+        body
+    }
+
+    /// Slice auth-logout-warning: the logout confirmation banner — the
+    /// sessions terminate-confirm / delete-account confirm pattern. The
+    /// warning copy is TGX `SignOutHint2`, verified verbatim.
+    fn account_logout_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("account-logout-confirm")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(danger())
+            .bg(danger_bg())
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(danger())
+                    .child("Log out of Quill?"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(LOGOUT_WARNING_COPY),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(
+                        Button::new("account-logout-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.account_lifecycle.confirm_logout = false;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("account-logout-final")
+                            .label("Log out")
+                            .danger()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_logout(cx);
+                            })),
+                    ),
+            )
+    }
 }
 
 #[cfg(test)]
@@ -440,5 +567,16 @@ mod tests {
         assert_eq!(super::format_account_ttl(180), "6 months");
         assert_eq!(super::format_account_ttl(366), "1 year");
         assert_eq!(super::format_account_ttl(730), "2 years");
+    }
+
+    #[test]
+    fn logout_warning_carries_tgx_signouthint2_meaning() {
+        // The checklist item is the warning copy: secret chats die,
+        // downloaded media erased. Pin both sentences so a future edit
+        // can't silently drop one.
+        let copy = super::LOGOUT_WARNING_COPY;
+        assert!(copy.contains("Secret Chats"));
+        assert!(copy.contains("Downloaded media"));
+        assert!(copy.contains("logging out"));
     }
 }

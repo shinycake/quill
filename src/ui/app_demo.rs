@@ -1151,7 +1151,7 @@ impl QuillApp {
                 }
                 (status, None, note, auth)
             }
-            None => bootstrap_connect(credentials),
+            None => bootstrap_connect(credentials.clone()),
         };
 
         let pending_attachments = demo_pending_attachments(demo);
@@ -1223,6 +1223,7 @@ impl QuillApp {
             connect_status,
             live,
             status_note,
+            credentials,
             demo_auth_inputs: matches!(
                 demo,
                 Some(
