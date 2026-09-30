@@ -14,12 +14,12 @@ use std::path::PathBuf;
 /// One page block, either parsed from an incoming `pageBlock*` or produced
 /// by the rich-text editor. Text is plain; `entities` carry the inline
 /// styling so the renderer reuses the normal entity painter.
-/// Rich-text composer max length: 32,768 UTF-16 code units, counted over the
-/// text of every block. Telegram's message limits are in UTF-16 code units
-/// (same unit the composer already uses for entity offsets —
-/// `RichWalk::utf16_len`, `src/composer.rs` `out16`); a non-BMP char counts
-/// as 2. Button labels are chrome, not message text, and are not counted.
-pub const RICH_TEXT_MAX_UTF16: usize = 32_768;
+/// Rich-text composer max length: 32,768 UTF-8 characters (Unicode scalar
+/// values) counted over the text of every block, per Telegram's "Rich
+/// Message Limits". Entity offsets stay in UTF-16 (`RichWalk::utf16_len`,
+/// `src/composer.rs` `out16`); the length limit is a separate unit. Button
+/// labels are chrome, not message text, and are not counted.
+pub const RICH_TEXT_MAX_CHARS: usize = 32_768;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RichBlock {
@@ -63,10 +63,10 @@ pub enum RichBlock {
 }
 
 impl RichBlock {
-    /// UTF-16 code-unit count of every text payload in this block.
-    pub fn text_utf16_len(&self) -> usize {
+    /// Character (Unicode scalar value) count of every text payload in this block.
+    pub fn text_char_len(&self) -> usize {
         fn len(s: &str) -> usize {
-            s.encode_utf16().count()
+            s.chars().count()
         }
         match self {
             RichBlock::Paragraph { text, .. } | RichBlock::Heading { text, .. } => len(text),
@@ -671,15 +671,17 @@ pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
     }
 }
 
-/// Build the `inputRichMessage` object for `inputMessageRichMessage`.
-/// `None` when no block survives (the send is then invalid).
-/// Total UTF-16 code units of text across all blocks in the composer.
-pub fn rich_blocks_utf16_len(blocks: &[RichBlock]) -> usize {
-    blocks.iter().map(RichBlock::text_utf16_len).sum()
+/// Total characters (Unicode scalar values) of text across all blocks in
+/// the composer.
+pub fn rich_blocks_char_len(blocks: &[RichBlock]) -> usize {
+    blocks.iter().map(RichBlock::text_char_len).sum()
 }
 
+/// Build the `inputRichMessage` object for `inputMessageRichMessage`.
+/// `None` when no block survives (the send is then invalid), or when the
+/// blocks exceed the rich-text max length.
 pub fn input_rich_message(blocks: &[RichBlock]) -> Option<Value> {
-    if rich_blocks_utf16_len(blocks) > RICH_TEXT_MAX_UTF16 {
+    if rich_blocks_char_len(blocks) > RICH_TEXT_MAX_CHARS {
         return None;
     }
     let inputs: Vec<Value> = blocks.iter().filter_map(input_page_block_json).collect();
@@ -1206,27 +1208,27 @@ mod tests {
     }
 
     #[test]
-    fn rich_text_max_length_is_utf16_units_across_blocks() {
+    fn rich_text_max_length_is_chars_across_blocks() {
         let paragraph = |text: String| RichBlock::Paragraph {
             text,
             entities: Vec::new(),
             buttons: Vec::new(),
         };
         // Under the limit across two blocks: accepted.
-        let half = "x".repeat(RICH_TEXT_MAX_UTF16 / 2);
+        let half = "x".repeat(RICH_TEXT_MAX_CHARS / 2);
         let blocks = vec![paragraph(half.clone()), paragraph(half.clone())];
-        assert_eq!(rich_blocks_utf16_len(&blocks), RICH_TEXT_MAX_UTF16);
+        assert_eq!(rich_blocks_char_len(&blocks), RICH_TEXT_MAX_CHARS);
         assert!(input_rich_message(&blocks).is_some());
         // One char over: rejected.
         let blocks = vec![paragraph(half.clone()), paragraph(format!("{half}x"))];
-        assert!(rich_blocks_utf16_len(&blocks) > RICH_TEXT_MAX_UTF16);
+        assert!(rich_blocks_char_len(&blocks) > RICH_TEXT_MAX_CHARS);
         assert!(input_rich_message(&blocks).is_none());
-        // Non-BMP chars count as 2 UTF-16 code units: 16383 emoji = 32766
-        // units passes, one more emoji = 32768, one more = rejected.
-        let emoji = "\u{1F600}".repeat(RICH_TEXT_MAX_UTF16 / 2 - 1);
+        // The limit counts Unicode scalar values, not UTF-16 code units:
+        // 32,768 emoji accepted, one more refused (a UTF-16 count would
+        // have refused at 16,385 emoji).
+        let emoji = "\u{1F600}".repeat(RICH_TEXT_MAX_CHARS);
         assert!(input_rich_message(&[paragraph(emoji.clone())]).is_some());
-        assert!(input_rich_message(&[paragraph(format!("{emoji}\u{1F600}"))]).is_some());
-        assert!(input_rich_message(&[paragraph(format!("{emoji}\u{1F600}\u{1F600}"))]).is_none());
+        assert!(input_rich_message(&[paragraph(format!("{emoji}\u{1F600}"))]).is_none());
         // Headings, list items, table cells, collapsibles, and document
         // fields all contribute; chrome (buttons/dividers) does not.
         let mixed = vec![
@@ -1257,8 +1259,8 @@ mod tests {
             },
             RichBlock::Divider,
         ];
-        assert_eq!(rich_blocks_utf16_len(&mixed), 9);
-        assert_eq!(rich_blocks_utf16_len(&[RichBlock::Divider]), 0);
+        assert_eq!(rich_blocks_char_len(&mixed), 9);
+        assert_eq!(rich_blocks_char_len(&[RichBlock::Divider]), 0);
     }
 
     #[test]
