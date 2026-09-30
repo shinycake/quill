@@ -261,6 +261,8 @@ impl QuillApp {
             body = body.child(this.appearance_bubble_section(cx));
             body = body.child(this.appearance_chat_list_section(cx));
             body = body.child(this.appearance_send_key_section(cx));
+            // parity:platform-spellcheck: the spellcheck toggle.
+            body = body.child(this.appearance_spellcheck_section(cx));
             // Slice parity:settings-language: the app language picker
             // (the tag TDLib gets in `setTdlibParameters`).
             body = body.child(this.appearance_language_section(cx));
@@ -763,6 +765,39 @@ impl QuillApp {
             "Enter sends, or Enter inserts a newline and Ctrl/Cmd+Enter sends.",
             control.into_any_element(),
         )
+    }
+
+    /// parity:platform-spellcheck: the spellcheck toggle (same row
+    /// pattern as `appearance_switch_row`, but wired to ChatPrefs).
+    fn appearance_spellcheck_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let checked = self.chat_prefs.spellcheck_enabled;
+        let control = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().text_sm().child("Check spelling"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Flag misspelled words in the message composer (English)."),
+                    ),
+            )
+            .child(
+                Switch::new("appearance-spellcheck")
+                    .checked(checked)
+                    .accessibility_label("Check spelling")
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_chat_prefs(cx, |c| c.spellcheck_enabled = on);
+                    })),
+            )
+            .into_any_element();
+        self.appearance_section(cx, "Spelling", "", control)
     }
 
     /// Slice parity:settings-language: the app language picker (the IETF

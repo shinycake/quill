@@ -32,6 +32,7 @@ pub mod poll;
 pub mod privacy;
 pub mod rich;
 pub mod settings;
+pub mod spellcheck;
 pub mod state;
 pub mod sticker_suggest;
 pub mod story_composer;

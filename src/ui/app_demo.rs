@@ -996,6 +996,10 @@ impl QuillApp {
                     _ => {
                         this.sync_command_menu(cx);
                         this.sync_inline_mode(cx);
+                        // parity:platform-spellcheck: cheap re-check of
+                        // the draft (suggestions stay cached until the
+                        // word set changes).
+                        this.sync_spellcheck(&text, cx);
                     }
                 }
                 if let InputEvent::PressEnter { secondary, shift } = event {
@@ -1290,6 +1294,17 @@ impl QuillApp {
             chat_prefs,
             appearance_open: false,
             appearance_applied: None,
+            // parity:platform-spellcheck: engine + persisted user words.
+            spellchecker: {
+                let mut sc = quill::spellcheck::SpellChecker::new();
+                sc.set_custom_words(
+                    quill::settings::load_spellcheck_words(&Self::appearance_paths()).words,
+                );
+                sc
+            },
+            spell_misspellings: Vec::new(),
+            spell_suggestions: Vec::new(),
+            spellcheck_open: false,
             data_storage_editor: None,
             data_storage_confirm_clear: false,
             sessions_open: false,
