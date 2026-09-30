@@ -1811,8 +1811,21 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "chatInviteLink" => Ok(EnvelopePayload::ChatInviteLink {
             link: parse_chat_invite_link(Some(&value)).ok_or(ParseError::MissingField)?,
         }),
-        // `parity:platform-deep-links`: `deepLinkInfo` (schema 1.8.67,
-        // line 10087) — the `getDeepLinkInfo` answer.
+        // Checked invite preview; joining requires a separate confirmation.
+        "chatInviteLinkInfo" => Ok(EnvelopePayload::ChatInviteLinkInfo {
+            title: json_field_str(&value, "title"),
+            member_count: int53(value.get("member_count")).unwrap_or(0) as i32,
+            creates_join_request: value
+                .get("creates_join_request")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_channel: value
+                .get("type")
+                .and_then(|t| t.get("@type"))
+                .and_then(Value::as_str)
+                == Some("inviteLinkChatTypeChannel"),
+        }),
+        // `getDeepLinkInfo` answer (schema 1.8.67, line 10087).
         "deepLinkInfo" => {
             let text = parse_formatted_text(value.get("text"));
             Ok(EnvelopePayload::DeepLinkInfo {

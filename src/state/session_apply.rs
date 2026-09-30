@@ -1720,6 +1720,31 @@ impl Session {
                     self.accept_join_chat_result(chat_id, result);
                 }
             }
+            // Checked invite preview; confirmation is a separate driver action.
+            EnvelopePayload::ChatInviteLinkInfo {
+                title,
+                member_count,
+                creates_join_request,
+                is_channel,
+            } => {
+                if let Some(RequestPurpose::DeepLinkCheckInvite { generation }) =
+                    pending.map(|p| p.purpose)
+                    && let Some(DeepLinkState::ResolvingChat {
+                        action: DeepLinkAction::JoinInvite { hash },
+                        generation: slot,
+                    }) = self.deep_link.clone()
+                    && slot == generation
+                {
+                    self.deep_link = Some(DeepLinkState::InvitePreview {
+                        hash,
+                        title,
+                        member_count,
+                        creates_join_request,
+                        is_channel,
+                        generation,
+                    });
+                }
+            }
             // `parity:platform-deep-links`: `getDeepLinkInfo` answer. The
             // actionable destination is parsed from the `textEntityTypeTextUrl`
             // entities; the generation guard drops stale answers. The UI

@@ -123,9 +123,12 @@ pub enum RequestPurpose {
     DeepLinkResolve {
         generation: u64,
     },
-    /// `parity:platform-deep-links`: `joinChatByInviteLink` (schema 1.8.67,
-    /// line 14166). The `chatJoinResult` answer is handled in
-    /// `session_apply.rs` against `Session::deep_link`.
+    /// Check an invite without joining; answer becomes a guarded preview.
+    DeepLinkCheckInvite {
+        generation: u64,
+    },
+    /// `parity:platform-deep-links`: explicitly confirmed `joinChatByInviteLink`
+    /// (schema 1.8.67, line 14166); answer is a `chatJoinResult`.
     DeepLinkJoin {
         generation: u64,
     },

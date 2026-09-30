@@ -843,7 +843,8 @@ impl Session {
             Some(
                 RequestPurpose::DeepLinkInfo { generation }
                 | RequestPurpose::DeepLinkResolve { generation }
-                | RequestPurpose::DeepLinkJoin { generation },
+                | RequestPurpose::DeepLinkJoin { generation }
+                | RequestPurpose::DeepLinkCheckInvite { generation },
             ) => {
                 let stale = !matches!(
                     &self.deep_link,

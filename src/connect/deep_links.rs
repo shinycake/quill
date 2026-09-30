@@ -11,7 +11,8 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{DeepLinkAction, DeepLinkState, RequestPurpose};
 use crate::telegram::requests::{
-    create_private_chat, get_chat, get_deep_link_info, join_chat_by_invite_link, search_public_chat,
+    check_chat_invite_link, create_private_chat, get_chat, get_deep_link_info,
+    join_chat_by_invite_link, search_public_chat,
 };
 use crate::text::{TextEntity, TextEntityKind};
 
@@ -161,10 +162,48 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Join only the currently displayed, checked invite generation.
+    pub fn confirm_deep_link_invite(
+        &mut self,
+        generation: u64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(DeepLinkState::InvitePreview {
+            hash,
+            generation: slot,
+            ..
+        }) = self.session.deep_link.clone()
+        else {
+            return Ok(None);
+        };
+        if slot != generation {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeepLinkJoin { generation }, None);
+        let json = join_chat_by_invite_link(extra, &format!("https://t.me/+{hash}"));
+        self.session.deep_link = Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::JoinInvite { hash },
+            generation,
+        });
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.deep_link =
+                    Some(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                Err(err)
+            }
+        }
+    }
+
     /// `parity:platform-deep-links`: fire the follow-up request for a
     /// parsed deep-link action — `searchPublicChat` for a username (or the
     /// story author's), `createPrivateChat` for `openmessage` / `user`,
-    /// `getChat` for `privatepost`, `joinChatByInviteLink` for an invite
+    /// `getChat` for `privatepost`, `checkChatInviteLink` for an invite
     /// hash. The answer becomes `DeepLinkState::ChatReady` in
     /// `Session::apply`.
     pub fn resolve_deep_link(
@@ -177,14 +216,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.deep_link_seq = self.session.deep_link_seq.wrapping_add(1);
         let generation = self.session.deep_link_seq;
         let purpose = match &action {
-            DeepLinkAction::JoinInvite { .. } => RequestPurpose::DeepLinkJoin { generation },
+            DeepLinkAction::JoinInvite { .. } => RequestPurpose::DeepLinkCheckInvite { generation },
             _ => RequestPurpose::DeepLinkResolve { generation },
         };
         let extra = self.session.request(purpose, None);
         let json = match &action {
             DeepLinkAction::OpenUsername { domain, .. } => search_public_chat(extra, domain),
             DeepLinkAction::JoinInvite { hash } => {
-                join_chat_by_invite_link(extra, &format!("https://t.me/+{hash}"))
+                check_chat_invite_link(extra, &format!("https://t.me/+{hash}"))
             }
             DeepLinkAction::OpenMessage { user_id, .. } | DeepLinkAction::OpenUser { user_id } => {
                 create_private_chat(extra, *user_id, false)

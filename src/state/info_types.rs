@@ -377,6 +377,15 @@ pub enum DeepLinkAction {
 /// slot, not a map — the app processes at most one launch link.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeepLinkState {
+    /// Checked invite awaiting explicit user confirmation; never auto-joins.
+    InvitePreview {
+        hash: String,
+        title: String,
+        member_count: i32,
+        creates_join_request: bool,
+        is_channel: bool,
+        generation: u64,
+    },
     /// `getDeepLinkInfo` in flight; `generation` drops stale answers.
     ResolvingInfo { generation: u64 },
     /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
@@ -389,7 +398,7 @@ pub enum DeepLinkState {
         generation: u64,
     },
     /// Follow-up request (`searchPublicChat` / `createPrivateChat` /
-    /// `joinChatByInviteLink` / `getChat`) in flight.
+    /// `checkChatInviteLink` / confirmed `joinChatByInviteLink` / `getChat`) in flight.
     ResolvingChat {
         action: DeepLinkAction,
         generation: u64,

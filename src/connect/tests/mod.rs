@@ -5,6 +5,7 @@ mod calls;
 mod chat_list;
 mod chat_state;
 mod connect_flow;
+mod deep_links;
 mod drafts_polls;
 mod group_calls;
 mod groups;

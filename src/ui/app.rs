@@ -471,6 +471,7 @@ pub struct QuillApp {
     /// `parity:platform-deep-links`: TDLib's info / error text for the
     /// deep link, shown in a dialog (`DialogKind::DeepLinkInfo`).
     pub(super) deep_link_dialog: Option<String>,
+    pub(super) deep_link_invite: Option<quill::state::DeepLinkState>,
     /// `parity:platform-deep-links`: resolved chat + action waiting for
     /// render (which owns the `Window`) to open it.
     pub(super) pending_deep_link_open: Option<(ChatId, quill::state::DeepLinkAction)>,

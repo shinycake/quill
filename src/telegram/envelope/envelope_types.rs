@@ -1019,6 +1019,13 @@ pub enum EnvelopePayload {
     ChatInviteLink {
         link: ParsedChatInviteLink,
     },
+    /// `checkChatInviteLink` answer (schema 1.8.67, line 2684).
+    ChatInviteLinkInfo {
+        title: String,
+        member_count: i32,
+        creates_join_request: bool,
+        is_channel: bool,
+    },
     /// `parity:platform-deep-links`: `deepLinkInfo` (schema 1.8.67, line
     /// 10087) — the `getDeepLinkInfo` answer. The actionable data is in
     /// `entities`: TDLib marks the resolved action with

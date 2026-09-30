@@ -11,7 +11,6 @@ use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::state::{DeepLinkAction, DeepLinkState};
@@ -31,12 +30,10 @@ impl QuillApp {
         if !matches!(live.driver.session.auth, AuthorizationState::Ready) {
             return;
         }
-        if let Some(link) = self.pending_deep_link.take()
-            && live.driver.request_deep_link_info(&link).is_err()
-        {
-            self.status_note = "couldn't open the link".into();
+        if let Some(link) = self.pending_deep_link.take() {
+            let _ = live.driver.request_deep_link_info(&link);
         }
-        // Take-once: each state is consumed here and never re-processed.
+        // Consume terminal states once, retaining the invite preview until a decision.
         let state = live.driver.session.deep_link.take();
         match state {
             None
@@ -57,9 +54,7 @@ impl QuillApp {
                         self.deep_link_dialog = Some(text);
                     }
                     (false, Some(action)) => {
-                        if live.driver.resolve_deep_link(action).is_err() {
-                            self.status_note = "couldn't open the link".into();
-                        }
+                        let _ = live.driver.resolve_deep_link(action);
                     }
                     // Unknown link: TDLib's info text is the confirmation
                     // copy written for exactly this case.
@@ -67,6 +62,10 @@ impl QuillApp {
                         self.deep_link_dialog = Some(text);
                     }
                 }
+            }
+            Some(preview @ DeepLinkState::InvitePreview { .. }) => {
+                self.deep_link_invite = Some(preview.clone());
+                live.driver.session.deep_link = Some(preview);
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
                 self.pending_deep_link_open = Some((chat_id, action));
@@ -109,7 +108,7 @@ impl QuillApp {
             if let Some(message_id) = jump_to
                 && live
                     .driver
-                    .jump_to_replied_message(MessageId(message_id))
+                    .jump_to_replied_message(MessageId::from_server_id(message_id))
                     .is_err()
             {
                 self.status_note = "opened chat, couldn't jump to the message".into();
@@ -136,6 +135,106 @@ impl QuillApp {
             self.open_story_viewer(chat_id, *story_id, cx);
         }
         cx.notify();
+    }
+
+    fn cancel_deep_link_invite(&mut self, cx: &mut Context<Self>) {
+        if let Some(DeepLinkState::InvitePreview { generation, .. }) = self.deep_link_invite.take()
+            && let Some(live) = self.live.as_mut()
+            && matches!(live.driver.session.deep_link, Some(DeepLinkState::InvitePreview { generation: slot, .. }) if slot == generation)
+        {
+            live.driver.session.deep_link = None;
+        }
+        cx.notify();
+    }
+
+    pub(super) fn build_deep_link_invite_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::DeepLinkInvite, |this, _, cx| {
+                this.cancel_deep_link_invite(cx);
+            });
+        app.update(cx, |this, cx| {
+            let (title, count, request, channel) = match this.deep_link_invite.as_ref() {
+                Some(DeepLinkState::InvitePreview {
+                    title,
+                    member_count,
+                    creates_join_request,
+                    is_channel,
+                    ..
+                }) => (
+                    title.clone(),
+                    *member_count,
+                    *creates_join_request,
+                    *is_channel,
+                ),
+                _ => (String::new(), 0, false, false),
+            };
+            let mut body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(div().child(title))
+                .child(div().text_sm().text_color(text_muted()).child(format!(
+                    "{count} {}",
+                    if channel { "subscribers" } else { "members" }
+                )));
+            if request {
+                body = body.child(div().text_sm().text_color(text_muted()).child(
+                    "Joining sends a request. An admin must approve it before you can enter.",
+                ));
+            }
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("deep-link-invite-cancel")
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.cancel_deep_link_invite(cx);
+                            this.close_kit_dialog_if_done(DialogKind::DeepLinkInvite, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("deep-link-invite-join")
+                        .label("Join")
+                        .primary()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if let Some(DeepLinkState::InvitePreview { generation, .. }) =
+                                this.deep_link_invite.take()
+                                && let Some(live) = this.live.as_mut()
+                            {
+                                let _ = live.driver.confirm_deep_link_invite(generation);
+                            }
+                            cx.notify();
+                            this.close_kit_dialog_if_done(DialogKind::DeepLinkInvite, window, cx);
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .title(if channel {
+                    "Join channel?"
+                } else {
+                    "Join group?"
+                })
+                .content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        content.child(
+                            body.borrow_mut()
+                                .take()
+                                .unwrap_or_else(|| div().into_any_element()),
+                        )
+                    }
+                })
+                .footer(footer)
+                .on_close(on_close)
+        })
     }
 
     /// kit `Dialog` for TDLib's deep-link info / error text, via

@@ -144,6 +144,7 @@ pub enum DialogKind {
     LoginUrlConfirm,
     /// `parity:platform-deep-links`: TDLib's deep-link info / error text.
     DeepLinkInfo,
+    DeepLinkInvite,
     PollVoters,
     ArchiveSettings,
     ImportContacts,
@@ -219,6 +220,7 @@ impl QuillShell {
             DialogKind::CallbackPassword => app.callback_password_dialog.is_some(),
             DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
             DialogKind::DeepLinkInfo => app.deep_link_dialog.is_some(),
+            DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
             DialogKind::ArchiveSettings => app.session().is_some_and(|s| s.archive_settings_open),
             DialogKind::ImportContacts => app.import_contacts_dialog.is_some(),
@@ -263,6 +265,7 @@ impl QuillShell {
             DialogKind::CallbackPassword => QuillApp::build_callback_password_dialog,
             DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
             DialogKind::DeepLinkInfo => QuillApp::build_deep_link_dialog,
+            DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
             DialogKind::ArchiveSettings => QuillApp::build_archive_settings_dialog,
             DialogKind::ImportContacts => QuillApp::build_import_contacts_dialog,
@@ -300,7 +303,7 @@ impl QuillShell {
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 38] = [
+    const KINDS: [DialogKind; 39] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -320,6 +323,7 @@ impl QuillShell {
         // `parity:platform-deep-links`: link info sits with the other
         // low-priority informational dialogs.
         DialogKind::DeepLinkInfo,
+        DialogKind::DeepLinkInvite,
         DialogKind::PaymentForm,
         DialogKind::PaymentReceipt,
         DialogKind::Subscriptions,
