@@ -4,8 +4,8 @@ use super::app::{ChatListFilter, QuillApp};
 use super::connect_ui::{ConnectUiStatus, bootstrap_connect};
 use super::demo::{
     demo_media_allowlist, seed_ready_chats_session, seed_ready_downloads_session,
-    seed_ready_media_session, seed_ready_send_media_session, seed_ready_unread_read_session,
-    seed_ready_unread_session,
+    seed_ready_media_session, seed_ready_offline_session, seed_ready_send_media_session,
+    seed_ready_unread_read_session, seed_ready_unread_session,
 };
 use super::history::HistoryShared;
 use super::screenshot_demo::ScreenshotDemo;
@@ -86,6 +86,15 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        // Slice parity:platform-offline-indicator — same chat list, but
+        // the fixture reports WaitingForNetwork so the offline banner
+        // renders.
+        ScreenshotDemo::ReadyOffline => (
+            Some(seed_ready_offline_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — offline indicator (injected updates, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyUnread => (

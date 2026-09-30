@@ -13,8 +13,8 @@ use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::state::{RequestPurpose, Session, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    ChatFolderInfo, ChatFolderSpec, ChatNotificationSettings, MessageContent, ParsedSession,
-    ParsedWebsite, PasswordState, StarSubscriptionData, StarSubscriptionPricing,
+    ChatFolderInfo, ChatFolderSpec, ChatNotificationSettings, ConnectionState, MessageContent,
+    ParsedSession, ParsedWebsite, PasswordState, StarSubscriptionData, StarSubscriptionPricing,
     StarSubscriptionTypeData, StarSubscriptionsData, StorageFileTypeStats, StorageStats,
     toggle_chosen_emoji_reaction,
 };
@@ -32,6 +32,15 @@ pub(super) fn seed_ready_unread_session(sink: Arc<MemorySink>) -> Session {
 
 pub(super) fn seed_ready_unread_read_session(sink: Arc<MemorySink>) -> Session {
     seed_demo_session(sink, DemoSeed::AfterMarkRead)
+}
+
+/// Slice parity:platform-offline-indicator — ReadyChats fixture with the
+/// client offline (`connectionStateWaitingForNetwork`), so the offline
+/// banner renders for screenshots.
+pub(super) fn seed_ready_offline_session(sink: Arc<MemorySink>) -> Session {
+    let mut session = seed_ready_chats_session(sink);
+    session.connection = ConnectionState::WaitingForNetwork;
+    session
 }
 
 /// Phase C1b: connected-video-call fixture — Zed's incoming video
@@ -253,6 +262,10 @@ pub(super) enum DemoSeed {
 pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let mut session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    // Slice parity:platform-offline-indicator — the fixtures model a
+    // connected client, so the offline indicator stays hidden in every
+    // existing demo.
+    session.connection = ConnectionState::Ready;
     let seq = AtomicU64::new(0);
     let a_unread = match kind {
         DemoSeed::ReadyChats | DemoSeed::Media | DemoSeed::SendMedia => 1,
