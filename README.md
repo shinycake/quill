@@ -115,7 +115,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] In-message buttons: render pageBlockButtonRow + richTextButton, taps fire bot callbacks <!-- parity:msg-richmessage-buttons -->
 - [x] Ephemeral messages: render message.ephemeral_content instead of regular content <!-- parity:msg-ephemeral-render -->
 - [x] Apply updateMessageEphemeralContent (ephemeral content refreshes over time; initial render covered by parity:msg-ephemeral-render) <!-- parity:msg-ephemeral-updates -->
-- [ ] Compact tables in rich messages <!-- parity:msg-richtext-tables -->
+- [x] Compact tables in rich messages <!-- parity:msg-richtext-tables -->
 - [ ] Expandable block quotes (long block quotes collapse with an expand affordance; authoring covered by parity:msg-quote-block) <!-- parity:msg-blockquote-expandable -->
 - [ ] Inline photos/videos in the rich-text composer (partial: inline documents/files/music done — parity:msg-richtext-inline-doc) <!-- parity:msg-richtext-inline-media -->
 - [ ] AI tools in the rich-text composer (composeTextWithAi, composeRichMessageWithAi, createRichMessageWithAi, fixTextWithAi, fixRichMessageWithAi) <!-- parity:msg-richtext-ai-tools -->
