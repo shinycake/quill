@@ -503,6 +503,171 @@ fn directory_nonempty(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Multi-account registry (`accounts.json` at the app root, next to
+/// `accounts/`). Missing or corrupt files fall back to `[primary]` — prefs
+/// must not block startup.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountRecord {
+    pub key: AccountKey,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AccountRegistry {
+    accounts: Vec<AccountRecord>,
+    #[serde(default)]
+    active: Option<AccountKey>,
+}
+
+impl Default for AccountRegistry {
+    fn default() -> Self {
+        Self {
+            accounts: vec![AccountRecord {
+                key: AccountKey::primary(),
+                display_name: "Primary".to_string(),
+            }],
+            active: Some(AccountKey::primary()),
+        }
+    }
+}
+
+fn registry_path(app_root: &Path) -> PathBuf {
+    app_root.join("accounts.json")
+}
+
+/// Load the registry; missing or corrupt ⇒ `[primary]` (never a hard error).
+fn load_registry(app_root: &Path) -> AccountRegistry {
+    let raw = std::fs::read(registry_path(app_root)).ok();
+    let mut registry: AccountRegistry = raw
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    // Drop hand-edited garbage and duplicate keys.
+    registry
+        .accounts
+        .retain(|r| AccountKey::new(&r.key.0).is_some());
+    let mut seen = std::collections::HashSet::new();
+    registry.accounts.retain(|r| seen.insert(r.key.clone()));
+    if registry.accounts.is_empty() {
+        return AccountRegistry::default();
+    }
+    if registry
+        .active
+        .as_ref()
+        .is_none_or(|k| !registry.accounts.iter().any(|r| &r.key == k))
+    {
+        registry.active = Some(registry.accounts[0].key.clone());
+    }
+    registry
+}
+
+fn save_registry(app_root: &Path, registry: &AccountRegistry) -> std::io::Result<()> {
+    std::fs::create_dir_all(app_root)?;
+    std::fs::write(
+        registry_path(app_root),
+        serde_json::to_vec_pretty(registry)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+    )
+}
+
+/// All known accounts; missing or corrupt registry ⇒ `[primary]`.
+pub fn list_accounts(app_root: &Path) -> Vec<AccountRecord> {
+    load_registry(app_root).accounts
+}
+
+/// The account to connect at startup; persisted in the registry,
+/// default `primary`.
+pub fn active_account(app_root: &Path) -> AccountKey {
+    load_registry(app_root)
+        .active
+        .unwrap_or_else(AccountKey::primary)
+}
+
+/// Persist the startup account. Errors when `key` is not in the registry.
+pub fn set_active_account(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
+    let mut registry = load_registry(app_root);
+    if !registry.accounts.iter().any(|r| &r.key == key) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("no such account: {key}"),
+        ));
+    }
+    registry.active = Some(key.clone());
+    save_registry(app_root, &registry)
+}
+
+/// Add an account with a collision-free key (`account-<n>`); returns the key.
+pub fn add_account(app_root: &Path, display_name: &str) -> std::io::Result<AccountKey> {
+    let mut registry = load_registry(app_root);
+    let mut n = 1u32;
+    loop {
+        let candidate = AccountKey::new(&format!("account-{n}")).expect("generated id is valid");
+        if !registry.accounts.iter().any(|r| r.key == candidate) {
+            registry.accounts.push(AccountRecord {
+                key: candidate.clone(),
+                display_name: display_name.to_string(),
+            });
+            save_registry(app_root, &registry)?;
+            return Ok(candidate);
+        }
+        n += 1;
+    }
+}
+
+/// Refusing to remove the last remaining account, or deleting an account's
+/// directory tree, must not panic — typed error instead.
+#[derive(Debug)]
+pub enum RemoveAccountError {
+    /// The registry must always keep at least one account.
+    LastAccount,
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for RemoveAccountError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LastAccount => write!(f, "cannot remove the last remaining account"),
+            Self::Io(e) => write!(f, "failed to remove account: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for RemoveAccountError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for RemoveAccountError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+/// Remove an account and delete its directory tree (`accounts/<key>`).
+/// Refuses to remove the last remaining account.
+pub fn remove_account(app_root: &Path, key: &AccountKey) -> Result<(), RemoveAccountError> {
+    let mut registry = load_registry(app_root);
+    if registry.accounts.len() <= 1 {
+        return Err(RemoveAccountError::LastAccount);
+    }
+    registry.accounts.retain(|r| &r.key != key);
+    if registry.active.as_ref() == Some(key) {
+        registry.active = registry.accounts.first().map(|r| r.key.clone());
+    }
+    // The DB tree is gone once the record is; a missing dir is not an error.
+    let dir = app_root.join("accounts").join(&key.0);
+    if let Err(e) = std::fs::remove_dir_all(&dir)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(RemoveAccountError::Io(e));
+    }
+    save_registry(app_root, &registry)?;
+    Ok(())
+}
+
 /// Platform data directory, or `None` when the OS provides none. There is
 /// deliberately no `./quill-data` fallback: live startup must refuse rather
 /// than scatter account databases and encryption keys under whatever
@@ -874,5 +1039,119 @@ mod badge_prefs_tests {
             exports: PathBuf::new(),
         };
         assert_eq!(load_badge_prefs(&paths), BadgePrefs::default());
+    }
+}
+
+#[cfg(test)]
+mod account_registry_tests {
+    use super::*;
+
+    fn tmp_root(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("quill-accounts-test-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn missing_registry_falls_back_to_primary() {
+        let root = tmp_root("missing");
+        let accounts = list_accounts(&root);
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].key, AccountKey::primary());
+        assert_eq!(active_account(&root), AccountKey::primary());
+    }
+
+    #[test]
+    fn corrupt_registry_falls_back_to_primary() {
+        let root = tmp_root("corrupt");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("accounts.json"), b"not json{{").unwrap();
+        assert_eq!(
+            list_accounts(&root),
+            list_accounts(&tmp_root("missing-never-written"))
+        );
+        assert_eq!(active_account(&root), AccountKey::primary());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn add_list_remove_roundtrip() {
+        let root = tmp_root("roundtrip");
+        let k1 = add_account(&root, "Work").expect("add works");
+        let k2 = add_account(&root, "Personal").expect("add works");
+        // Collision-free keys.
+        assert_ne!(k1, k2);
+        assert_ne!(k1, AccountKey::primary());
+        let keys: Vec<String> = list_accounts(&root)
+            .iter()
+            .map(|r| r.key.0.clone())
+            .collect();
+        assert_eq!(
+            keys,
+            vec!["primary".to_string(), k1.0.clone(), k2.0.clone()]
+        );
+        // display names survive the round-trip.
+        let records = list_accounts(&root);
+        let names: Vec<&str> = records.iter().map(|r| r.display_name.as_str()).collect();
+        assert_eq!(names, vec!["Primary", "Work", "Personal"]);
+
+        // Removing deletes the account's directory tree.
+        let dir = root.join("accounts").join(&k2.0);
+        std::fs::create_dir_all(dir.join("tdlib")).unwrap();
+        remove_account(&root, &k2).expect("remove works");
+        assert!(!root.join("accounts").join(&k2.0).exists());
+        let keys: Vec<String> = list_accounts(&root)
+            .iter()
+            .map(|r| r.key.0.clone())
+            .collect();
+        assert_eq!(keys, vec!["primary".to_string(), k1.0.clone()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remove_refuses_last_remaining_account() {
+        let root = tmp_root("last");
+        // Fresh registry holds only primary.
+        assert!(matches!(
+            remove_account(&root, &AccountKey::primary()),
+            Err(RemoveAccountError::LastAccount)
+        ));
+        let k1 = add_account(&root, "Work").expect("add works");
+        remove_account(&root, &AccountKey::primary())
+            .expect("removing primary is fine while others remain");
+        // Now k1 is the last one — removal is refused, no panic.
+        assert!(matches!(
+            remove_account(&root, &k1),
+            Err(RemoveAccountError::LastAccount)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn active_account_persists_and_rejects_unknown() {
+        let root = tmp_root("active");
+        let k1 = add_account(&root, "Work").expect("add works");
+        set_active_account(&root, &k1).expect("set works");
+        assert_eq!(active_account(&root), k1);
+        // Unknown key ⇒ NotFound, and the active account is unchanged.
+        let err = set_active_account(&root, &AccountKey::new("nope").unwrap()).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(active_account(&root), k1);
+        // Removing the active account falls back to a remaining one.
+        remove_account(&root, &k1).expect("remove works");
+        assert_eq!(active_account(&root), AccountKey::primary());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn account_paths_are_isolated_per_account() {
+        let root = PathBuf::from("/tmp/quill-accounts-test-isolation");
+        let p1 = AccountPaths::for_root(&root, &AccountKey::primary());
+        let p2 = AccountPaths::for_root(&root, &AccountKey::new("account-1").unwrap());
+        assert!(p1.tdlib_database.ends_with("accounts/primary/tdlib"));
+        assert!(p2.tdlib_database.ends_with("accounts/account-1/tdlib"));
+        assert_ne!(p1.tdlib_database, p2.tdlib_database);
+        assert_ne!(p1.tdlib_files, p2.tdlib_files);
     }
 }

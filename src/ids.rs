@@ -10,6 +10,23 @@ impl AccountKey {
     pub fn primary() -> Self {
         Self("primary".to_string())
     }
+
+    /// Filesystem-safe ids only: non-empty, ASCII alphanumerics plus `-`
+    /// and `_`. This keeps `accounts/<key>` paths free of separators and
+    /// traversal (`.` is not allowed, so `..` cannot occur).
+    pub fn new(id: &str) -> Option<Self> {
+        if id.is_empty() {
+            return None;
+        }
+        if id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            Some(Self(id.to_string()))
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for AccountKey {
@@ -102,5 +119,28 @@ pub struct AccountGeneration(pub u64);
 impl AccountGeneration {
     pub fn bump(&mut self) {
         self.0 = self.0.saturating_add(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_key_new_accepts_safe_ids() {
+        for id in ["primary", "account-1", "work_2", "a", "A9-_z"] {
+            assert_eq!(AccountKey::new(id), Some(AccountKey(id.to_string())));
+        }
+    }
+
+    #[test]
+    fn account_key_new_rejects_unsafe_ids() {
+        // Empty, traversal, separators, spaces, and dots all rejected —
+        // the id becomes a directory name under `accounts/`.
+        for id in [
+            "", "..", "../x", "a/b", "a\\b", "a b", "a.b", ".hidden", "é",
+        ] {
+            assert_eq!(AccountKey::new(id), None, "id {id:?} must be rejected");
+        }
     }
 }
