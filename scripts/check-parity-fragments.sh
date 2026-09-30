@@ -11,7 +11,9 @@ set -euo pipefail
 BASE="${1:-origin/main}"
 fail() { echo "parity-fragments: ERROR: $*" >&2; exit 1; }
 
-CHANGED="$(git diff --name-only "$BASE"...HEAD -- || true)"
+# Fail closed: if the base diff can't be computed, the gate must not pass.
+CHANGED="$(git diff --name-only "$BASE"...HEAD --)" \
+  || fail "cannot compute diff against base ref '$BASE' (bad ref or incomplete fetch)"
 
 # 1. README.md / DECISIONS.md are pipeline-owned now.
 if printf '%s\n' "$CHANGED" | grep -qx -e 'README\.md' -e 'DECISIONS\.md'; then
