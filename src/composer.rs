@@ -139,6 +139,34 @@ impl ComposerAttachment {
     }
 }
 
+/// Slice platform-drag-drop-files: infer the send kind for a dropped file
+/// from its extension. Photo: jpg/jpeg/png/gif/webp/heic. Video:
+/// mp4/mov/webm/mkv. Everything else (including missing or unknown
+/// extensions) → Document.
+pub fn attachment_kind_for_path(path: &Path) -> AttachmentKind {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg" | "jpeg" | "png" | "gif" | "webp" | "heic") => AttachmentKind::Photo,
+        Some("mp4" | "mov" | "webm" | "mkv") => AttachmentKind::Video,
+        _ => AttachmentKind::Document,
+    }
+}
+
+/// Slice platform-drag-drop-files: validate OS-dropped file paths into
+/// sendable attachments. Infers the kind per path and runs
+/// [`ComposerAttachment::pick`] validation; directories, missing, and
+/// unreadable paths are skipped silently. Pure logic — no OS drag involved.
+pub fn attachments_from_dropped_paths(paths: &[PathBuf]) -> Vec<ComposerAttachment> {
+    paths
+        .iter()
+        .filter_map(|path| ComposerAttachment::pick(path, attachment_kind_for_path(path)))
+        .collect()
+}
+
 /// Message the composer is quoting (tdesktop `FieldHeader::replyToMessage`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerReplyTo {
@@ -1476,6 +1504,50 @@ mod tests {
         ComposerAttachment::push_attachment(&mut list, video_note);
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].kind, AttachmentKind::VideoNote);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn drop_kind_inference_table() {
+        let cases = [
+            ("shot.jpg", AttachmentKind::Photo),
+            ("SHOT.JPEG", AttachmentKind::Photo),
+            ("pic.png", AttachmentKind::Photo),
+            ("anim.gif", AttachmentKind::Photo),
+            ("img.webp", AttachmentKind::Photo),
+            ("phone.heic", AttachmentKind::Photo),
+            ("clip.mp4", AttachmentKind::Video),
+            ("movie.MOV", AttachmentKind::Video),
+            ("web.webm", AttachmentKind::Video),
+            ("film.mkv", AttachmentKind::Video),
+            ("notes.pdf", AttachmentKind::Document),
+            ("archive.zip", AttachmentKind::Document),
+            ("noext", AttachmentKind::Document),
+            ("weird.xyz", AttachmentKind::Document),
+        ];
+        for (name, want) in cases {
+            assert_eq!(attachment_kind_for_path(Path::new(name)), want, "{name}");
+        }
+    }
+
+    #[test]
+    fn dropped_paths_become_validated_attachments() {
+        let root = scratch("drop");
+        let photo = root.join("shot.png");
+        fs::write(&photo, [1, 2]).unwrap();
+        let video = root.join("clip.mp4");
+        fs::write(&video, [3]).unwrap();
+        let dir = root.join("folder");
+        fs::create_dir(&dir).unwrap();
+        // Valid photo + valid video attach with inferred kinds; the missing
+        // file and the directory are skipped silently.
+        let paths = vec![photo, root.join("missing.png"), video, dir];
+        let atts = attachments_from_dropped_paths(&paths);
+        assert_eq!(atts.len(), 2);
+        assert_eq!(atts[0].kind, AttachmentKind::Photo);
+        assert_eq!(atts[0].file_name, "shot.png");
+        assert_eq!(atts[1].kind, AttachmentKind::Video);
+        assert_eq!(atts[1].file_name, "clip.mp4");
         let _ = fs::remove_dir_all(&root);
     }
 

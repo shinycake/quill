@@ -582,7 +582,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Flood/rate-limit errors with retry countdown (e.g. "Try again in N seconds") <!-- parity:platform-flood-errors -->
 - [ ] Unread badge on the app/taskbar icon <!-- parity:platform-app-icon-badge -->
 - [ ] OS desktop notifications (partial: in-app toast queue with burst coalescing exists in src/notify.rs; no OS dispatch) <!-- parity:platform-os-notifications -->
-- [ ] Drag-and-drop files into the composer <!-- parity:platform-drag-drop-files -->
+- [x] Drag-and-drop files into the composer — OS file drops onto the composer box attach as photo (jpg/jpeg/png/gif/webp/heic), video (mp4/mov/webm/mkv), or document (everything else) by extension; invalid paths are skipped with a status note (src/composer.rs, src/ui/composer.rs, src/ui/conversation.rs) <!-- parity:platform-drag-drop-files -->
 - [x] Copy text to clipboard (inline keyboard copy-text button src/ui/mod.rs:3932; invite link src/ui/mod.rs:6357) <!-- parity:platform-copy-clipboard -->
 - [ ] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
 - [ ] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->

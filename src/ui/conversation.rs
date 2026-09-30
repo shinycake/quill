@@ -992,7 +992,13 @@ impl QuillApp {
                         // under the textarea while the editor is open.
                         .when(self.rich_editor_open, |this| {
                             this.child(self.rich_editor_bar(cx))
-                        }),
+                        })
+                        // Slice platform-drag-drop-files: OS file drops
+                        // onto the composer box attach as photo / video /
+                        // document by extension (gpui `ExternalPaths`).
+                        .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                            this.attach_dropped_files(paths.paths(), cx);
+                        })),
                 )
             })
             .when_some(composer_note, |this, note| {

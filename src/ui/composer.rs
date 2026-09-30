@@ -11,9 +11,9 @@ use gpui_kit::*;
 use quill::composer::{
     AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
     ComposerScheduling, ComposerSnapshot, DeleteConfirm, FormatAction, SendOptions,
-    apply_format_markup, begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply,
-    cancel_reply_draft, clear_format_markup, command_menu_trigger, filter_command_menu_items,
-    strip_command_menu_trigger,
+    apply_format_markup, attachments_from_dropped_paths, begin_edit_keeping_reply,
+    cancel_edit_draft, cancel_edit_keeping_reply, cancel_reply_draft, clear_format_markup,
+    command_menu_trigger, filter_command_menu_items, strip_command_menu_trigger,
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -449,6 +449,23 @@ impl QuillApp {
         // MED1: the grouping override belongs to this composer batch.
         self.composer_group_media = None;
         self.status_note = "attachment cleared".into();
+        cx.notify();
+    }
+
+    /// Slice platform-drag-drop-files: OS file drops onto the composer box.
+    /// The kind is inferred from the extension; directories, missing, and
+    /// unreadable paths are skipped. Outcome goes through the existing
+    /// status-note pattern (`attach_local`'s equivalent).
+    pub(super) fn attach_dropped_files(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        let fresh = attachments_from_dropped_paths(paths);
+        for att in fresh.iter() {
+            ComposerAttachment::push_attachment(&mut self.pending_attachments, att.clone());
+        }
+        self.status_note = match fresh.len() {
+            0 => "dropped files could not be attached".into(),
+            1 => "attached 1 file".into(),
+            n => format!("attached {n} files"),
+        };
         cx.notify();
     }
 
