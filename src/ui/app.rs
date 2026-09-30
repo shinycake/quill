@@ -269,6 +269,15 @@ pub struct QuillApp {
     pub(super) chat_prefs: ChatPrefs,
     /// Settings → Appearance slice: the dialog is on screen.
     pub(super) appearance_open: bool,
+    /// Parity slice (platform-custom-keybindings): the rebindable action id
+    /// currently capturing a keystroke, if any.
+    pub(super) keybinding_capture: Option<String>,
+    /// Parity slice (platform-custom-keybindings): focus handle for the
+    /// keystroke-capture row.
+    pub(super) keybinding_focus: FocusHandle,
+    /// Parity slice (platform-custom-keybindings): saved shortcut overrides
+    /// applied to the keymap once the live driver is ready.
+    pub(super) keybindings_applied: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.

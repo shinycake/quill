@@ -249,7 +249,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language and startup. \
+                        "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language, startup and keyboard shortcuts. \
                          Changes apply immediately (language applies after restart) and are saved on this device.",
                     ),
             );
@@ -265,6 +265,8 @@ impl QuillApp {
             // (the tag TDLib gets in `setTdlibParameters`).
             body = body.child(this.appearance_language_section(cx));
             body = body.child(this.general_autostart_section(cx));
+            // Parity slice (platform-custom-keybindings).
+            body = body.child(this.appearance_keybindings_section(cx));
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
                     .label("Close")
@@ -795,6 +797,123 @@ impl QuillApp {
             "Language",
             "The language reported to Telegram. Applies after restart — the app's own text stays English for now.",
             control.into_any_element(),
+        )
+    }
+
+    /// Parity slice (platform-custom-keybindings): the shortcuts section.
+    /// Each row shows the action and its current keystroke; "Change" arms
+    /// keystroke capture for that row, and "Reset" restores the default.
+    fn appearance_keybindings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        use super::keybindings::{REBINDABLE_ACTIONS, apply_custom_bindings};
+        use quill::settings::CustomKeybinding;
+
+        let customs: Vec<CustomKeybinding> = self
+            .live
+            .as_ref()
+            .map(|live| live.driver.load_custom_keybindings())
+            .unwrap_or_default();
+        let capturing = self.keybinding_capture.clone();
+        let rows = REBINDABLE_ACTIONS.iter().map(|ra| {
+            let current = customs
+                .iter()
+                .find(|c| c.id == ra.id)
+                .map(|c| c.keystroke.clone())
+                .unwrap_or_else(|| ra.defaults.join(" / "));
+            let id = ra.id.to_string();
+            let label = ra.label.to_string();
+            let is_capturing = capturing.as_deref() == Some(ra.id);
+            let row = div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .py_1()
+                .child(div().text_sm().child(label))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_mono()
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .bg(cx.theme().muted)
+                                .child(if is_capturing {
+                                    "press keys…".to_string()
+                                } else {
+                                    current
+                                }),
+                        )
+                        .child(
+                            Button::new(format!("kb-change-{id}"))
+                                .label(if is_capturing { "Cancel" } else { "Change" })
+                                .small()
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    if this.keybinding_capture.as_deref() == Some(id.as_str()) {
+                                        this.keybinding_capture = None;
+                                    } else {
+                                        this.keybinding_capture = Some(id.clone());
+                                        window.focus(&this.keybinding_focus, cx);
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new(format!("kb-reset-{id}"))
+                                .label("Reset")
+                                .small()
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let custom = CustomKeybinding {
+                                        id: id.clone(),
+                                        keystroke: String::new(),
+                                    };
+                                    if let Some(live) = this.live.as_mut() {
+                                        let _ = live.driver.save_custom_keybinding(custom);
+                                        let customs = live.driver.load_custom_keybindings();
+                                        apply_custom_bindings(cx, &customs);
+                                    }
+                                    this.keybinding_capture = None;
+                                    cx.notify();
+                                })),
+                        ),
+                );
+            if is_capturing {
+                row.track_focus(&self.keybinding_focus)
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        // Escape cancels; anything else becomes the new shortcut.
+                        if event.keystroke.key.as_str() == "escape" {
+                            this.keybinding_capture = None;
+                            cx.notify();
+                            return;
+                        }
+                        let keystroke = event.keystroke.to_string();
+                        let custom = CustomKeybinding {
+                            id: id.clone(),
+                            keystroke,
+                        };
+                        if let Some(live) = this.live.as_mut() {
+                            let _ = live.driver.save_custom_keybinding(custom);
+                            let customs = live.driver.load_custom_keybindings();
+                            apply_custom_bindings(cx, &customs);
+                        }
+                        this.keybinding_capture = None;
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            } else {
+                row.into_any_element()
+            }
+        });
+        self.appearance_section(
+            cx,
+            "Keyboard shortcuts",
+            "Rebind the shortcuts below. Changes apply immediately and are saved on this device. Window and app shortcuts (quit, close, …) can't be changed.",
+            div().flex().flex_col().children(rows).into_any_element(),
         )
     }
 }

@@ -19,6 +19,19 @@ pub struct Preferences {
     /// Client-side (no TDLib setting exists; `in-app-sounds` is only a
     /// `SettingsSection` deep-link name, schema line 9322).
     pub inapp_sounds_enabled: bool,
+    /// Parity slice (platform-custom-keybindings): user-overridden shortcuts,
+    /// one per rebindable action id.
+    #[serde(default)]
+    pub custom_keybindings: Vec<CustomKeybinding>,
+}
+
+/// Parity slice (platform-custom-keybindings): one user-overridden shortcut.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CustomKeybinding {
+    /// Stable action id from `REBINDABLE_ACTIONS` (e.g. "focus-composer").
+    pub id: String,
+    /// Keystroke string as parsed by `KeyBinding::new` (e.g. "ctrl-shift-l").
+    pub keystroke: String,
 }
 
 impl Default for Preferences {
@@ -28,6 +41,7 @@ impl Default for Preferences {
             account: AccountKey::primary(),
             hide_notification_previews: true,
             inapp_sounds_enabled: true,
+            custom_keybindings: Vec::new(),
         }
     }
 }

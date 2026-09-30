@@ -76,6 +76,15 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
+        // Parity slice (platform-custom-keybindings): apply saved shortcut
+        // overrides once the driver (and its prefs paths) is ready.
+        if !self.keybindings_applied {
+            self.keybindings_applied = true;
+            let customs = live.driver.load_custom_keybindings();
+            if !customs.is_empty() {
+                super::keybindings::apply_custom_bindings(cx, &customs);
+            }
+        }
         let prev_auth = live.driver.session.auth.clone();
         let mut progressed = false;
         let mut send_failed = false;

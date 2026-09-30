@@ -1092,6 +1092,33 @@ impl<S: JsonSender> ConnectDriver<S> {
         save_preferences(&self.paths, &prefs)
     }
 
+    /// Parity slice (platform-custom-keybindings): load the user's shortcut
+    /// overrides (`prefs.json`).
+    pub fn load_custom_keybindings(&self) -> Vec<crate::settings::CustomKeybinding> {
+        load_preferences(&self.paths).custom_keybindings
+    }
+
+    /// Parity slice (platform-custom-keybindings): persist one shortcut
+    /// override (`prefs.json`); an empty keystroke resets to the default.
+    pub fn save_custom_keybinding(
+        &mut self,
+        custom: crate::settings::CustomKeybinding,
+    ) -> std::io::Result<()> {
+        let mut prefs = load_preferences(&self.paths);
+        if custom.keystroke.is_empty() {
+            prefs.custom_keybindings.retain(|c| c.id != custom.id);
+        } else if let Some(existing) = prefs
+            .custom_keybindings
+            .iter_mut()
+            .find(|c| c.id == custom.id)
+        {
+            existing.keystroke = custom.keystroke;
+        } else {
+            prefs.custom_keybindings.push(custom);
+        }
+        save_preferences(&self.paths, &prefs)
+    }
+
     /// Slice parity:settings-language: persist the app language pref
     /// (`language_prefs.json`) next to the account.
     pub fn save_language_prefs(&mut self) -> std::io::Result<()> {
