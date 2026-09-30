@@ -4,7 +4,7 @@ use crate::data_settings::{AutoDownloadNetSettings, NetworkKind, save_data_stora
 use crate::ids::{ChatId, RequestId};
 use crate::notify::NotificationSoundKind;
 use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
-use crate::settings::{save_badge_prefs, save_call_prefs};
+use crate::settings::{load_preferences, save_badge_prefs, save_call_prefs, save_preferences};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{
     ChatNotificationSettings, MUTE_FOREVER, NotificationSettingsScope,
@@ -1000,5 +1000,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`badge_prefs.json`) next to the account.
     pub fn save_badge_prefs(&mut self) -> std::io::Result<()> {
         save_badge_prefs(&self.paths, &self.session.badge_prefs)
+    }
+
+    /// Parity slice: persist the in-app notification sounds toggle
+    /// (`prefs.json`). Loads the existing prefs first so the other
+    /// fields survive the write.
+    pub fn save_inapp_sounds_enabled(&mut self) -> std::io::Result<()> {
+        let mut prefs = load_preferences(&self.paths);
+        prefs.inapp_sounds_enabled = self.session.inapp_sounds_enabled;
+        save_preferences(&self.paths, &prefs)
     }
 }

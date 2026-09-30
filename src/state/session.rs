@@ -129,6 +129,11 @@ pub struct Session {
     /// (default true). There is no settings UI yet, so the value lives on the
     /// session for the reducer to apply.
     pub hide_notification_previews: bool,
+    /// Parity slice: mirror of
+    /// `settings::Preferences::inapp_sounds_enabled` (default true) —
+    /// tdesktop's "Play sounds" toggle. Loaded from `prefs.json` at
+    /// connect time; the notification defaults dialog writes through.
+    pub inapp_sounds_enabled: bool,
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
@@ -854,6 +859,7 @@ impl Session {
             open_chat: None,
             app_active: true,
             hide_notification_previews: true,
+            inapp_sounds_enabled: true,
             pending_notifications: Vec::new(),
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
