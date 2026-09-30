@@ -6,7 +6,8 @@
   `getDeepLinkInfo` once auth is Ready → parse the `tg://` action from the
   `textEntityTypeTextUrl` entities → follow-up request → open the chat.
   `tg://resolve?domain=` (with `start=`/`post=`/`story=`), `tg://join?invite=`,
-  `tg://openmessage?user_id=&message_id=` all handled; bot `start=` prefills
+  `tg://openmessage?user_id=&message_id=`, `tg://privatepost?channel=&post=`
+  (`t.me/c/<id>/<msg>`), and `tg://user?id=` all handled; bot `start=` prefills
   `/start <param>` in the composer without sending. `need_update_application`
   and unknown/unparseable links show TDLib's own info text in a dialog.
   Linux `assets/quill.desktop` registers `x-scheme-handler/tg`.
