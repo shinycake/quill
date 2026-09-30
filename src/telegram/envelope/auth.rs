@@ -7,6 +7,11 @@ pub struct TdError {
     /// Error *class* only. The TDLib `message` field is not stored; it can
     /// contain phone numbers or other secrets.
     pub class: ErrorClass,
+    /// Slice parity:platform-flood-errors — retry-after seconds parsed
+    /// from a `FLOOD_WAIT_<n>` message in `parse_error` (the only place
+    /// the raw message is still available). The message text itself is
+    /// still dropped; only the numeric wait survives.
+    pub flood_wait_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +45,21 @@ impl TdError {
             400 => ErrorClass::Invalid,
             _ => ErrorClass::Other,
         };
-        Self { code, class }
+        Self {
+            code,
+            class,
+            flood_wait_secs: None,
+        }
+    }
+
+    /// Slice parity:platform-flood-errors — the retry countdown line for
+    /// a flood error: "Try again in N seconds" when the wait is known,
+    /// otherwise the honest generic line.
+    pub fn flood_line(&self, generic: &str) -> String {
+        match self.flood_wait_secs {
+            Some(secs) => format!("try again in {secs} seconds"),
+            None => generic.to_string(),
+        }
     }
 }
 
@@ -154,12 +173,24 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     // only place the raw message is still available (`TdError` drops it
     // for secret-scrubbing). Anything unrecognized falls back to the
     // code-based class, so every other flow is unchanged.
+    // Slice parity:platform-flood-errors — same story for `FLOOD_WAIT_<n>`:
+    // extract the retry-after seconds before the message is dropped, so
+    // error lines can show a real countdown. Only the number survives.
+    let flood_wait_secs = value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .and_then(|m| m.strip_prefix("FLOOD_WAIT_"))
+        .and_then(|n| n.parse::<u64>().ok());
     if let Some(class) = value
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
         .and_then(crate::story_restriction::classify_server_message)
     {
-        return TdError { code, class };
+        return TdError {
+            code,
+            class,
+            flood_wait_secs,
+        };
     }
     // Slice msg-richtext-ai-tools: the documented AI flood error
     // (`AICOMPOSE_FLOOD_PREMIUM`) is a known constant, safe to match —
@@ -172,7 +203,46 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         return TdError {
             code,
             class: ErrorClass::AiComposeFloodPremium,
+            flood_wait_secs,
         };
     }
-    TdError::from_code(code)
+    let mut err = TdError::from_code(code);
+    err.flood_wait_secs = flood_wait_secs;
+    err
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Slice parity:platform-flood-errors — `parse_error` extracts the
+    // retry-after seconds from `FLOOD_WAIT_<n>` before the message is
+    // dropped for secret-scrubbing.
+    #[test]
+    fn parse_error_extracts_flood_wait_seconds() {
+        let value: Value =
+            serde_json::from_str(r#"{"@type":"error","code":429,"message":"FLOOD_WAIT_30"}"#)
+                .unwrap();
+        let err = parse_error(Some(&value));
+        assert_eq!(err.code, 429);
+        assert_eq!(err.class, ErrorClass::Flood);
+        assert_eq!(err.flood_wait_secs, Some(30));
+        assert_eq!(
+            err.flood_line("too many requests — wait and try again"),
+            "try again in 30 seconds"
+        );
+    }
+
+    #[test]
+    fn parse_error_without_flood_wait_has_no_countdown() {
+        let value: Value =
+            serde_json::from_str(r#"{"@type":"error","code":429,"message":"FLOOD"}"#).unwrap();
+        let err = parse_error(Some(&value));
+        assert_eq!(err.class, ErrorClass::Flood);
+        assert_eq!(err.flood_wait_secs, None);
+        assert_eq!(
+            err.flood_line("too many requests — wait and try again"),
+            "too many requests — wait and try again"
+        );
+    }
 }

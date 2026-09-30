@@ -271,7 +271,7 @@ fn sessions_fetch_error_clears_loading() {
     assert!(!session.sessions_stale);
     assert_eq!(
         session.sessions_error.as_deref(),
-        Some("Could not load the sessions list: too many requests — wait and try again")
+        Some("Could not load the sessions list: try again in 3 seconds")
     );
 }
 
@@ -527,7 +527,7 @@ fn websites_fetch_error_clears_loading() {
     assert!(!session.websites_stale);
     assert_eq!(
         session.websites_error.as_deref(),
-        Some("Could not load the websites list: too many requests — wait and try again")
+        Some("Could not load the websites list: try again in 3 seconds")
     );
 }
 
