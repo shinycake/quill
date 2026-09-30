@@ -77,8 +77,9 @@ fn create_rich_message_with_ai_round_trips_blocks() {
     );
     let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse richMessage");
     driver.ingest(owned).expect("ingest richMessage");
-    let (chat_id, rich) = driver.session.ai_composer_blocks.expect("blocks stored");
+    let (chat_id, rich, note) = driver.session.ai_composer_blocks.expect("blocks stored");
     assert_eq!(chat_id, ChatId(7));
+    assert_eq!(note, "AI created the draft");
     assert!(rich.is_full);
     assert!(matches!(
         rich.blocks.as_slice(),
@@ -96,6 +97,51 @@ fn create_rich_message_with_ai_sends_user_language_code() {
         .expect("create request");
     let v = sent_request(&recorder, "createRichMessageWithAi");
     assert_eq!(v["language_code"], "es");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn ingest_rich_paragraph(
+    driver: &mut ConnectDriver<Arc<RecordingSender>>,
+    dyn_sink: &Arc<dyn DiagnosticSink>,
+    seq: &AtomicU64,
+    extra: crate::ids::RequestId,
+) {
+    let json = format!(
+        r#"{{"@type":"richMessage","is_full":true,"is_rtl":false,"blocks":[{{"@type":"pageBlockParagraph","text":{{"@type":"richTextPlain","text":"rain falls"}}}}],"@extra":"{id}"}}"#,
+        id = extra.0,
+    );
+    let owned = copy_and_parse(&json, seq, dyn_sink).expect("parse richMessage");
+    driver.ingest(owned).expect("ingest richMessage");
+}
+
+#[test]
+fn rich_ai_draft_notes_match_the_method() {
+    let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = ai_harness();
+    let fixed = driver
+        .fix_rich_message_with_ai(ChatId(7), &[RichBlock::Divider])
+        .expect("fix rich request");
+    ingest_rich_paragraph(&mut driver, &dyn_sink, &seq, fixed);
+    assert_eq!(
+        driver
+            .session
+            .ai_composer_blocks
+            .as_ref()
+            .map(|(_, _, note)| *note),
+        Some("AI fixed the draft")
+    );
+
+    let rewritten = driver
+        .compose_rich_message_with_ai(ChatId(7), &[RichBlock::Divider])
+        .expect("rewrite rich request");
+    ingest_rich_paragraph(&mut driver, &dyn_sink, &seq, rewritten);
+    assert_eq!(
+        driver
+            .session
+            .ai_composer_blocks
+            .as_ref()
+            .map(|(_, _, note)| *note),
+        Some("AI rewrote the draft")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

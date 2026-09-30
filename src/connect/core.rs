@@ -13,6 +13,17 @@ use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+/// Status note for a rich AI answer. Create / fix / rewrite must not share
+/// one label — only create actually created the draft.
+fn ai_rich_draft_note(purpose: RequestPurpose) -> &'static str {
+    match purpose {
+        RequestPurpose::FixRichMessageWithAi => "AI fixed the draft",
+        RequestPurpose::ComposeRichMessageWithAi => "AI rewrote the draft",
+        RequestPurpose::CreateRichMessageWithAi => "AI created the draft",
+        _ => "AI updated the draft",
+    }
+}
+
 impl<S: JsonSender> ConnectDriver<S> {
     pub fn new(
         session: Session,
@@ -176,25 +187,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice msg-richtext-ai-tools: capture AI rich-message answers
         // (`composeRichMessageWithAi` / `createRichMessageWithAi` /
         // `fixRichMessageWithAi` → `richMessage`) before `apply` takes
-        // the pending request. Same drain contract as the text answers;
-        // the blocks flatten to text on apply (the composer is a text
-        // draft).
-        let ai_rich_answer: Option<(ChatId, RichMessageContent)> = match &owned.envelope.payload {
-            EnvelopePayload::RichMessage { rich } => owned
-                .envelope
-                .extra
-                .and_then(|id| self.session.requests.get(id))
-                .filter(|pending| {
-                    matches!(
-                        pending.purpose,
-                        RequestPurpose::ComposeRichMessageWithAi
-                            | RequestPurpose::CreateRichMessageWithAi
-                            | RequestPurpose::FixRichMessageWithAi
-                    )
-                })
-                .and_then(|pending| pending.chat_id.map(|chat_id| (chat_id, rich.clone()))),
-            _ => None,
-        };
+        // the pending request. Same drain contract as the text answers.
+        // The UI serializes the blocks back to editor markup; the note
+        // records which method answered.
+        let ai_rich_answer: Option<(ChatId, RichMessageContent, &'static str)> =
+            match &owned.envelope.payload {
+                EnvelopePayload::RichMessage { rich } => owned
+                    .envelope
+                    .extra
+                    .and_then(|id| self.session.requests.get(id))
+                    .filter(|pending| {
+                        matches!(
+                            pending.purpose,
+                            RequestPurpose::ComposeRichMessageWithAi
+                                | RequestPurpose::CreateRichMessageWithAi
+                                | RequestPurpose::FixRichMessageWithAi
+                        )
+                    })
+                    .and_then(|pending| {
+                        let note = ai_rich_draft_note(pending.purpose);
+                        pending.chat_id.map(|chat_id| (chat_id, rich.clone(), note))
+                    }),
+                _ => None,
+            };
         // M1 fix-up: capture the `getMessageProperties` answer for the
         // "Share link" gate before `apply` takes the pending request.
         let link_gate: Option<(ChatId, MessageId, bool)> = match &owned.envelope.payload {
@@ -499,8 +514,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some((chat_id, text)) = ai_text_answer {
             self.session.ai_composer_text = Some((chat_id, text));
         }
-        if let Some((chat_id, rich)) = ai_rich_answer {
-            self.session.ai_composer_blocks = Some((chat_id, rich));
+        if let Some((chat_id, rich, note)) = ai_rich_answer {
+            self.session.ai_composer_blocks = Some((chat_id, rich, note));
         }
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.

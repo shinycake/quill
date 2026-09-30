@@ -11,8 +11,13 @@
   - Driver methods on `ConnectDriver` (`src/connect/messages.rs`). All five
     refuse in secret chats and reject an empty draft client-side. Answers
     stash into `Session::ai_composer_text` / `ai_composer_blocks`; the UI
-    drain replaces the open chat's draft (rich blocks flatten via
-    `copy_text()`). A late answer for a different chat is dropped.
+    drain replaces the open chat's draft. Rich blocks are written back
+    with `blocks_to_markup` (the inverse of `markup_to_blocks`), not
+    clipboard `copy_text()`, so headings, lists, details, and dividers
+    survive the rich send path. Fix rich / Rewrite rich use their own
+    status notes ("AI fixed the draft" / "AI rewrote the draft"); only
+    Create says "AI created the draft". A late answer for a different
+    chat is dropped.
   - Rich-editor bar ghost buttons (`src/ui/composer.rs`): **✨ Fix**
     (`fixTextWithAi`), **✨ Rewrite** (`composeTextWithAi`), **✨ Create**
     (`createRichMessageWithAi`), **✨ Fix rich** (`fixRichMessageWithAi`),
@@ -35,6 +40,10 @@
     empty-string default for that parameter, so a real code is always sent.
   - `fixedText.diff_text` is not parsed. Nothing renders a diff, so the
     field is not stored.
+  - Inline `TextEntity` spans on a rich AI answer are not rewritten into
+    editor markup. The editor stores styling as characters inside the
+    block text; this slice keeps block structure and leaves those spans
+    as plain text.
   - The button row wraps (`flex_wrap`) so the AI buttons stay on screen
     next to the block buttons.
 - **Proof:** `docs/screenshots/ready-rich-ai-tools.png`, captured from a

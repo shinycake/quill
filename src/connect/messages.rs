@@ -658,8 +658,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Slice msg-richtext-ai-tools: `fixRichMessageWithAi` (TDLib 1.8.67,
     /// `schema/td_api.tl:12176`) on the composer's parsed blocks. The
-    /// `richMessage` answer replaces the draft (flattened to text —
-    /// the composer is a text draft).
+    /// `richMessage` answer replaces the draft as editor markup.
     pub fn fix_rich_message_with_ai(
         &mut self,
         chat_id: ChatId,

@@ -73,9 +73,9 @@ pub struct Session {
     /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
     /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
     /// the open chat's composer. Same drain contract as
-    /// `ai_composer_text`; blocks flatten to text on apply (the composer
-    /// is a text draft).
-    pub ai_composer_blocks: Option<(ChatId, RichMessageContent)>,
+    /// `ai_composer_text`. The UI writes the blocks back as editor markup
+    /// (`blocks_to_markup`); the note distinguishes create / fix / rewrite.
+    pub ai_composer_blocks: Option<(ChatId, RichMessageContent, &'static str)>,
     /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
     /// errors. The UI drains it into the status note so the click never
     /// silently does nothing.

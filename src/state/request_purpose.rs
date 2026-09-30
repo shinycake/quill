@@ -1170,15 +1170,15 @@ pub enum RequestPurpose {
     ComposeTextWithAi,
     /// Slice msg-richtext-ai-tools: `composeRichMessageWithAi` (schema
     /// 1.8.67, :12162). Response is `richMessage`; the parsed blocks
-    /// replace the open chat's composer draft (flattened to text).
+    /// replace the open chat's composer draft as editor markup.
     ComposeRichMessageWithAi,
     /// Slice msg-richtext-ai-tools: `createRichMessageWithAi` (schema
     /// 1.8.67, :12168). Response is `richMessage`; the parsed blocks
-    /// replace the open chat's composer draft (flattened to text).
+    /// replace the open chat's composer draft as editor markup.
     CreateRichMessageWithAi,
     /// Slice msg-richtext-ai-tools: `fixRichMessageWithAi` (schema
     /// 1.8.67, :12176). Response is `richMessage`; the parsed blocks
-    /// replace the open chat's composer draft (flattened to text).
+    /// replace the open chat's composer draft as editor markup.
     FixRichMessageWithAi,
     Close,
     LogOut,
