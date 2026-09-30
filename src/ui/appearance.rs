@@ -852,34 +852,40 @@ impl QuillApp {
                                 .label(if is_capturing { "Cancel" } else { "Change" })
                                 .small()
                                 .ghost()
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    if this.keybinding_capture.as_deref() == Some(id.as_str()) {
-                                        this.keybinding_capture = None;
-                                    } else {
-                                        this.keybinding_capture = Some(id.clone());
-                                        window.focus(&this.keybinding_focus, cx);
-                                    }
-                                    cx.notify();
-                                })),
+                                .on_click({
+                                    let id = id.clone();
+                                    cx.listener(move |this, _, window, cx| {
+                                        if this.keybinding_capture.as_deref() == Some(id.as_str()) {
+                                            this.keybinding_capture = None;
+                                        } else {
+                                            this.keybinding_capture = Some(id.clone());
+                                            window.focus(&this.keybinding_focus, cx);
+                                        }
+                                        cx.notify();
+                                    })
+                                }),
                         )
                         .child(
                             Button::new(format!("kb-reset-{id}"))
                                 .label("Reset")
                                 .small()
                                 .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let custom = CustomKeybinding {
-                                        id: id.clone(),
-                                        keystroke: String::new(),
-                                    };
-                                    if let Some(live) = this.live.as_mut() {
-                                        let _ = live.driver.save_custom_keybinding(custom);
-                                        let customs = live.driver.load_custom_keybindings();
-                                        apply_custom_bindings(cx, &customs);
-                                    }
-                                    this.keybinding_capture = None;
-                                    cx.notify();
-                                })),
+                                .on_click({
+                                    let id = id.clone();
+                                    cx.listener(move |this, _, _, cx| {
+                                        let custom = CustomKeybinding {
+                                            id: id.clone(),
+                                            keystroke: String::new(),
+                                        };
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ = live.driver.save_custom_keybinding(custom);
+                                            let customs = live.driver.load_custom_keybindings();
+                                            apply_custom_bindings(cx, &customs);
+                                        }
+                                        this.keybinding_capture = None;
+                                        cx.notify();
+                                    })
+                                }),
                         ),
                 );
             if is_capturing {
