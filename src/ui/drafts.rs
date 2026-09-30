@@ -222,6 +222,10 @@ impl QuillApp {
         if self.pending_edit.is_some() {
             return;
         }
+        // parity:platform-spellcheck: new chat, new draft — session
+        // ignores don't carry over.
+        self.spellchecker.clear_ignored();
+        self.spellcheck_open = false;
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
