@@ -864,8 +864,8 @@ impl QuillApp {
                         // warm while the viewer is open (picker options +
                         // the chosen-reaction badge). Deduped in the
                         // driver — a no-op when nothing new is needed.
+                        let ids = this.story_custom_emoji_fetch_ids();
                         if let Some(live) = this.live.as_mut() {
-                            let ids = this.story_custom_emoji_fetch_ids();
                             let _ = live.driver.maybe_fetch_story_custom_emoji_stickers(&ids);
                         }
                         cx.notify();
