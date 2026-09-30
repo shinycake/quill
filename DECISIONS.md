@@ -6630,3 +6630,68 @@ communities.
   arriving via `updateCommunityFullInfo`.
 - **Out of this slice:** toggling community chat visibility (blocked: no
   TDLib 1.8.67 method — separate box).
+## Slice calls-proxy
+
+Date: 2026-09-29. Scope: `parity:calls-proxy` — "Use proxy for calls"
+setting (official clients: Settings → Data & Storage → Proxy).
+
+- **Mechanism (evidence-first, verified before coding):**
+  - TDLib schema (pinned 1.8.67, `schema/td_api.tl`, concept-level
+    search): proxy management is `addProxy`/`editProxy`/`enableProxy`/
+    `disableProxy`/`removeProxy`/`pingProxy`/`testProxy` (:16202–16304)
+    with types `proxyTypeSocks5`/`proxyTypeHttp`/`proxyTypeMtproto`
+    (:10100–10109) and `addedProxy(s)` (:10112–10121). There is NO
+    `use_proxy_for_calls` option and no call↔proxy linkage anywhere —
+    the only `use-for-calls` mention is the `proxy/use-for-calls`
+    settings deep-link subsection (:9276), a UI navigation target, not
+    an API. The toggle is therefore 100% client-side state.
+  - TDLib transports no call media (signaling only: `createCall` →
+    `CallId` at :14212, `sendCallSignalingData` at :14218); the
+    client's VoIP engine moves the media, so only the client can route
+    it through a proxy.
+  - Official behavior (Telegram Desktop / iOS): toggle on → the client
+    hands the currently-enabled proxy to its VoIP stack
+    (libtgvoip/tgcalls). Proxy-for-calls is SOCKS5-only (Telegram iOS
+    source: "Calls remain SOCKS5-only"); MTProto/HTTP proxies cannot
+    carry call (UDP) media.
+  - Quill's engine (ntgcalls v3.0.0): the C API surface (66 `ntg_*`
+    functions, vendored bindings verified verbatim against
+    `ntgcalls.h`) exposes NO proxy configuration — `ntg_connect_p2p`
+    takes only `custom_parameters` (null) and `ntg_connect` takes
+    TDLib's join-params JSON. The media engine cannot be told to use a
+    proxy today.
+  - Quill has no proxy management at all (no
+    addProxy/enableProxy/getProxies anywhere in `src/`), so no enabled
+    proxy exists to read yet; TDLib emits no proxy updates either
+    (only the `getProxies` poll at :16225).
+- **Built:**
+  - `src/settings.rs` +13: `CallPrefs.use_proxy_for_calls: bool`
+    (default off — opt-in, matching the official clients), persisted
+    in `call_prefs.json`; existing roundtrip test extended to cover
+    the new field.
+  - `src/calls/proxy.rs` (new, +108): `ProxyKind::{Socks5, Http,
+    Mtproto}`, `EnabledProxy` (the shape the future `getProxies`
+    plumbing will hand over), `CallProxy` (normalized SOCKS5 proxy
+    for the media engine), and `proxy_for_calls(toggle, enabled)` —
+    the official rule: `Some` only when the toggle is on AND the
+    enabled proxy is SOCKS5; toggle off / no proxy / MTProto / HTTP
+    → `None` (direct). Unit tests pin the SOCKS5-only rule.
+  - `src/calls/mod.rs` +1: declare the module.
+  - `src/ui/mod.rs` +14: "Use proxy for calls" kit-Switch row in Call
+    settings via the existing `pref_row` helper (persisted through
+    `set_call_pref`, same as "Confirm before calling").
+  - README box `parity:calls-proxy` checked.
+- **Key decisions (ponytail):** no `getProxies` request/response
+  plumbing in `connect.rs` — with no proxy management in Quill the
+  list is always empty and the engine couldn't apply a proxy anyway,
+  so that round-trip is speculative; the pure, fully-tested selection
+  function is the seam the proxy-management slice will call. Default
+  off preserves current behavior (calls go direct) for existing users.
+- **Not verifiable without live Telegram:** an actual proxied call
+  (no proxy can be configured in Quill yet; ntgcalls v3.0.0 exposes
+  no proxy knob, so media routing through a proxy is blocked at the
+  engine boundary regardless).
+- **Out of this slice:** proxy management UI/backend (add/enable
+  proxy — separate future slice), feeding the enabled proxy from
+  TDLib `getProxies` into `proxy_for_calls` at connect time, any
+  ntgcalls upgrade that exposes proxy configuration.
