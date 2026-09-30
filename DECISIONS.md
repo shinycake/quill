@@ -4700,6 +4700,11 @@ greps.
   - `is_rtl` is a known simplification: `parse_rich_message` ignores the
     `richMessage.is_rtl` flag and `input_rich_message` always sends `false`
     — Hebrew/Arabic rich messages render LTR. RTL layout is out of slice.
+  - Rich-text max length is 32,768 UTF-16 code units (Telegram's unit for
+    message limits; same unit the composer uses for entity offsets), summed
+    over every block's text. Over-limit drafts are refused at the
+    `input_rich_message` choke point and the composer shows a "too long"
+    status note (same pattern as the caption limit).
   - Collapsible blocks render expanded with an indented body; no
     collapse toggle in this slice (queued).
   - The editor is markup-source based (the composer textarea is the
