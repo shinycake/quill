@@ -8,7 +8,6 @@
 
 use super::app::QuillApp;
 use super::chat_theme::{bg_canvas, border, danger, text_muted, text_primary};
-use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -38,14 +37,19 @@ impl QuillApp {
         if next == self.spell_misspellings {
             return;
         }
-        let words: Vec<&str> = next.iter().map(|m| m.word.as_str()).collect();
-        let old_words: Vec<&str> = self
-            .spell_misspellings
-            .iter()
-            .map(|m| m.word.as_str())
-            .collect();
+        // Compare the word SET before moving `next` in (suggestions are
+        // only recomputed when the set changed, not on position shifts).
+        let words_changed = self.spellcheck_open && {
+            let words: Vec<&str> = next.iter().map(|m| m.word.as_str()).collect();
+            let old_words: Vec<&str> = self
+                .spell_misspellings
+                .iter()
+                .map(|m| m.word.as_str())
+                .collect();
+            words != old_words
+        };
         self.spell_misspellings = next;
-        if self.spellcheck_open && words != old_words {
+        if words_changed {
             self.refresh_spell_suggestions();
         }
         cx.notify();
@@ -144,17 +148,15 @@ impl QuillApp {
             return None;
         }
         let n = self.spell_misspellings.len();
+        let count_text = if n == 1 {
+            "1 word".to_string()
+        } else {
+            format!("{n} words")
+        };
         Some(
             Button::new("composer-spellcheck")
                 .label(format!("ABC {n}"))
-                .tooltip(format!(
-                    "Check spelling ({} flagged)",
-                    if n == 1 {
-                        "1 word"
-                    } else {
-                        &format!("{n} words")
-                    }
-                ))
+                .tooltip(format!("Check spelling ({count_text} flagged)"))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_spellcheck_panel(cx);
                 }))
