@@ -973,3 +973,116 @@ fn chat_export_pages_history_until_short_page() {
     assert!(export.done_paging);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Whether a `getChatHistory` request for `chat_id` was recorded.
+fn history_sent_for(recorder: &RecordingSender, chat_id: i64) -> bool {
+    recorder
+        .snapshot()
+        .into_iter()
+        .filter(|j| j.contains("\"@type\":\"getChatHistory\""))
+        .any(|j| {
+            serde_json::from_str::<Value>(&j)
+                .map(|v| v["chat_id"] == chat_id)
+                .unwrap_or(false)
+        })
+}
+
+/// Ingest one short export-history page for `chat_id` (the whole history
+/// in one page) in the data-export batch test.
+fn ingest_export_page<S: JsonSender>(
+    driver: &mut ConnectDriver<S>,
+    seq: &AtomicU64,
+    sink: &Arc<dyn DiagnosticSink>,
+    chat_id: i64,
+    msg_id: i64,
+) {
+    let extra = driver
+        .session
+        .requests
+        .pending_extra_for(RequestPurpose::ExportChatHistory, Some(ChatId(chat_id)))
+        .expect("export page in flight");
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"messages","@extra":"{}","messages":[{{"id":{msg_id},"chat_id":{chat_id},"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}]}}"#,
+                    extra.0,
+                ),
+                seq,
+                sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+}
+
+#[test]
+fn data_export_batches_chats_into_bundle_then_finalizes() {
+    // `parity:platform-data-export`: the account export pages every chat
+    // through the shared per-chat machinery (each chat's JSON lands in the
+    // bundle's `chats/`), advances chat by chat, then writes `account.json`
+    // and marks the export finished.
+    use crate::data_export::DataExportOptions;
+
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Demo Bot","type":{"@type":"chatTypePrivate","user_id":21},"unread_count":0}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":22,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":22},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+
+    let options = DataExportOptions {
+        chats: true,
+        contacts: false,
+        media: false,
+    };
+    let bundle = driver
+        .start_data_export(options, dir.join("dest"))
+        .expect("export starts");
+    assert!(bundle.join("chats").is_dir());
+    // A second export while one is running is refused.
+    assert!(driver.start_data_export(options, dir.join("dest")).is_err());
+
+    // First chat alphabetically ("Ada", 22): one short page is the whole
+    // history.
+    driver.pump_data_export();
+    assert!(history_sent_for(&recorder, 22));
+    ingest_export_page(&mut driver, &seq, &dyn_sink, 22, 5);
+    driver.pump_chat_export();
+    // The per-chat JSON went into the bundle and the batch advanced.
+    assert!(driver.session.chat_export.is_none());
+    let dx = driver.session.data_export.as_ref().expect("export active");
+    assert_eq!(dx.exported_chats, 1);
+    assert_eq!(dx.total_messages, 1);
+    assert_eq!(std::fs::read_dir(bundle.join("chats")).unwrap().count(), 1);
+
+    // Second chat ("Demo Bot", 21), then the queue is empty and the
+    // bundle finalizes.
+    driver.pump_data_export();
+    assert!(history_sent_for(&recorder, 21));
+    ingest_export_page(&mut driver, &seq, &dyn_sink, 21, 6);
+    driver.pump_chat_export();
+    driver.pump_data_export();
+    let dx = driver.session.data_export.as_ref().expect("export active");
+    assert!(dx.finished, "account export should be finished");
+    assert_eq!(dx.exported_chats, 2);
+    let account: Value = serde_json::from_str(
+        &std::fs::read_to_string(bundle.join("account.json")).expect("account.json written"),
+    )
+    .unwrap();
+    assert_eq!(account["app"], "quill");
+    assert_eq!(account["stats"]["chats"], 2);
+    assert_eq!(account["stats"]["messages"], 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}

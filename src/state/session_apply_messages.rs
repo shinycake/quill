@@ -68,6 +68,14 @@ impl Session {
                 && export.chat_id == chat_id
             {
                 let short_page = messages.len() < crate::chat_export::EXPORT_PAGE_LIMIT as usize;
+                // `parity:platform-data-export` — queue the page's media
+                // files for the bundle (deduped by file id; local files
+                // are copied without a download).
+                if let Some(dx) = self.data_export.as_mut() {
+                    for message in &messages {
+                        dx.enqueue_media_from(message, chat_id.0);
+                    }
+                }
                 // `getChatHistory` is inclusive of `from_message_id`, so the
                 // first message of every non-first page is the boundary
                 // message already in the buffer — skip it (matched by id,

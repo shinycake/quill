@@ -310,6 +310,9 @@ pub struct QuillApp {
     /// TTL). Working state lives in the named module; this is the one
     /// field the dialog machinery reads.
     pub(super) account_lifecycle: AccountLifecycleState,
+    /// `parity:platform-data-export` — the export dialog's UI state
+    /// (toggles + destination field; the export itself lives on Session).
+    pub(super) data_export_ui: DataExportUiState,
     /// Slice parity:auth-multi-account (UI): the Accounts dialog state
     /// (list / switch / add / remove). Working state lives in
     /// `accounts.rs`; this is the one field the dialog machinery reads.

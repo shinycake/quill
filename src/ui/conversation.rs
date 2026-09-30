@@ -441,16 +441,22 @@ impl QuillApp {
                         // `parity:platform-chat-export` — export the chat's
                         // history to a JSON file in Downloads. Live only:
                         // the export pages `getChatHistory` from TDLib.
-                        .when(self.live.is_some(), |this| {
-                            this.child(
-                                Button::new("chat-export-history")
-                                    .label("Export")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.start_chat_export(chat_id, cx);
-                                    })),
-                            )
-                        }),
+                        // Hidden while an account data export is running
+                        // (it owns the shared per-chat export machinery).
+                        .when(
+                            self.live.is_some()
+                                && self.session().is_none_or(|s| s.data_export.is_none()),
+                            |this| {
+                                this.child(
+                                    Button::new("chat-export-history")
+                                        .label("Export")
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.start_chat_export(chat_id, cx);
+                                        })),
+                                )
+                            },
+                        ),
                 )
             })
     }

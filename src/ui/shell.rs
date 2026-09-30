@@ -179,6 +179,9 @@ pub enum DialogKind {
     CommunityCreate,
     /// Slice G10: communities hub dialog.
     CommunityHub,
+    /// `parity:platform-data-export` — the "Export Telegram data" dialog
+    /// (scope toggles, destination, progress, completion).
+    DataExport,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -248,6 +251,7 @@ impl QuillShell {
             // Slice G10: communities create + hub dialogs.
             DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
             DialogKind::CommunityHub => app.community_ui.hub_open,
+            DialogKind::DataExport => app.data_export_ui.open,
         }
     }
 
@@ -291,6 +295,7 @@ impl QuillShell {
             // Slice G10: community builders live in dialogs/community.rs.
             DialogKind::CommunityCreate => community::build_create_community_dialog,
             DialogKind::CommunityHub => community::build_community_hub_dialog,
+            DialogKind::DataExport => QuillApp::build_data_export_dialog,
         }
     }
 

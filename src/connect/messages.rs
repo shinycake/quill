@@ -48,18 +48,40 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .is_some_and(|e| e.done_paging && !e.settled());
         if done_paging {
+            // `parity:platform-data-export` — inside an account export the
+            // per-chat JSON goes to the bundle's `chats/` and the batch
+            // advances; standalone behavior is unchanged.
+            let in_bundle = self.session.data_export.is_some();
             let result = {
                 let export = self.session.chat_export.as_ref().expect("checked");
-                let dir = crate::chat_export::default_export_dir();
+                let dir = match self.session.data_export.as_ref() {
+                    Some(dx) => dx.dir.join("chats"),
+                    None => crate::chat_export::default_export_dir(),
+                };
                 match crate::chat_export::write_export(export, &dir) {
                     Ok(path) => Ok(path),
                     Err(err) => Err(format!("could not write export file: {err}")),
                 }
             };
-            let export = self.session.chat_export.as_mut().expect("checked");
-            match result {
-                Ok(path) => export.finished_path = Some(path),
-                Err(note) => export.failed = Some(note),
+            if in_bundle {
+                let count = self
+                    .session
+                    .chat_export
+                    .as_ref()
+                    .map(|e| e.messages.len())
+                    .unwrap_or(0);
+                self.session.chat_export = None;
+                let dx = self.session.data_export.as_mut().expect("checked");
+                match result {
+                    Ok(_) => dx.note_chat_done(count),
+                    Err(note) => dx.failed = Some(note),
+                }
+            } else {
+                let export = self.session.chat_export.as_mut().expect("checked");
+                match result {
+                    Ok(path) => export.finished_path = Some(path),
+                    Err(note) => export.failed = Some(note),
+                }
             }
             return;
         }

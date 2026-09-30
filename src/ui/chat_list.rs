@@ -1524,6 +1524,18 @@ impl QuillApp {
                             this.open_accounts(cx);
                         }),
                     ));
+                    // `parity:platform-data-export` — "Export Telegram data"
+                    // (Telegram Desktop Settings → Advanced). Quill has no
+                    // settings screen, so it sits with the other
+                    // settings-adjacent entries; the dialog hosts scope
+                    // toggles, the destination folder, progress and cancel.
+                    list = list.child(
+                        Button::new("data-export")
+                            .label("📦 Export Telegram data")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_data_export(cx);
+                            })),
+                    );
                     // Phase 9.1/9.3: tdesktop-style active-stories tray above
                     // the chat rows (leading "+" tile opens the story
                     // composer); omitted for the contacts tab.

@@ -8,6 +8,7 @@ mod composer;
 mod connect_flow;
 mod contacts;
 mod core;
+mod data_export;
 mod group_calls;
 mod groups;
 mod live;

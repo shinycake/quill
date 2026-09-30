@@ -11,6 +11,7 @@ mod synthetic;
 pub(crate) use account_lifecycle::*;
 pub(crate) use accounts::*;
 pub(crate) use chat_theme::*;
+pub(crate) use data_export_ui::*;
 pub(crate) use privacy::{PrivacyEditorTarget, PrivacyExceptionKind, apply_ready_privacy};
 
 mod dialogs;
@@ -50,6 +51,7 @@ mod connect_ui;
 mod contacts;
 mod conversation;
 mod custom_keyboard;
+mod data_export_ui;
 mod demo;
 mod demo_setup;
 mod downloads;

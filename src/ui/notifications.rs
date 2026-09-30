@@ -145,6 +145,36 @@ impl QuillApp {
         // the result (file path or error) as a status note, then clear it.
         if let Some(live) = self.live.as_mut() {
             live.driver.pump_chat_export();
+            // `parity:platform-data-export` — drive the account export
+            // (contacts gate, chat sequencing, media drain, finalize).
+            live.driver.pump_data_export();
+            let export_running = live
+                .driver
+                .session
+                .data_export
+                .as_ref()
+                .is_some_and(|dx| !dx.settled());
+            let note = live
+                .driver
+                .session
+                .data_export
+                .as_mut()
+                .filter(|dx| dx.settled() && !dx.note_surfaced)
+                .map(|dx| {
+                    dx.note_surfaced = true;
+                    if let Some(failed) = dx.failed.as_deref() {
+                        format!("Data export failed: {failed}")
+                    } else {
+                        format!("Data export complete: {}", dx.dir.display())
+                    }
+                });
+            if let Some(note) = note {
+                self.status_note = note;
+                progressed = true;
+            } else if export_running {
+                // Keep the dialog's progress bar moving.
+                progressed = true;
+            }
             let note = live
                 .driver
                 .session

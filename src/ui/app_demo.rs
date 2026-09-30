@@ -1191,6 +1191,7 @@ impl QuillApp {
             twofa_email,
             twofa_notice: None,
             account_lifecycle: AccountLifecycleState::new(window, cx),
+            data_export_ui: DataExportUiState::new(window, cx),
             accounts_ui: AccountsUiState::new(window, cx),
             credentials,
             // Slice S3: privacy screen state.
