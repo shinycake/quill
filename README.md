@@ -328,7 +328,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Archive story list via getChatArchivedStories with load-more pagination (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->
 - [x] Pinned stories on chat page (getChatPostedToChatPageStories + setChatPinnedStories full-list semantics) <!-- parity:stories-pinned -->
 - [x] Clickable story areas (location, venue, suggested reaction, message, link, weather, gift) — parsed from `story.areas` (telegram/envelope.rs), rendered as clickable chips on the viewer, taps perform each area's action (ui/mod.rs Phase 9.8) <!-- parity:stories-areas-view -->
-- [ ] Story notification settings (mute stories per chat, story sound, show story poster) — parsed into fields only (telegram/envelope.rs:1859-1860) <!-- parity:stories-notify-settings -->
+- [x] Story notification settings (mute stories per chat, story sound, show story poster) <!-- parity:stories-notify-settings -->
 - [x] Story-restriction notices (TGX-verbatim `ChatDisabledStory` / `ChatRestrictedStory`): the `canPostStory` error channel delivers the Disabled notice for both the TDLib client-side-gate message ("Not enough rights to post stories in this group") and `CHAT_ADMIN_REQUIRED`, and the Restricted notice for `USER_RESTRICTED`; unrecognized errors keep the generic eligibility failure. No Until variant — the channel carries no until-date. <!-- parity:stories-restriction-notice -->
 
 #### Post stories

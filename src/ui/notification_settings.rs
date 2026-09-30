@@ -40,6 +40,9 @@ pub(super) const MAX_OS_NOTIFICATION_SOUND_THREADS: usize = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SoundPickerTarget {
     Chat(ChatId),
+    /// Parity slice (`parity:stories-notify-settings`): per-chat story
+    /// sound (`story_sound_id`), separate from the message sound.
+    ChatStory(ChatId),
     Scope(NotificationSettingsScope),
     /// Parity slice: `reactionNotificationSettings` (TDLib 1.8.67, line 3396).
     Reaction,
@@ -484,6 +487,16 @@ impl QuillApp {
             .and_then(|chat| session.as_ref().map(|s| s.effective_preview_allowed(chat)))
             .unwrap_or(chat_settings.use_default_show_preview || chat_settings.show_preview);
         let sound_label = self.notification_sound_label(&chat_settings);
+        // Parity slice (`parity:stories-notify-settings`): effective
+        // per-chat story settings, falling back to the chat's own flags
+        // when the chat is unknown to the session.
+        let story_muted = open_chat_summary
+            .and_then(|chat| session.as_ref().map(|s| s.effective_story_muted(chat)))
+            .unwrap_or(chat_settings.mute_stories);
+        let story_poster_on = open_chat_summary
+            .and_then(|chat| session.as_ref().map(|s| s.effective_story_poster(chat)))
+            .unwrap_or(chat_settings.show_story_poster);
+        let story_sound_label = self.story_sound_label(&chat_settings);
         let saved_sounds: Vec<NotificationSound> = session
             .as_ref()
             .map(|s| s.saved_notification_sounds.clone())
@@ -639,6 +652,103 @@ impl QuillApp {
                 &saved_sounds,
             ));
         }
+        // Parity slice (`parity:stories-notify-settings`): per-chat story
+        // controls — mute toggle, poster toggle, and a story-sound picker
+        // reusing the saved-sound picker with a story target.
+        panel = panel.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Mute story notifications"),
+                )
+                .child(
+                    Switch::new("notif-story-mute-toggle")
+                        .checked(story_muted)
+                        .accessibility_label("Mute story notifications")
+                        .on_click(cx.listener(move |this, &on, _, cx| {
+                            if let Some(chat_id) = open_chat {
+                                this.apply_chat_story_mute(chat_id, on, cx);
+                            }
+                        })),
+                ),
+        );
+        panel = panel.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Show story poster"),
+                )
+                .child(
+                    Switch::new("notif-story-poster-toggle")
+                        .checked(story_poster_on)
+                        .accessibility_label("Show story poster")
+                        .on_click(cx.listener(move |this, &on, _, cx| {
+                            if let Some(chat_id) = open_chat {
+                                this.apply_chat_story_poster(chat_id, on, cx);
+                            }
+                        })),
+                ),
+        );
+        panel = panel.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("Story sound: {story_sound_label}")),
+                )
+                .child(
+                    Button::new("notif-story-sound-picker-toggle")
+                        .label(if self.story_sound_picker_open {
+                            "Hide"
+                        } else {
+                            "Change"
+                        })
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.story_sound_picker_open = !this.story_sound_picker_open;
+                            if this.story_sound_picker_open
+                                && let Some(live) = this.live.as_mut()
+                            {
+                                let _ = live.driver.maybe_fetch_notification_sounds();
+                            }
+                            cx.notify();
+                        })),
+                ),
+        );
+        if self.story_sound_picker_open
+            && let Some(chat_id) = open_chat
+        {
+            let current = if chat_settings.use_default_story_sound {
+                SoundChoice::Default
+            } else if chat_settings.story_sound_id == 0 {
+                SoundChoice::Disabled
+            } else {
+                SoundChoice::Custom(chat_settings.story_sound_id)
+            };
+            panel = panel.child(self.notification_sound_picker(
+                cx,
+                SoundPickerTarget::ChatStory(chat_id),
+                current,
+                &saved_sounds,
+            ));
+        }
         panel.child(
             Button::new("notif-open-defaults")
                 .label("Defaults for all chats\u{2026}")
@@ -768,6 +878,26 @@ impl QuillApp {
             .unwrap_or_else(|| "Custom".to_string())
     }
 
+    /// Parity slice (`parity:stories-notify-settings`): current story-sound
+    /// choice for a chat, for the notifications panel summary and picker
+    /// checkmarks.
+    pub(super) fn story_sound_label(&self, settings: &ChatNotificationSettings) -> String {
+        if settings.use_default_story_sound {
+            return "Default".to_string();
+        }
+        if settings.story_sound_id == 0 {
+            return "None".to_string();
+        }
+        self.session()
+            .and_then(|s| {
+                s.saved_notification_sounds
+                    .iter()
+                    .find(|sound| sound.id == settings.story_sound_id)
+                    .map(|sound| sound.title.clone())
+            })
+            .unwrap_or_else(|| "Custom".to_string())
+    }
+
     /// Parity slice: apply a sound choice to the open chat
     /// (`setChatNotificationSettings`).
     pub(super) fn apply_chat_sound(
@@ -841,6 +971,116 @@ impl QuillApp {
         }
     }
 
+    /// Parity slice (`parity:stories-notify-settings`): apply a
+    /// story-mute exception to the open chat (`setChatNotificationSettings`).
+    pub(super) fn apply_chat_story_mute(
+        &mut self,
+        chat_id: ChatId,
+        mute_stories: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .set_chat_story_mute(chat_id, mute_stories);
+            self.status_note = match result {
+                Ok(_) => "story mute updated…".into(),
+                Err(_) => "could not change story mute".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_notification_settings(
+                chat_id,
+                |settings| {
+                    settings.use_default_mute_stories = false;
+                    settings.mute_stories = mute_stories;
+                },
+                cx,
+            );
+            self.status_note = "story mute updated".into();
+            cx.notify();
+        }
+    }
+
+    /// Parity slice (`parity:stories-notify-settings`): apply a
+    /// story-poster exception to the open chat (`setChatNotificationSettings`).
+    pub(super) fn apply_chat_story_poster(
+        &mut self,
+        chat_id: ChatId,
+        show_story_poster: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .set_chat_story_poster(chat_id, show_story_poster);
+            self.status_note = match result {
+                Ok(_) => "story poster setting updated…".into(),
+                Err(_) => "could not change story poster".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_notification_settings(
+                chat_id,
+                |settings| {
+                    settings.use_default_show_story_poster = false;
+                    settings.show_story_poster = show_story_poster;
+                },
+                cx,
+            );
+            self.status_note = "story poster setting updated".into();
+            cx.notify();
+        }
+    }
+
+    /// Parity slice (`parity:stories-notify-settings`): apply a story-sound
+    /// choice to the open chat (`setChatNotificationSettings`).
+    pub(super) fn apply_chat_story_sound(
+        &mut self,
+        chat_id: ChatId,
+        use_default_story_sound: bool,
+        story_sound_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        self.story_sound_picker_open = false;
+        if self.live.is_some() {
+            let result = self
+                .live
+                .as_mut()
+                .expect("live")
+                .driver
+                .set_chat_story_sound(chat_id, use_default_story_sound, story_sound_id);
+            self.status_note = match result {
+                Ok(_) => "story sound updated…".into(),
+                Err(_) => "could not change story sound".into(),
+            };
+            cx.notify();
+            return;
+        }
+        if self.demo_session.is_some() {
+            self.apply_demo_notification_settings(
+                chat_id,
+                |settings| {
+                    settings.use_default_story_sound = use_default_story_sound;
+                    settings.story_sound_id = story_sound_id;
+                },
+                cx,
+            );
+            self.status_note = "story sound updated".into();
+            cx.notify();
+        }
+    }
+
     /// Parity slice: preview a saved notification sound immediately — play
     /// the MP3 when local, otherwise download it and play on completion
     /// (via `Session::pending_sound_plays`).
@@ -883,6 +1123,7 @@ impl QuillApp {
     ) -> AnyElement {
         let list_id = match target {
             SoundPickerTarget::Chat(_) => "notif-sound-list".to_string(),
+            SoundPickerTarget::ChatStory(_) => "notif-story-sound-list".to_string(),
             SoundPickerTarget::Scope(scope) => format!("scope-sound-list-{scope:?}"),
             SoundPickerTarget::Reaction => "reaction-sound-list".to_string(),
         };
@@ -937,6 +1178,15 @@ impl QuillApp {
             (SoundPickerTarget::Chat(_), SoundChoice::Default) => "sound-pick-chat-default",
             (SoundPickerTarget::Chat(_), SoundChoice::Disabled) => "sound-pick-chat-none",
             (SoundPickerTarget::Chat(_), SoundChoice::Custom(_)) => "sound-pick-chat-custom",
+            (SoundPickerTarget::ChatStory(_), SoundChoice::Default) => {
+                "sound-pick-chat-story-default"
+            }
+            (SoundPickerTarget::ChatStory(_), SoundChoice::Disabled) => {
+                "sound-pick-chat-story-none"
+            }
+            (SoundPickerTarget::ChatStory(_), SoundChoice::Custom(_)) => {
+                "sound-pick-chat-story-custom"
+            }
             (SoundPickerTarget::Scope(_), SoundChoice::Default) => "sound-pick-scope-default",
             (SoundPickerTarget::Scope(_), SoundChoice::Disabled) => "sound-pick-scope-none",
             (SoundPickerTarget::Scope(_), SoundChoice::Custom(_)) => "sound-pick-scope-custom",
@@ -1008,6 +1258,17 @@ impl QuillApp {
                     SoundChoice::Custom(id) => (false, id),
                 };
                 self.apply_chat_sound(chat_id, use_default_sound, sound_id, cx);
+            }
+            // Parity slice (`parity:stories-notify-settings`): story sound
+            // follows the same Default / None / custom shape as the message
+            // sound (schema line 3350).
+            SoundPickerTarget::ChatStory(chat_id) => {
+                let (use_default_story_sound, story_sound_id) = match choice {
+                    SoundChoice::Default => (true, 0),
+                    SoundChoice::Disabled => (false, 0),
+                    SoundChoice::Custom(id) => (false, id),
+                };
+                self.apply_chat_story_sound(chat_id, use_default_story_sound, story_sound_id, cx);
             }
             SoundPickerTarget::Scope(scope) => {
                 let sound_id = match choice {

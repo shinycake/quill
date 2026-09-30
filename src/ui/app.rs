@@ -357,6 +357,9 @@ pub struct QuillApp {
     pub(super) group_call_invite_open: bool,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
     pub(super) notif_sound_picker_open: bool,
+    /// Parity slice (`parity:stories-notify-settings`): the notifications
+    /// panel's story-sound picker sub-view is open.
+    pub(super) story_sound_picker_open: bool,
     /// Parity slice: scope-default notification settings dialog is open.
     pub(super) notification_defaults_open: bool,
     /// Parity slice: which defaults-dialog section's sound picker is

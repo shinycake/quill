@@ -565,3 +565,39 @@ fn chat_notification_settings_update_refreshes_exceptions() {
             .contains_key(&NotificationSettingsScope::PrivateChats)
     );
 }
+
+#[test]
+fn story_settings_effective_mute_and_poster_follow_scope_then_chat_exception() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    // Private chat keeping all story defaults.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"m","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":true,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}}"#,
+    );
+    // Scope defaults: stories muted, poster shown — the chat's
+    // `use_default_*` flags defer to these.
+    session.scope_notification_settings.insert(
+        NotificationSettingsScope::PrivateChats,
+        ScopeNotificationSettings {
+            mute_stories: true,
+            show_story_poster: true,
+            ..Default::default()
+        },
+    );
+    let chat = session.chats.get(&7).unwrap();
+    assert!(session.effective_story_muted(chat));
+    assert!(session.effective_story_poster(chat));
+    // Per-chat exceptions override the scope defaults.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatNotificationSettings","chat_id":7,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":true,"use_default_mute_stories":false,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":false,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}"#,
+    );
+    let chat = session.chats.get(&7).unwrap();
+    assert!(!session.effective_story_muted(chat));
+    assert!(!session.effective_story_poster(chat));
+}
