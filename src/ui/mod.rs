@@ -1,4 +1,5 @@
 mod account_lifecycle;
+mod accounts;
 mod appearance;
 mod auth_recovery;
 mod chat_theme;
@@ -8,6 +9,7 @@ mod story_areas;
 mod synthetic;
 
 pub(crate) use account_lifecycle::*;
+pub(crate) use accounts::*;
 pub(crate) use chat_theme::*;
 pub(crate) use privacy::{PrivacyEditorTarget, PrivacyExceptionKind, apply_ready_privacy};
 

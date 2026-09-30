@@ -82,7 +82,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance => (
+        ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAccounts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -1191,6 +1191,8 @@ impl QuillApp {
             twofa_email,
             twofa_notice: None,
             account_lifecycle: AccountLifecycleState::new(window, cx),
+            accounts_ui: AccountsUiState::new(window, cx),
+            credentials,
             // Slice S3: privacy screen state.
             privacy_open: false,
             privacy_editor: None,
@@ -1223,7 +1225,6 @@ impl QuillApp {
             connect_status,
             live,
             status_note,
-            credentials,
             demo_auth_inputs: matches!(
                 demo,
                 Some(

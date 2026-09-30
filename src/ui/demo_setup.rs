@@ -632,6 +632,14 @@ impl QuillApp {
             self.appearance_open = true;
             self.status_note = "screenshot demo — appearance settings".into();
         }
+        // Slice parity:auth-multi-account (UI): the Accounts dialog open
+        // over the ReadyChats fixture (injected, no live Telegram). The
+        // list reads the real local registry, read-only — nothing is
+        // added, switched, or removed by the fixture.
+        if matches!(demo, Some(ScreenshotDemo::ReadyAccounts)) {
+            self.accounts_ui.open = true;
+            self.status_note = "screenshot demo — accounts".into();
+        }
         // Slice A2: 2FA overlay fixture — password set with recovery
         // email (injected `passwordState`, no live Telegram).
         if matches!(demo, Some(ScreenshotDemo::Ready2faManage)) {
