@@ -459,6 +459,59 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Parity slice (platform-paste-image): on Paste, if the composer has
+    /// focus and the clipboard holds an image, attach it as a photo. The kit
+    /// Textarea's own paste runs first on the focused element and only handles
+    /// text (image-only clipboards insert "" — a no-op); this bubbled handler
+    /// then adds the image. No-ops everywhere except the composer so search
+    /// boxes and dialogs keep their plain text paste.
+    pub(super) fn paste_image_from_clipboard(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
+            return;
+        }
+        let Some(item) = cx.read_from_clipboard() else {
+            return;
+        };
+        let image = item.entries.iter().find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(image),
+            _ => None,
+        });
+        let Some(image) = image else {
+            return;
+        };
+        let extension = match image.format {
+            ImageFormat::Png => "png",
+            ImageFormat::Jpeg => "jpg",
+            ImageFormat::Webp => "webp",
+            ImageFormat::Gif => "gif",
+            ImageFormat::Svg => "svg",
+            ImageFormat::Bmp => "bmp",
+            ImageFormat::Tiff => "tiff",
+            ImageFormat::Ico => "ico",
+            ImageFormat::Pnm => "pnm",
+        };
+        match quill::composer::clipboard_image_attachment(&image.bytes, extension) {
+            Some(att) => {
+                let name = att.file_name.clone();
+                let before = self.pending_attachments.len();
+                ComposerAttachment::push_attachment(&mut self.pending_attachments, att);
+                self.status_note = if self.pending_attachments.len() == before {
+                    format!("album is full ({before})")
+                } else {
+                    format!("attached {name}")
+                };
+            }
+            None => {
+                self.status_note = "could not paste image".into();
+            }
+        }
+        cx.notify();
+    }
+
     pub(super) fn clear_attachment(&mut self, cx: &mut Context<Self>) {
         self.pending_attachments.clear();
         self.composer_self_destruct = None;

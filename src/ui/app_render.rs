@@ -9,6 +9,7 @@ use super::actions::{
 use super::app::QuillApp;
 use super::shell::title_bar;
 use gpui_kit::component::alert::Alert;
+use gpui_kit::component::input::Paste as PasteAction;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -253,6 +254,12 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                 this.composer
                     .update(cx, |input, cx| input.focus(window, cx));
+            }))
+            // Parity slice (platform-paste-image): the kit Textarea's paste is
+            // text-only; this bubbled handler attaches clipboard images when
+            // the composer has focus.
+            .on_action(cx.listener(|this, _: &PasteAction, window, cx| {
+                this.paste_image_from_clipboard(window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {
                 window.focus(&this.focus_sidebar, cx);
