@@ -1278,6 +1278,16 @@ impl QuillApp {
                         .driver
                         .cancel_recovery_email_setup()
                         .map(|_| "aborting email setup…".to_string()),
+                    // Slice payments: clear the saved order info and the
+                    // saved provider credentials (`deleteSavedOrderInfo`
+                    // / `deleteSavedCredentials`, schema 1.8.67, lines
+                    // 15286 / 15289). TDLib answers `ok` asynchronously;
+                    // a refusal surfaces via
+                    // `Session::chat_action_error`.
+                    GroupConfirmAction::ClearPaymentInfo => live
+                        .driver
+                        .clear_saved_payment_info()
+                        .map(|_| "clearing saved payment info…".to_string()),
                 };
                 match result {
                     Ok(note) => note,
@@ -1638,6 +1648,13 @@ impl QuillApp {
                         "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.".to_string(),
                         "Delete".to_string(),
                     ),
+                    // Slice payments: clear saved order info + saved
+                    // credentials (TGX "Clear Payment Info").
+                    GroupConfirmAction::ClearPaymentInfo => (
+                        "Clear saved payment info".to_string(),
+                        "Delete the shipping info and payment credentials Telegram saved from past checkouts? This cannot be undone.".to_string(),
+                        "Clear".to_string(),
+                    ),
                 };
             let destructive = matches!(
                 dialog_state.action,
@@ -1645,6 +1662,7 @@ impl QuillApp {
                     | GroupConfirmAction::BlockUser { block: true, .. }
                     | GroupConfirmAction::BlockContact { block: true, .. }
                     | GroupConfirmAction::DeleteSyncedContacts
+                    | GroupConfirmAction::ClearPaymentInfo
             );
             let body = div()
                 .flex()

@@ -9,6 +9,7 @@ mod group_calls;
 mod groups;
 mod message_ops;
 mod messaging;
+mod payments;
 mod search;
 mod settings;
 mod stories;

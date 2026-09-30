@@ -7,6 +7,7 @@ use crate::telegram::requests::{
     get_payment_form, get_payment_receipt, send_payment_form as send_payment_form_request,
     validate_order_info as validate_order_info_request,
 };
+use crate::telegram::{delete_saved_credentials, delete_saved_order_info};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Slice P1: fetch the `paymentForm` for a Buy button press
@@ -97,5 +98,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         let json = get_payment_receipt(extra, chat_id, message_id);
         self.send_json_request(extra, &json)
+    }
+
+    /// Slice payments: clear the saved order info (`deleteSavedOrderInfo`,
+    /// schema 1.8.67, line 15286) and the saved provider credentials
+    /// (`deleteSavedCredentials`, schema line 15289). Both are
+    /// parameterless `= Ok` constructors, sent in order without waiting
+    /// for the first `ok` (same pattern as `delete_synced_contacts`);
+    /// the saved info lives server-side, so there is no local state to
+    /// clear. Returns the number of requests sent.
+    pub fn clear_saved_payment_info(&mut self) -> Result<usize, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteSavedOrderInfo, None);
+        self.send_json_request(extra, &delete_saved_order_info(extra))?;
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteSavedCredentials, None);
+        self.send_json_request(extra, &delete_saved_credentials(extra))?;
+        Ok(2)
     }
 }

@@ -6,10 +6,12 @@
 //! round-trip untouched via `PrivacyRuleDetail::extra_rules`.
 
 use super::app::QuillApp;
+use super::dialogs::GroupConfirmAction;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::ids::ChatId;
 use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use quill::state::{ContactRow, Session};
 use quill::telegram::client::copy_and_parse;
@@ -191,6 +193,34 @@ impl QuillApp {
         body = body.child(calls);
 
         body = body.child(self.privacy_blocked_section(cx));
+
+        // Slice payments: the "Clear saved payment/shipping info" row
+        // (`parity:bots-payment-clear`) — destructive, with the shared
+        // confirm dialog, next to the other data-clearing controls.
+        let mut payments = div().flex().flex_col().gap_1();
+        payments = payments.child(div().text_sm().font_semibold().px_1().child("Payments"));
+        payments = payments.child(
+            div().flex().flex_col().gap_1().child(
+                Button::new("privacy-clear-payment-info")
+                    .label("Clear saved payment/shipping info…")
+                    .ghost()
+                    .danger()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_group_confirm(
+                            ChatId(0),
+                            GroupConfirmAction::ClearPaymentInfo,
+                            cx,
+                        );
+                    })),
+            ),
+        );
+        payments = payments.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("Deletes the shipping info and payment credentials Telegram saved from past checkouts."),
+        );
+        body = body.child(payments);
 
         self.privacy_shell(cx, "main", "Privacy", body.into_any_element())
     }

@@ -58,6 +58,10 @@ pub enum GroupConfirmAction {
     /// 11467). TGX confirms via `AbortRecoveryEmailConfirm`; the abort
     /// carries no chat, so the dialog's chat id is a dummy.
     AbortRecoveryEmailSetup,
+    /// Slice payments: "Clear saved payment/shipping info" —
+    /// `deleteSavedOrderInfo` + `deleteSavedCredentials` (schema 1.8.67,
+    /// lines 15286 / 15289). The dialog's chat id is a dummy.
+    ClearPaymentInfo,
 }
 
 pub struct GroupConfirmDialog {
