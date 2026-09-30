@@ -6598,3 +6598,35 @@ null filter.
   results from the server.
 - **Out of this slice:** other `searchMessagesChatTypeFilter*` variants
   (separate boxes).
+
+## Slice communities-chatlist-mode — view a community's chats as a filtered chat list (2026-09-29)
+
+**Scope:** `parity:communities-chatlist-mode` — selecting a community's
+"View chats" in the communities hub filters the main chat list to that
+community's chats. Membership is derived from the cached
+`communityFullInfo.chats` pack (state keeps no per-chat `community_id`);
+`updateCommunityFullInfo` replaces the pack wholesale, so membership changes
+update the list on the next render. Hidden chats (`is_hidden`) stay included:
+the mode only narrows the already-visible main list, and the hub lists owned
+communities.
+
+- **Built:**
+  - New named module `src/community_mode.rs`: the pure filter logic.
+  - `src/ui/mod.rs`: `ChatListFilter::Community(i64)` variant, a new arm on
+    the existing chat-list empty-state chain, and five `QuillApp` methods
+    (`enter`/`exit_community_chat_list_mode`, `community_mode_banner`,
+    `folder_tabs_with_community_banner`, `retain_community_chats`) + 1 import
+    + 2 call-site glue lines.
+  - `src/ui/dialogs/community.rs`: kit `Button` "View chats" per hub row.
+  - Mode banner (community name + clear X) under the folder tabs; empty state
+    for communities with no chats; Loading state while the full-info pack
+    hasn't landed. The mode exits via the banner X or by selecting a folder
+    tab / Unread / Archived.
+  - Tests in the new named file `tests/community_chatlist_mode.rs`.
+  - README box `parity:communities-chatlist-mode` checked.
+- **Key decisions (ponytail):** derive membership from the cached full-info
+  pack instead of a new per-chat field; no new state shape.
+- **Not verifiable without live Telegram:** real community membership changes
+  arriving via `updateCommunityFullInfo`.
+- **Out of this slice:** toggling community chat visibility (blocked: no
+  TDLib 1.8.67 method — separate box).

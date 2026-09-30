@@ -255,6 +255,21 @@ pub fn build_community_hub_dialog(
                     .gap_2()
                     .child(div().flex_1().text_sm().font_semibold().child(name))
                     .child(
+                        // Parity slice `parity:communities-chatlist-mode`:
+                        // enter chat-list mode for this community — closes
+                        // the hub, filters the main chat list to the
+                        // community's chats, and fires
+                        // `loadCommunityFullInfo` so membership resolves.
+                        Button::new(format!("cm-hub-view-chats-{community_id}"))
+                            .label("💬 View chats")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.close_community_hub(cx);
+                                this.enter_community_chat_list_mode(community_id, cx);
+                                this.close_kit_dialog_if_done(DialogKind::CommunityHub, window, cx);
+                            })),
+                    )
+                    .child(
                         Button::new(format!("g10-hub-info-{community_id}"))
                             .label("ℹ Info")
                             .ghost()
