@@ -112,8 +112,11 @@ impl ChatActiveStoriesView {
 }
 
 /// Phase 9.1: story media Quill renders in the viewer: photo and video only.
-/// Live stories and unsupported content keep the story item but render a
-/// placeholder (no group-call join, no RTMP — out of scope).
+/// Unsupported content keeps the story item but renders a placeholder.
+/// Live stories carry their group call id so the viewer can join
+/// (`stories-live-play`); RTMP live stories can't be joined via tgcalls
+/// (one-way broadcast — the schema exposes no playback URL), so the
+/// viewer says so honestly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoryContentView {
     Photo {
@@ -133,7 +136,12 @@ pub enum StoryContentView {
         /// so the file lands local.
         file_id: FileId,
     },
-    Live,
+    Live {
+        /// `storyContentLive.group_call_id` (`schema/td_api.tl:6662`).
+        group_call_id: i32,
+        /// `storyContentLive.is_rtmp_stream` — not joinable, viewer-only.
+        is_rtmp_stream: bool,
+    },
     Unsupported,
 }
 
@@ -625,7 +633,10 @@ pub(crate) fn parse_story_content(
                 file_id,
             }
         }
-        Some("storyContentLive") => StoryContentView::Live,
+        Some("storyContentLive") => StoryContentView::Live {
+            group_call_id: json_i32(value.get("group_call_id"), 0),
+            is_rtmp_stream: json_bool(value.get("is_rtmp_stream"), false),
+        },
         _ => StoryContentView::Unsupported,
     }
 }

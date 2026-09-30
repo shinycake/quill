@@ -197,6 +197,15 @@ pub struct ActiveGroupCall {
     pub is_video_recorded: bool,
 }
 
+/// stories-live-play: a pending "Join live" from the story viewer — the
+/// group call id plus the `getGroupCall` request behind it, so the pump
+/// can tell "still waiting" from "the fetch failed".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveStoryJoinIntent {
+    pub group_call_id: i32,
+    pub request: RequestId,
+}
+
 impl ActiveGroupCall {
     /// Blank tracked call for a newly seen call id. Participant state
     /// repopulates from updates.

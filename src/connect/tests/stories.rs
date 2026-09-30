@@ -592,3 +592,93 @@ fn driver_pin_and_unpin_chat_message_then_is_pinned_update() {
     assert!(!sink.rendered().contains("CANARY"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// stories-live-play: `join_live_story` sends `getGroupCall` for the live
+/// story's group call and records the pending join; the ingest pump then
+/// issues `joinVideoChat` once the `groupCall` answer has created the
+/// unjoined tracker. Gates: unknown story, non-live story, and a second
+/// join while one is pending are all refused.
+#[test]
+fn driver_join_live_story_two_step_and_gates() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+    // Unknown story: rejected.
+    assert_eq!(
+        driver.join_live_story(ChatId(7), 99),
+        Err(ConnectSendError::InvalidRequest)
+    );
+
+    // Non-live story: rejected.
+    seed_story(&mut driver, &seq, &dyn_sink, 7, 5, "storyContentPhoto", "");
+    assert_eq!(
+        driver.join_live_story(ChatId(7), 5),
+        Err(ConnectSendError::InvalidRequest)
+    );
+
+    // Live story (group_call_id rides in the content object): sends
+    // getGroupCall and records the pending join.
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"story","id":6,"poster_chat_id":7,"date":1700000000,"content":{"@type":"storyContentLive","group_call_id":4242,"is_rtmp_stream":false},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let extra = driver.join_live_story(ChatId(7), 6).unwrap();
+    let get = sent_request(&recorder, "getGroupCall");
+    assert_eq!(get["group_call_id"], 4242);
+    assert_eq!(get["@extra"], extra.0.to_string());
+    let intent = driver
+        .session
+        .pending_live_story_join
+        .expect("pending live-story join recorded");
+    assert_eq!(intent.group_call_id, 4242);
+    assert_eq!(intent.request, extra);
+
+    // Second join while one is pending: rejected.
+    assert_eq!(
+        driver.join_live_story(ChatId(7), 6),
+        Err(ConnectSendError::InvalidRequest)
+    );
+
+    // The `groupCall` answer creates the unjoined tracker; the pump then
+    // issues `joinVideoChat` for the pending live-story join (the no-device
+    // fallback params — no call engine in tests).
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":4242,"title":"Live","is_active":true,"is_video_chat":true,"is_live_story":true,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"participant_count":3}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    // One more ingest in case the answer applied after the pump section.
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":1}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let join = sent_request(&recorder, "joinVideoChat");
+    assert_eq!(join["group_call_id"], 4242);
+    assert_eq!(driver.session.pending_live_story_join, None);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -1,6 +1,7 @@
 //! Connect driver: stories.
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::LiveStoryJoinIntent;
 use crate::state::RequestPurpose;
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::story_page::{StoryPageOp, StoryPageOpState, story_page_op_label};
@@ -82,6 +83,44 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// stories-live-play: join the group call behind a live story
+    /// (`storyContentLive.group_call_id`, `schema/td_api.tl:6662`).
+    /// Two-step, reusing the C3a machinery: `getGroupCall` (via the
+    /// existing `fetch_group_call`) creates the unjoined tracker, and the
+    /// ingest pump issues `join_video_chat` once the tracker exists
+    /// (`pending_live_story_join`). Refuses while a 1:1 call is active,
+    /// while another group call is tracked, or while a live-story join is
+    /// already pending — the group-call overlay's Join button stays the
+    /// manual fallback either way.
+    pub fn join_live_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match self.session.stories.get(&(chat_id.0, story_id)) {
+            Some(story) => match story.content {
+                StoryContentView::Live { group_call_id, .. } => group_call_id,
+                _ => return Err(ConnectSendError::InvalidRequest),
+            },
+            None => return Err(ConnectSendError::InvalidRequest),
+        };
+        if self.session.active_call.is_some() || self.session.active_group_call.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.pending_live_story_join.is_some() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.fetch_group_call(group_call_id)?;
+        self.session.pending_live_story_join = Some(LiveStoryJoinIntent {
+            group_call_id,
+            request: extra,
+        });
+        Ok(extra)
     }
 
     /// Phase 9.1: fetch one story's full content (`getStory`). Deduped by
@@ -212,7 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stories
             .get(&(chat_id.0, story_id))
             .ok_or(ConnectSendError::InvalidRequest)?;
-        if matches!(story.content, StoryContentView::Live) {
+        if matches!(story.content, StoryContentView::Live { .. }) {
             return Err(ConnectSendError::InvalidRequest);
         }
         if emoji.is_some_and(|emoji| emoji.trim().is_empty()) {
@@ -258,7 +297,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stories
             .get(&(chat_id.0, story_id))
             .ok_or(ConnectSendError::InvalidRequest)?;
-        if matches!(story.content, StoryContentView::Live) {
+        if matches!(story.content, StoryContentView::Live { .. }) {
             return Err(ConnectSendError::InvalidRequest);
         }
         if custom_emoji_id <= 0 {

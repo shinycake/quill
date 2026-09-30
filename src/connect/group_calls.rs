@@ -305,6 +305,39 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
+    /// stories-live-play: the story viewer's "Join live" sets
+    /// `pending_live_story_join`; once the `getGroupCall` answer has
+    /// created the unjoined tracker, issue `join_video_chat` for it.
+    /// The intent is kept while the `getGroupCall` request is in flight
+    /// and dropped when the request completes without a tracker (fetch
+    /// failed — a later tap can retry). The group-call overlay's Join
+    /// button stays the manual fallback either way.
+    pub(crate) fn maybe_join_live_story(&mut self) -> Result<(), ConnectSendError> {
+        let intent = match self.session.pending_live_story_join {
+            Some(intent) => intent,
+            None => return Ok(()),
+        };
+        let ready = self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.id == intent.group_call_id && !call.is_joined);
+        if ready {
+            self.session.pending_live_story_join = None;
+            self.join_video_chat(intent.group_call_id)?;
+            return Ok(());
+        }
+        // The `getGroupCall` request finished without producing a
+        // tracker: the fetch failed. Drop the intent so a later tap can
+        // retry; while the request is still in flight the intent is kept,
+        // so the join can't fire before the tracker exists and can't be
+        // lost to an early ingest either.
+        if self.session.requests.get(intent.request).is_none() {
+            self.session.pending_live_story_join = None;
+        }
+        Ok(())
+    }
+
     /// Phase C3a: `getGroupCall` for a known call id (schema 1.8.67,
     /// :14274). Used to start tracking a voice chat found via a chat's
     /// `video_chat` affordance.

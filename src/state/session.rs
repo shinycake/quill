@@ -397,6 +397,10 @@ pub struct Session {
     /// `getGroupCall` fetch (queued from the `createVideoChat`
     /// `groupCallId` answer). Drained by the driver.
     pub group_call_fetch_queue: Vec<i32>,
+    /// stories-live-play: the story viewer's "Join live" asked for this
+    /// group call; the driver issues `join_video_chat` once the
+    /// `getGroupCall` answer has created the unjoined tracker.
+    pub pending_live_story_join: Option<LiveStoryJoinIntent>,
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
     /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
     pub open_topic: Option<i32>,
@@ -985,6 +989,7 @@ impl Session {
             language_prefs: LanguagePrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
+            pending_live_story_join: None,
             open_topic: None,
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
