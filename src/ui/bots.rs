@@ -120,6 +120,8 @@ pub(super) fn apply_ready_rich_message(
         {"@type":"pageBlockDetails","header":{"@type":"richTextPlain","text":"Details"},"blocks":[
             {"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"Doors at 9pm, show at 10pm."}}],"is_open":true},
         {"@type":"pageBlockDocument","document":{"@type":"document","file_name":"setlist.pdf"},"caption":{"@type":"pageBlockCaption","text":{"@type":"richTextPlain","text":"Tonight's setlist"},"credit":{"@type":"richTextPlain","text":""}}},
+        {"@type":"pageBlockPhoto","photo":{"@type":"photo","id":7770001},"caption":{"@type":"pageBlockCaption","text":{"@type":"richTextPlain","text":"Stage lights"},"credit":{"@type":"richTextPlain","text":""}},"url":"","has_spoiler":false},
+        {"@type":"pageBlockVideo","video":{"@type":"video","id":7770002},"caption":{"@type":"pageBlockCaption","text":{"@type":"richTextPlain","text":"Encore clip"},"credit":{"@type":"richTextPlain","text":""}},"need_autoplay":false,"is_looped":false,"has_spoiler":false},
         {"@type":"pageBlockTable","cells":[
             [{"@type":"pageBlockTableCell","text":{"@type":"richTextPlain","text":"A1"}},{"@type":"pageBlockTableCell","text":{"@type":"richTextPlain","text":"B1"}}],
             [{"@type":"pageBlockTableCell","text":{"@type":"richTextPlain","text":"A2"}},{"@type":"pageBlockTableCell","text":{"@type":"richTextPlain","text":"B2"}}]],"is_bordered":true,"is_striped":false,"has_header":false},
