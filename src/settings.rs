@@ -15,6 +15,10 @@ pub struct Preferences {
     pub account: AccountKey,
     /// Application API credentials are never stored here. See env / local untracked file.
     pub hide_notification_previews: bool,
+    /// Parity slice: tdesktop "Play sounds" — in-app notification sounds.
+    /// Client-side (no TDLib setting exists; `in-app-sounds` is only a
+    /// `SettingsSection` deep-link name, schema line 9322).
+    pub inapp_sounds_enabled: bool,
 }
 
 impl Default for Preferences {
@@ -23,8 +27,21 @@ impl Default for Preferences {
             version: PREFS_VERSION,
             account: AccountKey::primary(),
             hide_notification_previews: true,
+            inapp_sounds_enabled: true,
         }
     }
+}
+
+/// Load general prefs (`prefs.json`); missing or corrupt files fall back
+/// to defaults (never a hard error — prefs must not block startup).
+pub fn load_preferences(paths: &AccountPaths) -> Preferences {
+    load_json_prefs(paths, "prefs.json")
+}
+
+/// Persist general prefs; failures are returned to the caller to surface
+/// in the status note.
+pub fn save_preferences(paths: &AccountPaths, prefs: &Preferences) -> std::io::Result<()> {
+    save_json_prefs(paths, "prefs.json", prefs)
 }
 
 /// Phase C2i: local-only call preferences, persisted as JSON next to

@@ -78,6 +78,12 @@ impl Session {
         &self,
         chat: &ChatSummary,
     ) -> Option<notify::NotificationSoundKind> {
+        // Parity slice: in-app sounds toggle (tdesktop "Play sounds").
+        // Client-side preference — when off, no sound is decided for
+        // any notification.
+        if !self.inapp_sounds_enabled {
+            return None;
+        }
         let settings = &chat.notification_settings;
         let scope = scope_for_chat_kind(&chat.kind);
         let scope_sound_id = self

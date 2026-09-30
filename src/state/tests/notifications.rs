@@ -352,3 +352,37 @@ fn chat_action_choosing_sticker_label() {
     assert_eq!(chat.peer_activity_label(), Some("typing…"));
     assert_eq!(chat.sidebar_preview(), "typing…");
 }
+
+#[test]
+fn inapp_sounds_toggle_gates_notification_sound() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Demo group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    // Scope fetched with no mute and the default sound.
+    let extra = session.request_for_scope(
+        RequestPurpose::GetScopeNotificationSettings,
+        NotificationSettingsScope::GroupChats,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &scope_settings_json(&extra.0.to_string(), 0, true),
+    );
+    session.app_active = false;
+    // Toggle on (default): existing behavior — the app default tone.
+    let chat = session.chats.get(&14).unwrap();
+    assert_eq!(
+        session.notification_sound_for(chat),
+        Some(notify::NotificationSoundKind::Default)
+    );
+    // Toggle off: no sound, regardless of mute/focus state.
+    session.inapp_sounds_enabled = false;
+    let chat = session.chats.get(&14).unwrap();
+    assert!(session.notification_sound_for(chat).is_none());
+}

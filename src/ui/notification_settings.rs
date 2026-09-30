@@ -147,6 +147,22 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Parity slice: in-app notification sounds toggle (tdesktop "Play
+    /// sounds"). Writes through to prefs (persist) and updates the
+    /// Session mirror immediately.
+    pub(super) fn set_inapp_sounds_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.inapp_sounds_enabled = on;
+            if let Err(err) = live.driver.save_inapp_sounds_enabled() {
+                self.status_note = format!("couldn’t save notification sounds: {err}");
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.inapp_sounds_enabled = on;
+            self.status_note = "demo: in-app sounds are not saved".into();
+        }
+        cx.notify();
+    }
+
     /// kit Phase 2 (redo): notification defaults hosted in a kit `Dialog`
     /// via `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
     pub(super) fn build_notification_defaults_dialog(
@@ -190,6 +206,10 @@ impl QuillApp {
             // Slice parity:chatlist-badge-settings: app badge counter
             // preferences (include muted/archived, messages vs chats).
             body = body.child(this.badge_counter_section(cx));
+            // Parity slice: in-app notification sounds (tdesktop "Play
+            // sounds") — the client-side toggle gating
+            // `Session::notification_sound_for`.
+            body = body.child(this.inapp_sounds_section(cx));
             let footer = div().flex().justify_end().child(
                 Button::new("close-notif-defaults")
                     .label("Close")
@@ -304,6 +324,50 @@ impl QuillApp {
                 prefs.count_messages,
                 |p, on| p.count_messages = on,
             ))
+            .into_any_element()
+    }
+
+    /// Parity slice: in-app notification sounds (tdesktop "Play sounds")
+    /// as a single kit Switch row in the notification defaults dialog.
+    /// Toggling writes through to `prefs.json` and updates the Session
+    /// mirror so the next notification's sound decision sees it.
+    pub(super) fn inapp_sounds_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = self
+            .session()
+            .map(|s| s.inapp_sounds_enabled)
+            .unwrap_or(true);
+        div()
+            .id("inapp-sounds-section")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(div().font_semibold().text_sm().child("In-app sounds"))
+                    .child(
+                        Switch::new("inapp-sounds-toggle")
+                            .checked(enabled)
+                            .accessibility_label("Play sounds")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.set_inapp_sounds_enabled(on, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Play sounds while using the app"),
+            )
             .into_any_element()
     }
 
