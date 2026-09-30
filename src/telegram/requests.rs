@@ -5292,6 +5292,30 @@ pub fn set_scope_notification_settings(
     .to_string()
 }
 
+/// `setReactionNotificationSettings` (TDLib 1.8.67, line 13668). Full
+/// settings object; callers copy the current settings and change one
+/// field. No getter exists — the current values arrive as
+/// `updateReactionNotificationSettings`.
+pub fn set_reaction_notification_settings(
+    extra: RequestId,
+    settings: &crate::telegram::envelope::ReactionNotificationSettings,
+) -> String {
+    let source = |s: crate::telegram::envelope::ReactionNotificationSource| json!({ "@type": s.type_name() });
+    json!({
+        "@type": "setReactionNotificationSettings",
+        "@extra": extra.as_extra(),
+        "notification_settings": {
+            "@type": "reactionNotificationSettings",
+            "message_reaction_source": source(settings.message_reaction_source),
+            "story_reaction_source": source(settings.story_reaction_source),
+            "poll_vote_source": source(settings.poll_vote_source),
+            "sound_id": settings.sound_id,
+            "show_preview": settings.show_preview
+        }
+    })
+    .to_string()
+}
+
 /// `addChatToList` (TDLib 1.8.67). Main and Archive are mutually exclusive.
 /// `sendChatAction` (TDLib 1.8.67). `typing` sends `chatActionTyping`;
 /// otherwise `chatActionCancel` (Unigram `CancelTyping`). `topic_id` null,

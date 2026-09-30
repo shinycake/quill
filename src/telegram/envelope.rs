@@ -885,6 +885,12 @@ pub enum EnvelopePayload {
         scope: NotificationSettingsScope,
         settings: ScopeNotificationSettings,
     },
+    /// `updateReactionNotificationSettings` — reaction and poll-vote
+    /// notification settings changed (schema line 10671). No getter
+    /// exists; the update stream is the source of truth.
+    UpdateReactionNotificationSettings {
+        settings: ReactionNotificationSettings,
+    },
     /// `updateMessageInteractionInfo` — views / forwards / `messageReactions`.
     UpdateMessageInteractionInfo {
         chat_id: ChatId,
@@ -3431,6 +3437,56 @@ impl Default for ScopeNotificationSettings {
             show_story_poster: true,
             disable_pinned_message_notifications: false,
             disable_mention_notifications: false,
+        }
+    }
+}
+
+/// `reactionNotificationSource` (TDLib 1.8.67, lines 3378-3387): which
+/// reactions get notifications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReactionNotificationSource {
+    /// Notifications for reactions are disabled.
+    #[default]
+    None,
+    /// Notifications are shown only for reactions from contacts.
+    Contacts,
+    /// Notifications are shown for all reactions.
+    All,
+}
+
+impl ReactionNotificationSource {
+    /// The `@type` constructor name for `setReactionNotificationSettings`.
+    pub fn type_name(self) -> &'static str {
+        match self {
+            ReactionNotificationSource::None => "reactionNotificationSourceNone",
+            ReactionNotificationSource::Contacts => "reactionNotificationSourceContacts",
+            ReactionNotificationSource::All => "reactionNotificationSourceAll",
+        }
+    }
+}
+
+/// `reactionNotificationSettings` (TDLib 1.8.67, line 3396): notification
+/// settings for reactions and poll votes. There is no getter — the current
+/// values arrive via `updateReactionNotificationSettings`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactionNotificationSettings {
+    pub message_reaction_source: ReactionNotificationSource,
+    pub story_reaction_source: ReactionNotificationSource,
+    pub poll_vote_source: ReactionNotificationSource,
+    /// 0 = disabled; -1 = app-dependent default sound (schema line 3394).
+    pub sound_id: i64,
+    /// True if reaction sender and emoji must be displayed in notifications.
+    pub show_preview: bool,
+}
+
+impl Default for ReactionNotificationSettings {
+    fn default() -> Self {
+        Self {
+            message_reaction_source: ReactionNotificationSource::None,
+            story_reaction_source: ReactionNotificationSource::None,
+            poll_vote_source: ReactionNotificationSource::None,
+            sound_id: -1,
+            show_preview: true,
         }
     }
 }
@@ -8411,6 +8467,11 @@ fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseEr
                 None => Err(ParseError::MissingField),
             }
         }
+        "updateReactionNotificationSettings" => {
+            Ok(EnvelopePayload::UpdateReactionNotificationSettings {
+                settings: parse_reaction_notification_settings(value.get("notification_settings")),
+            })
+        }
         // Slice CL2: `createPrivateChat` answer — a bare `chat`
         // object (schema 1.8.67, line 13312). Parsed exactly like
         // `updateNewChat`'s inner chat so the reducer inserts it into
@@ -10234,6 +10295,35 @@ fn parse_scope_notification_settings(value: Option<&Value>) -> ScopeNotification
             value.get("disable_mention_notifications"),
             defaults.disable_mention_notifications,
         ),
+    }
+}
+
+/// `reactionNotificationSettings` (TDLib 1.8.67, line 3396).
+fn parse_reaction_notification_settings(value: Option<&Value>) -> ReactionNotificationSettings {
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return ReactionNotificationSettings::default();
+    };
+    let defaults = ReactionNotificationSettings::default();
+    ReactionNotificationSettings {
+        message_reaction_source: parse_reaction_notification_source(
+            value.get("message_reaction_source"),
+        ),
+        story_reaction_source: parse_reaction_notification_source(
+            value.get("story_reaction_source"),
+        ),
+        poll_vote_source: parse_reaction_notification_source(value.get("poll_vote_source")),
+        sound_id: json_i64_field(value.get("sound_id"), defaults.sound_id),
+        show_preview: json_bool(value.get("show_preview"), defaults.show_preview),
+    }
+}
+
+/// `reactionNotificationSource` (TDLib 1.8.67, lines 3378-3387); unknown
+/// constructors fall back to `None` (disabled).
+fn parse_reaction_notification_source(value: Option<&Value>) -> ReactionNotificationSource {
+    match value.and_then(|v| v.get("@type")).and_then(Value::as_str) {
+        Some("reactionNotificationSourceContacts") => ReactionNotificationSource::Contacts,
+        Some("reactionNotificationSourceAll") => ReactionNotificationSource::All,
+        _ => ReactionNotificationSource::None,
     }
 }
 
@@ -17507,6 +17597,31 @@ mod notification_sound_tests {
                 assert_eq!(scope, NotificationSettingsScope::GroupChats);
                 assert_eq!(settings.sound_id, 0);
                 assert!(!settings.show_preview);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_reaction_notification_settings_parsed() {
+        // Schema 1.8.67 lines 3396, 10671.
+        let env = parse_envelope(
+            r#"{"@type":"updateReactionNotificationSettings","notification_settings":{"@type":"reactionNotificationSettings","message_reaction_source":{"@type":"reactionNotificationSourceContacts"},"story_reaction_source":{"@type":"reactionNotificationSourceAll"},"poll_vote_source":{"@type":"reactionNotificationSourceNone"},"sound_id":-1,"show_preview":true}}"#,
+        )
+        .unwrap();
+        match env.payload {
+            EnvelopePayload::UpdateReactionNotificationSettings { settings } => {
+                assert_eq!(
+                    settings.message_reaction_source,
+                    ReactionNotificationSource::Contacts
+                );
+                assert_eq!(
+                    settings.story_reaction_source,
+                    ReactionNotificationSource::All
+                );
+                assert_eq!(settings.poll_vote_source, ReactionNotificationSource::None);
+                assert_eq!(settings.sound_id, -1);
+                assert!(settings.show_preview);
             }
             other => panic!("unexpected {other:?}"),
         }

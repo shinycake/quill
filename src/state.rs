@@ -33,12 +33,12 @@ use crate::telegram::envelope::{
     ParsedCommunity, ParsedCommunityFullInfo, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
     ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
     ParsedUser, ParsedVideoChat, ParsedWebsite, ParsedWelcomeMessage, PasswordState,
-    PaymentFormData, PaymentReceiptData, Poll, ReplyKeyboard, ReplyMarkup, ReportChatOutcome,
-    ReportOption, ReportSponsoredResult, ReportStoryResult, RichMessageContent,
-    ScopeNotificationSettings, SecretChatState, SponsoredMessage, StickerFormat, StickerItem,
-    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryInteractionView,
-    StoryInteractionsView, StoryListView, TdError, UsernameCheckResult, ValidatedOrderInfoData,
-    effective_content, reply_markup_demands_reply,
+    PaymentFormData, PaymentReceiptData, Poll, ReactionNotificationSettings, ReplyKeyboard,
+    ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult, ReportStoryResult,
+    RichMessageContent, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
+    StickerFormat, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
+    StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
+    ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
@@ -245,6 +245,9 @@ pub enum RequestPurpose {
     /// Parity slice: `setScopeNotificationSettings`. Response is `ok`;
     /// the new defaults arrive as `updateScopeNotificationSettings`.
     SetScopeNotificationSettings,
+    /// Parity slice: `setReactionNotificationSettings`. Response is `ok`;
+    /// the new values arrive as `updateReactionNotificationSettings`.
+    SetReactionNotificationSettings,
     /// Slice A3: `getActiveSessions`. Response is `sessions`; the list is
     /// replaced from the authoritative answer (never optimistic).
     GetActiveSessions,
@@ -4206,6 +4209,9 @@ pub struct Session {
     pub scope_notification_settings: HashMap<NotificationSettingsScope, ScopeNotificationSettings>,
     /// Parity slice: scopes with a `getScopeNotificationSettings` in flight.
     pub scope_settings_loading: HashSet<NotificationSettingsScope>,
+    /// Parity slice: `updateReactionNotificationSettings` cache. No getter
+    /// exists — this stays `None` until the first update arrives.
+    pub reaction_notification_settings: Option<ReactionNotificationSettings>,
     /// Phase S2: cached `getStorageStatistics` answer (aggregated by file
     /// type, TGX `TGStorageStats` style); drives the storage-usage overlay,
     /// including the "Secret media and files" category.
@@ -5336,6 +5342,7 @@ impl Session {
             saved_sounds_stale: false,
             scope_notification_settings: HashMap::new(),
             scope_settings_loading: HashSet::new(),
+            reaction_notification_settings: None,
             storage_stats: None,
             storage_stats_loading: false,
             data_storage: DataStoragePrefs::default(),
@@ -8661,6 +8668,12 @@ impl Session {
                 // `setScopeNotificationSettings` was confirmed).
                 self.scope_notification_settings.insert(scope, settings);
                 self.scope_settings_loading.remove(&scope);
+            }
+            EnvelopePayload::UpdateReactionNotificationSettings { settings } => {
+                // Parity slice: no getter exists — the update stream is the
+                // source of truth (it also confirms our own
+                // `setReactionNotificationSettings`).
+                self.reaction_notification_settings = Some(settings);
             }
             // Phase C2g: `joinVideoChat` returns `text` — the tgcalls
             // join answer, stored on the tracked call and consumed by

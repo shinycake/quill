@@ -124,11 +124,12 @@ use quill::telegram::envelope::{
     ParsedFile, ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession,
     ParsedStory, ParsedWebsite, ParsedWelcomeMessage, PasswordState, PaymentFormData,
     PaymentFormTypeData, PaymentProviderKind, PaymentReceivedContent, PaymentSuccessContent,
-    PollContent, PollOption, PollType, ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings,
-    SecretChatState, SpeechRecognition, SponsoredMessage, StatisticalGraph, StatisticalValue,
-    StorageFileTypeStats, StorageStats, StoryAreaKind, StoryOriginView, UsernameCheckResult,
-    call_entry_label, chat_ttl_service_label, effective_content, format_payment_price,
-    format_ttl_setting, price_parts_total, toggle_chosen_emoji_reaction,
+    PollContent, PollOption, PollType, ReactionNotificationSettings, ReactionNotificationSource,
+    ReplyKeyboard, ReplyMarkup, ScopeNotificationSettings, SecretChatState, SpeechRecognition,
+    SponsoredMessage, StatisticalGraph, StatisticalValue, StorageFileTypeStats, StorageStats,
+    StoryAreaKind, StoryOriginView, UsernameCheckResult, call_entry_label, chat_ttl_service_label,
+    effective_content, format_payment_price, format_ttl_setting, price_parts_total,
+    toggle_chosen_emoji_reaction,
 };
 use quill::telegram::requests::SelfDestructSend;
 use quill::telegram::requests::{
@@ -212,6 +213,8 @@ const MAX_OS_NOTIFICATION_SOUND_THREADS: usize = 2;
 enum SoundPickerTarget {
     Chat(ChatId),
     Scope(NotificationSettingsScope),
+    /// Parity slice: `reactionNotificationSettings` (TDLib 1.8.67, line 3396).
+    Reaction,
 }
 
 /// Parity slice: a sound choice in the picker UI.
@@ -223,6 +226,14 @@ enum SoundChoice {
     Disabled,
     /// A saved notification sound id.
     Custom(i64),
+}
+
+/// Parity slice: which reaction-notification source a preset row applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReactionSourceKind {
+    Message,
+    Story,
+    PollVote,
 }
 
 /// kit Phase 9: hover/pressed feedback for hand-rolled clickable surfaces.
@@ -789,9 +800,9 @@ pub struct QuillApp {
     notif_sound_picker_open: bool,
     /// Parity slice: scope-default notification settings dialog is open.
     notification_defaults_open: bool,
-    /// Parity slice: which scope section's sound picker is expanded in the
-    /// defaults dialog (`None` = all collapsed).
-    defaults_sound_picker: Option<NotificationSettingsScope>,
+    /// Parity slice: which defaults-dialog section's sound picker is
+    /// expanded (`None` = all collapsed).
+    defaults_sound_picker: Option<SoundPickerTarget>,
     /// Parity slice: in-flight notification-sound workers; capped so a
     /// message burst cannot stack players.
     notify_sound_inflight: Arc<AtomicUsize>,
@@ -18229,6 +18240,9 @@ impl QuillApp {
             for scope in NotificationSettingsScope::ALL {
                 body = body.child(this.scope_settings_section(cx, scope, &saved_sounds));
             }
+            // Parity slice: reaction + poll-vote notification settings
+            // (`setReactionNotificationSettings`).
+            body = body.child(this.reaction_settings_section(cx, &saved_sounds));
             let footer = div().flex().justify_end().child(
                 Button::new("close-notif-defaults")
                     .label("Close")
@@ -29729,6 +29743,7 @@ impl QuillApp {
         let list_id = match target {
             SoundPickerTarget::Chat(_) => "notif-sound-list".to_string(),
             SoundPickerTarget::Scope(scope) => format!("scope-sound-list-{scope:?}"),
+            SoundPickerTarget::Reaction => "reaction-sound-list".to_string(),
         };
         let mut list = div().id(list_id).flex().flex_col().gap_1().py_1();
         list = list.child(self.sound_picker_row(
@@ -29784,6 +29799,9 @@ impl QuillApp {
             (SoundPickerTarget::Scope(_), SoundChoice::Default) => "sound-pick-scope-default",
             (SoundPickerTarget::Scope(_), SoundChoice::Disabled) => "sound-pick-scope-none",
             (SoundPickerTarget::Scope(_), SoundChoice::Custom(_)) => "sound-pick-scope-custom",
+            (SoundPickerTarget::Reaction, SoundChoice::Default) => "sound-pick-reaction-default",
+            (SoundPickerTarget::Reaction, SoundChoice::Disabled) => "sound-pick-reaction-none",
+            (SoundPickerTarget::Reaction, SoundChoice::Custom(_)) => "sound-pick-reaction-custom",
         };
         let mut row = div()
             .id(format!("{row_id}-row"))
@@ -29858,6 +29876,15 @@ impl QuillApp {
                     SoundChoice::Custom(id) => id,
                 };
                 self.apply_scope_sound(scope, sound_id, cx);
+            }
+            SoundPickerTarget::Reaction => {
+                let sound_id = match choice {
+                    // Reaction `-1` = app-dependent default (schema line 3394).
+                    SoundChoice::Default => -1,
+                    SoundChoice::Disabled => 0,
+                    SoundChoice::Custom(id) => id,
+                };
+                self.apply_reaction_sound(sound_id, cx);
             }
         }
     }
@@ -29991,6 +30018,204 @@ impl QuillApp {
             settings.show_preview = show_preview;
             session.scope_notification_settings.insert(scope, settings);
             self.status_note = "default preview updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: apply a scope's story-mute default
+    /// (`setScopeNotificationSettings`).
+    fn apply_scope_story_mute(
+        &mut self,
+        scope: NotificationSettingsScope,
+        mute_stories: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
+                .driver
+                .session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.mute_stories = mute_stories;
+            let result = live
+                .driver
+                .send_scope_notification_settings(scope, &settings);
+            self.status_note = match result {
+                Ok(_) => "story notification default updated…".into(),
+                Err(_) => "could not change story notification default".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let mut settings = session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+                .unwrap_or_default();
+            settings.mute_stories = mute_stories;
+            session.scope_notification_settings.insert(scope, settings);
+            self.status_note = "story notification default updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: apply a scope's story-poster default
+    /// (`setScopeNotificationSettings`).
+    fn apply_scope_story_poster(
+        &mut self,
+        scope: NotificationSettingsScope,
+        show_story_poster: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — if the
+            // scope's settings haven't arrived yet, wait for the fetch
+            // instead (the dialog already shows "Loading…" per scope).
+            let Some(mut settings) = live
+                .driver
+                .session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+            else {
+                self.status_note = "defaults still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.show_story_poster = show_story_poster;
+            let result = live
+                .driver
+                .send_scope_notification_settings(scope, &settings);
+            self.status_note = match result {
+                Ok(_) => "story poster default updated…".into(),
+                Err(_) => "could not change story poster default".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            let mut settings = session
+                .scope_notification_settings
+                .get(&scope)
+                .cloned()
+                .unwrap_or_default();
+            settings.show_story_poster = show_story_poster;
+            session.scope_notification_settings.insert(scope, settings);
+            self.status_note = "story poster default updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: apply a reaction-notification source
+    /// (`setReactionNotificationSettings`).
+    fn apply_reaction_source(
+        &mut self,
+        kind: ReactionSourceKind,
+        source: ReactionNotificationSource,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — no
+            // getter exists, so wait for the first
+            // `updateReactionNotificationSettings` instead.
+            let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
+            else {
+                self.status_note = "reaction settings still loading…".into();
+                cx.notify();
+                return;
+            };
+            match kind {
+                ReactionSourceKind::Message => settings.message_reaction_source = source,
+                ReactionSourceKind::Story => settings.story_reaction_source = source,
+                ReactionSourceKind::PollVote => settings.poll_vote_source = source,
+            }
+            let result = live.driver.send_reaction_notification_settings(&settings);
+            self.status_note = match result {
+                Ok(_) => "reaction notification setting updated…".into(),
+                Err(_) => "could not change reaction notification setting".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // Screenshot demo: apply locally so the dialog reflects it.
+            let mut settings = session
+                .reaction_notification_settings
+                .clone()
+                .unwrap_or_default();
+            match kind {
+                ReactionSourceKind::Message => settings.message_reaction_source = source,
+                ReactionSourceKind::Story => settings.story_reaction_source = source,
+                ReactionSourceKind::PollVote => settings.poll_vote_source = source,
+            }
+            session.reaction_notification_settings = Some(settings);
+            self.status_note = "reaction notification setting updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: apply the reaction-notification sound
+    /// (`setReactionNotificationSettings`).
+    fn apply_reaction_sound(&mut self, sound_id: i64, cx: &mut Context<Self>) {
+        self.defaults_sound_picker = None;
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — no
+            // getter exists, so wait for the first
+            // `updateReactionNotificationSettings` instead.
+            let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
+            else {
+                self.status_note = "reaction settings still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.sound_id = sound_id;
+            let result = live.driver.send_reaction_notification_settings(&settings);
+            self.status_note = match result {
+                Ok(_) => "reaction sound updated…".into(),
+                Err(_) => "could not change reaction sound".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // Screenshot demo: apply locally so the dialog reflects it.
+            let mut settings = session
+                .reaction_notification_settings
+                .clone()
+                .unwrap_or_default();
+            settings.sound_id = sound_id;
+            session.reaction_notification_settings = Some(settings);
+            self.status_note = "reaction sound updated".into();
+        }
+        cx.notify();
+    }
+
+    /// Parity slice: apply the reaction-notification preview flag
+    /// (`setReactionNotificationSettings`).
+    fn apply_reaction_preview(&mut self, show_preview: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            // Guard: never send schema-defaults as current state — no
+            // getter exists, so wait for the first
+            // `updateReactionNotificationSettings` instead.
+            let Some(mut settings) = live.driver.session.reaction_notification_settings.clone()
+            else {
+                self.status_note = "reaction settings still loading…".into();
+                cx.notify();
+                return;
+            };
+            settings.show_preview = show_preview;
+            let result = live.driver.send_reaction_notification_settings(&settings);
+            self.status_note = match result {
+                Ok(_) => "reaction preview updated…".into(),
+                Err(_) => "could not change reaction preview".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            // Screenshot demo: apply locally so the dialog reflects it.
+            let mut settings = session
+                .reaction_notification_settings
+                .clone()
+                .unwrap_or_default();
+            settings.show_preview = show_preview;
+            session.reaction_notification_settings = Some(settings);
+            self.status_note = "reaction preview updated".into();
         }
         cx.notify();
     }
@@ -31131,24 +31356,29 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(format!("scope-sound-{:?}", scope))
-                            .label(if self.defaults_sound_picker == Some(scope) {
-                                "Hide"
-                            } else {
-                                "Change"
-                            })
+                            .label(
+                                if self.defaults_sound_picker
+                                    == Some(SoundPickerTarget::Scope(scope))
+                                {
+                                    "Hide"
+                                } else {
+                                    "Change"
+                                },
+                            )
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
+                                let target = SoundPickerTarget::Scope(scope);
                                 this.defaults_sound_picker =
-                                    if this.defaults_sound_picker == Some(scope) {
+                                    if this.defaults_sound_picker == Some(target) {
                                         None
                                     } else {
-                                        Some(scope)
+                                        Some(target)
                                     };
                                 cx.notify();
                             })),
                     ),
             );
-        if self.defaults_sound_picker == Some(scope) {
+        if self.defaults_sound_picker == Some(SoundPickerTarget::Scope(scope)) {
             section = section.child(self.notification_sound_picker(
                 cx,
                 SoundPickerTarget::Scope(scope),
@@ -31156,7 +31386,219 @@ impl QuillApp {
                 saved_sounds,
             ));
         }
+        section
+            .child(
+                // Parity slice: story fields of `scopeNotificationSettings`
+                // (schema line 3369-3375) — no story-sound picker (the
+                // message-sound picker above already covers the per-scope
+                // sound choice).
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Mute story notifications"),
+                    )
+                    .child(
+                        Switch::new(format!("scope-story-mute-{scope:?}"))
+                            .checked(settings.mute_stories)
+                            .accessibility_label("Mute story notifications")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.apply_scope_story_mute(scope, on, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Show story poster"),
+                    )
+                    .child(
+                        Switch::new(format!("scope-story-poster-{scope:?}"))
+                            .checked(settings.show_story_poster)
+                            .accessibility_label("Show story poster")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.apply_scope_story_poster(scope, on, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// Parity slice: reaction + poll-vote notification settings section in
+    /// the defaults dialog (`reactionNotificationSettings`, TDLib 1.8.67
+    /// line 3396; no getter — the current values arrive as
+    /// `updateReactionNotificationSettings`).
+    fn reaction_settings_section(
+        &self,
+        cx: &mut Context<Self>,
+        saved_sounds: &[NotificationSound],
+    ) -> AnyElement {
+        let settings: ReactionNotificationSettings = self
+            .session()
+            .and_then(|s| s.reaction_notification_settings.clone())
+            .unwrap_or_default();
+        let loaded = self
+            .session()
+            .is_some_and(|s| s.reaction_notification_settings.is_some());
+        let sound_label = match settings.sound_id {
+            -1 => "Default".to_string(),
+            0 => "None".to_string(),
+            id => saved_sounds
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.title.clone())
+                .unwrap_or_else(|| "Custom".to_string()),
+        };
+        let current_choice = match settings.sound_id {
+            -1 => SoundChoice::Default,
+            0 => SoundChoice::Disabled,
+            id => SoundChoice::Custom(id),
+        };
+
+        let mut section = div()
+            .id("reaction-settings-section")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().font_semibold().text_sm().child("Reactions"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if loaded {
+                                "Set".to_string()
+                            } else {
+                                "Loading…".to_string()
+                            }),
+                    ),
+            );
+        for (kind, label) in [
+            (ReactionSourceKind::Message, "Message reactions"),
+            (ReactionSourceKind::Story, "Story reactions"),
+            (ReactionSourceKind::PollVote, "Poll votes"),
+        ] {
+            section = section.child(self.reaction_source_row(cx, kind, label));
+        }
+        section = section
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Show sender and emoji in notification"),
+                    )
+                    .child(
+                        // Phase 6: kit Switch.
+                        Switch::new("reaction-preview")
+                            .checked(settings.show_preview)
+                            .accessibility_label("Show sender and emoji in reaction notifications")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.apply_reaction_preview(on, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Sound: {sound_label}")),
+                    )
+                    .child(
+                        Button::new("reaction-sound-toggle")
+                            .label(
+                                if self.defaults_sound_picker == Some(SoundPickerTarget::Reaction) {
+                                    "Hide"
+                                } else {
+                                    "Change"
+                                },
+                            )
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.defaults_sound_picker = if this.defaults_sound_picker
+                                    == Some(SoundPickerTarget::Reaction)
+                                {
+                                    None
+                                } else {
+                                    Some(SoundPickerTarget::Reaction)
+                                };
+                                cx.notify();
+                            })),
+                    ),
+            );
+        if self.defaults_sound_picker == Some(SoundPickerTarget::Reaction) {
+            section = section.child(self.notification_sound_picker(
+                cx,
+                SoundPickerTarget::Reaction,
+                current_choice,
+                saved_sounds,
+            ));
+        }
         section.into_any_element()
+    }
+
+    /// Parity slice: one reaction source's preset row (None / Contacts /
+    /// Everyone), mirroring the scope mute presets.
+    fn reaction_source_row(
+        &self,
+        cx: &mut Context<Self>,
+        kind: ReactionSourceKind,
+        label: &str,
+    ) -> AnyElement {
+        let mut row = div().flex().flex_wrap().gap_1().items_center();
+        row = row.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("{label}:")),
+        );
+        for (preset_label, source) in [
+            ("None", ReactionNotificationSource::None),
+            ("Contacts", ReactionNotificationSource::Contacts),
+            ("Everyone", ReactionNotificationSource::All),
+        ] {
+            row = row.child(
+                Button::new(format!("reaction-source-{kind:?}-{source:?}"))
+                    .label(preset_label)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.apply_reaction_source(kind, source, cx);
+                    })),
+            );
+        }
+        row.into_any_element()
     }
 
     /// Parity slice: per-chat folder picker below the header. Destinations
