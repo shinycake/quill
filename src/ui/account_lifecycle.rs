@@ -1,5 +1,15 @@
+use super::app::QuillApp;
+use super::shell::{DialogKind, QuillShell};
 use super::*;
-
+use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::*;
+use gpui_kit::*;
+use std::cell::RefCell;
+use std::rc::Rc;
+use zeroize::Zeroize;
 /// Slice A9: account lifecycle UI — the A7 UI half. One "Account" dialog
 /// with the self-destruct TTL picker and the delete-account danger zone.
 /// TGX-verbatim copy (`SettingsPrivacyController`,

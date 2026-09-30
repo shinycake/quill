@@ -12,11 +12,21 @@
 //! seeded once from the presets (Wi-Fi ← high, mobile ← medium,
 //! roaming ← low).
 
+use super::super::app::QuillApp;
+use super::super::shell::{DialogKind, QuillShell};
 use super::super::*;
+use gpui_kit::assets::IconName;
+use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::switch::Switch;
+use gpui_kit::component::table::{Table, TableBody, TableRow};
+use gpui_kit::component::*;
+use gpui_kit::*;
 use quill::data_settings::{
     AutoDownloadNetSettings, DataStoragePrefs, NetworkKind, size_cap_label, top_chats_by_size,
 };
-
+use std::cell::RefCell;
+use std::rc::Rc;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
 fn format_storage_bytes(n: i64) -> String {

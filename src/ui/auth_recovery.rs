@@ -1,5 +1,12 @@
-use super::*;
-
+use super::app::QuillApp;
+use gpui_kit::component::button::*;
+use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+use quill::composer::should_send_on_enter;
+use quill::telegram::envelope::AuthorizationState;
+use zeroize::Zeroize;
 /// Slice A10: 2FA password recovery UI. "Forgot password?" on the auth
 /// password screen sends `requestAuthenticationPasswordRecovery` (the code
 /// is emailed); the screen switches to recovery-code entry, which submits

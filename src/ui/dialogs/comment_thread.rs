@@ -1,5 +1,4 @@
-use super::super::*;
-
+use quill::ids::{ChatId, MessageId};
 /// Slice G2: channel-post comment-thread viewer (message menu →
 /// "View comments"). The dialog shows the
 /// `Session::comment_thread` fetch (`Loading` / `Failed` / loaded

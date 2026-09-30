@@ -1,5 +1,6 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
 /// Slice G1: which chat to create. Basic groups use
 /// `createNewBasicGroupChat` (schema 1.8.67, line 13327); supergroups
 /// and channels use `createNewSupergroupChat` (line 13337) with the

@@ -1,5 +1,7 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::ids::{ChatId, MessageId};
 /// Slice G1: which close action a modal dialog's backdrop / close
 /// button runs.
 #[derive(Debug, Clone, PartialEq, Eq)]

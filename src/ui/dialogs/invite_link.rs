@@ -1,5 +1,7 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::ids::ChatId;
 /// Phase D3a: invite-link create dialog above the composer. Fields map
 /// 1:1 to `createChatInviteLink` (schema 1.8.67 line 14097): name,
 /// expiration, member limit, creates-join-request toggle. Expiration is

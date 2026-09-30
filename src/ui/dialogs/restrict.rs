@@ -1,5 +1,5 @@
-use super::super::*;
-
+use quill::ids::ChatId;
+use quill::telegram::envelope::ChatPermissions;
 /// Slice G1: restrict/ban dialog (`setChatMemberStatus`, schema
 /// 1.8.67, line 13592). `banned_until_days`: 0 = forever; otherwise
 /// the Unix timestamp sent is now + days * 86400.

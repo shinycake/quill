@@ -4,6 +4,7 @@
 //! `QuillApp` methods, and the render wiring.
 
 use super::QuillApp;
+use super::story_viewer::apply_ready_stories;
 use gpui_kit::AppContext;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::gpui::{Context, Entity, Window};
@@ -13,7 +14,6 @@ use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-
 /// Phase 9.7: the chat story page overlay — story albums (list, open,
 /// create, rename, delete, add/remove/reorder stories, reorder albums),
 /// chat-page stories (pin/unpin), and the paginated archive list for one
@@ -66,7 +66,7 @@ pub(crate) fn apply_ready_story_albums(
     seq: &AtomicU64,
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    super::apply_ready_stories(session, sink, seq);
+    apply_ready_stories(session, sink, seq);
     let story = |id: i32, caption: &str| {
         format!(
             r#"{{"@type":"story","id":{id},"poster_chat_id":11,"date":1700000000,"caption":{{"@type":"formattedText","text":"{caption}","entities":[]}}}}"#

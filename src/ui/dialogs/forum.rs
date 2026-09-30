@@ -1,5 +1,7 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::ids::ChatId;
 /// Slice G2: forum-topic management dialog (info panel → "Manage
 /// topics", admins with `can_manage_topics` only). `new_topic_input`
 /// feeds `createForumTopic`; `editing_topic` + `edit_input` drive the

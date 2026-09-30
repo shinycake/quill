@@ -1,5 +1,8 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::folders::FolderEditor;
+use quill::telegram::envelope::ChatFolderSpec;
 /// Parity slice: create/edit chat-folder dialog. The editable folder model
 /// is [`FolderEditor`]; on save it freezes to a [`ChatFolderSpec`] sent via
 /// `createChatFolder` / `editChatFolder`.

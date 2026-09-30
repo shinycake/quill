@@ -1,5 +1,7 @@
-use super::super::*;
-
+use super::super::app::QuillApp;
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::*;
+use quill::ids::ChatId;
 /// Slice G1: what a `UsernameDialog` text prompt edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextPromptKind {

@@ -1,5 +1,19 @@
+use super::super::app::QuillApp;
+use super::super::shell::{DialogKind, QuillShell};
 use super::super::*;
-
+use gpui_kit::component::button::*;
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::*;
+use gpui_kit::*;
+use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::state::{InfoPanelTarget, Session};
+use quill::telegram::client::copy_and_parse;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 /// Slice G10: communities create + hub + info UI
 /// (`parity:communities-create/hub/info`). Backend landed earlier —
 /// `create_community` / `load_community_full_info` / `set_community_name`

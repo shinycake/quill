@@ -5,10 +5,18 @@
 //! (+ read-date and blocked-sender constructors); unknown rule types
 //! round-trip untouched via `PrivacyRuleDetail::extra_rules`.
 
-use super::*;
+use super::app::QuillApp;
+use gpui_kit::component::button::*;
+use gpui_kit::component::*;
+use gpui_kit::*;
+use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
+use quill::state::{ContactRow, Session};
+use quill::telegram::client::copy_and_parse;
+use quill::telegram::requests::{CallPrivacySetting, PrivacyWho};
 use quill::telegram::requests_privacy::PrivacySettingKey;
-
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 /// Slice S3: Privacy rule editor target — one of the five
 /// `PrivacySettingKey` rules, or one of the two call settings (which
 /// reuse the Phase C2i `call_privacy_*` plumbing instead of the new
