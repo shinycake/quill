@@ -25,6 +25,23 @@ fn bot_commands_parsed_from_get_commands_response() {
 }
 
 #[test]
+fn bot_commands_keep_ephemeral_flag() {
+    // `botCommand.is_ephemeral` (schema 1.8.67 line 826) must survive
+    // decoding — the command menu icon reads it. Absent → false (older
+    // payloads).
+    let json = r#"{"@type":"botCommands","@extra":"9","bot_user_id":21,"commands":[{"@type":"botCommand","command":"secret","description":"Only you see this","is_ephemeral":true},{"@type":"botCommand","command":"start","description":"Start"}]}"#;
+    let env = parse_envelope(json).unwrap();
+    match env.payload {
+        EnvelopePayload::BotCommands { commands, .. } => {
+            assert_eq!(commands.len(), 2);
+            assert!(commands[0].is_ephemeral);
+            assert!(!commands[1].is_ephemeral);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn bot_commands_parsed_without_command_list() {
     // Missing/null `commands` degrades to an empty list rather than a
     // parse failure — the menu then simply shows no global rows.

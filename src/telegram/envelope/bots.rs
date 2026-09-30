@@ -2,13 +2,17 @@ use serde_json::Value;
 
 /// `botCommand` (TDLib 1.8.67, `schema/td_api.tl:826`):
 /// `botCommand command:string description:string is_ephemeral:Bool =
-/// BotCommand`. `is_ephemeral` is not kept — the panel only lists commands;
-/// tapping one inserts plain text into the composer (Phase 3.3 owns the
-/// command menu).
+/// BotCommand`. `is_ephemeral` (schema: "True, if the command must send an
+/// ephemeral message instead of a regular one") is kept so the command
+/// list can mark ephemeral commands; tapping one still inserts the plain
+/// `/command` text into the composer (Phase 3.3 owns the command menu).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BotCommand {
     pub command: String,
     pub description: String,
+    /// Slice: ephemeral-command icon — true when the command's result is
+    /// shown only to the sender (Telegram blog "Ephemeral Bot Messages").
+    pub is_ephemeral: bool,
 }
 
 /// `botInfo` subset (TDLib 1.8.67, `schema/td_api.tl:2430`): only what the
@@ -49,6 +53,11 @@ pub(crate) fn parse_bot_command(value: Option<&Value>) -> Option<BotCommand> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        // Absent in older payloads → not ephemeral.
+        is_ephemeral: value
+            .get("is_ephemeral")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 

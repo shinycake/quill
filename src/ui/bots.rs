@@ -3,6 +3,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -39,7 +40,7 @@ pub(super) fn apply_ready_bot_chat(session: &mut Session, sink: &Arc<MemorySink>
         r#"{"@type":"updateNewMessage","message":{"id":302,"chat_id":21,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"/start","entities":[]}}}}"#
             .to_string(),
         format!(
-            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}},{{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}},{{"@type":"botCommand","command":"ping","description":"Check latency","is_ephemeral":false}}]}}}}"#,
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","commands":[{{"@type":"botCommand","command":"start","description":"Start the bot","is_ephemeral":false}},{{"@type":"botCommand","command":"help","description":"Show help","is_ephemeral":false}},{{"@type":"botCommand","command":"ping","description":"Check latency (ephemeral)","is_ephemeral":true}}]}}}}"#,
             info_extra.0,
         ),
     ];
@@ -154,7 +155,7 @@ pub(super) fn apply_ready_bot_command_menu(
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let cmd_extra = session.request(RequestPurpose::GetCommands, Some(ChatId(21)));
     let json = format!(
-        r#"{{"@type":"botCommands","@extra":"{}","bot_user_id":21,"commands":[{{"@type":"botCommand","command":"settings","description":"Tweak the bot","is_ephemeral":false}}]}}"#,
+        r#"{{"@type":"botCommands","@extra":"{}","bot_user_id":21,"commands":[{{"@type":"botCommand","command":"settings","description":"Tweak the bot (ephemeral)","is_ephemeral":true}}]}}"#,
         cmd_extra.0,
     );
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
@@ -637,14 +638,18 @@ impl QuillApp {
                 } else {
                     format!("/{name} — {}", command.description)
                 };
-                row = row.child(
-                    Button::new(format!("bot-command-{name}"))
-                        .label(label)
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.insert_bot_command(&name, window, cx);
-                        })),
-                );
+                // Ephemeral commands (schema 1.8.67 `botCommand`,
+                // line 826) carry the same eye-off icon as the `/` menu:
+                // their result is only visible to the sender.
+                let mut button = Button::new(format!("bot-command-{name}"))
+                    .label(label)
+                    .ghost();
+                if command.is_ephemeral {
+                    button = button.icon(Icon::new(IconName::EyeOff));
+                }
+                row = row.child(button.on_click(cx.listener(move |this, _, window, cx| {
+                    this.insert_bot_command(&name, window, cx);
+                })));
             }
             panel = panel.child(row);
         }

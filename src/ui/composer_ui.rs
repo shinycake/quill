@@ -5,6 +5,7 @@ use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -98,21 +99,35 @@ impl QuillApp {
                 format!("/{name} — {}", item.description)
             };
             let highlighted = index == selected;
-            list = list.child(
-                div()
-                    .id(("command-menu-item", index as u64))
-                    .w_full()
-                    .px_3()
-                    .py_2()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .when(highlighted, |this| this.bg(cx.theme().selection))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.pick_command_menu_index(index, window, cx);
-                    }))
-                    .child(div().text_sm().child(label)),
-            );
+            // Ephemeral-command icon (Telegram blog "Ephemeral Bot
+            // Messages": ephemeral commands are marked with a special
+            // icon in the bot menu) — eye-off, muted, trailing: the
+            // command's result is only visible to the sender.
+            let mut row = div()
+                .id(("command-menu-item", index as u64))
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .cursor_pointer()
+                .pressable(cx.theme())
+                .when(highlighted, |this| this.bg(cx.theme().selection))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.pick_command_menu_index(index, window, cx);
+                }))
+                .child(div().text_sm().flex_1().min_w_0().child(label));
+            if item.is_ephemeral {
+                row = row.child(
+                    Icon::new(IconName::EyeOff)
+                        .small()
+                        .text_color(cx.theme().muted_foreground),
+                );
+            }
+            list = list.child(row);
         }
         Some(list.into_any_element())
     }

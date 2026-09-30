@@ -1057,6 +1057,10 @@ pub struct CommandMenuItem {
     /// rather than the bot's `botInfo`; rendered in the "Global" section
     /// below the bot-specific commands.
     pub global: bool,
+    /// True when the command is ephemeral (schema 1.8.67 `botCommand`,
+    /// line 826) — the row shows the ephemeral icon; the result is only
+    /// visible to the sender.
+    pub is_ephemeral: bool,
 }
 
 /// Phase 3.3: `/` command-menu trigger. Returns the filter prefix typed
@@ -1121,6 +1125,7 @@ pub fn merge_command_menu_items(
             command: command.command.clone(),
             description: command.description.clone(),
             global: false,
+            is_ephemeral: command.is_ephemeral,
         })
         .collect();
     for command in global {
@@ -1131,6 +1136,7 @@ pub fn merge_command_menu_items(
             command: command.command.clone(),
             description: command.description.clone(),
             global: true,
+            is_ephemeral: command.is_ephemeral,
         });
     }
     items
@@ -1631,6 +1637,7 @@ mod tests {
         BotCommand {
             command: command.into(),
             description: description.into(),
+            is_ephemeral: false,
         }
     }
 
@@ -1707,6 +1714,7 @@ mod tests {
                 command: "start".into(),
                 description: "Start the bot".into(),
                 global: false,
+                is_ephemeral: false,
             }
         );
         assert_eq!(
@@ -1715,6 +1723,7 @@ mod tests {
                 command: "settings".into(),
                 description: "Tweak the bot".into(),
                 global: true,
+                is_ephemeral: false,
             }
         );
     }
@@ -1728,22 +1737,50 @@ mod tests {
     }
 
     #[test]
+    fn merge_command_menu_items_keeps_ephemeral_flag() {
+        // The `is_ephemeral` flag is what the menu icon reads — it must
+        // survive the merge from both the bot-specific and the global
+        // side.
+        let mut secret = bot_command("secret", "Only you see this");
+        secret.is_ephemeral = true;
+        let mut gsettings = bot_command("gsettings", "Global ephemeral");
+        gsettings.is_ephemeral = true;
+        let items = merge_command_menu_items(&[secret, bot_command("start", "")], &[gsettings]);
+        let secret_item = items.iter().find(|i| i.command == "secret").unwrap();
+        assert!(secret_item.is_ephemeral);
+        assert!(!secret_item.global);
+        let global_item = items.iter().find(|i| i.command == "gsettings").unwrap();
+        assert!(global_item.is_ephemeral);
+        assert!(global_item.global);
+        assert!(
+            !items
+                .iter()
+                .find(|i| i.command == "start")
+                .unwrap()
+                .is_ephemeral
+        );
+    }
+
+    #[test]
     fn filter_command_menu_items_matches_prefix_case_insensitively() {
         let items = vec![
             CommandMenuItem {
                 command: "start".into(),
                 description: String::new(),
                 global: false,
+                is_ephemeral: false,
             },
             CommandMenuItem {
                 command: "settings".into(),
                 description: String::new(),
                 global: true,
+                is_ephemeral: false,
             },
             CommandMenuItem {
                 command: "help".into(),
                 description: String::new(),
                 global: false,
+                is_ephemeral: false,
             },
         ];
         let all: Vec<&str> = filter_command_menu_items(&items, "")
