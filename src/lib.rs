@@ -18,6 +18,7 @@ pub mod diagnostics;
 pub mod emoji;
 pub mod folders;
 pub mod force_reply;
+pub mod icon_badge;
 pub mod ids;
 pub mod key_fingerprint;
 pub mod layout;

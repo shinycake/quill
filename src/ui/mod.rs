@@ -50,6 +50,7 @@ mod connect_ui;
 mod contacts;
 mod conversation;
 mod custom_keyboard;
+mod deep_links;
 mod demo;
 mod demo_setup;
 mod downloads;

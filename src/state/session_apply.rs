@@ -1688,11 +1688,89 @@ impl Session {
                 self.accept_own_chat_member(chat_id, member);
             }
             EnvelopePayload::JoinChatResult(result) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::JoinChat)
+                // `parity:platform-deep-links`: `joinChatByInviteLink`
+                // answer for a deep-link invite. Success opens the chat;
+                // the other variants surface as an honest note.
+                if let Some(RequestPurpose::DeepLinkJoin { generation }) =
+                    pending.map(|p| p.purpose)
+                    && let Some(DeepLinkState::ResolvingChat {
+                        action,
+                        generation: slot,
+                    }) = self.deep_link.clone()
+                    && slot == generation
+                {
+                    self.deep_link = Some(match result {
+                        ChatJoinResult::Success { chat_id } => {
+                            DeepLinkState::ChatReady { chat_id, action }
+                        }
+                        ChatJoinResult::RequestSent => DeepLinkState::ShowText(
+                            "Join request sent — the admins need to approve it.".into(),
+                        ),
+                        ChatJoinResult::GuardBotApprovalRequired => DeepLinkState::ShowText(
+                            "This invite needs a guard bot's approval first.".into(),
+                        ),
+                        ChatJoinResult::Declined => {
+                            DeepLinkState::ShowText("The invite was declined.".into())
+                        }
+                    });
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::JoinChat)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
                     self.accept_join_chat_result(chat_id, result);
+                }
+            }
+            // Checked invite preview; confirmation is a separate driver action.
+            EnvelopePayload::ChatInviteLinkInfo {
+                title,
+                member_count,
+                creates_join_request,
+                is_channel,
+            } => {
+                if let Some(RequestPurpose::DeepLinkCheckInvite { generation }) =
+                    pending.map(|p| p.purpose)
+                    && let Some(DeepLinkState::ResolvingChat {
+                        action: DeepLinkAction::JoinInvite { hash },
+                        generation: slot,
+                    }) = self.deep_link.clone()
+                    && slot == generation
+                {
+                    self.deep_link = Some(DeepLinkState::InvitePreview {
+                        hash,
+                        title,
+                        member_count,
+                        creates_join_request,
+                        is_channel,
+                        generation,
+                    });
+                }
+            }
+            // `parity:platform-deep-links`: `getDeepLinkInfo` answer. The
+            // actionable destination is parsed from the `textEntityTypeTextUrl`
+            // entities; the generation guard drops stale answers. The UI
+            // consumes `Info` once (follow-up request, or a dialog with
+            // `text` when there is no action / an update is required).
+            EnvelopePayload::DeepLinkInfo {
+                text,
+                need_update,
+                entities,
+            } => {
+                if let Some(RequestPurpose::DeepLinkInfo { generation }) =
+                    pending.map(|p| p.purpose)
+                    && matches!(
+                        &self.deep_link,
+                        Some(DeepLinkState::ResolvingInfo {
+                            generation: slot
+                        }) if *slot == generation
+                    )
+                {
+                    let action = crate::connect::parse_deep_link_action(&entities);
+                    self.deep_link = Some(DeepLinkState::Info {
+                        text,
+                        need_update,
+                        action,
+                        generation,
+                    });
                 }
             }
             EnvelopePayload::CallbackQueryAnswer(answer) => {
@@ -2006,6 +2084,10 @@ impl Session {
             // M2: handled by the driver before `apply` (blocks land in
             // history there); nothing to reduce here.
             EnvelopePayload::RichMessage { .. } => {}
+            // Slice msg-richtext-ai-tools: `fixedText` / `formattedText`
+            // answers — captured by the driver before `apply` into
+            // `Session::ai_composer_text`; nothing to reduce here.
+            EnvelopePayload::FixedText { .. } | EnvelopePayload::FormattedText { .. } => {}
             // MED4: `webPageInstantView` — captured by the driver before
             // `apply` into `Session::instant_view` (success) or
             // `Session::instant_view_fallback_url` (error); nothing to

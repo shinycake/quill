@@ -164,3 +164,42 @@ fn int64_order_is_not_float() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn deep_link_info_parses_text_and_tg_entities() {
+    // `parity:platform-deep-links`: `getDeepLinkInfo` answer (schema
+    // 1.8.67, line 10087). The actionable data is the `textEntityTypeTextUrl`
+    // entity whose url is the resolved `tg://` link.
+    let env = parse_envelope(
+        r#"{"@type":"deepLinkInfo","text":{"@type":"formattedText","text":"Open the chat","entities":[{"@type":"textEntity","offset":0,"length":13,"type":{"@type":"textEntityTypeTextUrl","url":"tg://resolve?domain=durov"}}]},"need_update_application":false,"@extra":"7"}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::DeepLinkInfo {
+            text,
+            need_update,
+            entities,
+        } => {
+            assert_eq!(text, "Open the chat");
+            assert!(!need_update);
+            assert_eq!(entities.len(), 1);
+            match &entities[0].kind {
+                crate::text::TextEntityKind::TextUrl { url } => {
+                    assert_eq!(url, "tg://resolve?domain=durov")
+                }
+                other => panic!("{other:?}"),
+            }
+            // End to end: entities → action.
+            assert_eq!(
+                crate::connect::parse_deep_link_action(&entities),
+                Some(crate::state::DeepLinkAction::OpenUsername {
+                    domain: "durov".into(),
+                    start_param: None,
+                    post: None,
+                    story_id: None,
+                })
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}

@@ -18,7 +18,7 @@ Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**
 
 ## Status
 
-This is the comprehensive Telegram-parity checklist: one checkbox per user-visible feature/behavior, grouped by area, each with a stable `parity:<area>-<slug>` anchor. `[x]` means the feature genuinely works in Quill today; partial implementations stay unchecked with a note. The parity percentage is computed from this section by `scripts/parity_pct.sh` — never estimated. Newly discovered gaps are added here, so the percentage may drop when audits find new gaps. Every merged feature PR checks its boxes in this list.
+This is the comprehensive Telegram-parity checklist: one checkbox per user-visible feature/behavior, grouped by area, each with a stable `parity:<area>-<slug>` anchor. `[x]` means the feature genuinely works in Quill today; partial implementations stay unchecked with a note. The parity percentage is computed from this section by `scripts/parity_pct.sh` — never estimated. Newly discovered gaps are added here, so the percentage may drop when audits find new gaps. Feature PRs declare completed items in parity-fragments/<slice-id>.txt; the merge pipeline checks the boxes here after each merge (parity may lag a merge by a few minutes).
 
 A weekly `telegram-update-watch` scheduled job keeps this checklist current with official Telegram releases: new release features are verified against the pinned TDLib schema and added here as unchecked items with `parity:` anchors. Items blocked on missing TDLib APIs are marked `(blocked:)` with the reason.
 
@@ -115,10 +115,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] In-message buttons: render pageBlockButtonRow + richTextButton, taps fire bot callbacks <!-- parity:msg-richmessage-buttons -->
 - [x] Ephemeral messages: render message.ephemeral_content instead of regular content <!-- parity:msg-ephemeral-render -->
 - [x] Apply updateMessageEphemeralContent (ephemeral content refreshes over time; initial render covered by parity:msg-ephemeral-render) <!-- parity:msg-ephemeral-updates -->
-- [ ] Compact tables in rich messages <!-- parity:msg-richtext-tables -->
+- [x] Compact tables in rich messages <!-- parity:msg-richtext-tables -->
 - [ ] Expandable block quotes (long block quotes collapse with an expand affordance; authoring covered by parity:msg-quote-block) <!-- parity:msg-blockquote-expandable -->
-- [ ] Inline photos/videos in the rich-text composer (partial: inline documents/files/music done — parity:msg-richtext-inline-doc) <!-- parity:msg-richtext-inline-media -->
-- [ ] AI tools in the rich-text composer (composeTextWithAi, composeRichMessageWithAi, createRichMessageWithAi, fixTextWithAi, fixRichMessageWithAi) <!-- parity:msg-richtext-ai-tools -->
+- [x] Inline photos/videos in the rich-text composer (pageBlockPhoto/pageBlockVideo ↔ inputPageBlockPhoto/inputPageBlockVideo; emoji+caption tile render) <!-- parity:msg-richtext-inline-media -->
+- [x] AI tools in the rich-text composer (composeTextWithAi, composeRichMessageWithAi, createRichMessageWithAi, fixTextWithAi, fixRichMessageWithAi) <!-- parity:msg-richtext-ai-tools -->
 - [x] Rich-text composer max length (32,768 chars) <!-- parity:msg-richtext-max-length -->
 - [ ] Premium gating of the rich-text editor <!-- parity:msg-richtext-premium-gate -->
 
@@ -559,7 +559,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Customizable key bindings <!-- parity:platform-custom-keybindings -->
 - [ ] Screen-reader accessible labels/roles on UI elements (no accessibility API usage in src) <!-- parity:platform-screen-reader-labels -->
 - [ ] VoiceOver support (blocked: Linux desktop has no VoiceOver; no accessibility tree backend in the UI layer) <!-- parity:platform-voiceover -->
-- [ ] High-contrast theme/mode <!-- parity:platform-high-contrast -->
+- [x] High-contrast theme/mode <!-- parity:platform-high-contrast -->
 - [x] System tray icon with unread count (src/tray.rs: tray-icon 0.21 crate, programmatic 64x64 RGBA icon + red unread pill capped at "99+", tooltip — no-op on Linux per tray-icon's docs; 1s UI-thread sync from main.rs; silent no-op when the OS has no system tray; badge sums non-archived chats incl. muted — Telegram Desktop's actual default `_includeMutedCounter = true`) <!-- parity:platform-tray-icon -->
 - [ ] Minimize/close-to-tray behavior <!-- parity:platform-minimize-to-tray -->
 - [ ] Tray context menu (open window, quit) <!-- parity:platform-tray-menu -->
@@ -576,16 +576,16 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder -->
 - [ ] Update changelog display after updates <!-- parity:platform-update-changelog -->
 - [x] Offline connection indicator in UI: slim strip below the title bar driven by `Session::connection` — kit warning banner "Waiting for network…" when offline, presence dot for transitional states (Connecting/Updating/ConnectingToProxy); per-state reconnect labels are parity:platform-reconnect-states <!-- parity:platform-offline-indicator -->
-- [ ] Reconnect state labels ("Connecting…", "Waiting for network…", "Updating…", "Connecting to proxy…") <!-- parity:platform-reconnect-states -->
+- [x] Reconnect state labels ("Connecting…", "Waiting for network…", "Updating…", "Connecting to proxy…") <!-- parity:platform-reconnect-states -->
 - [ ] "You're offline" error messaging when sending/calling while offline <!-- parity:platform-offline-errors -->
 - [x] TDLib request errors surfaced on the originating surface (e.g. failed createCall → error line on call overlay) (src/state.rs:4547) <!-- parity:platform-error-surfacing -->
-- [ ] Flood/rate-limit errors with retry countdown (e.g. "Try again in N seconds") <!-- parity:platform-flood-errors -->
-- [ ] Unread badge on the app/taskbar icon <!-- parity:platform-app-icon-badge -->
-- [ ] OS desktop notifications (partial: in-app toast queue with burst coalescing exists in src/notify.rs; no OS dispatch) <!-- parity:platform-os-notifications -->
+- [x] Flood/rate-limit errors with retry countdown (e.g. "Try again in N seconds") <!-- parity:platform-flood-errors -->
+- [x] Unread badge on the app/taskbar icon <!-- parity:platform-app-icon-badge -->
+- [x] OS desktop notifications (in-app toast queue with burst coalescing in src/notify.rs; OS dispatch via notify-send on Linux / osascript on macOS on worker threads, click-to-focus on Linux) <!-- parity:platform-os-notifications -->
 - [ ] Drag-and-drop files into the composer <!-- parity:platform-drag-drop-files -->
 - [x] Copy text to clipboard (inline keyboard copy-text button src/ui/mod.rs:3932; invite link src/ui/mod.rs:6357) <!-- parity:platform-copy-clipboard -->
-- [ ] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
-- [ ] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
+- [x] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
+- [x] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
 
 Decisions, pins, and blockers: [DECISIONS.md](DECISIONS.md).  
 What credentials are needed next: [docs/credentials.md](docs/credentials.md).  

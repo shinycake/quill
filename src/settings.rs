@@ -250,6 +250,11 @@ pub enum ThemeChoice {
     #[default]
     Light,
     Dark,
+    /// stories-high-contrast: maximum-contrast palette (pure-black
+    /// surfaces, white text/borders). Wins over auto-night — an explicit
+    /// accessibility choice is never silently reverted by the schedule.
+    #[serde(rename = "high_contrast")]
+    HighContrast,
 }
 
 /// Auto-night mode (TGX `NIGHT_MODE_*`, `Settings.java:460-464`). `Auto`
@@ -1263,5 +1268,29 @@ mod account_registry_tests {
         assert!(p2.tdlib_database.ends_with("accounts/account-1/tdlib"));
         assert_ne!(p1.tdlib_database, p2.tdlib_database);
         assert_ne!(p1.tdlib_files, p2.tdlib_files);
+    }
+}
+
+#[cfg(test)]
+mod theme_choice_tests {
+    use super::*;
+
+    /// stories-high-contrast: the new variant serializes as
+    /// "high_contrast" and round-trips; prefs saved before the variant
+    /// existed still load (missing theme → default Light).
+    #[test]
+    fn high_contrast_theme_choice_serde() {
+        let json = serde_json::to_string(&ThemeChoice::HighContrast).unwrap();
+        assert_eq!(json, "\"high_contrast\"");
+        assert_eq!(
+            serde_json::from_str::<ThemeChoice>("\"high_contrast\"").unwrap(),
+            ThemeChoice::HighContrast
+        );
+        assert_eq!(
+            serde_json::from_str::<ThemeChoice>("\"dark\"").unwrap(),
+            ThemeChoice::Dark
+        );
+        let legacy: AppearancePrefs = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.theme, ThemeChoice::Light);
     }
 }

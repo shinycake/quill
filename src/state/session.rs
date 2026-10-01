@@ -65,6 +65,21 @@ pub struct Session {
     /// request errors. The UI drains it into the status note so the
     /// click never silently does nothing.
     pub message_link_error: Option<String>,
+    /// Slice msg-richtext-ai-tools: one-shot `fixTextWithAi` /
+    /// `composeTextWithAi` answer for the open chat's composer. The UI
+    /// drains it (replacing the draft) on the next frame; the chat id
+    /// guards against applying to a chat the user has since left.
+    pub ai_composer_text: Option<(ChatId, String)>,
+    /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
+    /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
+    /// the open chat's composer. Same drain contract as
+    /// `ai_composer_text`. The UI writes the blocks back as editor markup
+    /// (`blocks_to_markup`); the note distinguishes create / fix / rewrite.
+    pub ai_composer_blocks: Option<(ChatId, RichMessageContent, &'static str)>,
+    /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
+    /// errors. The UI drains it into the status note so the click never
+    /// silently does nothing.
+    pub ai_error: Option<String>,
     /// MED4: `getOption("message_caption_length_max")` via `updateOption`
     /// (TDLib 1.8.67, `schema/td_api.tl:10926`); default 1024 is TDLib's
     /// compiled default. Guards caption edits and media-send captions.
@@ -730,6 +745,11 @@ pub struct Session {
     /// Bots slice: generation counter for `ResolveInlineBot` request
     /// correlation (bumped per resolve; see the purpose docs).
     pub inline_bot_resolve_seq: u64,
+    /// `parity:platform-deep-links`: the single active deep-link flow
+    /// (launch link → `getDeepLinkInfo` → follow-up → open chat).
+    pub deep_link: Option<DeepLinkState>,
+    /// Generation counter for deep-link request correlation.
+    pub deep_link_seq: u64,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -902,6 +922,9 @@ impl Session {
             composer_preview: None,
             composer_preview_urls: HashMap::new(),
             message_link_error: None,
+            ai_composer_text: None,
+            ai_composer_blocks: None,
+            ai_error: None,
             recognize_speech_error: None,
             resend_error: None,
             invite_link_error: None,
@@ -1092,6 +1115,8 @@ impl Session {
             inline_query: None,
             inline_bot_resolve: None,
             inline_bot_resolve_seq: 0,
+            deep_link: None,
+            deep_link_seq: 0,
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
@@ -1132,16 +1157,26 @@ impl Session {
 /// Slice parity:platform-offline-indicator — what the UI renders for a
 /// TDLib connection state. Only `Ready` is "connected" (no indicator);
 /// every other state renders the offline/connection indicator.
-/// `Unknown` is treated as transitional (presence only), never as
-/// connected.
+/// `Unknown` is treated as transitional (falls back to "Connecting…"),
+/// never as connected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionIndicator {
     /// Fully offline — banner with the "Waiting for network…" label.
     Offline,
-    /// Connecting / updating / proxy — presence dot only. Per-state
-    /// labels ("Connecting…", "Updating…", "Connecting to proxy…") are
-    /// the `platform-reconnect-states` slice.
-    Transitioning,
+    /// Connecting / updating / proxy — presence dot plus the per-state
+    /// label ("Connecting…", "Updating…", "Connecting to proxy…").
+    /// (Slice parity:platform-reconnect-states.)
+    Transitioning(&'static str),
+}
+
+impl ConnectionIndicator {
+    /// The label the connection strip renders for this indicator.
+    pub fn label(&self) -> &'static str {
+        match self {
+            ConnectionIndicator::Offline => "Waiting for network…",
+            ConnectionIndicator::Transitioning(label) => label,
+        }
+    }
 }
 
 /// Slice parity:platform-offline-indicator — `Session::connection` →
@@ -1150,9 +1185,11 @@ pub fn connection_indicator(state: ConnectionState) -> Option<ConnectionIndicato
     match state {
         ConnectionState::Ready => None,
         ConnectionState::WaitingForNetwork => Some(ConnectionIndicator::Offline),
-        ConnectionState::ConnectingToProxy
-        | ConnectionState::Connecting
-        | ConnectionState::Updating
-        | ConnectionState::Unknown => Some(ConnectionIndicator::Transitioning),
+        ConnectionState::ConnectingToProxy => {
+            Some(ConnectionIndicator::Transitioning("Connecting to proxy…"))
+        }
+        ConnectionState::Connecting => Some(ConnectionIndicator::Transitioning("Connecting…")),
+        ConnectionState::Updating => Some(ConnectionIndicator::Transitioning("Updating…")),
+        ConnectionState::Unknown => Some(ConnectionIndicator::Transitioning("Connecting…")),
     }
 }

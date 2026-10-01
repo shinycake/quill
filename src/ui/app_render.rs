@@ -9,6 +9,7 @@ use super::actions::{
 use super::app::QuillApp;
 use super::shell::title_bar;
 use gpui_kit::component::alert::Alert;
+use gpui_kit::component::input::Paste as PasteAction;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -38,6 +39,42 @@ impl Render for QuillApp {
         {
             dialog.prefill_from_form(&form, window, cx);
         }
+        // Slice msg-richtext-ai-tools: an AI answer for the open chat's
+        // composer replaces the draft (this needs `&mut Window` for the
+        // input, so it can't live in `poll_live`). A late answer for a
+        // chat the user has since left is dropped, never applied blindly.
+        // Rich answers are written back as editor markup
+        // (`blocks_to_markup`, the inverse of `markup_to_blocks`) so the
+        // rich send path rebuilds headings, lists, details, and dividers.
+        let ai_text = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.ai_composer_text.take());
+        let ai_blocks = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.ai_composer_blocks.take());
+        let open_chat = self
+            .live
+            .as_ref()
+            .and_then(|live| live.driver.session.open_chat);
+        if let Some((chat_id, text)) = ai_text
+            && open_chat == Some(chat_id)
+        {
+            self.composer.update(cx, |input, cx| {
+                input.set_value(&text, window, cx);
+            });
+            self.status_note = "AI updated the draft".into();
+        }
+        if let Some((chat_id, rich, note)) = ai_blocks
+            && open_chat == Some(chat_id)
+        {
+            let text = quill::rich::blocks_to_markup(&rich.blocks);
+            self.composer.update(cx, |input, cx| {
+                input.set_value(&text, window, cx);
+            });
+            self.status_note = note.into();
+        }
         // Phase A1: keep the slow-mode countdown ticking while the open
         // chat is gated (spawns at most one 1s task per open chat).
         self.ensure_slow_mode_tick(cx);
@@ -64,6 +101,11 @@ impl Render for QuillApp {
                 self.pending_story_open = None;
                 self.rebuild_story_viewer(ChatId(chat_id), story_id, cx);
             }
+        }
+        // `parity:platform-deep-links`: open the chat the deep link
+        // resolved to (take-once; render owns the `Window`).
+        if let Some((chat_id, action)) = self.pending_deep_link_open.take() {
+            self.open_deep_link_chat(chat_id, &action, window, cx);
         }
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
         // chats whose active stories should be refreshed (an own story
@@ -203,10 +245,12 @@ impl Render for QuillApp {
                 // so the 60s auto-night tick can't silently revert the
                 // flip. Auto-night, when enabled, still overrides the
                 // manual choice while active — same as the dialog.
-                let next = if this.appearance.theme == ThemeChoice::Dark {
-                    ThemeChoice::Light
-                } else {
-                    ThemeChoice::Dark
+                // stories-high-contrast: the toggle cycles all three
+                // modes (Light → Dark → High contrast).
+                let next = match this.appearance.theme {
+                    ThemeChoice::Light => ThemeChoice::Dark,
+                    ThemeChoice::Dark => ThemeChoice::HighContrast,
+                    ThemeChoice::HighContrast => ThemeChoice::Light,
                 };
                 this.set_appearance(cx, |a| a.theme = next);
             }))
@@ -221,6 +265,12 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                 this.composer
                     .update(cx, |input, cx| input.focus(window, cx));
+            }))
+            // Parity slice (platform-paste-image): the kit Textarea's paste is
+            // text-only; this bubbled handler attaches clipboard images when
+            // the composer has focus.
+            .on_action(cx.listener(|this, _: &PasteAction, window, cx| {
+                this.paste_image_from_clipboard(window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {
                 window.focus(&this.focus_sidebar, cx);
@@ -328,22 +378,33 @@ impl Render for QuillApp {
             // Slice parity:platform-offline-indicator — slim connection
             // strip below the title bar. Offline gets the kit warning
             // banner with the "Waiting for network…" label; transitional
-            // states get a presence dot only (per-state labels are the
-            // `platform-reconnect-states` slice).
+            // states get a presence dot plus their per-state label
+            // (slice parity:platform-reconnect-states).
             .when(connection == Some(ConnectionIndicator::Offline), |this| {
                 this.child(Alert::warning("connection-indicator", "Waiting for network…").banner())
             })
-            .when(
-                connection == Some(ConnectionIndicator::Transitioning),
-                |this| {
+            .when_some(
+                connection.and_then(|c| match c {
+                    ConnectionIndicator::Transitioning(label) => Some(label),
+                    ConnectionIndicator::Offline => None,
+                }),
+                |this, label| {
                     this.child(
                         div()
                             .w_full()
                             .flex_none()
                             .flex()
+                            .items_center()
                             .justify_center()
+                            .gap(px(6.))
                             .py(px(4.))
-                            .child(div().size(px(8.)).rounded_full().bg(cx.theme().warning)),
+                            .child(div().size(px(8.)).rounded_full().bg(cx.theme().warning))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(label),
+                            ),
                     )
                 },
             )

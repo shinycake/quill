@@ -6960,3 +6960,17 @@ name `platform-chat-export` is kept in code/comments.)
   first-seen grouping is the display order.
 - **Out of this slice:** `parity:platform-custom-keybindings` (rebinding UI);
   showing context-gated shortcuts' active context (viewer-only, composer-only).
+
+## Parity slice — OS desktop notifications: verify + check (2026-09-30)
+
+- **Scope:** `parity:platform-os-notifications`. The README line claimed "no OS dispatch", but that note was stale — written in the original checklist (#74, 2026-09-27); OS dispatch landed later in "Phase 8.1: desktop notifications for incoming messages" (66440fd) and the checklist was never updated.
+- **Verified (no code changes needed):**
+  - Reducer: `notify::decide_notify` → `coalesce_notification_with_sound` → `session.pending_notifications` (`src/state/session_notifications.rs:62,109`).
+  - Every render: `flush_notifications` (`src/ui/app_render.rs:27`) drains the queue and calls `spawn_os_notification` per notification.
+  - Dispatch: `notify::build_notification_command` (notify-send `--wait --action` on Linux, osascript `display notification` on macOS) + `run_notification_command` on a capped worker-thread pool (`src/ui/notifications.rs:451`).
+  - Click-to-focus: Linux `--wait` action reports "default" → chat id pushed to `notify_clicks` → next `flush_notifications` calls `select_listed_chat`.
+  - Sounds ride the same worker-thread pattern (`spawn_sound_command`).
+  - README box checked with a corrected description.
+- **Key decisions (ponytail):** verified instead of rebuilt — the code was complete and tested (`linux_command_shape`, `macos_command_escapes_quotes`, coalescing tests all pass). No new code was the right diff.
+- **Tests:** existing suite covers it; no new tests needed.
+- **Out of this slice:** none identified.

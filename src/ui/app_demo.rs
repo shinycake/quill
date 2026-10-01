@@ -4,8 +4,8 @@ use super::app::{ChatListFilter, QuillApp};
 use super::connect_ui::{ConnectUiStatus, bootstrap_connect};
 use super::demo::{
     demo_media_allowlist, seed_ready_chats_session, seed_ready_downloads_session,
-    seed_ready_media_session, seed_ready_offline_session, seed_ready_send_media_session,
-    seed_ready_unread_read_session, seed_ready_unread_session,
+    seed_ready_media_session, seed_ready_offline_session, seed_ready_reconnecting_session,
+    seed_ready_send_media_session, seed_ready_unread_read_session, seed_ready_unread_session,
 };
 use super::history::HistoryShared;
 use super::screenshot_demo::ScreenshotDemo;
@@ -82,7 +82,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAccounts => (
+        ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAccounts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -95,6 +95,15 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_offline_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — offline indicator (injected updates, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        // Slice parity:platform-reconnect-states — same chat list, but
+        // the fixture reports Updating so the transitional strip renders
+        // with its per-state label.
+        ScreenshotDemo::ReadyReconnecting => (
+            Some(seed_ready_reconnecting_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — reconnecting indicator (injected updates, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyUnread => (
@@ -126,6 +135,13 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_send_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — outgoing photo/document send (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyPasteImage => (
+            Some(seed_ready_send_media_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — paste clipboard image as photo attachment (injected, no live Telegram)"
                 .into(),
             AuthorizationState::Ready,
         ),
@@ -420,6 +436,18 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — rich editor".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyRichAiTools => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — rich editor AI tools".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyRichPremiumGate => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "Rich messages require Telegram Premium".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyProfileEdit | ScreenshotDemo::ReadyUsername => (
@@ -772,6 +800,14 @@ pub(super) fn demo_pending_attachments(demo: Option<ScreenshotDemo>) -> Vec<Comp
         && let Some(att) = ComposerAttachment::pick(
             &demo_media_allowlist().join("demo-notes.txt"),
             AttachmentKind::Document,
+        )
+    {
+        ComposerAttachment::push_attachment(&mut pending_attachments, att);
+    }
+    if matches!(demo, Some(ScreenshotDemo::ReadyPasteImage))
+        && let Some(att) = ComposerAttachment::pick(
+            &demo_media_allowlist().join("demo-thumb.png"),
+            AttachmentKind::Photo,
         )
     {
         ComposerAttachment::push_attachment(&mut pending_attachments, att);
@@ -1363,6 +1399,10 @@ impl QuillApp {
             member_dialog: None,
             callback_password_dialog: None,
             login_url_confirm: None,
+            pending_deep_link: None,
+            deep_link_dialog: None,
+            deep_link_invite: None,
+            pending_deep_link_open: None,
             dismissed_keyboards: std::collections::HashSet::new(),
             permissions_dialog: None,
             username_dialog: None,
