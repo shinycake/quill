@@ -1582,6 +1582,7 @@ impl Session {
                     self.accept_trending_sticker_sets(sets, is_premium);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).
+                    self.emoji.trending_total = total_count;
                     self.accept_trending_emoji_sets(sets, is_premium);
                 }
             }
@@ -1621,9 +1622,17 @@ impl Session {
                 id,
                 stickers,
                 files,
+                title,
                 ..
             } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetEmojiSet)
+                    && self.emoji.selected_set_id == Some(id)
+                {
+                    self.remember_files(&files);
+                    self.emoji.failed = false;
+                    self.emoji.preview_title = title;
+                    self.emoji.preview = stickers;
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
                     self.remember_files(&files);
                     self.accept_sticker_set(id, stickers);
                 }

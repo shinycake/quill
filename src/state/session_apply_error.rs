@@ -1192,6 +1192,21 @@ impl Session {
         if let Some(RequestPurpose::ManageStickerSet { set_id, .. }) = pending.map(|p| p.purpose) {
             self.finish_sticker_batch_item(set_id, false);
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {
+            self.emoji.mutation_failed = true;
+        }
+        let emoji_purpose = pending.map(|p| p.purpose);
+        if emoji_purpose == Some(RequestPurpose::GetEmojiSet)
+            || emoji_purpose == Some(RequestPurpose::ChangeEmojiSet)
+            || (emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets)
+                && self.emoji.tab == crate::emoji::EmojiSetTab::Installed)
+            || (emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets)
+                && self.emoji.tab == crate::emoji::EmojiSetTab::Trending)
+            || (emoji_purpose == Some(RequestPurpose::SearchEmojiSets)
+                && self.emoji.tab == crate::emoji::EmojiSetTab::Search)
+        {
+            self.emoji.failed = true;
+        }
         if let Some(request) = pending
             && let RequestPurpose::StopPendingMessage { topic_id, draft_id } = request.purpose
             && let Some(chat_id) = request.chat_id

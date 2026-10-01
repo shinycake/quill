@@ -4,6 +4,9 @@ use quill::ids::ChatId;
 /// upgrade (`toggleSupergroupIsBroadcastGroup`), and banning a member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupConfirmAction {
+    RemoveEmojiSet {
+        set_id: i64,
+    },
     DeleteChat,
     LeaveChat,
     BroadcastUpgrade,

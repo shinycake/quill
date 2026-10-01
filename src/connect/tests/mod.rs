@@ -8,6 +8,7 @@ mod chat_state;
 mod connect_flow;
 mod deep_links;
 mod drafts_polls;
+mod emoji_sets;
 mod group_calls;
 mod groups;
 mod message_ops;

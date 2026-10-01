@@ -194,6 +194,19 @@ impl Session {
                 }
             }
         }
+        if self.emoji.open {
+            for sticker in &self.emoji.preview {
+                let file_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
+                    (sticker.format == StickerFormat::Webp && sticker.file_id.0 != 0)
+                        .then_some(sticker.file_id)
+                });
+                if let Some(file_id) = file_id
+                    && self.should_download(file_id)
+                {
+                    ids.push(file_id);
+                }
+            }
+        }
         // Sponsored rows in the open chat: content + sponsor thumbs at priority 1.
         if let Some(chat_id) = self.open_chat
             && let Some(entry) = self.sponsored.get(&chat_id.0)
