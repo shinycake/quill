@@ -184,7 +184,7 @@ impl Default for SpellChecker {
     }
 }
 
-/// Lowercase; strip surrounding quotes/dashes the tokenizer kept.
+/// Lowercase an already-trimmed token.
 fn normalize(word: &str) -> String {
     word.to_lowercase()
 }
@@ -226,7 +226,8 @@ fn is_acronym(word: &str) -> bool {
 /// a letter, `'` or `-` (URLs, @mentions, #hashtags stay whole through
 /// the tokenizer and fail here).
 fn is_checkable(word: &str) -> bool {
-    if word.is_empty() {
+    // ponytail: skip tokens over 64 bytes to bound quadratic edit generation.
+    if word.is_empty() || word.len() > 64 {
         return false;
     }
     for c in word.chars() {
@@ -255,7 +256,7 @@ fn tokenize(text: &str) -> Vec<(&str, usize, usize)> {
     let mut i = 0;
     while i < text.len() {
         let c = bytes[i] as char;
-        let word_char = c.is_ascii_alphabetic() || c == '\'' || c == '-';
+        let word_char = token_byte(bytes[i]);
         // Keep @/# prefixes attached so mentions/hashtags are skipped.
         let prefix = (c == '@' || c == '#')
             && i + 1 < text.len()
@@ -264,8 +265,7 @@ fn tokenize(text: &str) -> Vec<(&str, usize, usize)> {
             let start = i;
             i += 1;
             while i < text.len() {
-                let d = bytes[i] as char;
-                if d.is_ascii_alphabetic() || d == '\'' || d == '-' {
+                if token_byte(bytes[i]) {
                     i += 1;
                 } else {
                     break;
@@ -294,6 +294,11 @@ fn tokenize(text: &str) -> Vec<(&str, usize, usize)> {
         }
     }
     out
+}
+
+// Consume whole mixed-script/digit/username tokens so their ASCII suffix is not flagged.
+fn token_byte(byte: u8) -> bool {
+    byte >= 128 || byte.is_ascii_alphanumeric() || matches!(byte, b'\'' | b'-' | b'_')
 }
 
 /// All Damerau-Levenshtein edits at distance 1 (deletes, transposes,
@@ -438,6 +443,11 @@ mod tests {
         // Mentions, URLs and digits don't produce misspellings.
         let miss = sc.check_words("hey @tehuser see https://example.com/teh 123");
         assert!(miss.is_empty(), "got {miss:?}");
+        assert!(
+            sc.check_words("teh123 @teh_user #teh_tag café caféspeling 日本teh")
+                .is_empty()
+        );
+        assert!(sc.suggestions(&"z".repeat(4096), 5).is_empty());
     }
 
     #[test]

@@ -591,3 +591,23 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
         Some("Could not change the session setting: Telegram refused the request")
     );
 }
+
+// Rich-text premium gate: `my_is_premium` reflects our own user's
+// `user.is_premium` (schema 1.8.67 line 2403); false until our user
+// object is cached.
+#[test]
+fn my_is_premium_follows_own_user_record() {
+    let (mut session, _sink) = session();
+    assert!(!session.my_is_premium());
+    session.my_user_id = Some(31);
+    assert!(!session.my_is_premium());
+    session.users.insert(
+        31,
+        ParsedUser {
+            id: 31,
+            is_premium: true,
+            ..Default::default()
+        },
+    );
+    assert!(session.my_is_premium());
+}

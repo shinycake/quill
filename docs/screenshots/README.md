@@ -4,6 +4,7 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 
 | File | What it shows |
 |---|---|
+| `ready-rich-premium-gate.png` | **Slice msg-richtext-premium-gate** Multi-line composer with the **⛶ Rich editor** button visible, editor closed, and status **Rich messages require Telegram Premium**. Injected Ready session, no live Telegram; `--screenshot-demo ready-rich-premium-gate`. Captured 2026-09-30 via Xvfb + lavapipe. |
 | `ready-deep-link-info.png` | Telegram link kit dialog with TDLib-style update-required text over Ready chats. Injected, no live Telegram; `--screenshot-demo ready-deep-link-info`. Captured 2026-09-30. |
 | `ready-deep-link-invite.png` | Join group confirmation with checked title, member count, admin-approval note and Cancel / Join. Injected, no live Telegram; `--screenshot-demo ready-deep-link-invite`. Captured 2026-09-30. |
 | `synthetic-chat.png` | Mixed-height history: short row, wrapping paragraph, Arabic RTL, Hebrew+emoji, async-loaded image placeholder, empty composer. No live Telegram. |
