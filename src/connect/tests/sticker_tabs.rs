@@ -152,3 +152,143 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
     assert!(driver.select_sticker_tab(StickerTab::Recent).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn sticker_search_and_set_management_use_latest_confirmed_state() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.stickers.open = true;
+    driver.select_sticker_tab(StickerTab::Search).unwrap();
+    driver.search_sticker_picker(" old ").unwrap();
+    let old = sent_request(&recorder, "searchStickerSets")["@extra"].clone();
+    driver.search_sticker_picker("new").unwrap();
+    let latest = sent_request(&recorder, "searchStickerSets")["@extra"].clone();
+    assert_ne!(latest, old);
+    assert_eq!(sent_request(&recorder, "searchStickers")["query"], "new");
+    let result = |extra, id| {
+        json!({"@type":"stickerSets","@extra":extra,"sets":[{"@type":"stickerSetInfo","id":id,"title":"Found","name":"Found","size":2,"is_installed":false}]}).to_string()
+    };
+    driver
+        .ingest(copy_and_parse(&result(old, "66"), &seq, &sink).unwrap())
+        .unwrap();
+    assert!(driver.session.stickers.found_sets.is_empty());
+    driver
+        .ingest(copy_and_parse(&result(latest, "77"), &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.stickers.found_sets[0].id, 77);
+    let first = sent_request(&recorder, "searchStickers")["@extra"].clone();
+    let sticker = |id| json!({"@type":"sticker","id":id,"set_id":"77","emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":false},"remote":{"@type":"remoteFile"}}});
+    let stickers: Vec<_> = (1..=100).map(sticker).collect();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"stickers","@extra":first,"stickers":stickers}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.stickers.found_stickers.len(), 100);
+    assert!(driver.session.stickers.search_has_more);
+    let more = driver.more_sticker_search_results().unwrap().unwrap();
+    assert_eq!(sent_request(&recorder, "searchStickers")["offset"], 100);
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"stickers","@extra":more.as_extra(),"stickers":[sticker(100)]})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.stickers.found_stickers.len(), 100);
+    assert_eq!(driver.session.stickers.search_offset, 101);
+    assert!(!driver.session.stickers.search_has_more);
+    driver.select_sticker_set(77).unwrap();
+    assert_eq!(sent_request(&recorder, "getStickerSet")["set_id"], "77");
+    driver.select_sticker_tab(StickerTab::Search).unwrap();
+    assert_eq!(driver.session.stickers.selected_set_id, None);
+    assert!(
+        !driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetStickerSet)
+    );
+    assert!(driver.manage_sticker_set(77, true, true).is_err());
+    let install = driver.manage_sticker_set(77, true, false).unwrap().unwrap();
+    assert!(!driver.session.stickers.found_sets[0].is_installed);
+    assert_eq!(driver.manage_sticker_set(77, false, false).unwrap(), None);
+    assert_eq!(sent_request(&recorder, "changeStickerSet")["set_id"], "77");
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":install.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.stickers.found_sets[0].is_installed);
+    assert!(
+        driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetInstalledStickerSets)
+    );
+    let remove = driver
+        .manage_sticker_set(77, false, false)
+        .unwrap()
+        .unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"error","@extra":remove.as_extra(),"code":500,"message":"test"})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.stickers.failed);
+    assert!(driver.session.stickers.found_sets[0].is_installed);
+    driver.close_sticker_panel();
+    let remove = driver
+        .manage_sticker_set(77, false, false)
+        .unwrap()
+        .unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":remove.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        !driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetInstalledStickerSets)
+    );
+    assert!(!driver.session.stickers.found_sets[0].is_installed);
+    driver.search_sticker_picker("").unwrap();
+    assert!(!driver.session.stickers.failed);
+    assert!(driver.session.stickers.found_sets.is_empty());
+    assert!(
+        !driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::SearchStickers)
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

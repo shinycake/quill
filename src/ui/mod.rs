@@ -98,6 +98,7 @@ mod shortcuts;
 mod spellcheck_ui;
 mod sponsored;
 mod statistics;
+mod stickers_ui;
 mod story_albums;
 mod story_composer;
 mod story_viewer;

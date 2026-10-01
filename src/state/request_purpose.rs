@@ -282,6 +282,11 @@ pub enum RequestPurpose {
     /// Response is `ok`; the installed-sets cache is cleared so the
     /// panel refetches the authoritative list.
     ChangeStickerSet,
+    ManageStickerSet {
+        set_id: i64,
+        installed: bool,
+        archived: bool,
+    },
     /// Slice S8: `reorderInstalledStickerSets`. Response is `ok`; same
     /// installed-sets invalidation as change.
     ReorderInstalledStickerSets,

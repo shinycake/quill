@@ -8,6 +8,7 @@ pub enum StickerTab {
     Recent,
     Favorites,
     Trending,
+    Search,
 }
 
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
@@ -34,6 +35,9 @@ pub struct StickerPanel {
     pub recent: Vec<StickerItem>,
     /// Slice S8: `searchStickerSets` / `searchStickers` results.
     pub found_sets: Vec<StickerSetInfo>,
+    pub search_query: String,
+    pub search_offset: usize,
+    pub search_has_more: bool,
     pub found_stickers: Vec<StickerItem>,
     /// Slice S12: sticker suggestions for the composer's trailing emoji
     /// (`searchStickers` answers under `SuggestStickers`). `suggest_for`
@@ -76,6 +80,8 @@ impl StickerPanel {
             StickerTab::Installed | StickerTab::Trending => &self.stickers,
             StickerTab::Recent => &self.recent,
             StickerTab::Favorites => &self.favorites,
+            StickerTab::Search if self.selected_set_id.is_some() => &self.stickers,
+            StickerTab::Search => &self.found_stickers,
         }
     }
 
