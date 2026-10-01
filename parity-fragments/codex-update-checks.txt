@@ -1,3 +1,0 @@
-parity:platform-update-check-auto
-parity:platform-update-check-manual
-parity:platform-update-available-ui
