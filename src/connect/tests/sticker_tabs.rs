@@ -436,7 +436,13 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
         .unwrap();
     assert_eq!(driver.session.stickers.archived, before);
     let old = driver.fetch_archived_stickers(false).unwrap().unwrap();
-    driver.session.stickers.selected_set_id = Some(1);
+    driver.select_sticker_set(1).unwrap();
+    assert!(
+        driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetStickerSet)
+    );
     let restore = driver.manage_sticker_set(1, true, false).unwrap().unwrap();
     driver
         .ingest(
@@ -450,6 +456,12 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
         .unwrap();
     assert!(driver.session.stickers.archived.is_empty());
     assert_eq!(driver.session.stickers.selected_set_id, None);
+    assert!(
+        !driver
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetStickerSet)
+    );
     let fresh = sent_request(&recorder, "getArchivedStickerSets")["@extra"].clone();
     assert_ne!(fresh, json!(old.as_extra()));
     driver

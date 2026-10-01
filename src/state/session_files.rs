@@ -92,14 +92,13 @@ impl Session {
 
     /// Photo thumbs in the open chat that are not secret/spoiler and still need a download.
     pub fn thumb_file_ids_to_download(&self) -> Vec<FileId> {
-        let Some(chat_id) = self.open_chat else {
-            return Vec::new();
-        };
-        let Some(history) = self.histories.get(&chat_id.0) else {
-            return Vec::new();
-        };
         let mut ids = Vec::new();
-        for message in history.messages.values() {
+        for message in self
+            .open_chat
+            .and_then(|id| self.histories.get(&id.0))
+            .into_iter()
+            .flat_map(|history| history.messages.values())
+        {
             match &message.content {
                 MessageContent::Photo(photo) => {
                     if photo.is_secret || photo.has_spoiler {
