@@ -205,7 +205,7 @@ pub fn build_create_community_dialog(
         let body = body.into_any_element();
         dialog
             .title("New community")
-            .content({
+            .content(crate::ui::shell::scrollable_dialog_content({
                 // `content` needs an `Fn` closure, but the body is built once
                 // per dialog render — hand it over through a one-shot cell.
                 let body = Rc::new(RefCell::new(Some(body)));
@@ -216,7 +216,7 @@ pub fn build_create_community_dialog(
                         .unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 }
-            })
+            }))
             .footer(footer)
             .on_close(on_close)
     })
@@ -302,7 +302,7 @@ pub fn build_community_hub_dialog(
         let body = body.into_any_element();
         dialog
             .title("Communities")
-            .content({
+            .content(crate::ui::shell::scrollable_dialog_content({
                 let body = Rc::new(RefCell::new(Some(body)));
                 move |content, _, _| {
                     let body = body
@@ -311,7 +311,7 @@ pub fn build_community_hub_dialog(
                         .unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 }
-            })
+            }))
             .on_close(on_close)
     })
 }

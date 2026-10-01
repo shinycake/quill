@@ -957,7 +957,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(format!("Start {kind} with {name}?"))
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
@@ -966,7 +966,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -1093,7 +1093,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(format!("{name} is calling ({kind})"))
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
@@ -1102,7 +1102,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -1232,7 +1232,7 @@ impl QuillApp {
         self.dial_user(user_id, is_video, cx);
     }
 
-    /// Phase C2i: Recent-calls list + call settings for the Calls tab.
+    /// Recent calls; preferences live in Settings.
     pub(super) fn calls_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut list = div().id("calls-list").flex().flex_col().gap_1().px_1();
         list = list.child(div().text_sm().font_semibold().px_1().child("Recent calls"));
@@ -1302,8 +1302,6 @@ impl QuillApp {
                 );
             }
         }
-        list = list.child(self.call_settings_section(cx));
-        list = list.child(self.media_settings_section(cx));
         list
     }
 

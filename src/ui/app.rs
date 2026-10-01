@@ -8,7 +8,7 @@ use super::notification_settings::SoundPickerTarget;
 use super::story_albums::StoryPrivacyEdit;
 use super::synthetic::SyntheticChat;
 use super::*;
-use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::input::{InputState, TextareaState};
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::component::slider::SliderState;
@@ -113,7 +113,7 @@ pub struct QuillApp {
     pub(super) email_input: Entity<TextareaState>,
     pub(super) phone_input: Entity<TextareaState>,
     pub(super) code_input: Entity<TextareaState>,
-    pub(super) password_input: Entity<TextareaState>,
+    pub(super) password_input: Entity<InputState>,
     /// Slice A10: recovery-code entry for 2FA password recovery. The code
     /// is never stored beyond the input widget — it is zeroized after
     /// submit (the A2 rule).
@@ -301,6 +301,8 @@ pub struct QuillApp {
     pub(super) chat_prefs: ChatPrefs,
     /// Settings → Appearance slice: the dialog is on screen.
     pub(super) appearance_open: bool,
+    pub(super) settings_open: bool,
+    pub(super) settings_page: Option<&'static str>,
     /// Parity slice (platform-custom-keybindings): the rebindable action id
     /// currently capturing a keystroke, if any.
     pub(super) keybinding_capture: Option<String>,
@@ -350,8 +352,8 @@ pub struct QuillApp {
     /// inputs only and are cleared on submit/close — never on the session.
     pub(super) twofa_open: bool,
     pub(super) twofa_view: TwofaView,
-    pub(super) twofa_current_password: Entity<TextareaState>,
-    pub(super) twofa_new_password: Entity<TextareaState>,
+    pub(super) twofa_current_password: Entity<InputState>,
+    pub(super) twofa_new_password: Entity<InputState>,
     pub(super) twofa_hint: Entity<TextareaState>,
     pub(super) twofa_email: Entity<TextareaState>,
     /// Slice A2 fixup: local validation notice for the 2FA forms ("enter

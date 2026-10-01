@@ -88,7 +88,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(title)
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
@@ -97,7 +97,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -187,7 +187,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(title)
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
@@ -196,7 +196,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -355,7 +355,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title("Folders")
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
@@ -364,7 +364,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .on_close(on_close)
         })
     }

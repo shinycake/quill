@@ -332,6 +332,7 @@ impl QuillApp {
                     div()
                         .flex()
                         .gap_1()
+                        .child(self.chat_navigation_menu(cx))
                         .when(voice_ok, |this| {
                             this.child(
                                 Button::new("chat-voice-chat")

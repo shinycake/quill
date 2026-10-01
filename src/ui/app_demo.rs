@@ -12,7 +12,7 @@ use super::history::HistoryShared;
 use super::screenshot_demo::ScreenshotDemo;
 use super::synthetic::SyntheticChat;
 use super::*;
-use gpui_kit::component::input::{InputEvent, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::component::*;
@@ -99,7 +99,7 @@ pub(super) fn demo_seed_for(
             AuthorizationState::Ready,
         ),
         // Slice parity:platform-offline-errors — offline banner + kit toast
-        // with the product offline-send note (status_note → push_status_note).
+        // with the product offline-send note (status line).
         ScreenshotDemo::ReadyOfflineToast => (
             Some(seed_ready_offline_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -991,9 +991,9 @@ impl QuillApp {
                 .submit_on_enter(true)
         });
         let password_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            InputState::new(window, cx)
+                .masked(true)
                 .placeholder("Two-step password")
-                .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
         let recovery_code_input = cx.new(|cx| {
@@ -1006,15 +1006,15 @@ impl QuillApp {
         // here only and are cleared on submit/close — never on the
         // session.
         let twofa_current_password = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            InputState::new(window, cx)
+                .masked(true)
                 .placeholder("Current password")
-                .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let twofa_new_password = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            InputState::new(window, cx)
+                .masked(true)
                 .placeholder("New password")
-                .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let twofa_hint = cx.new(|cx| {
@@ -1470,6 +1470,8 @@ impl QuillApp {
             appearance: Self::load_appearance(),
             chat_prefs,
             appearance_open: false,
+            settings_open: false,
+            settings_page: None,
             keybinding_capture: None,
             keybinding_error: None,
             keybinding_focus: cx.focus_handle(),

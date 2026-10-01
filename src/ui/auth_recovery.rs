@@ -1,5 +1,6 @@
 use super::app::QuillApp;
 use gpui_kit::component::button::*;
+use gpui_kit::component::input::{Input, InputContentType};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -146,6 +147,7 @@ impl QuillApp {
                 .child(
                     div()
                         .flex()
+                        .flex_wrap()
                         .items_center()
                         .gap_2()
                         .child(
@@ -182,7 +184,11 @@ impl QuillApp {
                         .text_sm()
                         .child("Two-step password"),
                 )
-                .child(Textarea::new(&self.password_input).h(px(40.)))
+                .child(
+                    Input::new(&self.password_input)
+                        .content_type(InputContentType::Password)
+                        .h(px(40.)),
+                )
                 .child(
                     div()
                         .text_xs()
@@ -192,6 +198,7 @@ impl QuillApp {
                 .child(
                     div()
                         .flex()
+                        .flex_wrap()
                         .items_center()
                         .gap_2()
                         .child(

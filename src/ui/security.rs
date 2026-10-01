@@ -7,6 +7,7 @@ use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::input::{Input, InputContentType};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::table::{Table, TableBody, TableRow};
 use gpui_kit::component::*;
@@ -76,7 +77,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title("Two-Step Verification")
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -87,7 +88,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -255,7 +256,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title("Active Sessions")
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -263,7 +264,7 @@ impl QuillApp {
                         let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -394,7 +395,7 @@ impl QuillApp {
                 .overlay(true)
                 // TGX `WebSessionsTitle`, verbatim.
                 .title("Logged In with Telegram")
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -402,7 +403,7 @@ impl QuillApp {
                         let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -532,14 +533,14 @@ impl QuillApp {
     pub(super) fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.twofa_open = false;
         self.goto_twofa_view(TwofaView::Status);
-        for input in [
-            &self.twofa_current_password,
-            &self.twofa_new_password,
-            &self.twofa_hint,
-            &self.twofa_email,
-        ] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-        }
+        self.twofa_current_password
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa_new_password
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa_hint
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa_email
+            .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
     /// Slice A3: close the overlay and drop any pending terminate
@@ -608,14 +609,14 @@ impl QuillApp {
             return;
         }
         self.twofa_notice = None;
-        for input in [
-            &self.twofa_current_password,
-            &self.twofa_new_password,
-            &self.twofa_hint,
-            &self.twofa_email,
-        ] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-        }
+        self.twofa_current_password
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa_new_password
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa_hint
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa_email
+            .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
             let email_opt = if include_email && !email.is_empty() {
                 Some(email.as_str())
@@ -654,9 +655,10 @@ impl QuillApp {
             return;
         }
         self.twofa_notice = None;
-        for input in [&self.twofa_current_password, &self.twofa_email] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-        }
+        self.twofa_current_password
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa_email
+            .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.set_recovery_email(&current, &email);
         }
@@ -873,7 +875,11 @@ impl QuillApp {
                 .child("Set additional password"),
         )
         .child(div().mt_1().font_semibold().text_sm().child("New password"))
-        .child(Textarea::new(&self.twofa_new_password).h(px(40.)))
+        .child(
+            Input::new(&self.twofa_new_password)
+                .content_type(InputContentType::Password)
+                .h(px(40.)),
+        )
         .child(
             div()
                 .mt_1()
@@ -909,9 +915,17 @@ impl QuillApp {
                     .text_sm()
                     .child("Current password"),
             )
-            .child(Textarea::new(&self.twofa_current_password).h(px(40.)))
+            .child(
+                Input::new(&self.twofa_current_password)
+                    .content_type(InputContentType::Password)
+                    .h(px(40.)),
+            )
             .child(div().mt_1().font_semibold().text_sm().child("New password"))
-            .child(Textarea::new(&self.twofa_new_password).h(px(40.)))
+            .child(
+                Input::new(&self.twofa_new_password)
+                    .content_type(InputContentType::Password)
+                    .h(px(40.)),
+            )
             .child(
                 div()
                     .mt_1()
@@ -951,7 +965,11 @@ impl QuillApp {
                 .text_sm()
                 .child("Current password"),
         )
-        .child(Textarea::new(&self.twofa_current_password).h(px(40.)))
+        .child(
+            Input::new(&self.twofa_current_password)
+                .content_type(InputContentType::Password)
+                .h(px(40.)),
+        )
         .child(
             div()
                 .text_xs()
@@ -972,7 +990,11 @@ impl QuillApp {
                     .text_sm()
                     .child("Current password"),
             )
-            .child(Textarea::new(&self.twofa_current_password).h(px(40.)))
+            .child(
+                Input::new(&self.twofa_current_password)
+                    .content_type(InputContentType::Password)
+                    .h(px(40.)),
+            )
             .child(
                 div()
                     .mt_1()

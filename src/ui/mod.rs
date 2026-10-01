@@ -85,6 +85,7 @@ mod message_media;
 mod message_payments;
 mod message_poll;
 mod message_text;
+mod navigation;
 mod notification_settings;
 mod notifications;
 mod payments;

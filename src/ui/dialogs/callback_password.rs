@@ -1,5 +1,5 @@
 use super::super::app::QuillApp;
-use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 /// B1: password prompt for an `inlineKeyboardButtonTypeCallbackWithPassword`
@@ -24,7 +24,7 @@ pub struct CallbackPasswordDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) message_id: MessageId,
     pub(crate) data: Vec<u8>,
-    pub(crate) password_input: Entity<TextareaState>,
+    pub(crate) password_input: Entity<InputState>,
 }
 
 impl CallbackPasswordDialog {
@@ -36,9 +36,9 @@ impl CallbackPasswordDialog {
         data: Vec<u8>,
     ) -> Self {
         let password_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            InputState::new(window, cx)
                 .placeholder("2-step verification password")
-                .auto_grow(1, 1)
+                .masked(true)
                 .submit_on_enter(false)
         });
         Self {

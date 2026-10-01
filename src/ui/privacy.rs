@@ -137,9 +137,9 @@ impl QuillApp {
                     .bg(cx.theme().sidebar)
                     .border_1()
                     .border_color(cx.theme().border)
-                    .min_w(px(380.))
-                    .max_w(px(520.))
-                    .max_h(px(600.))
+                    .w(px(520.))
+                    .max_w(relative(0.9))
+                    .max_h(relative(0.85))
                     .overflow_y_scroll()
                     .child(
                         div()

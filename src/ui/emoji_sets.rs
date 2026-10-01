@@ -457,13 +457,15 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title("Emoji Packs and Status")
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    move |content, _, _| {
+                        content.child(
+                            body.borrow_mut()
+                                .take()
+                                .unwrap_or_else(|| div().into_any_element()),
+                        )
+                    },
+                ))
                 .on_close(close)
         })
     }

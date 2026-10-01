@@ -373,6 +373,7 @@ impl QuillApp {
                     div()
                         .id("info-panel-body")
                         .flex_1()
+                        .min_h_0()
                         .overflow_y_scroll()
                         .child(content),
                 )

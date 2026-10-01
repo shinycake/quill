@@ -1011,6 +1011,7 @@ pub(super) fn session_history_row(
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(reply_btn)
                     .when_some(react_btn, |this, btn| this.child(btn))

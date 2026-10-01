@@ -222,7 +222,7 @@ impl QuillApp {
                 } else {
                     "Join group?"
                 })
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         content.child(
@@ -231,7 +231,7 @@ impl QuillApp {
                                 .unwrap_or_else(|| div().into_any_element()),
                         )
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -271,7 +271,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title("Telegram link")
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {
                         let body = body
@@ -280,7 +280,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })

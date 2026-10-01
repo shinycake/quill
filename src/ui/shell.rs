@@ -4,7 +4,7 @@ use super::app::{PaneMode, QuillApp};
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::dialog::{Dialog, DialogContent};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -134,6 +134,7 @@ pub(super) fn title_bar(
 /// sites are untouched.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DialogKind {
+    Settings,
     Scheduled,
     PaymentForm,
     PaymentReceipt,
@@ -214,6 +215,7 @@ impl QuillShell {
     /// the render-time overlay conditions the hand-rolled dialogs used.
     fn dialog_is_open(app: &QuillApp, kind: DialogKind) -> bool {
         match kind {
+            DialogKind::Settings => app.settings_open,
             DialogKind::Scheduled => app.scheduled_dialog_open,
             DialogKind::PaymentForm => {
                 app.payment_dialog.is_some()
@@ -268,6 +270,7 @@ impl QuillShell {
 
     fn dialog_builder(kind: DialogKind) -> DialogBuilder {
         match kind {
+            DialogKind::Settings => QuillApp::build_settings_dialog,
             DialogKind::Scheduled => QuillApp::build_scheduled_dialog,
             DialogKind::PaymentForm => QuillApp::build_payment_dialog,
             DialogKind::PaymentReceipt => QuillApp::build_payment_receipt_dialog,
@@ -369,6 +372,7 @@ impl QuillShell {
         // Slice parity:platform-shortcuts-reference: informational, lowest
         // priority.
         DialogKind::Shortcuts,
+        DialogKind::Settings,
     ];
 
     /// Keep the single kit dialog in sync with the app-side open flags.
@@ -403,12 +407,14 @@ impl QuillShell {
                 let build = Self::dialog_builder(kind);
                 let app_c = app.clone();
                 let shell_c = shell.clone();
-                window.open_dialog(cx, move |dialog, _window, cx| {
+                window.open_dialog(cx, move |dialog, window, cx| {
                     // The kit binds Enter to Confirm (which closes the dialog);
                     // the hand-rolled dialogs had no dialog-level Enter behavior,
                     // so keep it disabled. A builder that wants Enter-to-confirm
                     // can set its own `on_ok`, which overrides this default.
                     build(&app_c, &shell_c, dialog.on_ok(|_, _, _| false), cx)
+                        .max_w((window.viewport_size().width - px(48.)).max(px(240.)))
+                        .max_h((window.viewport_size().height - px(48.)).max(px(120.)))
                 });
             }
         }
@@ -470,5 +476,28 @@ impl QuillApp {
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
         }
+    }
+}
+
+/// Bound every dialog body to the current window and keep its header/footer visible.
+pub(crate) fn scrollable_dialog_content<F>(
+    build: F,
+) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent
+where
+    F: Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static,
+{
+    move |content, window, cx| {
+        let available = (window.viewport_size().height - px(180.)).max(px(80.));
+        let body = build(DialogContent::new(), window, cx);
+        content.min_h_0().child(
+            div()
+                .id("dialog-body-scroll")
+                .role(Role::ScrollView)
+                .aria_label("Dialog content")
+                .w_full()
+                .max_h(available)
+                .overflow_y_scroll()
+                .child(body),
+        )
     }
 }

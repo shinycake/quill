@@ -6,7 +6,7 @@ use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::Textarea;
+use gpui_kit::component::input::{Input, InputContentType};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -452,7 +452,10 @@ impl QuillApp {
                         .text_color(text_muted())
                         .child("This button is protected by your two-step verification password."),
                 )
-                .child(Textarea::new(&dialog_state.password_input).h(px(40.)))
+                .child(
+                    Input::new(&dialog_state.password_input)
+                        .content_type(InputContentType::Password),
+                )
                 .into_any_element();
             let footer = div()
                 .flex()
@@ -479,7 +482,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title("Enter 2-step password")
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -490,7 +493,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -557,7 +560,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title("Open login URL?")
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -568,7 +571,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
