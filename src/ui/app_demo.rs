@@ -1326,6 +1326,7 @@ impl QuillApp {
             chat_prefs,
             appearance_open: false,
             keybinding_capture: None,
+            keybinding_error: None,
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
             keybindings_screenshot: false,
@@ -1470,7 +1471,13 @@ impl QuillApp {
 
         let menu_app = cx.weak_entity();
         cx.intercept_keystrokes(move |event, _window, cx| {
-            if event.keystroke.modifiers.modified() {
+            // Shortcut capture owns the key. This interceptor is registered
+            // first so it observes `keybinding_capture` before the capture
+            // handler clears it.
+            let capturing = menu_app
+                .update(cx, |this, _| this.keybinding_capture.is_some())
+                .unwrap_or(false);
+            if capturing || event.keystroke.modifiers.modified() {
                 return;
             }
             let handled = match event.keystroke.key.as_str() {
@@ -1494,6 +1501,28 @@ impl QuillApp {
             if handled {
                 cx.stop_propagation();
             }
+        })
+        .detach();
+        // GPUI matches keybindings before `on_key_down`. While a shortcut
+        // row is capturing, consume the key here so Escape cannot dismiss
+        // Appearance and quit/close/other chords cannot fire underneath.
+        // The element `on_key_down` also stops propagation for keys that
+        // reach the bubble phase.
+        let capture_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, _window, cx| {
+            let keystroke = event.keystroke.clone();
+            let armed = capture_app
+                .update(cx, |this, _| this.keybinding_capture.is_some())
+                .unwrap_or(false);
+            if !armed {
+                return;
+            }
+            cx.stop_propagation();
+            capture_app
+                .update(cx, |this, cx| {
+                    this.handle_keybinding_capture(&keystroke, cx);
+                })
+                .ok();
         })
         .detach();
         if app.live.is_some() {

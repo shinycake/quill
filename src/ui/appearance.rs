@@ -827,8 +827,13 @@ impl QuillApp {
     /// Parity slice (platform-custom-keybindings): the shortcuts section.
     /// Each row shows the action and its current keystroke; "Change" arms
     /// keystroke capture for that row, and "Reset" restores the default.
+    /// The chip shows only a chord that is actually bound. A press that
+    /// collides with fixed chrome or another rebindable action is refused
+    /// and explained under the row.
     fn appearance_keybindings_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        use super::keybindings::{REBINDABLE_ACTIONS, apply_custom_bindings};
+        use super::keybindings::{
+            REBINDABLE_ACTIONS, apply_custom_bindings, conflict_message, resolve_keybindings,
+        };
         use quill::settings::CustomKeybinding;
 
         let customs: Vec<CustomKeybinding> = self
@@ -836,16 +841,35 @@ impl QuillApp {
             .as_ref()
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
+        let resolved = resolve_keybindings(&customs);
         let capturing = self.keybinding_capture.clone();
         let rows = REBINDABLE_ACTIONS.iter().map(|ra| {
-            let current = customs
-                .iter()
-                .find(|c| c.id == ra.id)
-                .map(|c| c.keystroke.clone())
-                .unwrap_or_else(|| ra.defaults.join(" / "));
+            let row_state = resolved.iter().find(|row| row.id == ra.id);
+            let current = row_state
+                .map(|row| row.live.join(" / "))
+                .filter(|live| !live.is_empty())
+                .unwrap_or_else(|| "—".to_string());
             let id = ra.id.to_string();
             let label = ra.label.to_string();
             let is_capturing = capturing.as_deref() == Some(ra.id);
+            let persisted_error = row_state.and_then(|row| {
+                let conflict = row.rejected.as_ref()?;
+                let chord = customs
+                    .iter()
+                    .find(|custom| custom.id == ra.id)
+                    .map(|custom| custom.keystroke.as_str())
+                    .unwrap_or(ra.id);
+                Some(conflict_message(chord, conflict))
+            });
+            let error = if is_capturing {
+                None
+            } else {
+                self.keybinding_error
+                    .as_ref()
+                    .filter(|(err_id, _)| err_id == ra.id)
+                    .map(|(_, message)| message.clone())
+                    .or(persisted_error)
+            };
             // A joined pair like "cmd-shift-g / ctrl-shift-g" is wider than
             // the row; stack those so the label does not paint under the chip.
             let key_lines: Vec<String> = if is_capturing {
@@ -917,36 +941,41 @@ impl QuillApp {
                                             apply_custom_bindings(cx, &customs);
                                         }
                                         this.keybinding_capture = None;
+                                        if this
+                                            .keybinding_error
+                                            .as_ref()
+                                            .is_some_and(|(err_id, _)| err_id == &id)
+                                        {
+                                            this.keybinding_error = None;
+                                        }
                                         cx.notify();
                                     })
                                 }),
                         ),
                 );
-            if is_capturing {
+            let row = if is_capturing {
                 row.track_focus(&self.keybinding_focus)
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        // Escape cancels; anything else becomes the new shortcut.
-                        if event.keystroke.key.as_str() == "escape" {
-                            this.keybinding_capture = None;
-                            cx.notify();
-                            return;
-                        }
-                        let keystroke = event.keystroke.to_string();
-                        let custom = CustomKeybinding {
-                            id: id.clone(),
-                            keystroke,
-                        };
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.save_custom_keybinding(custom);
-                            let customs = live.driver.load_custom_keybindings();
-                            apply_custom_bindings(cx, &customs);
-                        }
-                        this.keybinding_capture = None;
-                        cx.notify();
+                        // Stop the key before it dismisses Appearance or runs
+                        // a global binding. GPUI also matches keybindings
+                        // before this bubble handler; the capture interceptor
+                        // consumes those. Modifier-only presses stay armed.
+                        cx.stop_propagation();
+                        this.handle_keybinding_capture(&event.keystroke, cx);
                     }))
                     .into_any_element()
             } else {
                 row.into_any_element()
+            };
+            if let Some(message) = error {
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(row)
+                    .child(div().text_xs().text_color(super::danger()).child(message))
+                    .into_any_element()
+            } else {
+                row
             }
         });
         self.appearance_section(
@@ -955,5 +984,78 @@ impl QuillApp {
             "Rebind the shortcuts below. Changes apply immediately and are saved on this device. Window and app shortcuts (quit, close, …) can't be changed.",
             div().flex().flex_col().children(rows).into_any_element(),
         )
+    }
+
+    /// Apply one captured key while a shortcuts row is armed.
+    ///
+    /// Escape cancels. Bare modifiers are ignored so Ctrl+K can finish.
+    /// A chord that collides with fixed chrome or another live shortcut is
+    /// not saved; the active chip stays on the chord that is really bound.
+    pub(super) fn handle_keybinding_capture(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) {
+        use super::keybindings::{
+            apply_custom_bindings, canonical_event_chord, conflict_message, is_modifier_key,
+            keybinding_conflict,
+        };
+        use quill::settings::CustomKeybinding;
+
+        let Some(id) = self.keybinding_capture.clone() else {
+            return;
+        };
+        if is_modifier_key(&keystroke.key) {
+            return;
+        }
+        if keystroke.key == "escape" && !keystroke.modifiers.modified() {
+            self.keybinding_capture = None;
+            cx.notify();
+            return;
+        }
+        let Some(chord) = canonical_event_chord(keystroke) else {
+            return;
+        };
+        let customs = self
+            .live
+            .as_ref()
+            .map(|live| live.driver.load_custom_keybindings())
+            .unwrap_or_default();
+        if let Some(conflict) = keybinding_conflict(&id, &chord, &customs) {
+            self.keybinding_error = Some((id, conflict_message(&chord, &conflict)));
+            self.keybinding_capture = None;
+            cx.notify();
+            return;
+        }
+        let custom = CustomKeybinding {
+            id: id.clone(),
+            keystroke: chord,
+        };
+        let saved = self.live.as_mut().map(|live| {
+            let ok = live.driver.save_custom_keybinding(custom).is_ok();
+            let customs = ok.then(|| live.driver.load_custom_keybindings());
+            (ok, customs)
+        });
+        match saved {
+            Some((true, Some(customs))) => {
+                apply_custom_bindings(cx, &customs);
+                if self
+                    .keybinding_error
+                    .as_ref()
+                    .is_some_and(|(err_id, _)| err_id == &id)
+                {
+                    self.keybinding_error = None;
+                }
+            }
+            Some((false, _)) => {
+                self.keybinding_error = Some((
+                    id,
+                    "Couldn't save that shortcut. The previous one is still active.".into(),
+                ));
+            }
+            _ => {}
+        }
+        self.keybinding_capture = None;
+        cx.notify();
     }
 }

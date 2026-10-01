@@ -272,6 +272,10 @@ pub struct QuillApp {
     /// Parity slice (platform-custom-keybindings): the rebindable action id
     /// currently capturing a keystroke, if any.
     pub(super) keybinding_capture: Option<String>,
+    /// Parity slice (platform-custom-keybindings): a capture that was
+    /// refused (fixed chrome or another rebindable action). The shortcuts
+    /// chip keeps showing the chord that is actually bound.
+    pub(super) keybinding_error: Option<(String, String)>,
     /// Parity slice (platform-custom-keybindings): focus handle for the
     /// keystroke-capture row.
     pub(super) keybinding_focus: FocusHandle,
