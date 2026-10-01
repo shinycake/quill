@@ -765,6 +765,10 @@ pub(super) fn session_history_row(
             files,
             downloading,
             media_roots,
+            session
+                .as_ref()
+                .map(|s| s.emoji.custom_emoji_stickers.as_slice())
+                .unwrap_or(&[]),
             revealed,
             // Settings → Appearance: message font size.
             look.font,
@@ -964,6 +968,8 @@ pub(super) fn session_history_row(
                 revealed,
                 // Settings → Appearance: caption follows the message font size.
                 look.font,
+                // Captions don't resolve custom emoji in this slice (text fallback).
+                &HashMap::new(),
                 cx,
             )
         });

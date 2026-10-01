@@ -83,6 +83,8 @@ pub(super) fn sponsored_message_row(
             files,
             downloading,
             media_roots,
+            // Sponsored demo rows carry no custom emoji entities.
+            &[],
             revealed,
             // Settings → Appearance: message font size.
             look.font,

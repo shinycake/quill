@@ -1630,6 +1630,8 @@ impl QuillApp {
                 &self.spoiler_revealed,
                 // Settings → Appearance: captions follow the message font size.
                 self.msg_font(),
+                // Captions don't resolve custom emoji in this slice (text fallback).
+                &HashMap::new(),
                 cx,
             )
         });

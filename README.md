@@ -489,7 +489,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
 - [x] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
 - [x] Custom emoji packs (browse/install/remove, "Emoji Sets" settings screen) <!-- parity:emoji-custom-packs -->
-- [ ] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (partial: backend wired — getCustomEmojiStickers resolves ids to stickers in EmojiPanel; render in text pending)
+- [x] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (inline sticker image at 1.25× text size; thumbnail first, else static WEBP; unresolved falls back to the span text; animated playback still static; live custom emoji unverified)
 - [ ] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated --> (partial: backend wired — getAnimatedEmoji + animatedEmoji parse into EmojiPanel; composer suggestion UI pending)
 - [x] Emoji status: recent/trending/default choices, Premium-gated selection and removal, forever/1h/2h/8h/2d/custom expiry; thumbnails and safe retry; live changes unverified <!-- parity:emoji-status -->
 - [x] Clear recent emoji statuses after confirmation; refusal preserves history and stale list replies cannot restore cleared entries <!-- parity:emoji-status-clear-recent -->

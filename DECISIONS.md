@@ -6939,3 +6939,19 @@ name `platform-chat-export` is kept in code/comments.)
 - **Key decisions (ponytail):** verified instead of rebuilt — the code was complete and tested (`linux_command_shape`, `macos_command_escapes_quotes`, coalescing tests all pass). No new code was the right diff.
 - **Tests:** existing suite covers it; no new tests needed.
 - **Out of this slice:** none identified.
+
+## Slice — render custom emoji inside message text (2026-10-01)
+
+- **Scope:** `parity:emoji-custom-render`. `getCustomEmojiStickers` already
+  resolved custom emoji ids into the EmojiPanel cache, but message text
+  rendering ignored `textEntityTypeCustomEmoji` entities.
+- **Design (ponytail):** reuse, don't rebuild —
+  - `TextEntityKind::CustomEmoji { custom_emoji_id: i64 }` + `TextRun.custom_emoji_id: Option<i64>`; `styled_runs` carries the id through and refuses to merge runs with different ids (each renders its own sticker image).
+  - Parse positive `custom_emoji_id` (string or numeric) via the existing `int64` helper; non-positive/missing ids are skipped, rendering the plain text.
+  - Resolution reuses the existing `getCustomEmojiStickers` pipeline (request builder, `GetCustomEmojiStickers` purpose, `Session::emoji.custom_emoji_stickers` cache, `status_resolution_attempted`): new `Session::message_custom_emoji_ids_to_resolve` scans the open chat's message text (deduped, 200-id cap) and new `ConnectDriver::maybe_resolve_message_custom_emoji` sends it with no panel-open gate.
+  - Downloads reuse `Session::thumb_file_ids_to_download`: the Text arm also queues resolved custom-emoji display files (`StickerItem::display_file_id` — thumbnail first, else static WEBP).
+  - Render: `message_text_block` builds `HashMap<i64, PathBuf>` (id → sandbox-checked downloaded image) once per message and threads it down; `paint_text_run` renders an inline `img` (1.25× font, `ObjectFit::Contain`, text fallback) when resolved, else the span text as before. Spoiler hiding still applies first. Sponsored rows pass `&[]` (no session).
+- **Tests:** parser (string id parsed, zero id skipped), `styled_runs` (id carried, no merge across ids, merge for same id), Session scan (open-chat gate, dedupe, attempted-set exclusion).
+- **Screenshot:** new `ready-custom-emoji` demo (`seed_ready_custom_emoji_session`) — injected message + resolved sticker fixture + completed download.
+- **Not verifiable without live login:** a real custom emoji from a real `getCustomEmojiStickers` answer (the demo fixture stands in for the server response, exercising the same cache/download/render path).
+- **Out of this slice:** animated custom emoji playback (static WEBP/thumbnail only — same as the status panel); custom emoji in captions (message captions, media-viewer/story-viewer captions, game cards, draft previews — entities now parse but render the span text, today's behavior); emoji-status rendering in message text (already exists in the panel).

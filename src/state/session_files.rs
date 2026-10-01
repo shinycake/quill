@@ -1,5 +1,6 @@
 //! File tracking, downloads and auto-download policy.
 use super::*;
+use crate::text::TextEntityKind;
 
 impl Session {
     pub(crate) fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
@@ -117,6 +118,24 @@ impl Session {
                         && self.should_download(size.file_id)
                     {
                         ids.push(size.file_id);
+                    }
+                    // Custom emoji stickers referenced by the text need
+                    // their display file (thumbnail first, else static
+                    // WEBP) before the inline image can render.
+                    for entity in &text.entities {
+                        let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
+                            continue;
+                        };
+                        let resolved = self
+                            .emoji
+                            .custom_emoji_stickers
+                            .iter()
+                            .find(|s| s.custom_emoji_id == Some(custom_emoji_id));
+                        if let Some(file_id) = resolved.and_then(|s| s.display_file_id())
+                            && self.should_download(file_id)
+                        {
+                            ids.push(file_id);
+                        }
                     }
                 }
                 MessageContent::Sticker(sticker) => {

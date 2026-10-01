@@ -78,7 +78,7 @@ fn replay_text_entities_mixed_nested_unknown_and_malformed() {
     };
     assert_eq!(content.text, text);
     let kinds: Vec<&TextEntityKind> = content.entities.iter().map(|e| &e.kind).collect();
-    assert_eq!(kinds.len(), 10, "unknown + malformed entities are dropped");
+    assert_eq!(kinds.len(), 11, "unknown + malformed entities are dropped");
     assert!(matches!(kinds[0], TextEntityKind::Bold));
     assert!(matches!(kinds[1], TextEntityKind::Italic));
     assert!(matches!(kinds[2], TextEntityKind::Bold));
@@ -93,6 +93,13 @@ fn replay_text_entities_mixed_nested_unknown_and_malformed() {
     ));
     // Block quotes are parsed since the blockquote slice (input order kept).
     assert!(matches!(kinds[9], TextEntityKind::BlockQuote));
+    // Custom emoji is parsed since the custom-emoji-in-text slice.
+    assert!(matches!(
+        kinds[10],
+        TextEntityKind::CustomEmoji {
+            custom_emoji_id: 123
+        }
+    ));
 
     // Nesting combines: the "bolditalic" span renders bold italic.
     let runs = styled_runs(&content.text, &content.entities);

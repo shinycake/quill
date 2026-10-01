@@ -69,8 +69,8 @@ pub fn contains_canary(haystack: &str, needle: &str) -> bool {
 /// TDLib `textEntity` offsets are UTF-16. Callers convert them to UTF-8 byte
 /// indices before storing a span. Entity type constructors are verified
 /// against `schema/td_api.tl` (1.8.67, lines 5719–5785); anything not listed
-/// here (mentions, hashtags, phone numbers, bank-card numbers, custom
-/// emoji, media timestamps, dates, …) stays unparsed and unstyled.
+/// here (mentions, hashtags, phone numbers, bank-card numbers, media
+/// timestamps, dates, …) stays unparsed and unstyled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextEntityKind {
     /// `textEntityTypeUrl` — the substring is the HTTP URL.
@@ -99,6 +99,10 @@ pub enum TextEntityKind {
     /// `textEntityTypeExpandableBlockQuote` — quote block; same collapse
     /// behavior as `BlockQuote` (kept as its own variant for schema fidelity).
     ExpandableBlockQuote,
+    /// `textEntityTypeCustomEmoji custom_emoji_id:int64` — the covered span
+    /// renders as the custom emoji's sticker image; the span text stays as
+    /// the fallback when the sticker isn't resolved.
+    CustomEmoji { custom_emoji_id: i64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,12 +126,15 @@ impl TextEntity {
 }
 
 /// One painted slice of message text. `href` is set for clickable links;
-/// `style` carries the Phase 4.1 entity styling for the same slice.
+/// `style` carries the Phase 4.1 entity styling for the same slice;
+/// `custom_emoji_id` is set when the slice is a custom emoji (rendered as
+/// the sticker image, falling back to `text`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextRun {
     pub text: String,
     pub href: Option<String>,
     pub style: RunStyle,
+    pub custom_emoji_id: Option<i64>,
 }
 
 /// Combined styling for one painted run (Phase 4.1).
@@ -171,6 +178,8 @@ impl RunStyle {
 /// - `href`: the entity with the smallest `(utf8_start, utf8_end)` wins per
 ///   run. The schema forbids Url / TextUrl nesting, so this only matters for
 ///   malformed input.
+/// - `custom_emoji_id`: same smallest-wins rule; runs with different ids
+///   never merge (each renders its own sticker image).
 /// - `pre` wins over `code` for the block look; both stay monospace.
 /// - Degenerate entities (zero length, outside the text, or splitting a
 ///   UTF-8 char boundary) are dropped.
@@ -200,6 +209,7 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
         }
         let mut style = RunStyle::default();
         let mut href: Option<String> = None;
+        let mut custom_emoji_id: Option<i64> = None;
         for entity in &spans {
             if entity.utf8_start > start || entity.utf8_end < end {
                 continue;
@@ -208,6 +218,13 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
                 TextEntityKind::Url | TextEntityKind::TextUrl { .. } => {
                     if href.is_none() {
                         href = entity.open_href(text).map(str::to_string);
+                    }
+                }
+                TextEntityKind::CustomEmoji {
+                    custom_emoji_id: id,
+                } => {
+                    if custom_emoji_id.is_none() {
+                        custom_emoji_id = Some(*id);
                     }
                 }
                 TextEntityKind::Bold => style.bold = true,
@@ -232,6 +249,7 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
         if let Some(last) = runs.last_mut()
             && last.style == style
             && last.href == href
+            && last.custom_emoji_id == custom_emoji_id
         {
             last.text.push_str(&slice);
         } else {
@@ -239,6 +257,7 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
                 text: slice,
                 href,
                 style,
+                custom_emoji_id,
             });
         }
     }
@@ -435,6 +454,60 @@ mod tests {
             utf8_end: end,
             kind,
         }
+    }
+
+    #[test]
+    fn styled_runs_custom_emoji_carries_id_and_never_merges_across_ids() {
+        // "a😀😃b": a=0..1, 😀=1..5, 😃=5..9, b=9..10 (UTF-8).
+        let runs = styled_runs(
+            "a😀😃b",
+            &[
+                entity(
+                    1,
+                    5,
+                    TextEntityKind::CustomEmoji {
+                        custom_emoji_id: 11,
+                    },
+                ),
+                entity(
+                    5,
+                    9,
+                    TextEntityKind::CustomEmoji {
+                        custom_emoji_id: 22,
+                    },
+                ),
+            ],
+        );
+        assert_eq!(runs.len(), 4);
+        assert!(runs[0].custom_emoji_id.is_none());
+        assert_eq!(runs[1].custom_emoji_id, Some(11));
+        assert_eq!(runs[2].custom_emoji_id, Some(22));
+        assert!(runs[3].custom_emoji_id.is_none());
+    }
+
+    #[test]
+    fn styled_runs_custom_emoji_same_id_merges() {
+        let runs = styled_runs(
+            "😀😀",
+            &[
+                entity(
+                    0,
+                    4,
+                    TextEntityKind::CustomEmoji {
+                        custom_emoji_id: 11,
+                    },
+                ),
+                entity(
+                    4,
+                    8,
+                    TextEntityKind::CustomEmoji {
+                        custom_emoji_id: 11,
+                    },
+                ),
+            ],
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].custom_emoji_id, Some(11));
     }
 
     #[test]
