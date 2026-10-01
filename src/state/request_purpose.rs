@@ -332,9 +332,8 @@ pub enum RequestPurpose {
     /// `getOption("animation_search_bot_username")` + `searchPublicChat`
     /// (schema 1.8.67, lines 6483, 11063); the driver slice will carry the
     /// resolved id when it issues searches.
-    /// ponytail: no query identity — two concurrent searches can race and
-    /// a stale first page can clobber newer results; the UI slice must
-    /// debounce/serialize searches.
+    /// New queries discard prior tracked pages; late replies are ignored.
+    ResolveGifSearchBot,
     GetGifSearchResults {
         first_page: bool,
     },

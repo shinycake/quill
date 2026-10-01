@@ -138,6 +138,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             && matches!(owned.envelope.payload, EnvelopePayload::StickerSets { .. });
         let archive_catalog_changed = sticker_set_changed
             && matches!(view_purpose, Some(RequestPurpose::ManageStickerSet { .. }));
+        let gif_saved_changed = matches!(
+            owned.envelope.payload,
+            EnvelopePayload::UpdateSavedAnimations { .. }
+        );
+        let gif_mutation_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
+            && matches!(
+                view_purpose,
+                Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
+            );
+        let gif_bot_changed = match &owned.envelope.payload {
+            EnvelopePayload::UpdateOption { name, value }
+                if name == "animation_search_bot_username" =>
+            {
+                match value {
+                    crate::telegram::envelope::OptionValue::String(name) => {
+                        *name != self.session.gifs.search_bot_username
+                    }
+                    _ => !self.session.gifs.search_bot_username.is_empty(),
+                }
+            }
+            _ => false,
+        };
         let recent_cleared = matches!(owned.envelope.payload, EnvelopePayload::Ok)
             && view_purpose == Some(RequestPurpose::ClearRecentStickers);
         let trending_answer = matches!(
@@ -585,6 +607,26 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.message_link_error =
                     Some("message link not available for this message".into());
             }
+        }
+        if gif_bot_changed {
+            self.cancel_gif_search_requests();
+            self.session.gifs.search_results.clear();
+            self.session.gifs.search_next_offset.clear();
+            self.session.gifs.search_loading = self.session.gifs.search_mode;
+        }
+        if self.chats_path_active()
+            && self.session.gifs.open
+            && self.session.gifs.search_mode
+            && self.session.gifs.search_loading
+        {
+            self.maybe_search_gifs(false)?;
+        }
+        if gif_mutation_ok || gif_saved_changed {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetSavedAnimations),
+            );
         }
         if installed_stickers_answer
             && self.session.stickers.suggest_waiting_for_sets

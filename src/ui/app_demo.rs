@@ -904,6 +904,12 @@ impl QuillApp {
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
+        let gif_search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search GIFs")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
         let sticker_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search stickers and sets")
@@ -1247,6 +1253,7 @@ impl QuillApp {
             inline_query_token: 0,
             inline_query_armed: None,
             sticker_search_input,
+            gif_search_input,
             phone_input,
             code_input,
             password_input,

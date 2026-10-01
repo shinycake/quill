@@ -1210,8 +1210,22 @@ impl Session {
         ) {
             self.stickers.failed = true;
         }
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::ResolveGifSearchBot | RequestPurpose::GetGifSearchResults { .. })
+        ) {
+            self.gifs.search_failed = true;
+            self.gifs.search_loading = false;
+        }
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
+        ) {
+            self.gifs.failed = true;
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
             self.gifs.loading = false;
+            self.gifs.loaded = true;
             self.gifs.failed = true;
             self.gifs.stale = false;
         }

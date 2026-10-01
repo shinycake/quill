@@ -58,6 +58,7 @@ mod drafts;
 mod event_log;
 mod folders;
 mod forward;
+mod gifs_ui;
 mod group_admin_panels;
 mod group_call_ui;
 mod group_calls;

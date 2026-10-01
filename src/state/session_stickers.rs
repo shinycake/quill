@@ -196,6 +196,7 @@ impl Session {
         self.gifs.failed = false;
         self.gifs.stale = false;
         self.gifs.animations = animations;
+        self.gifs.loaded = true;
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -209,6 +210,8 @@ impl Session {
         next_offset: String,
         first_page: bool,
     ) {
+        self.gifs.search_loading = false;
+        self.gifs.search_failed = false;
         if first_page {
             self.gifs.search_results = animations;
         } else {
@@ -223,7 +226,12 @@ impl Session {
                 }
             }
         }
-        self.gifs.search_next_offset = next_offset;
+        self.gifs.search_next_offset =
+            if !next_offset.is_empty() && next_offset == self.gifs.search_offset {
+                String::new()
+            } else {
+                next_offset
+            };
     }
 
     pub fn accept_sticker_set(&mut self, id: i64, stickers: Vec<StickerItem>) {

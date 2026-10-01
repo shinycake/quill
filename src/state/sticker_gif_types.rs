@@ -62,9 +62,16 @@ pub struct StickerPanel {
 pub struct GifPanel {
     pub open: bool,
     pub animations: Vec<AnimationItem>,
+    pub loaded: bool,
+    pub search_mode: bool,
+    pub search_loading: bool,
+    pub search_failed: bool,
+    pub search_query: String,
+    pub search_bot_username: String,
+    pub search_bot_user_id: Option<i64>,
     pub loading: bool,
     pub failed: bool,
-    /// `updateSavedAnimations` arrived while the panel was open.
+    /// `updateSavedAnimations` arrived; refresh even if the panel was closed.
     pub stale: bool,
     /// Slice S9: GIF search via the animation search bot
     /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
@@ -72,6 +79,7 @@ pub struct GifPanel {
     pub search_results: Vec<AnimationItem>,
     /// Slice S9: `next_offset` of the last search page ("" = exhausted).
     pub search_next_offset: String,
+    pub search_offset: String,
     /// Slice S9: `updateAnimationSearchParameters` (schema 1.8.67, line
     /// 11064) — the upstream animation-search provider name and its
     /// suggested search emojis.
@@ -80,6 +88,14 @@ pub struct GifPanel {
 }
 
 impl GifPanel {
+    pub fn visible_animations(&self) -> &[AnimationItem] {
+        if self.search_mode {
+            &self.search_results
+        } else {
+            &self.animations
+        }
+    }
+
     pub fn close(&mut self) {
         self.open = false;
     }
