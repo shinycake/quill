@@ -73,7 +73,7 @@ pub fn interpret_release(status: u16, body: &[u8], current: &str) -> UpdateState
     if release.draft || release.prerelease || !version.pre.is_empty() {
         return UpdateState::Failed("No stable release information. Retry the check.");
     }
-    if version <= current {
+    if !version.cmp_precedence(&current).is_gt() {
         return UpdateState::UpToDate;
     }
     if !release
@@ -146,6 +146,10 @@ mod tests {
         );
         assert_eq!(
             interpret_release(200, &release("v0.9.0"), "0.10.0"),
+            UpdateState::UpToDate
+        );
+        assert_eq!(
+            interpret_release(200, &release("v0.10.0+build2"), "0.10.0"),
             UpdateState::UpToDate
         );
         assert_eq!(
