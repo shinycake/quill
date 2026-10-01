@@ -65,7 +65,8 @@ pub fn close_story(extra: RequestId, chat_id: ChatId, story_id: i32) -> String {
 }
 
 /// Phase 9.2: `getStoryAvailableReactions` (TDLib 1.8.67,
-/// `schema/td_api.tl:13802`) — emoji reactions the story picker can offer.
+/// `schema/td_api.tl:13802`) — reactions the story picker can offer
+/// (emoji, custom emoji, and paid rows; the picker offers the first two).
 /// `row_size` must be 5–25; the viewer requests 10. Response is
 /// `availableReactions`.
 pub fn get_story_available_reactions(extra: RequestId, row_size: i32) -> String {
@@ -79,9 +80,9 @@ pub fn get_story_available_reactions(extra: RequestId, row_size: i32) -> String 
 
 /// Phase 9.2: `setStoryReaction` (TDLib 1.8.67, `schema/td_api.tl:13809`) —
 /// changes the user's chosen reaction on a story. `emoji: None` removes the
-/// reaction (`reaction_type: null`); `Some("❤")` sets it. Only
-/// `reactionTypeEmoji` is offered (custom emoji is Premium-only; paid
-/// reactions can't be set — schema comment). `update_recent_reactions: true`
+/// reaction (`reaction_type: null`); `Some("❤")` sets it. Emoji only —
+/// custom emoji goes through `set_story_custom_emoji_reaction`, paid
+/// reactions can't be set (schema comment). `update_recent_reactions: true`
 /// matches the official picker click. Not supported for live stories (the
 /// driver gates that). Response is `ok`.
 pub fn set_story_reaction(
@@ -125,6 +126,20 @@ pub fn set_story_custom_emoji_reaction(
         "story_id": story_id,
         "reaction_type": reaction_type_custom_emoji(custom_emoji_id),
         "update_recent_reactions": true
+    })
+    .to_string()
+}
+
+/// Phase 9.2+: `getCustomEmojiStickers` (TDLib 1.8.67,
+/// `schema/td_api.tl:14751`) — the sticker visuals for custom-emoji story
+/// reactions the picker offers. Response is `stickers`; the reducer keys
+/// them by sticker id (= the custom emoji id) into
+/// `Session::story_custom_emoji_stickers`.
+pub fn get_story_custom_emoji_stickers(extra: RequestId, custom_emoji_ids: &[i64]) -> String {
+    json!({
+        "@type": "getCustomEmojiStickers",
+        "@extra": extra.as_extra(),
+        "custom_emoji_ids": custom_emoji_ids
     })
     .to_string()
 }
