@@ -69,8 +69,8 @@ pub fn contains_canary(haystack: &str, needle: &str) -> bool {
 /// TDLib `textEntity` offsets are UTF-16. Callers convert them to UTF-8 byte
 /// indices before storing a span. Entity type constructors are verified
 /// against `schema/td_api.tl` (1.8.67, lines 5719–5785); anything not listed
-/// here (mentions, hashtags, phone numbers, bank-card numbers, block quotes,
-/// custom emoji, media timestamps, dates, …) stays unparsed and unstyled.
+/// here (mentions, hashtags, phone numbers, bank-card numbers, custom
+/// emoji, media timestamps, dates, …) stays unparsed and unstyled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextEntityKind {
     /// `textEntityTypeUrl` — the substring is the HTTP URL.
@@ -93,6 +93,12 @@ pub enum TextEntityKind {
     Pre,
     /// `textEntityTypePreCode language:string` — monospace block with language.
     PreCode { language: String },
+    /// `textEntityTypeBlockQuote` — quote block; collapses past
+    /// `QUOTE_COLLAPSE_LINES` lines.
+    BlockQuote,
+    /// `textEntityTypeExpandableBlockQuote` — quote block; same collapse
+    /// behavior as `BlockQuote` (kept as its own variant for schema fidelity).
+    ExpandableBlockQuote,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +145,10 @@ pub struct RunStyle {
     pub pre: bool,
     /// Language from `textEntityTypePreCode`; `None` for plain `pre`.
     pub language: Option<String>,
+    /// Block quote (`textEntityTypeBlockQuote` /
+    /// `textEntityTypeExpandableBlockQuote`) — renders as a quote block;
+    /// long quotes collapse with an expand affordance.
+    pub quote: bool,
 }
 
 impl RunStyle {
@@ -213,6 +223,9 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
                         style.language = Some(language.clone());
                     }
                 }
+                TextEntityKind::BlockQuote | TextEntityKind::ExpandableBlockQuote => {
+                    style.quote = true;
+                }
             }
         }
         let slice = text[start..end].to_string();
@@ -230,6 +243,26 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
         }
     }
     runs
+}
+
+/// Block quotes collapse past this many visible lines. TDLib documents
+/// `textEntityTypeExpandableBlockQuote` as "collapsed by default to 3 lines
+/// with the ability to show full text" (`schema/td_api.tl:5770`); long plain
+/// `textEntityTypeBlockQuote`s collapse the same way so both render
+/// identically.
+pub const QUOTE_COLLAPSE_LINES: usize = 3;
+
+/// True when a block quote's text is long enough to collapse: strictly more
+/// lines than [`QUOTE_COLLAPSE_LINES`].
+pub fn quote_collapses(quote_text: &str) -> bool {
+    quote_text.lines().count() > QUOTE_COLLAPSE_LINES
+}
+
+/// Byte length of the first three logical lines, measured before style runs split them.
+pub fn collapsed_quote_len(text: &str) -> usize {
+    text.match_indices('\n')
+        .nth(QUOTE_COLLAPSE_LINES - 1)
+        .map_or(text.len(), |(index, _)| index)
 }
 
 /// `http`/`https` only, no whitespace or control characters (passed to xdg-open/open).
@@ -590,5 +623,40 @@ mod tests {
     #[test]
     fn styled_runs_empty_text() {
         assert!(styled_runs("", &[entity(0, 0, TextEntityKind::Bold)]).is_empty());
+    }
+
+    #[test]
+    fn quote_collapse_predicate() {
+        assert!(!quote_collapses("one line"));
+        assert!(!quote_collapses("one\ntwo\nthree")); // boundary: 3 lines stay
+        assert!(quote_collapses("one\ntwo\nthree\nfour"));
+        assert_eq!(
+            collapsed_quote_len("é\n二\nthree\nfour"),
+            "é\n二\nthree".len()
+        ); // 4 lines collapse
+        let long = (1..=50).map(|i| format!("line {i}")).collect::<Vec<_>>();
+        assert!(quote_collapses(&long.join("\n")));
+    }
+
+    #[test]
+    fn styled_runs_marks_both_blockquote_kinds() {
+        for kind in [
+            TextEntityKind::BlockQuote,
+            TextEntityKind::ExpandableBlockQuote,
+        ] {
+            let runs = styled_runs("quoted", &[entity(0, 6, kind)]);
+            assert_eq!(runs.len(), 1);
+            assert!(runs[0].style.quote);
+        }
+        // Nested styles survive inside a quote.
+        let runs = styled_runs(
+            "quoted",
+            &[
+                entity(0, 6, TextEntityKind::BlockQuote),
+                entity(0, 6, TextEntityKind::Bold),
+            ],
+        );
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].style.quote && runs[0].style.bold);
     }
 }

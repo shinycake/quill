@@ -39,6 +39,7 @@ fn replay_text_entities_mixed_nested_unknown_and_malformed() {
         ),
         // Unknown types are ignored, never crash the parse.
         ent("Bold", r#"{"@type":"textEntityTypeMention"}"#),
+        // textEntityTypeBlockQuote is parsed (kept) since the blockquote slice.
         ent("Bold", r#"{"@type":"textEntityTypeBlockQuote"}"#),
         ent(
             "Bold",
@@ -77,7 +78,7 @@ fn replay_text_entities_mixed_nested_unknown_and_malformed() {
     };
     assert_eq!(content.text, text);
     let kinds: Vec<&TextEntityKind> = content.entities.iter().map(|e| &e.kind).collect();
-    assert_eq!(kinds.len(), 9, "unknown + malformed entities are dropped");
+    assert_eq!(kinds.len(), 10, "unknown + malformed entities are dropped");
     assert!(matches!(kinds[0], TextEntityKind::Bold));
     assert!(matches!(kinds[1], TextEntityKind::Italic));
     assert!(matches!(kinds[2], TextEntityKind::Bold));
@@ -90,6 +91,8 @@ fn replay_text_entities_mixed_nested_unknown_and_malformed() {
         kinds[8],
         TextEntityKind::PreCode { language } if language == "rust"
     ));
+    // Block quotes are parsed since the blockquote slice (input order kept).
+    assert!(matches!(kinds[9], TextEntityKind::BlockQuote));
 
     // Nesting combines: the "bolditalic" span renders bold italic.
     let runs = styled_runs(&content.text, &content.entities);
