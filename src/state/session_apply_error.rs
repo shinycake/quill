@@ -448,6 +448,15 @@ impl Session {
                     err.code
                 ));
             }
+            Some(
+                RequestPurpose::SetSupergroupStickerSet
+                | RequestPurpose::SetSupergroupCustomEmojiStickerSet,
+            ) => {
+                self.chat_action_error = Some(call_request_error_line(
+                    &err,
+                    "Could not change the group's sticker pack",
+                ));
+            }
             Some(RequestPurpose::ReadChatList) => {
                 self.chat_action_error = Some(format!(
                     "could not mark all chats as read (error {})",

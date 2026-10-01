@@ -9,6 +9,123 @@ use quill::ids::ChatId;
 use quill::state::{AdminListFetch, InviteLinkFetch, JoinRequestFetch, RequestPurpose};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatAdministratorEntry, ChatKind};
 impl QuillApp {
+    fn group_sticker_choices(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.session().expect("group info session");
+        let info = session.chats.get(&chat_id.0).and_then(|c| match c.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => {
+                session.supergroup_full_info(supergroup_id)
+            }
+            _ => None,
+        });
+        let busy = [
+            RequestPurpose::SetSupergroupStickerSet,
+            RequestPurpose::SetSupergroupCustomEmojiStickerSet,
+        ]
+        .iter()
+        .any(|p| session.requests.has_purpose_for_chat(*p, chat_id));
+        let loading = [
+            RequestPurpose::GetInstalledStickerSets,
+            RequestPurpose::GetInstalledEmojiSets,
+        ]
+        .iter()
+        .any(|p| session.requests.has_purpose(*p));
+        let mut section = div().flex().flex_col().gap_1().child(
+            Button::new("group-load-sticker-packs")
+                .label(if loading {
+                    "Loading packs…"
+                } else {
+                    "Load / refresh group packs"
+                })
+                .ghost()
+                .disabled(loading)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(live) = this.live.as_mut() {
+                        if live.driver.load_group_sticker_choices(chat_id).is_err() {
+                            this.status_note =
+                                "Could not load group packs. Retry the action.".into();
+                        }
+                    }
+                    cx.notify();
+                })),
+        );
+        if session.stickers.failed || session.emoji.failed {
+            section = section.child(
+                div()
+                    .text_sm()
+                    .child("Could not load packs. Retry Load / refresh."),
+            );
+        }
+        for (custom, title, current, sets) in [
+            (
+                false,
+                "Group stickers",
+                info.map_or(0, |i| i.sticker_set_id),
+                &session.stickers.sets,
+            ),
+            (
+                true,
+                "Group emoji",
+                info.map_or(0, |i| i.custom_emoji_sticker_set_id),
+                &session.emoji.installed_sets,
+            ),
+        ] {
+            let current_label = if current == 0 {
+                "None".to_string()
+            } else {
+                sets.iter()
+                    .find(|s| s.id == current)
+                    .map(|s| s.title.clone())
+                    .unwrap_or_else(|| format!("Pack {current}"))
+            };
+            let mut choices = div()
+                .id(if custom {
+                    "group-emoji-choices"
+                } else {
+                    "group-sticker-choices"
+                })
+                .flex()
+                .flex_col()
+                .gap_1()
+                .max_h(px(160.))
+                .overflow_y_scroll()
+                .child(div().text_sm().child(format!("{title}: {current_label}")));
+            for (id, label) in std::iter::once((0, "Remove pack".to_string()))
+                .chain(sets.iter().map(|s| (s.id, s.title.clone())))
+            {
+                choices = choices.child(
+                    Button::new(format!("group-pack-{custom}-{id}"))
+                        .label(label)
+                        .ghost()
+                        .selected(id == current)
+                        .disabled(busy || id == current)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let result = if custom {
+                                    live.driver
+                                        .set_supergroup_custom_emoji_sticker_set(chat_id, id)
+                                } else {
+                                    live.driver.set_supergroup_sticker_set(chat_id, id)
+                                };
+                                this.status_note = match result {
+                                    Ok(Some(_)) => "Group pack change requested.".into(),
+                                    Ok(None) => {
+                                        "Group pack change is unavailable or already pending."
+                                            .into()
+                                    }
+                                    Err(_) => {
+                                        "Could not change group pack. Retry the action.".into()
+                                    }
+                                };
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            section = section.child(choices);
+        }
+        section.into_any_element()
+    }
+
     /// Slice G2: channel boost status (`getChatBoostStatus`, schema
     /// 1.8.67, line 13917) with the one-tap `boostChat` action. Shown
     /// for channels only; honest states: loading (request in flight),
@@ -251,6 +368,12 @@ impl QuillApp {
                     this.open_permissions_dialog(chat_id, cx);
                 }
             );
+        }
+        if !is_channel
+            && !is_basic_group
+            && session.is_some_and(|s| s.chat_can_set_sticker_set(chat_id))
+        {
+            section = section.child(self.group_sticker_choices(chat_id, cx));
         }
         if can_invite {
             row!(
