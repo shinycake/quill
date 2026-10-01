@@ -53,6 +53,19 @@ pub struct StickerItem {
     pub thumb_height: i32,
 }
 
+impl StickerItem {
+    /// File to show: thumbnail first, else the sticker itself when it is static WEBP.
+    pub fn display_file_id(&self) -> Option<FileId> {
+        if let Some(id) = self.thumb_file_id.filter(|id| id.0 != 0) {
+            return Some(id);
+        }
+        if self.format == StickerFormat::Webp && self.file_id.0 != 0 {
+            return Some(self.file_id);
+        }
+        None
+    }
+}
+
 /// `stickerSetInfo` row from `getInstalledStickerSets` (regular sets only are requested).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StickerSetInfo {

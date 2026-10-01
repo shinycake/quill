@@ -1537,6 +1537,10 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
                     // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
                     self.accept_custom_emoji_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::GetStoryCustomEmojiStickers) {
+                    // Phase 9.2+: story reaction picker visuals — keyed by
+                    // sticker id (= custom emoji id).
+                    self.accept_story_custom_emoji_stickers(stickers);
                 }
             }
             // Slice S10: emoji payloads — purpose-gated dispatch lives in emoji.rs.
