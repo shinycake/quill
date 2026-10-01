@@ -568,9 +568,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Spellcheck in composer (on-device English dictionary, corrections panel and custom words) <!-- parity:platform-spellcheck -->
 - [x] Chat history export to file (JSON export of the full history to Downloads, via client-side `getChatHistory` paging — no exportHistory constructor in schema; per-message sender names absent by design, Quill plumbs no sender identity) <!-- parity:platform-history-export -->
 - [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
-- [ ] Check for updates automatically on launch against GitHub Releases (latest tag vs compiled-in `CARGO_PKG_VERSION`), with an opt-out toggle in Settings <!-- parity:platform-update-check-auto -->
-- [ ] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
-- [ ] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->
+- [x] Check for updates automatically on launch against GitHub Releases (latest tag vs compiled-in `CARGO_PKG_VERSION`), with an opt-out toggle in Settings <!-- parity:platform-update-check-auto -->
+- [x] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
+- [x] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->
 - [ ] One-click download, install, and restart (replace own binary, relaunch; user confirms — no silent auto-install) <!-- parity:platform-update-install -->
 - [ ] Honest updater states: already up to date, no network, download/install failed with retry <!-- parity:platform-update-states -->
 - [ ] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder -->
