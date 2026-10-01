@@ -12,6 +12,7 @@ use crate::telegram::requests::{
     edit_story as edit_story_request, edit_story_cover as edit_story_cover_request,
     get_chat_active_stories, get_chats_to_post_stories as get_chats_to_post_stories_request,
     get_story, get_story_available_reactions,
+    get_story_custom_emoji_stickers as get_story_custom_emoji_stickers_request,
     get_story_interactions as get_story_interactions_request, load_active_stories, open_story,
     post_story as post_story_request, report_story as report_story_request, send_text_story_reply,
     set_story_custom_emoji_reaction as set_story_custom_emoji_reaction_request,
@@ -223,6 +224,48 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self
             .sender
             .send_json(&get_story_available_reactions(extra, 10))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Phase 9.2+: `getCustomEmojiStickers` for custom-emoji reaction
+    /// visuals (picker options and the chosen reaction badge). Dedupes
+    /// against the cache; one in-flight request at a time. The viewer
+    /// tick calls this while open — it is a no-op when there is nothing
+    /// new to fetch.
+    pub fn maybe_fetch_story_custom_emoji_stickers(
+        &mut self,
+        ids: &[i64],
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetStoryCustomEmojiStickers)
+        {
+            return Ok(None);
+        }
+        let ids: Vec<i64> = ids
+            .iter()
+            .copied()
+            .filter(|id| *id > 0 && !self.session.story_custom_emoji_stickers.contains_key(id))
+            .collect();
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetStoryCustomEmojiStickers, None);
+        match self
+            .sender
+            .send_json(&get_story_custom_emoji_stickers_request(extra, &ids))
         {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {

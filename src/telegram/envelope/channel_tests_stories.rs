@@ -514,17 +514,30 @@ fn can_post_story_results_parsed() {
 }
 
 #[test]
-fn available_reactions_parsed_and_custom_emoji_dropped() {
-    // `availableReactions` (schema 1.8.67 line 7330): the story
-    // picker keeps emoji reactions; custom-emoji rows are dropped.
-    let json = r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"123"},"needs_premium":true},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}"#;
+fn available_reactions_parsed_with_custom_emoji_and_paid_kinds() {
+    // `availableReactions` (schema 1.8.67 line 7330): the story picker
+    // keeps emoji, custom-emoji, and paid rows (paid rides along; the
+    // picker never offers it — `setStoryReaction` can't set paid).
+    let json = r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"123"},"needs_premium":true},{"@type":"availableReaction","type":{"@type":"reactionTypePaid"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::StoryAvailableReactions { reactions } => {
-            assert_eq!(reactions.len(), 2);
-            assert_eq!(reactions[0].emoji, "❤");
+            assert_eq!(reactions.len(), 4);
+            assert_eq!(
+                reactions[0].kind,
+                StoryAvailableReactionKind::Emoji("❤".into())
+            );
             assert!(!reactions[0].needs_premium);
-            assert_eq!(reactions[1].emoji, "👍");
+            assert_eq!(
+                reactions[1].kind,
+                StoryAvailableReactionKind::CustomEmoji(123)
+            );
+            assert!(reactions[1].needs_premium);
+            assert_eq!(reactions[2].kind, StoryAvailableReactionKind::Paid);
+            assert_eq!(
+                reactions[3].kind,
+                StoryAvailableReactionKind::Emoji("👍".into())
+            );
         }
         other => panic!("{other:?}"),
     }

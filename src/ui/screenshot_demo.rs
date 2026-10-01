@@ -239,13 +239,15 @@ pub enum ScreenshotDemo {
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).
     ReadyStories,
-    /// Story posting slice demo (injected, no live Telegram): same seed as
-    /// `ReadyStories`, but Demo chat A's photo story carries a chosen ❤
-    /// reaction, interaction counts, and deletable/repliable flags; the
-    /// viewer opens with the **reaction picker** and **reply row** visible,
-    /// plus a seeded `availableReactions` response (Phase 9.2). The demo
-    /// keeps its viewer-only shape — the posting composer is the
-    /// `ReadyStoryComposer` demo (Phase 9.3).
+    /// Story posting / custom-reaction slice demo (injected, no live
+    /// Telegram): same seed as `ReadyStories`, but Demo chat A's photo
+    /// story carries a chosen ❤ reaction, interaction counts, and
+    /// deletable/repliable flags; the viewer opens with the **reaction
+    /// picker** and **reply row** visible, plus seeded `availableReactions`
+    /// (emoji + custom-emoji Premium tile with a local sticker thumb —
+    /// Phase 9.2 / `parity:stories-custom-reactions`). The demo keeps its
+    /// viewer-only shape — the posting composer is the `ReadyStoryComposer`
+    /// demo (Phase 9.3).
     ReadyStoryPost,
     /// Phase 9.3: story posting composer (injected, no live Telegram) —
     /// the `ReadyStories` fixture plus the composer overlay open: a

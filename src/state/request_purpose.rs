@@ -762,6 +762,11 @@ pub enum RequestPurpose {
     /// `availableReactions`; cached in
     /// `Session::story_available_reactions` for the viewer picker.
     GetStoryAvailableReactions,
+    /// Phase 9.2+: `getCustomEmojiStickers` for the story reaction picker.
+    /// Response is `stickers`; cached in
+    /// `Session::story_custom_emoji_stickers` keyed by sticker id (=
+    /// custom emoji id).
+    GetStoryCustomEmojiStickers,
     /// Phase 9.2: `setStoryReaction` (set) / removing the chosen reaction.
     /// Responses are `ok`; the new state arrives via `updateStory`.
     SetStoryReaction,
