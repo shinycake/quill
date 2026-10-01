@@ -86,6 +86,7 @@ pub(super) fn sponsored_message_row(
             revealed,
             // Settings → Appearance: message font size.
             look.font,
+            false,
             cx,
         )),
         MessageContent::Photo(photo) => Some(photo_attachment(

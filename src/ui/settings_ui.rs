@@ -563,6 +563,7 @@ impl QuillApp {
     /// "Record HQ Round Videos" / `UseHqRoundVideos`). Persisted in
     /// `MediaPrefs`; 480px captures when on, 280px otherwise.
     pub(super) fn media_settings_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let big_emoji = self.session().is_none_or(|s| s.media_prefs.big_emoji);
         let hq = self
             .session()
             .is_some_and(|session| session.media_prefs.hq_round_videos);
@@ -642,6 +643,23 @@ impl QuillApp {
                                 this.set_media_pref(|prefs| prefs.instant_view_mode = mode, cx);
                             })),
                     ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .child(
+                        Switch::new("media-pref-big-emoji")
+                            .checked(big_emoji)
+                            .accessibility_label("Big emoji")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_media_pref(|prefs| prefs.big_emoji = on, cx)
+                            })),
+                    )
+                    .child(div().text_sm().child("Big emoji")),
             )
             // MED3: auto-download settings below the media prefs.
             .child(self.auto_download_settings_section(cx))

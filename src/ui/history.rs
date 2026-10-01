@@ -768,6 +768,7 @@ pub(super) fn session_history_row(
             revealed,
             // Settings → Appearance: message font size.
             look.font,
+            session.is_none_or(|s| s.media_prefs.big_emoji),
             cx,
         )),
         // Slice bots-games: the game card is the message's primary

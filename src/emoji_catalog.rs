@@ -50,6 +50,33 @@ pub fn search<'a>(
     })
 }
 
+/// One to three plain emoji, counting flags, skin tones and ZWJ sequences as units.
+pub fn big_emoji_count(text: &str) -> Option<usize> {
+    use std::collections::HashSet;
+    use std::sync::OnceLock;
+    use unicode_segmentation::UnicodeSegmentation;
+    static KNOWN: OnceLock<HashSet<String>> = OnceLock::new();
+    let known = KNOWN.get_or_init(|| {
+        catalog()
+            .map(|entry| entry.emoji.replace('\u{fe0f}', ""))
+            .collect()
+    });
+    let mut count = 0;
+    for grapheme in text.graphemes(true) {
+        if grapheme.chars().all(char::is_whitespace) {
+            continue;
+        }
+        if !known.contains(&grapheme.replace('\u{fe0f}', "")) {
+            return None;
+        }
+        count += 1;
+        if count > 3 {
+            return None;
+        }
+    }
+    (count > 0).then_some(count)
+}
+
 impl MediaPrefs {
     pub fn remember_emoji(&mut self, emoji: &str) {
         if !catalog().any(|entry| entry.emoji == emoji) {
@@ -64,6 +91,18 @@ impl MediaPrefs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn big_emoji_uses_graphemes_and_excludes_text() {
+        assert_eq!(big_emoji_count(" 👩🏽‍💻 🇺🇸 ❤️ "), Some(3));
+        assert_eq!(big_emoji_count("❤"), Some(1));
+        assert_eq!(big_emoji_count("1️⃣"), Some(1));
+        assert_eq!(big_emoji_count("hello 😀"), None);
+        assert_eq!(big_emoji_count("123"), None);
+        assert_eq!(big_emoji_count("😀😀😀😀"), None);
+        assert_eq!(big_emoji_count(""), None);
+        assert_eq!(big_emoji_count("  "), None);
+        assert_eq!(big_emoji_count("❤\u{fe0e}"), None);
+    }
     #[test]
     fn catalog_search_and_account_recents() {
         let entries: Vec<_> = catalog().collect();
@@ -90,12 +129,19 @@ mod tests {
         assert_eq!(prefs.recent_emoji[0], entries[59].emoji);
         prefs.remember_emoji("not an emoji");
         assert_eq!(prefs.recent_emoji.len(), RECENT_LIMIT);
+        prefs.big_emoji = false;
         let stored = serde_json::to_string(&prefs).unwrap();
         let restored: MediaPrefs = serde_json::from_str(&stored).unwrap();
         assert_eq!(prefs, restored);
         assert!(MediaPrefs::default().recent_emoji.is_empty());
         let mut old = serde_json::to_value(&prefs).unwrap();
         old.as_object_mut().unwrap().remove("recent_emoji");
+        old.as_object_mut().unwrap().remove("big_emoji");
+        assert!(
+            serde_json::from_value::<MediaPrefs>(old.clone())
+                .unwrap()
+                .big_emoji
+        );
         assert!(
             serde_json::from_value::<MediaPrefs>(old)
                 .unwrap()
