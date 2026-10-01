@@ -555,7 +555,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Platform & edge cases
 
 - [x] Global keyboard shortcuts: 22 bindings wired in `bind_keys` (Quit, focus sidebar/composer, chat search, media viewer nav/zoom) (src/ui/mod.rs:125) <!-- parity:platform-keyboard-shortcuts -->
-- [x] Keyboard shortcuts reference/help overlay listing all bindings (Help → Keyboard Shortcuts opens a read-only kit dialog rendering every row of `src/ui/keybindings.rs::shortcut_rows()` — the same table `bind_keys` installs, grouped by section with kit `Kbd` chips, so the reference cannot drift from the real bindings) <!-- parity:platform-shortcuts-reference -->
+- [ ] Keyboard shortcuts reference/help overlay listing all bindings <!-- parity:platform-shortcuts-reference -->
 - [ ] Customizable key bindings <!-- parity:platform-custom-keybindings -->
 - [ ] Screen-reader accessible labels/roles on UI elements (no accessibility API usage in src) <!-- parity:platform-screen-reader-labels -->
 - [ ] VoiceOver support (blocked: Linux desktop has no VoiceOver; no accessibility tree backend in the UI layer) <!-- parity:platform-voiceover -->
