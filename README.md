@@ -443,7 +443,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Delete saved GIF (removeSavedAnimation + confirm) <!-- parity:gifs-delete -->
 - [x] "No GIFs" empty state <!-- parity:gifs-empty-state -->
 - [ ] "Autoplay GIFs" setting <!-- parity:gifs-autoplay-setting -->
-- [ ] GIF loop playback in history (partial: static frame cache only, ui/mod.rs:3015) <!-- parity:gifs-history-playback -->
+- [x] GIF loop playback in history (full sampled loop, cancellable background decode, native playback verified) <!-- parity:gifs-history-playback -->
 - [x] Apply updateAnimationSearchParameters to GIF search (search still rides the animation_search_bot_username inline-bot path) <!-- parity:gifs-search-parameters -->
 - [x] Emoji picker in composer with categories (Smileys & People, etc.) and search <!-- parity:emoji-picker -->
 - [x] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
