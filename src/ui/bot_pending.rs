@@ -8,6 +8,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::rich::RichBlock;
 use quill::state::{RequestPurpose, unix_ms_now};
 use quill::telegram::envelope::MessageContent;
+use std::collections::HashMap;
 
 impl QuillApp {
     pub(super) fn pending_bot_reply(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -39,6 +40,8 @@ impl QuillApp {
                 false,
                 &self.spoiler_revealed,
                 font,
+                // Draft previews don't resolve custom emoji in this slice.
+                &HashMap::new(),
                 cx,
             ),
             MessageContent::RichMessage(rich) => {

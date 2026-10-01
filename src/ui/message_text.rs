@@ -13,12 +13,14 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
+use quill::local_path::sandboxed_display_path;
 use quill::rich::RichBlock;
 use quill::state::{OutboxReceipt, Session, message_time_hhmm};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{MessageContent, MessageInteractionInfo, ParsedFile};
+use quill::telegram::envelope::{MessageContent, MessageInteractionInfo, ParsedFile, StickerItem};
 use quill::text::{
-    TextEntity, TextRun, collapsed_quote_len, quote_collapses, styled_runs, utf8_to_utf16_offset,
+    TextEntity, TextEntityKind, TextRun, collapsed_quote_len, quote_collapses, styled_runs,
+    utf8_to_utf16_offset,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -388,14 +390,52 @@ pub(super) fn message_chrome(
 /// family resolves through the platform font stack (fontconfig on Linux).
 pub(super) const MONO_FONT: &str = "monospace";
 
+/// Custom emoji ids in `entities` → downloaded sticker image paths, via the
+/// EmojiPanel's `getCustomEmojiStickers` cache (thumbnail first, else static
+/// WEBP — `StickerItem::display_file_id`). Ids without a resolved, downloaded
+/// sticker are absent; the renderer falls back to the span text.
+fn custom_emoji_paths(
+    entities: &[TextEntity],
+    stickers: &[StickerItem],
+    files: &HashMap<i32, ParsedFile>,
+    media_roots: &[PathBuf],
+) -> HashMap<i64, PathBuf> {
+    let mut out = HashMap::new();
+    for entity in entities {
+        let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
+            continue;
+        };
+        if out.contains_key(&custom_emoji_id) {
+            continue;
+        }
+        let path = stickers
+            .iter()
+            .find(|s| s.custom_emoji_id == Some(custom_emoji_id))
+            .and_then(|s| s.display_file_id())
+            .and_then(|id| files.get(&id.0))
+            .and_then(|f| f.usable_path())
+            .and_then(|path| sandboxed_display_path(path, media_roots));
+        if let Some(path) = path {
+            out.insert(custom_emoji_id, path);
+        }
+    }
+    out
+}
+
 /// Paint one entity run with the Phase 4.1 styles (bold/italic/…, spoiler,
 /// code/pre, links). Shared by plain runs and quote-block runs.
+/// `emoji_paths` maps resolved custom emoji ids to sticker images; a run
+/// carrying an id renders the image inline (1.25× the text size) and falls
+/// back to its text while unresolved.
 fn paint_text_run(
     run: &TextRun,
     index: usize,
     msg_key: (i64, u64),
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    emoji_paths: &HashMap<i64, PathBuf>,
+    // Settings → Appearance: message font size.
+    font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let run_id = format!(
@@ -423,6 +463,33 @@ fn paint_text_run(
             }))
             .child(run.text.clone())
             .into_any_element();
+    }
+    if let Some(id) = run.custom_emoji_id
+        && let Some(path) = emoji_paths.get(&id)
+    {
+        let edge = font * 1.25;
+        let fallback_text = run.text.clone();
+        let image = img(path.clone())
+            .id(format!("{run_id}-emoji"))
+            .w(edge)
+            .h(edge)
+            .object_fit(ObjectFit::Contain)
+            .with_fallback(move || div().child(fallback_text.clone()).into_any_element());
+        // A custom emoji inside a link keeps the link (role + click); the
+        // image itself carries no text styling.
+        if let Some(href) = run.href.clone() {
+            return div()
+                .id(run_id)
+                .role(Role::Link)
+                .aria_label(run.text.clone())
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_message_url(&href, cx);
+                }))
+                .child(image)
+                .into_any_element();
+        }
+        return image.into_any_element();
     }
     let mut el = div().id(run_id).when(!run.text.trim().is_empty(), |el| {
         el.role(if run.href.is_some() {
@@ -475,6 +542,9 @@ fn quote_block(
     msg_key: (i64, u64),
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    emoji_paths: &HashMap<i64, PathBuf>,
+    // Settings → Appearance: message font size.
+    font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote_text: String = group.iter().map(|run| run.text.as_str()).collect();
@@ -505,6 +575,8 @@ fn quote_block(
                 msg_key,
                 is_caption,
                 revealed,
+                emoji_paths,
+                font,
                 cx,
             ));
         }
@@ -516,6 +588,8 @@ fn quote_block(
                 msg_key,
                 is_caption,
                 revealed,
+                emoji_paths,
+                font,
                 cx,
             ));
         }
@@ -568,6 +642,8 @@ pub(super) fn rich_text_line(
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Settings → Appearance: message font size (was hardcoded text_sm).
     font: Pixels,
+    // Resolved custom emoji sticker images (id → path); empty when none.
+    emoji_paths: &HashMap<i64, PathBuf>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let runs = styled_runs(text, entities);
@@ -586,7 +662,14 @@ pub(super) fn rich_text_line(
         }
         if !run.style.quote {
             line = line.child(paint_text_run(
-                run, index, msg_key, is_caption, revealed, cx,
+                run,
+                index,
+                msg_key,
+                is_caption,
+                revealed,
+                emoji_paths,
+                font,
+                cx,
             ));
             index += 1;
             continue;
@@ -604,6 +687,8 @@ pub(super) fn rich_text_line(
             msg_key,
             is_caption,
             revealed,
+            emoji_paths,
+            font,
             cx,
         ));
         index = end;
@@ -620,6 +705,8 @@ pub(super) fn message_text_block(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
+    // Resolved custom emoji stickers for inline rendering (EmojiPanel cache).
+    custom_emoji: &[StickerItem],
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Settings → Appearance: message font size.
     font: Pixels,
@@ -644,6 +731,7 @@ pub(super) fn message_text_block(
         false,
         revealed,
         font,
+        &custom_emoji_paths(&text.entities, custom_emoji, files, media_roots),
         cx,
     );
     let card = text.link_preview.as_ref().and_then(|preview| {
@@ -970,7 +1058,16 @@ pub(super) fn rich_block_element(
                 .gap_1();
             if !text.is_empty() {
                 col = col.child(rich_text_line(
-                    text, entities, msg_key, false, revealed, font, cx,
+                    text,
+                    entities,
+                    msg_key,
+                    false,
+                    revealed,
+                    font,
+                    // Instant View richText* has no custom emoji entities
+                    // (richTextCustomEmoji degrades to alternative_text).
+                    &HashMap::new(),
+                    cx,
                 ));
             }
             for (button_index, button) in buttons.iter().enumerate() {
@@ -1010,7 +1107,15 @@ pub(super) fn rich_block_element(
             Some(
                 heading
                     .child(rich_text_line(
-                        text, entities, msg_key, false, revealed, font, cx,
+                        text,
+                        entities,
+                        msg_key,
+                        false,
+                        revealed,
+                        font,
+                        // Instant View richText* has no custom emoji entities.
+                        &HashMap::new(),
+                        cx,
                     ))
                     .into_any_element(),
             )

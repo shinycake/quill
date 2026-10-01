@@ -15,8 +15,8 @@ use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     ChatFolderInfo, ChatFolderSpec, ChatNotificationSettings, ConnectionState, MessageContent,
     ParsedSession, ParsedWebsite, PasswordState, StarSubscriptionData, StarSubscriptionPricing,
-    StarSubscriptionTypeData, StarSubscriptionsData, StorageFileTypeStats, StorageStats,
-    toggle_chosen_emoji_reaction,
+    StarSubscriptionTypeData, StarSubscriptionsData, StickerFormat, StickerItem,
+    StorageFileTypeStats, StorageStats, toggle_chosen_emoji_reaction,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -49,6 +49,49 @@ pub(super) fn seed_ready_offline_session(sink: Arc<MemorySink>) -> Session {
 pub(super) fn seed_ready_reconnecting_session(sink: Arc<MemorySink>) -> Session {
     let mut session = seed_ready_chats_session(sink);
     session.connection = ConnectionState::Updating;
+    session
+}
+
+/// Custom emoji inline rendering — ReadyChats fixture plus a message with a
+/// `textEntityTypeCustomEmoji` entity, a resolved `getCustomEmojiStickers`
+/// cache entry, and its sticker file downloaded (injected, no live Telegram).
+pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let mut session = seed_ready_chats_session(sink);
+    // Continue the envelope sequence from the ReadyChats seed: `Session::apply`
+    // ignores out-of-order envelopes, so restarting at 0 would silently drop
+    // every injected update.
+    let seq = AtomicU64::new(session.last_seq);
+    let apply = |session: &mut Session, json: &str| {
+        if let Some(owned) = copy_and_parse(json, &seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    };
+    // "Custom emoji: 😀 inline" — the emoji is at UTF-16 offset 14, length 2.
+    apply(
+        &mut session,
+        r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"date":1790632300,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Custom emoji: 😀 inline","entities":[{"@type":"textEntity","offset":14,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4242"}}]}}}}"#,
+    );
+    // The sticker file the custom emoji resolves to (completed download).
+    apply(
+        &mut session,
+        &demo_file_json(61, &demo_thumb_png_path(), true),
+    );
+    session.emoji.custom_emoji_stickers.push(StickerItem {
+        custom_emoji_id: Some(4242),
+        id: 4242,
+        set_id: 0,
+        emoji: "😀".to_string(),
+        width: 512,
+        height: 512,
+        format: StickerFormat::Webp,
+        file_id: FileId(61),
+        thumb_file_id: None,
+        thumb_width: 0,
+        thumb_height: 0,
+        requires_premium: false,
+    });
+    session.open_chat(ChatId(11));
     session
 }
 

@@ -684,10 +684,11 @@ pub(crate) fn parse_caption(value: Option<&Value>) -> (String, Vec<TextEntity>) 
 }
 
 /// Keep the entity types Quill renders (Phase 4.1): links, the style
-/// entities (`textEntityTypeBold` … `textEntityTypePreCode`), and block
-/// quotes (`textEntityTypeBlockQuote` / `textEntityTypeExpandableBlockQuote`).
+/// entities (`textEntityTypeBold` … `textEntityTypePreCode`), block quotes
+/// (`textEntityTypeBlockQuote` / `textEntityTypeExpandableBlockQuote`), and
+/// custom emoji (`textEntityTypeCustomEmoji`, rendered as sticker images).
 /// Unknown entity types (mentions, hashtags, phone numbers, bank-card
-/// numbers, custom emoji, media timestamps, dates, …) are ignored.
+/// numbers, media timestamps, dates, …) are ignored.
 pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<TextEntity> {
     let Some(entries) = formatted
         .and_then(|value| value.get("entities"))
@@ -743,6 +744,15 @@ pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<
             },
             Some("textEntityTypeBlockQuote") => TextEntityKind::BlockQuote,
             Some("textEntityTypeExpandableBlockQuote") => TextEntityKind::ExpandableBlockQuote,
+            Some("textEntityTypeCustomEmoji") => {
+                match int64(type_value.and_then(|t| t.get("custom_emoji_id"))) {
+                    Some(id) if id > 0 => TextEntityKind::CustomEmoji {
+                        custom_emoji_id: id,
+                    },
+                    // Unresolvable without an id — render the plain text.
+                    _ => continue,
+                }
+            }
             _ => continue,
         };
         out.push(TextEntity {

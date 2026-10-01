@@ -121,6 +121,29 @@ fn message_text_parses_link_entities_and_article_preview() {
     assert_eq!(message.files[0].id, FileId(7));
 }
 
+#[test]
+fn message_text_parses_custom_emoji_entities() {
+    // "hi 😀 bye": 😀 is at UTF-16 offset 3, length 2. The zero-id entity
+    // sits on a valid span ("hi") and is skipped for its id, not its range.
+    let json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi 😀 bye","entities":[{"@type":"textEntity","offset":3,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"12345"}},{"@type":"textEntity","offset":0,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":0}}]}}}}"#;
+    let env = parse_envelope(json).unwrap();
+    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+        panic!("expected message");
+    };
+    let MessageContent::Text(content) = message.content else {
+        panic!("expected text");
+    };
+    assert_eq!(content.entities.len(), 1);
+    assert!(matches!(
+        content.entities[0].kind,
+        crate::text::TextEntityKind::CustomEmoji {
+            custom_emoji_id: 12345
+        }
+    ));
+    assert_eq!(content.entities[0].utf8_start, 3);
+    assert_eq!(content.entities[0].utf8_end, 7);
+}
+
 /// MED4: `webPageInstantView` (schema:4377) reuses the M2 `pageBlock*`
 /// parser — same blocks, new payload.
 #[test]

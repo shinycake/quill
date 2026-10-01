@@ -73,6 +73,8 @@ pub(super) fn game_card(
             false,
             revealed,
             font,
+            // Game cards don't resolve custom emoji in this slice (text fallback).
+            &HashMap::new(),
             cx,
         ));
     }

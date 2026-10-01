@@ -140,6 +140,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// Resolve custom emoji ids referenced by the open chat's message text.
+    /// Unlike the status-panel variant this has no panel-open gate — message
+    /// text renders in the normal chat view. Shares the status pipeline's
+    /// purpose, cache, and attempted-set.
+    pub(crate) fn maybe_resolve_message_custom_emoji(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active()
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetCustomEmojiStickers)
+        {
+            return Ok(());
+        }
+        let ids = self.session.message_custom_emoji_ids_to_resolve();
+        if !ids.is_empty() {
+            self.session
+                .emoji
+                .status_resolution_attempted
+                .extend(ids.iter().copied());
+            self.emoji_set_request(RequestPurpose::GetCustomEmojiStickers, |extra| {
+                crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, &ids)
+            })?;
+        }
+        Ok(())
+    }
+
     fn emoji_set_request(
         &mut self,
         purpose: RequestPurpose,

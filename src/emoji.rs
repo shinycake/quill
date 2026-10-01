@@ -1,6 +1,9 @@
 use crate::state::{RequestPurpose, Session};
-use crate::telegram::envelope::{EnvelopePayload, ParsedFile, StickerItem, StickerSetInfo};
+use crate::telegram::envelope::{
+    EnvelopePayload, MessageContent, ParsedFile, StickerItem, StickerSetInfo,
+};
 use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
+use crate::text::TextEntityKind;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EmojiSetTab {
@@ -227,6 +230,45 @@ impl Session {
         }
     }
 
+    /// Custom emoji ids referenced by the open chat's message text that are
+    /// neither resolved (`custom_emoji_stickers`) nor already attempted.
+    /// Sorted, deduplicated, capped at the server's 200-ids-per-call limit.
+    pub fn message_custom_emoji_ids_to_resolve(&self) -> Vec<i64> {
+        let mut ids = Vec::new();
+        for message in self
+            .open_chat
+            .and_then(|id| self.histories.get(&id.0))
+            .into_iter()
+            .flat_map(|history| history.messages.values())
+        {
+            let MessageContent::Text(text) = &message.content else {
+                continue;
+            };
+            for entity in &text.entities {
+                let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
+                    continue;
+                };
+                if custom_emoji_id > 0
+                    && !self
+                        .emoji
+                        .status_resolution_attempted
+                        .contains(&custom_emoji_id)
+                    && !self
+                        .emoji
+                        .custom_emoji_stickers
+                        .iter()
+                        .any(|s| s.custom_emoji_id == Some(custom_emoji_id))
+                {
+                    ids.push(custom_emoji_id);
+                }
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids.truncate(200);
+        ids
+    }
+
     /// Slice S10: an emoji-status or emoji-set mutation succeeded — drop the
     /// affected cache so the next fetch shows the server-confirmed state.
     pub fn invalidate_emoji_caches(&mut self, purpose: Option<RequestPurpose>) {
@@ -264,7 +306,7 @@ impl Session {
 mod tests {
     use super::*;
     use crate::diagnostics::{DiagnosticSink, MemorySink};
-    use crate::ids::AccountKey;
+    use crate::ids::{AccountKey, ChatId};
     use crate::telegram::client::copy_and_parse;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
@@ -279,6 +321,25 @@ mod tests {
         let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
         let owned = copy_and_parse(json, seq, &dyn_sink).unwrap();
         session.apply(owned);
+    }
+
+    /// Custom emoji ids in the open chat's message text are collected for
+    /// resolution: deduped, skipped when nothing is open, and excluded once
+    /// attempted or already resolved.
+    #[test]
+    fn message_custom_emoji_ids_to_resolve_scans_open_chat() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        let json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi 😀 bye","entities":[{"@type":"textEntity","offset":3,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"12345"}},{"@type":"textEntity","offset":3,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"12345"}}]}}}}"#;
+        apply_json(&mut session, &seq, &sink, json);
+        // Chat 4 isn't open: nothing to resolve.
+        assert!(session.message_custom_emoji_ids_to_resolve().is_empty());
+        session.open_chat = Some(ChatId(4));
+        // Deduped even though the entity repeats.
+        assert_eq!(session.message_custom_emoji_ids_to_resolve(), vec![12345]);
+        // Attempted ids are excluded.
+        session.emoji.status_resolution_attempted.insert(12345);
+        assert!(session.message_custom_emoji_ids_to_resolve().is_empty());
     }
 
     /// Slice S10: emoji-backend answers are stored only under a matching
