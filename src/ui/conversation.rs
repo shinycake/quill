@@ -1525,6 +1525,10 @@ impl QuillApp {
             })
             .child(
                 MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
+                    let gif_view = weak.clone();
+                    cx.defer(move |cx| {
+                        let _ = gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
+                    });
                     if ix == 0 {
                         let weak = weak.clone();
                         cx.defer(move |cx| {

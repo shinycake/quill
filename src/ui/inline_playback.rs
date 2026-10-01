@@ -174,6 +174,53 @@ pub(super) fn apply_ready_video_send(
 }
 
 impl QuillApp {
+    pub(super) fn maybe_autoplay_gif(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.playing_animation.is_some()
+            || self.pending_gif_play.is_some()
+            || self.playing_voice.is_some()
+            || self.playing_audio.is_some()
+            || self.playing_video.is_some()
+            || self.recording_active()
+            || self.media_viewer.is_open()
+            || self.story_viewer.is_open()
+        {
+            return;
+        }
+        let Some(super::history_row::HistoryRow::Single(row)) = self.history_rows.get(ix) else {
+            return;
+        };
+        let Some(session) = self.session() else {
+            return;
+        };
+        if !session.media_prefs.autoplay_gifs
+            || session.media_prefs.data_saver
+            || session.open_chat != Some(row.message.chat_id)
+            || self.autoplayed_gifs.contains(&row.message.id)
+        {
+            return;
+        }
+        let quill::telegram::envelope::MessageContent::Animation(animation) = &row.message.content
+        else {
+            return;
+        };
+        if animation.is_secret || animation.has_spoiler {
+            return;
+        }
+        let Some(file_id) = animation.play_file_id().filter(|id| {
+            session
+                .files
+                .get(&id.0)
+                .and_then(|file| file.usable_path())
+                .is_some()
+        }) else {
+            return;
+        };
+        let (id, mime) = (row.message.id, animation.mime_type.clone());
+        // ponytail: the existing player supports one visible GIF at a time; concurrent clips need independent playback slots.
+        self.autoplayed_gifs.insert(id);
+        self.toggle_animation_playback(id, file_id, mime, cx);
+    }
+
     pub(super) fn stop_animation_playback(&mut self) {
         if let Some(cancel) = self.animation_extract_cancel.take() {
             cancel.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -251,6 +298,7 @@ impl QuillApp {
         mime: String,
         cx: &mut Context<Self>,
     ) {
+        self.autoplayed_gifs.insert(message_id);
         if self.playing_animation == Some(message_id) {
             self.stop_animation_playback();
             self.status_note = "GIF paused".into();

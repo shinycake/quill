@@ -477,6 +477,7 @@ pub struct QuillApp {
     pub(super) playback_positions: HashMap<MessageId, f64>,
     /// History row whose GIF is looping (tdesktop clip / Unigram player).
     pub(super) playing_animation: Option<MessageId>,
+    pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
     pub(super) animation_frames: Vec<Arc<RenderImage>>,
     pub(super) animation_frame: usize,
     pub(super) animation_tick: bool,

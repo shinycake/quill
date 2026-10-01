@@ -667,6 +667,27 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.open_emoji_sets(cx))),
             )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .child(
+                        Switch::new("media-pref-autoplay-gifs")
+                            .checked(self.session().is_none_or(|s| s.media_prefs.autoplay_gifs))
+                            .accessibility_label("Autoplay GIFs")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
+                                if !on {
+                                    this.stop_animation_playback();
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(div().text_sm().child("Autoplay GIFs")),
+            )
             // MED3: auto-download settings below the media prefs.
             .child(self.auto_download_settings_section(cx))
     }
