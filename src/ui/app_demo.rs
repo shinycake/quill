@@ -1534,6 +1534,7 @@ impl QuillApp {
             playback_positions: HashMap::new(),
             playing_animation: None,
             animation_frames: Vec::new(),
+            autoplayed_gifs: Default::default(),
             animation_frame: 0,
             animation_tick: false,
             animation_fps: 8.0,

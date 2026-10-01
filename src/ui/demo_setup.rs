@@ -426,12 +426,14 @@ impl QuillApp {
                     }
                 }
             }
-            self.toggle_animation_playback(
-                MessageId(501),
-                quill::ids::FileId(63),
-                "image/gif".into(),
-                cx,
-            );
+            if demo == Some(ScreenshotDemo::ReadyGifs) {
+                self.toggle_animation_playback(
+                    MessageId(501),
+                    quill::ids::FileId(63),
+                    "image/gif".into(),
+                    cx,
+                );
+            }
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideo)) {
             if let Some(session) = self.demo_session.as_mut() {

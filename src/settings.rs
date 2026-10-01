@@ -163,6 +163,8 @@ pub const AUTO_DOWNLOAD_MAX_BYTES: i64 = 50 * 1024 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaPrefs {
     #[serde(default = "default_true")]
+    pub autoplay_gifs: bool,
+    #[serde(default = "default_true")]
     pub big_emoji: bool,
     #[serde(default)]
     pub recent_emoji: Vec<String>,
@@ -212,6 +214,7 @@ fn auto_download_default() -> u8 {
 impl Default for MediaPrefs {
     fn default() -> Self {
         Self {
+            autoplay_gifs: true,
             big_emoji: true,
             recent_emoji: Vec::new(),
             remember_media_grouping: false,
@@ -866,6 +869,7 @@ mod tests {
         assert_eq!(load_media_prefs(&paths), MediaPrefs::default());
         assert!(MediaPrefs::default().default_grouping());
         let prefs = MediaPrefs {
+            autoplay_gifs: false,
             remember_media_grouping: true,
             group_media: false,
             hq_round_videos: true,
@@ -908,6 +912,7 @@ mod tests {
         )
         .unwrap();
         let loaded = load_media_prefs(&paths);
+        assert!(loaded.autoplay_gifs);
         assert!(loaded.remember_media_grouping);
         assert!(loaded.hq_round_videos);
         assert!(!loaded.data_saver);
