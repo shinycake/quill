@@ -1510,9 +1510,12 @@ impl Session {
             // Slice S8: `getTrendingStickerSets` answers with
             // `trendingStickerSets`.
             EnvelopePayload::TrendingStickerSets {
-                sets, is_premium, ..
+                sets,
+                is_premium,
+                total_count,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
+                    self.stickers.trending_total = total_count.max(0) as usize;
                     self.accept_trending_sticker_sets(sets, is_premium);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).

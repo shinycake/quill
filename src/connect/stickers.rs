@@ -1,8 +1,13 @@
 //! Connect driver: sticker and GIF panels.
 use super::*;
+use crate::ids::FileId;
 use crate::ids::RequestId;
-use crate::state::RequestPurpose;
+use crate::state::{RequestPurpose, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
+use crate::telegram::requests::{
+    add_favorite_sticker, clear_recent_stickers, get_favorite_stickers, get_recent_stickers,
+    get_trending_sticker_sets, remove_favorite_sticker, view_trending_sticker_sets,
+};
 use crate::telegram::requests::{
     get_installed_sticker_sets, get_saved_animations, get_sticker_set, search_stickers,
 };
@@ -15,6 +20,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.open = true;
+        let favorites = self.sticker_request_favorites()?;
+        match self.session.stickers.tab {
+            StickerTab::Recent => {
+                return self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
+                    get_recent_stickers(id, false)
+                });
+            }
+            StickerTab::Favorites => return Ok(favorites),
+            StickerTab::Trending => return self.fetch_trending_stickers(false),
+            StickerTab::Installed => {}
+        }
         self.session.stickers.failed = false;
         if self
             .session
@@ -42,6 +58,154 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn close_sticker_panel(&mut self) {
         self.session.stickers.close();
+    }
+
+    fn sticker_request(
+        &mut self,
+        purpose: RequestPurpose,
+        build: impl FnOnce(RequestId) -> String,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Viewed pages are independent: a new page may arrive while the prior ack is pending.
+        if purpose != RequestPurpose::ViewTrendingStickerSets
+            && self.session.requests.has_purpose(purpose)
+        {
+            return Ok(None);
+        }
+        self.session.stickers.failed = false;
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self.sender.send_json(&build(extra)) {
+            self.session.requests.take(extra);
+            self.session.stickers.failed = true;
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    pub fn select_sticker_tab(
+        &mut self,
+        tab: StickerTab,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if tab == StickerTab::Trending && self.session.stickers.tab != tab {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetStickerSet),
+            );
+            self.session.stickers.loading_set = false;
+            self.session.stickers.selected_set_id = None;
+            self.session.stickers.loaded_set_id = None;
+            self.session.stickers.stickers.clear();
+        }
+        if tab == StickerTab::Installed {
+            let id = self.session.stickers.sets.first().map(|set| set.id);
+            if let Some(id) = id
+                && !self
+                    .session
+                    .stickers
+                    .sets
+                    .iter()
+                    .any(|set| Some(set.id) == self.session.stickers.selected_set_id)
+            {
+                self.session.select_sticker_set(id);
+            }
+        }
+        self.session.stickers.tab = tab;
+        match tab {
+            StickerTab::Installed => self.open_sticker_panel(),
+            StickerTab::Recent => self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
+                get_recent_stickers(id, false)
+            }),
+            StickerTab::Favorites => {
+                self.sticker_request(RequestPurpose::GetFavoriteStickers, get_favorite_stickers)
+            }
+            StickerTab::Trending => self
+                .sticker_request(RequestPurpose::GetTrendingStickerSets, |id| {
+                    get_trending_sticker_sets(id, 0, 100)
+                }),
+        }
+    }
+
+    pub fn fetch_trending_stickers(
+        &mut self,
+        more: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetTrendingStickerSets)
+        {
+            return Ok(None);
+        }
+        let offset = if more {
+            self.session.stickers.trending_next_offset
+        } else {
+            0
+        };
+        self.session.stickers.trending_offset = offset;
+        self.sticker_request(RequestPurpose::GetTrendingStickerSets, |id| {
+            get_trending_sticker_sets(id, offset as i32, 100)
+        })
+    }
+
+    pub(crate) fn sticker_request_favorites(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.sticker_request(RequestPurpose::GetFavoriteStickers, get_favorite_stickers)
+    }
+
+    pub fn clear_recent_stickers(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        self.sticker_request(RequestPurpose::ClearRecentStickers, |id| {
+            clear_recent_stickers(id, false)
+        })
+    }
+
+    pub fn set_favorite_sticker(
+        &mut self,
+        file_id: FileId,
+        favorite: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if file_id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = if favorite {
+            RequestPurpose::AddFavoriteSticker
+        } else {
+            RequestPurpose::RemoveFavoriteSticker
+        };
+        self.sticker_request(purpose, |id| {
+            if favorite {
+                add_favorite_sticker(id, file_id)
+            } else {
+                remove_favorite_sticker(id, file_id)
+            }
+        })
+    }
+
+    pub(crate) fn mark_trending_stickers_viewed(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let ids: Vec<_> = self
+            .session
+            .stickers
+            .trending
+            .iter()
+            .map(|set| set.id)
+            .collect();
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        self.sticker_request(RequestPurpose::ViewTrendingStickerSets, |id| {
+            view_trending_sticker_sets(id, &ids)
+        })
     }
 
     /// Slice S12: refresh the composer sticker suggestions for the
@@ -109,7 +273,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn maybe_load_selected_sticker_set(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.stickers.open || !self.chats_path_active() {
+        if !self.session.stickers.open
+            || !self.chats_path_active()
+            || !matches!(
+                self.session.stickers.tab,
+                StickerTab::Installed | StickerTab::Trending
+            )
+        {
             return Ok(None);
         }
         if self

@@ -6,6 +6,9 @@ impl Session {
         self.stickers.loading_sets = false;
         self.stickers.failed = false;
         self.stickers.sets = sets;
+        if self.stickers.tab != StickerTab::Installed {
+            return;
+        }
         let still_selected = self
             .stickers
             .selected_set_id
@@ -17,11 +20,20 @@ impl Session {
         }
     }
 
-    /// Slice S8: store a `trendingStickerSets` page. Single-page replace
-    /// semantics: a paged second call overwrites page one. Append-before-
-    /// needed is speculative — the tab UI will own paging when it lands.
+    /// Replace the first trending page; append later pages without duplicate sets.
     pub fn accept_trending_sticker_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
-        self.stickers.trending = sets;
+        self.stickers.trending_next_offset = self.stickers.trending_offset + sets.len();
+        if sets.is_empty() {
+            self.stickers.trending_total = self.stickers.trending_next_offset;
+        }
+        if self.stickers.trending_offset == 0 {
+            self.stickers.trending = sets;
+        } else {
+            let mut ids: HashSet<_> = self.stickers.trending.iter().map(|set| set.id).collect();
+            self.stickers
+                .trending
+                .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
+        }
         self.stickers.trending_is_premium = is_premium;
     }
 

@@ -1,10 +1,20 @@
 //! Sticker and GIF panel state types.
 use super::*;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StickerTab {
+    #[default]
+    Installed,
+    Recent,
+    Favorites,
+    Trending,
+}
+
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerPanel {
     pub open: bool,
+    pub tab: StickerTab,
     pub sets: Vec<StickerSetInfo>,
     pub selected_set_id: Option<i64>,
     pub stickers: Vec<StickerItem>,
@@ -14,6 +24,9 @@ pub struct StickerPanel {
     pub failed: bool,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
+    pub trending_total: usize,
+    pub trending_offset: usize,
+    pub trending_next_offset: usize,
     pub trending_is_premium: bool,
     /// Slice S8: favorite stickers (`getFavoriteStickers`).
     pub favorites: Vec<StickerItem>,
@@ -58,6 +71,14 @@ impl GifPanel {
 }
 
 impl StickerPanel {
+    pub fn visible_stickers(&self) -> &[StickerItem] {
+        match self.tab {
+            StickerTab::Installed | StickerTab::Trending => &self.stickers,
+            StickerTab::Recent => &self.recent,
+            StickerTab::Favorites => &self.favorites,
+        }
+    }
+
     pub fn close(&mut self) {
         self.open = false;
     }

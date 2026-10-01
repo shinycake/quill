@@ -16,7 +16,7 @@ use quill::composer::{ComposerEdit, ComposerReplyTo, find_urls};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{RequestPurpose, Session};
+use quill::state::{RequestPurpose, Session, StickerTab};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::effective_content;
 use std::cell::RefCell;
@@ -349,6 +349,48 @@ impl QuillApp {
         cx.notify();
     }
 
+    fn select_sticker_tab(&mut self, tab: StickerTab, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.select_sticker_tab(tab) {
+                Ok(_) => "stickers".into(),
+                Err(_) => "could not load sticker tab".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.stickers.tab = tab;
+        }
+        cx.notify();
+    }
+
+    fn more_trending_stickers(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.fetch_trending_stickers(true) {
+                Ok(_) => "loading more trending stickers…".into(),
+                Err(_) => "could not load more trending stickers".into(),
+            };
+        }
+        cx.notify();
+    }
+
+    fn favorite_sticker(&mut self, id: FileId, favorite: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.set_favorite_sticker(id, favorite) {
+                Ok(_) => "updating favorite stickers…".into(),
+                Err(_) => "could not update favorite sticker".into(),
+            };
+        }
+        cx.notify();
+    }
+
+    fn clear_recent_stickers(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.clear_recent_stickers() {
+                Ok(_) => "clearing recent stickers…".into(),
+                Err(_) => "could not clear recent stickers".into(),
+            };
+        }
+        cx.notify();
+    }
+
     pub(super) fn send_sticker_pick(
         &mut self,
         file_id: FileId,
@@ -612,8 +654,45 @@ impl QuillApp {
             .map(|session| session.files.clone())
             .unwrap_or_default();
         let roots = self.media_display_roots();
-        let mut sets = div().id("sticker-set-row").flex().flex_wrap().gap_1();
-        for set in &panel.sets {
+        let mut sets = div()
+            .id("sticker-set-row")
+            .flex()
+            .flex_wrap()
+            .gap_1()
+            .max_h(px(96.))
+            .overflow_y_scroll();
+        let mut tabs = div().flex().flex_wrap().gap_1();
+        for (tab, label) in [
+            (StickerTab::Installed, "Installed"),
+            (StickerTab::Recent, "Recent"),
+            (StickerTab::Favorites, "Favorites"),
+            (StickerTab::Trending, "Trending"),
+        ] {
+            tabs = tabs.child(
+                Button::new(format!("sticker-tab-{tab:?}"))
+                    .label(if panel.tab == tab {
+                        format!("{label} · open")
+                    } else {
+                        label.into()
+                    })
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| this.select_sticker_tab(tab, cx))),
+            );
+        }
+        if panel.tab == StickerTab::Recent {
+            tabs = tabs.child(
+                Button::new("clear-recent-stickers")
+                    .label("Clear recent")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.clear_recent_stickers(cx))),
+            );
+        }
+        let visible_sets = match panel.tab {
+            StickerTab::Installed => panel.sets.as_slice(),
+            StickerTab::Trending => panel.trending.as_slice(),
+            _ => &[],
+        };
+        for set in visible_sets {
             let set_id = set.id;
             let selected = panel.selected_set_id == Some(set_id);
             let title = if set.title.is_empty() {
@@ -634,8 +713,16 @@ impl QuillApp {
                     })),
             );
         }
+        if panel.tab == StickerTab::Trending && panel.trending_next_offset < panel.trending_total {
+            sets = sets.child(
+                Button::new("sticker-trending-more")
+                    .label("More trending sets")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.more_trending_stickers(cx))),
+            );
+        }
         let mut grid = div().id("sticker-grid").flex().flex_wrap().gap_2();
-        for sticker in &panel.stickers {
+        for sticker in panel.visible_stickers() {
             let file_id = sticker.file_id;
             let emoji = sticker.emoji.clone();
             let width = sticker.width;
@@ -707,18 +794,53 @@ impl QuillApp {
                     .child(label)
                     .into_any_element()
             };
-            grid = grid.child(cell);
+            let favorite = panel.favorites.iter().any(|item| item.file_id == file_id);
+            grid = grid.child(
+                div().flex().flex_col().gap_1().child(cell).child(
+                    Button::new(format!(
+                        "sticker-favorite-{}-{}",
+                        sticker.set_id, sticker.id
+                    ))
+                    .label(if favorite { "Unfavorite" } else { "Favorite" })
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.favorite_sticker(file_id, !favorite, cx)
+                    })),
+                ),
+            );
         }
-        let status = if panel.loading_sets || panel.loading_set {
-            "Loading installed sticker sets…"
+        let loading_tab = self.session().is_some_and(|session| {
+            let purpose = match panel.tab {
+                StickerTab::Installed => RequestPurpose::GetInstalledStickerSets,
+                StickerTab::Recent => RequestPurpose::GetRecentStickers,
+                StickerTab::Favorites => RequestPurpose::GetFavoriteStickers,
+                StickerTab::Trending => RequestPurpose::GetTrendingStickerSets,
+            };
+            session.requests.has_purpose(purpose)
+        });
+        let status = if loading_tab || panel.loading_set {
+            "Loading stickers…".to_string()
         } else if panel.failed {
-            "Could not load stickers."
-        } else if panel.sets.is_empty() {
-            "No installed sticker sets."
-        } else if panel.stickers.is_empty() {
-            "This set is empty."
+            "Could not update stickers. Select the tab to retry.".into()
         } else {
-            "Tap a sticker to send it."
+            match panel.tab {
+                StickerTab::Installed if panel.sets.is_empty() => {
+                    "No sticker sets installed.".into()
+                }
+                StickerTab::Installed => format!(
+                    "{} sets installed · Tap a sticker to send it.",
+                    panel.sets.len()
+                ),
+                StickerTab::Recent if panel.recent.is_empty() => "No recent stickers.".into(),
+                StickerTab::Favorites if panel.favorites.is_empty() => {
+                    "No favorite stickers. Add one from an installed set.".into()
+                }
+                StickerTab::Trending if panel.trending.is_empty() => {
+                    "No trending sticker sets.".into()
+                }
+                StickerTab::Trending => "Select a trending set to preview its stickers.".into(),
+                _ => "Tap a sticker to send it.".into(),
+            }
         };
         div()
             .id("sticker-picker")
@@ -751,8 +873,15 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(status),
             )
+            .child(tabs)
             .child(sets)
-            .child(grid)
+            .child(
+                div()
+                    .id("sticker-scroll")
+                    .max_h(px(240.))
+                    .overflow_y_scroll()
+                    .child(grid),
+            )
     }
 
     pub(super) fn composer_edit_banner(
