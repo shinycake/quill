@@ -22,8 +22,8 @@ use std::collections::{HashMap, HashSet};
 /// Embedded English wordlist, one word per line, most frequent first.
 const WORDLIST: &str = include_str!("../assets/spellcheck/en.txt");
 
-/// Cap on misspellings returned per check — the dialog shows at most
-/// this many; the badge counts all of them via [`SpellChecker::count`].
+/// Cap on misspellings returned per check and counted by the badge.
+/// The corrections panel renders a smaller subset of this list.
 pub const MAX_MISSPELLINGS: usize = 32;
 
 /// A misspelled token: byte range into the checked text plus the word
@@ -189,6 +189,23 @@ fn normalize(word: &str) -> String {
     word.to_lowercase()
 }
 
+/// Match a correction to the original token's letter case.
+pub fn match_capitalization(original: &str, suggestion: &str) -> String {
+    let mut letters = original.chars().filter(|c| c.is_alphabetic()).peekable();
+    if letters.peek().is_some() && letters.clone().all(char::is_uppercase) {
+        return suggestion.to_uppercase();
+    }
+    if letters.next().is_some_and(char::is_uppercase)
+        && let Some((start, first)) = suggestion.char_indices().find(|(_, c)| c.is_alphabetic())
+    {
+        let mut result = suggestion[..start].to_string();
+        result.extend(first.to_uppercase());
+        result.push_str(&suggestion[start + first.len_utf8()..]);
+        return result;
+    }
+    suggestion.to_string()
+}
+
 /// ALL-CAPS tokens with 2+ letters are acronyms (NASA, FYI) — never
 /// flagged. Checked before lowercasing.
 fn is_acronym(word: &str) -> bool {
@@ -280,11 +297,11 @@ fn tokenize(text: &str) -> Vec<(&str, usize, usize)> {
 }
 
 /// All Damerau-Levenshtein edits at distance 1 (deletes, transposes,
-/// replaces, inserts over a-z).
+/// replaces, inserts over a-z plus apostrophe and hyphen).
 fn edits1(word: &str) -> Vec<String> {
     let chars: Vec<char> = word.chars().collect();
     let n = chars.len();
-    let mut out = Vec::with_capacity(54 * n + 26);
+    let mut out = Vec::with_capacity(58 * n + 28);
     // Deletes.
     for i in 0..n {
         let mut s = String::with_capacity(n);
@@ -300,7 +317,7 @@ fn edits1(word: &str) -> Vec<String> {
     }
     // Replaces and inserts.
     for i in 0..=n {
-        for c in 'a'..='z' {
+        for c in ('a'..='z').chain(['\'', '-']) {
             if i < n {
                 let mut s = String::with_capacity(n);
                 s.extend(chars[..i].iter());
@@ -375,6 +392,33 @@ mod tests {
         assert!(s.contains(&"spelling".to_string()), "got {s:?}");
         // Already-correct words get no suggestions.
         assert!(sc.suggestions("hello", 5).is_empty());
+    }
+
+    #[test]
+    fn suggestions_reach_hyphenated_dictionary_words() {
+        let sc = checker();
+        assert!(edits1("wellknown").contains(&"well-known".to_string()));
+        assert!(edits1("wellxknown").contains(&"well-known".to_string()));
+        assert!(edits1("canxt").contains(&"can't".to_string()));
+        assert!(edits1("cant").contains(&"can't".to_string()));
+        let suggestions = sc.suggestions("wellknown", 5);
+        assert!(
+            suggestions.contains(&"well-known".to_string()),
+            "got {suggestions:?}"
+        );
+    }
+
+    #[test]
+    fn corrections_match_capitalization() {
+        assert_eq!(match_capitalization("Teh", "the"), "The");
+        assert_eq!(match_capitalization("THE", "the"), "THE");
+        assert_eq!(match_capitalization("teh", "the"), "the");
+        assert_eq!(match_capitalization("'Teh", "'the"), "'The");
+        assert_eq!(
+            match_capitalization("WELLKNOWN", "well-known"),
+            "WELL-KNOWN"
+        );
+        assert_eq!(match_capitalization("---", "the"), "the");
     }
 
     #[test]

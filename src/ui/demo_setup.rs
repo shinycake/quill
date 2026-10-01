@@ -97,6 +97,23 @@ impl QuillApp {
                 generation: 1,
             });
         }
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel)
+        ) {
+            self.chat_prefs.spellcheck_enabled = true;
+            // Ignore persisted custom words so this fixture always shows typos.
+            self.spellchecker = quill::spellcheck::SpellChecker::new();
+            self.composer.update(cx, |input, cx| {
+                input.set_value("Teh quick brown fox has a speling error", window, cx);
+            });
+            let text = self.composer.read(cx).value().to_string();
+            self.sync_spellcheck(&text, cx);
+            self.spellcheck_open = matches!(demo, Some(ScreenshotDemo::ReadySpellcheckPanel));
+            if self.spellcheck_open {
+                self.refresh_spell_suggestions();
+            }
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             self.composer.update(cx, |input, cx| {
                 input.set_value("hello from composer", window, cx);
@@ -643,7 +660,13 @@ impl QuillApp {
         // blue accent, dark wallpaper, 16px message text. They are only
         // in-memory for the demo — `apply_appearance` (end of this fn)
         // picks them up; nothing is persisted.
-        if matches!(demo, Some(ScreenshotDemo::ReadyAppearance)) {
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheckToggle)
+        ) {
+            if matches!(demo, Some(ScreenshotDemo::ReadySpellcheckToggle)) {
+                self.chat_prefs.spellcheck_enabled = true;
+            }
             // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
             // captures the dialog with the HC theme selected.
             self.appearance.theme =

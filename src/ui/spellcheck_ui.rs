@@ -11,9 +11,10 @@ use super::chat_theme::{bg_canvas, border, danger, text_muted, text_primary};
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::spellcheck::match_capitalization;
 
 /// Max misspellings rendered in the panel (the engine caps at
-/// `MAX_MISSPELLINGS`; the badge counts all of them).
+/// `MAX_MISSPELLINGS`; the badge counts the full capped list).
 const PANEL_WORD_LIMIT: usize = 8;
 /// Suggestions offered per misspelled word.
 const SUGGESTION_LIMIT: usize = 5;
@@ -25,7 +26,10 @@ impl QuillApp {
     /// only when the panel is open and the word set changed.
     pub(super) fn sync_spellcheck(&mut self, text: &str, cx: &mut Context<Self>) {
         if !self.chat_prefs.spellcheck_enabled {
-            if !self.spell_misspellings.is_empty() || self.spellcheck_open {
+            if !self.spell_misspellings.is_empty()
+                || !self.spell_suggestions.is_empty()
+                || self.spellcheck_open
+            {
                 self.spell_misspellings.clear();
                 self.spell_suggestions.clear();
                 self.spellcheck_open = false;
@@ -57,12 +61,18 @@ impl QuillApp {
 
     /// Recompute suggestions for the current misspellings (panel-open
     /// path only — never per keystroke).
-    fn refresh_spell_suggestions(&mut self) {
+    pub(super) fn refresh_spell_suggestions(&mut self) {
         self.spell_suggestions = self
             .spell_misspellings
             .iter()
             .take(PANEL_WORD_LIMIT)
-            .map(|m| self.spellchecker.suggestions(&m.word, SUGGESTION_LIMIT))
+            .map(|m| {
+                self.spellchecker
+                    .suggestions(&m.word, SUGGESTION_LIMIT)
+                    .iter()
+                    .map(|s| match_capitalization(&m.word, s))
+                    .collect()
+            })
             .collect();
     }
 
@@ -96,9 +106,10 @@ impl QuillApp {
             self.sync_spellcheck(&text, cx);
             return;
         }
+        let suggestion = match_capitalization(&word, suggestion);
         let mut new_text = String::with_capacity(text.len() + suggestion.len());
         new_text.push_str(&text[..start]);
-        new_text.push_str(suggestion);
+        new_text.push_str(&suggestion);
         new_text.push_str(&text[end..]);
         let cursor = start + suggestion.len();
         self.composer.update(cx, |input, cx| {

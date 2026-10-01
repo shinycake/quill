@@ -384,6 +384,12 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Ready chat draft with typos and the ABC badge, panel closed.
+    ReadySpellcheck,
+    /// Same draft with the corrections panel and suggestions visible.
+    ReadySpellcheckPanel,
+    /// Appearance dialog with the Spelling / Check spelling row visible.
+    ReadySpellcheckToggle,
     /// Slice parity:auth-multi-account (UI): the Accounts dialog open
     /// over the ReadyChats fixture (injected, no live Telegram). The
     /// account list reads the real local registry (read-only).

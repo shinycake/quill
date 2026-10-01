@@ -265,6 +265,8 @@ impl QuillApp {
                     ),
             );
             body = body.child(this.appearance_theme_section(cx));
+            // Keep the spelling toggle visible without scrolling.
+            body = body.child(this.appearance_spellcheck_section(cx));
             body = body.child(this.appearance_auto_night_section(cx));
             body = body.child(this.appearance_accent_section(cx));
             body = body.child(this.appearance_wallpaper_section(cx));
@@ -272,8 +274,6 @@ impl QuillApp {
             body = body.child(this.appearance_bubble_section(cx));
             body = body.child(this.appearance_chat_list_section(cx));
             body = body.child(this.appearance_send_key_section(cx));
-            // parity:platform-spellcheck: the spellcheck toggle.
-            body = body.child(this.appearance_spellcheck_section(cx));
             // Slice parity:settings-language: the app language picker
             // (the tag TDLib gets in `setTdlibParameters`).
             body = body.child(this.appearance_language_section(cx));
@@ -806,6 +806,8 @@ impl QuillApp {
                     .accessibility_label("Check spelling")
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_chat_prefs(cx, |c| c.spellcheck_enabled = on);
+                        let text = this.composer.read(cx).value().to_string();
+                        this.sync_spellcheck(&text, cx);
                     })),
             )
             .into_any_element();
