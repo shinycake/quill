@@ -1,2 +1,0 @@
-# platform deep links — t.me/tg: launch arg via getDeepLinkInfo
-parity:platform-deep-links
