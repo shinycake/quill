@@ -419,6 +419,17 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<Self>,
     ) {
+        // Refuse offline before the confirm dialog — a call can't be
+        // queued, so confirming then failing would be dishonest.
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.is_offline())
+        {
+            self.status_note = "You're offline — can't start a call".into();
+            cx.notify();
+            return;
+        }
         if self
             .session()
             .is_some_and(|session| session.call_prefs.confirm_before_calling)
@@ -1201,6 +1212,15 @@ impl QuillApp {
     /// Phase C2i: "Call again" from a history row — honours the
     /// confirm-before-calling preference before dialling.
     pub(super) fn call_again(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.is_offline())
+        {
+            self.status_note = "You're offline — can't start a call".into();
+            cx.notify();
+            return;
+        }
         let confirm = self
             .session()
             .is_some_and(|session| session.call_prefs.confirm_before_calling);

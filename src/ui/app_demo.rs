@@ -97,6 +97,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — offline indicator (injected updates, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        // Slice parity:platform-offline-errors — offline banner + kit toast
+        // with the product offline-send note (status_note → push_status_note).
+        ScreenshotDemo::ReadyOfflineToast => (
+            Some(seed_ready_offline_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "You're offline — will send when you reconnect".into(),
+            AuthorizationState::Ready,
+        ),
         // Slice parity:platform-reconnect-states — same chat list, but
         // the fixture reports Updating so the transitional strip renders
         // with its per-state label.

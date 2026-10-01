@@ -1162,7 +1162,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.resend_failed_message(chat_id, message_id) {
-                Ok(_) => "retrying send…".into(),
+                Ok(_) => self.send_started_note("retrying send…"),
                 Err(_) => "could not retry".into(),
             };
         } else {

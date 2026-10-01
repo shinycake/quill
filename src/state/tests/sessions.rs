@@ -592,12 +592,15 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
     );
 }
 
-// Slice parity:platform-offline-errors — `is_offline` is true for any
-// non-Ready connection state.
+// Slice parity:platform-offline-errors — `is_offline` is false for
+// Ready and Updating (live sync); true for WaitingForNetwork /
+// Connecting / etc.
 #[test]
 fn is_offline_follows_connection_state() {
     let (mut session, _sink) = session();
     session.connection = ConnectionState::Ready;
+    assert!(!session.is_offline());
+    session.connection = ConnectionState::Updating;
     assert!(!session.is_offline());
     session.connection = ConnectionState::WaitingForNetwork;
     assert!(session.is_offline());
