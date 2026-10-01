@@ -162,6 +162,17 @@ impl Session {
         ) {
             self.invalidate_installed_sticker_sets();
         }
+        if let Some(RequestPurpose::ManageStickerSet {
+            set_id, installed, ..
+        }) = pending.map(|p| p.purpose)
+        {
+            for sets in [&mut self.stickers.trending, &mut self.stickers.found_sets] {
+                for set in sets.iter_mut().filter(|set| set.id == set_id) {
+                    set.is_installed = installed;
+                }
+            }
+            self.stickers.sets.clear();
+        }
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
         self.invalidate_emoji_caches(pending.map(|p| p.purpose));
         // Slice S9: a saved-GIF mutation (`addSavedAnimation` /

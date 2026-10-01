@@ -5,8 +5,9 @@ use crate::ids::RequestId;
 use crate::state::{RequestPurpose, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::telegram::requests::{
-    add_favorite_sticker, clear_recent_stickers, get_favorite_stickers, get_recent_stickers,
-    get_trending_sticker_sets, remove_favorite_sticker, view_trending_sticker_sets,
+    add_favorite_sticker, change_sticker_set, clear_recent_stickers, get_favorite_stickers,
+    get_recent_stickers, get_trending_sticker_sets, remove_favorite_sticker, search_sticker_sets,
+    view_trending_sticker_sets,
 };
 use crate::telegram::requests::{
     get_installed_sticker_sets, get_saved_animations, get_sticker_set, search_stickers,
@@ -29,6 +30,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             StickerTab::Favorites => return Ok(favorites),
             StickerTab::Trending => return self.fetch_trending_stickers(false),
+            StickerTab::Search => return Ok(None),
             StickerTab::Installed => {}
         }
         self.session.stickers.failed = false;
@@ -91,7 +93,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if tab == StickerTab::Trending && self.session.stickers.tab != tab {
+        if tab == StickerTab::Search
+            || tab == StickerTab::Trending && self.session.stickers.tab != tab
+        {
             drop(
                 self.session
                     .requests
@@ -124,11 +128,104 @@ impl<S: JsonSender> ConnectDriver<S> {
             StickerTab::Favorites => {
                 self.sticker_request(RequestPurpose::GetFavoriteStickers, get_favorite_stickers)
             }
-            StickerTab::Trending => self
-                .sticker_request(RequestPurpose::GetTrendingStickerSets, |id| {
-                    get_trending_sticker_sets(id, 0, 100)
-                }),
+            StickerTab::Trending => self.fetch_trending_stickers(false),
+            StickerTab::Search => Ok(None),
         }
+    }
+
+    pub fn search_sticker_picker(&mut self, query: &str) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::SearchStickerSets),
+        );
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::SearchStickers),
+        );
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::GetStickerSet),
+        );
+        self.session.stickers.selected_set_id = None;
+        self.session.stickers.loaded_set_id = None;
+        self.session.stickers.loading_set = false;
+        self.session.stickers.failed = false;
+        self.session.stickers.search_offset = 0;
+        self.session.stickers.search_has_more = false;
+        self.session.stickers.search_query = query.trim().to_string();
+        self.session.stickers.found_sets.clear();
+        self.session.stickers.found_stickers.clear();
+        let query = self.session.stickers.search_query.clone();
+        if query.is_empty() {
+            return Ok(());
+        }
+        self.sticker_request(RequestPurpose::SearchStickerSets, |id| {
+            search_sticker_sets(id, &query)
+        })?;
+        self.sticker_request(RequestPurpose::SearchStickers, |id| {
+            search_stickers(id, "", &query, 0, 100)
+        })?;
+        Ok(())
+    }
+
+    pub fn more_sticker_search_results(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let query = self.session.stickers.search_query.clone();
+        let offset = self.session.stickers.search_offset;
+        if query.is_empty() || !self.session.stickers.search_has_more {
+            return Ok(None);
+        }
+        self.sticker_request(RequestPurpose::SearchStickers, |id| {
+            search_stickers(id, "", &query, offset as i32, 100)
+        })
+    }
+
+    pub fn manage_sticker_set(
+        &mut self,
+        set_id: i64,
+        installed: bool,
+        archived: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || set_id <= 0 || installed && archived {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // Serialize contradictory operations on one set, while allowing independent sets to change.
+        let busy = [(true, false), (false, true), (false, false)]
+            .into_iter()
+            .any(|(installed, archived)| {
+                self.session
+                    .requests
+                    .has_purpose(RequestPurpose::ManageStickerSet {
+                        set_id,
+                        installed,
+                        archived,
+                    })
+            });
+        if busy {
+            return Ok(None);
+        }
+        self.sticker_request(
+            RequestPurpose::ManageStickerSet {
+                set_id,
+                installed,
+                archived,
+            },
+            |id| change_sticker_set(id, set_id, installed, archived),
+        )
+    }
+
+    pub(crate) fn refresh_installed_sticker_sets(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.sticker_request(
+            RequestPurpose::GetInstalledStickerSets,
+            get_installed_sticker_sets,
+        )
     }
 
     pub fn fetch_trending_stickers(
@@ -277,7 +374,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             || !self.chats_path_active()
             || !matches!(
                 self.session.stickers.tab,
-                StickerTab::Installed | StickerTab::Trending
+                StickerTab::Installed | StickerTab::Trending | StickerTab::Search
             )
         {
             return Ok(None);

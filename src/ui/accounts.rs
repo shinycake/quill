@@ -122,6 +122,8 @@ impl QuillApp {
             return;
         };
         self.close_accounts(window, cx);
+        self.sticker_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(mut live) = self.live.take() {
             live.shutdown(CLIENT_CLOSE_TIMEOUT);
         }

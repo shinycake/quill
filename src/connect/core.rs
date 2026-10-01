@@ -125,6 +125,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 view_purpose,
                 Some(RequestPurpose::AddFavoriteSticker | RequestPurpose::RemoveFavoriteSticker)
             );
+        let sticker_set_changed = matches!(owned.envelope.payload, EnvelopePayload::Ok)
+            && matches!(view_purpose, Some(RequestPurpose::ManageStickerSet { .. }));
         let recent_cleared = matches!(owned.envelope.payload, EnvelopePayload::Ok)
             && view_purpose == Some(RequestPurpose::ClearRecentStickers);
         let trending_answer = matches!(
@@ -600,6 +602,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C2f: a dropped group call (`need_rejoin`) auto-rejoins
         // with the C2d attempt discipline (max 3).
         let _ = self.maybe_auto_rejoin_group_call();
+        if sticker_set_changed {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetInstalledStickerSets),
+            );
+            if self.session.stickers.open {
+                self.refresh_installed_sticker_sets()?;
+            }
+        }
         if sticker_mutation_ok {
             // An older fetch can answer after the mutation with stale contents.
             drop(

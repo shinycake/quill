@@ -904,6 +904,11 @@ impl QuillApp {
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
+        let sticker_search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search stickers and sets")
+                .auto_grow(1, 1)
+        });
         let phone_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Phone (+country code)")
@@ -1240,6 +1245,7 @@ impl QuillApp {
             inline_results_selected: 0,
             inline_query_token: 0,
             inline_query_armed: None,
+            sticker_search_input,
             phone_input,
             code_input,
             password_input,

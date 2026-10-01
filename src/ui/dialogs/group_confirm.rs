@@ -62,6 +62,9 @@ pub enum GroupConfirmAction {
     /// `deleteSavedOrderInfo` + `deleteSavedCredentials` (schema 1.8.67,
     /// lines 15286 / 15289). The dialog's chat id is a dummy.
     ClearPaymentInfo,
+    RemoveStickerSet {
+        set_id: i64,
+    },
 }
 
 pub struct GroupConfirmDialog {

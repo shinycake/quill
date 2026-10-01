@@ -1192,7 +1192,10 @@ impl Session {
         if matches!(
             pending.map(|p| p.purpose),
             Some(
-                RequestPurpose::GetFavoriteStickers
+                RequestPurpose::ManageStickerSet { .. }
+                    | RequestPurpose::SearchStickers
+                    | RequestPurpose::SearchStickerSets
+                    | RequestPurpose::GetFavoriteStickers
                     | RequestPurpose::GetRecentStickers
                     | RequestPurpose::GetTrendingStickerSets
                     | RequestPurpose::ClearRecentStickers

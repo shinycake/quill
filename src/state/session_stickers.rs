@@ -54,7 +54,22 @@ impl Session {
 
     /// Slice S8: store a `searchStickers` answer.
     pub fn accept_found_stickers(&mut self, stickers: Vec<StickerItem>) {
-        self.stickers.found_stickers = stickers;
+        self.stickers.search_has_more = stickers.len() == 100;
+        if self.stickers.search_offset == 0 {
+            self.stickers.found_stickers.clear();
+        }
+        self.stickers.search_offset += stickers.len();
+        let mut files: HashSet<_> = self
+            .stickers
+            .found_stickers
+            .iter()
+            .map(|sticker| sticker.file_id)
+            .collect();
+        self.stickers.found_stickers.extend(
+            stickers
+                .into_iter()
+                .filter(|sticker| files.insert(sticker.file_id)),
+        );
     }
 
     /// Slice S12: drop the composer sticker suggestions.
