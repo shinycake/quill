@@ -769,6 +769,7 @@ fn driver_group_sticker_set_gates_and_shape() {
     );
     assert_eq!(recorder.snapshot().len(), sent_before);
     // Full info unfetched → capability gate fails closed.
+    assert!(driver.load_group_sticker_choices(ChatId(10)).is_err());
     assert!(
         driver
             .set_supergroup_sticker_set(ChatId(10), 5)
@@ -786,6 +787,23 @@ fn driver_group_sticker_set_gates_and_shape() {
             ..Default::default()
         },
     );
+    driver.load_group_sticker_choices(ChatId(10)).unwrap();
+    let requests: Vec<Value> = recorder
+        .snapshot()
+        .iter()
+        .map(|s| serde_json::from_str(s).unwrap())
+        .filter(|v: &Value| v["@type"] == "getInstalledStickerSets")
+        .collect();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["sticker_type"]["@type"], "stickerTypeRegular");
+    assert_eq!(
+        requests[1]["sticker_type"]["@type"],
+        "stickerTypeCustomEmoji"
+    );
+    let sent = recorder.snapshot().len();
+    driver.load_group_sticker_choices(ChatId(10)).unwrap();
+    assert_eq!(recorder.snapshot().len(), sent);
+    assert!(!driver.session.stickers.open && !driver.session.emoji.open);
     let extra = driver
         .set_supergroup_sticker_set(ChatId(10), 1234567890123)
         .unwrap()
@@ -837,6 +855,36 @@ fn driver_group_sticker_set_gates_and_shape() {
     assert_eq!(v["@extra"], extra.0.to_string());
     assert_eq!(v["supergroup_id"], 10);
     assert_eq!(v["custom_emoji_sticker_set_id"], "9876543210987");
+    assert_eq!(
+        driver
+            .session
+            .supergroup_full_info(10)
+            .unwrap()
+            .custom_emoji_sticker_set_id,
+        0
+    );
+    driver.ingest(copy_and_parse(&serde_json::json!({"@type":"error","@extra":extra.as_extra(),"code":403,"message":"private body"}).to_string(), &seq, &dyn_sink).unwrap()).unwrap();
+    assert!(
+        driver
+            .session
+            .chat_action_error
+            .as_deref()
+            .is_some_and(|e| e.contains("Could not change") && !e.contains("private body"))
+    );
+    assert_eq!(
+        driver
+            .session
+            .supergroup_full_info(10)
+            .unwrap()
+            .custom_emoji_sticker_set_id,
+        0
+    );
+    assert!(
+        driver
+            .set_supergroup_custom_emoji_sticker_set(ChatId(10), 0)
+            .unwrap()
+            .is_some()
+    );
     assert!(
         driver
             .set_supergroup_custom_emoji_sticker_set(ChatId(10), -1)

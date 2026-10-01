@@ -21,6 +21,35 @@ use crate::telegram::requests_group_stickers::{
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
+    pub fn load_group_sticker_choices(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() || !self.session.chat_can_set_sticker_set(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.stickers.failed = false;
+        self.session.emoji.failed = false;
+        for (purpose, build) in [
+            (
+                RequestPurpose::GetInstalledStickerSets,
+                crate::telegram::requests::get_installed_sticker_sets as fn(RequestId) -> String,
+            ),
+            (
+                RequestPurpose::GetInstalledEmojiSets,
+                crate::telegram::requests_emoji::get_installed_emoji_sets
+                    as fn(RequestId) -> String,
+            ),
+        ] {
+            if self.session.requests.has_purpose(purpose) {
+                continue;
+            }
+            let extra = self.session.request(purpose, None);
+            if let Err(err) = self.sender.send_json(&build(extra)) {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
     /// Phase 5.1: `getSupergroup` for a non-channel supergroup whose forum
     /// status is still unknown. Fires once (deduped by cache + in-flight
     /// purpose); the `supergroup` response and `updateSupergroup` both
