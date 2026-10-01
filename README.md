@@ -448,7 +448,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Emoji picker in composer with categories (Smileys & People, etc.) and search <!-- parity:emoji-picker -->
 - [x] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
 - [x] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
-- [ ] Custom emoji packs (browse/install/remove, "Emoji Sets" settings screen) <!-- parity:emoji-custom-packs --> (partial: backend wired — getInstalledStickerSets/getArchivedStickerSets/getTrendingStickerSets/searchStickerSets with stickerTypeCustomEmoji + changeStickerSet reuse + reorderInstalledStickerSets; "Emoji Sets" screen pending)
+- [x] Custom emoji packs (browse/install/remove, "Emoji Sets" settings screen) <!-- parity:emoji-custom-packs -->
 - [ ] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (partial: backend wired — getCustomEmojiStickers resolves ids to stickers in EmojiPanel; render in text pending)
 - [ ] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated --> (partial: backend wired — getAnimatedEmoji + animatedEmoji parse into EmojiPanel; composer suggestion UI pending)
 - [ ] Emoji status: select/set status, timed status (1h/2h/8h/2d/custom), trending statuses <!-- parity:emoji-status --> (partial: backend wired — setEmojiStatus incl. null-clear, getRecent/getThemed/getDefault/getUpgradedGiftEmojiStatuses parsed into EmojiPanel; status picker UI pending)
@@ -476,7 +476,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Custom reply keyboards rendered above the composer; text sends, one-time hides on tap, contact/location/poll honestly disabled <!-- parity:bots-custom-keyboard -->
 - [x] Force-reply markup focuses the composer with the reply target set <!-- parity:bots-force-reply -->
 - [x] Force-reply keyboards render the reply-keyboard bar (a ↩ {placeholder} ghost button above the composer, kit Button; tap focuses the composer) <!-- parity:bots-force-reply-keyboard -->
-- [ ] Stop button for streaming bot drafts (cancel an in-flight streaming bot reply) <!-- parity:bots-streaming-draft-stop -->
+- [x] Stop button for streaming bot drafts (cancel an in-flight streaming bot reply) <!-- parity:bots-streaming-draft-stop -->
 - [x] Bot info panel with description and tappable /command buttons inserting into the composer (ui/mod.rs:13726) <!-- parity:bots-info-panel -->
 - [x] Bot START button / start_parameter deep links (partial: link parser + armed START state are wired, but Quill registers no t.me/tg: URL scheme so OS deep-link intake is out of this slice): t.me/<bot>?start=<param> parses to (bot, param); START button sends sendBotStartMessage with the parameter (state.rs, ui/mod.rs) <!-- parity:bots-start -->
 - [x] Restart bot: confirm-gated; clears the bot chat history (deleteChatHistory, kept in list) then re-sends sendBotStartMessage with an empty parameter (connect.rs:restart_bot) <!-- parity:bots-restart -->
