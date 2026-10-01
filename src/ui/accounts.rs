@@ -137,6 +137,7 @@ impl QuillApp {
         ) {
             Ok(live) => {
                 self.live = Some(live);
+                self.reload_account_keybindings(cx);
                 // Clear any earlier restore-blocked label — the switch
                 // succeeded and the connect is live again.
                 self.connect_status = ConnectUiStatus::Live;

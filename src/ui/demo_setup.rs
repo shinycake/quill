@@ -647,7 +647,10 @@ impl QuillApp {
         // blue accent, dark wallpaper, 16px message text. They are only
         // in-memory for the demo — `apply_appearance` (end of this fn)
         // picks them up; nothing is persisted.
-        if matches!(demo, Some(ScreenshotDemo::ReadyAppearance)) {
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyKeybindings)
+        ) {
             // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
             // captures the dialog with the HC theme selected.
             self.appearance.theme =
@@ -660,7 +663,12 @@ impl QuillApp {
             self.appearance.wallpaper_rgb = Some(0x0e1621);
             self.appearance.font_size_px = 16;
             self.appearance_open = true;
-            self.status_note = "screenshot demo — appearance settings".into();
+            self.keybindings_screenshot = matches!(demo, Some(ScreenshotDemo::ReadyKeybindings));
+            self.status_note = if self.keybindings_screenshot {
+                "screenshot demo — keyboard shortcuts".into()
+            } else {
+                "screenshot demo — appearance settings".into()
+            };
         }
         // Slice parity:auth-multi-account (UI): the Accounts dialog open
         // over the ReadyChats fixture (injected, no live Telegram). The

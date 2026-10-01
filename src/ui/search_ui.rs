@@ -207,7 +207,7 @@ impl QuillApp {
         // Settings → Appearance: Esc closes the dialog (backdrop click
         // also closes; changes already applied live).
         if self.appearance_open {
-            self.appearance_open = false;
+            self.close_appearance();
             cx.notify();
             return;
         }

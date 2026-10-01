@@ -36,17 +36,31 @@ impl QuillApp {
             // (`cmd-q` / `ctrl-q`) render as one entry with both chips.
             // `shortcut_rows()` is written in section order, so first-seen
             // order is the display order.
-            let mut groups: Vec<(&'static str, &'static str, Vec<&'static str>)> = Vec::new();
+            let bindings = cx.key_bindings();
+            let bindings = bindings.borrow();
+            let mut groups: Vec<(&'static str, &'static str, Vec<Keystroke>)> = Vec::new();
             for row in shortcut_rows() {
-                match groups
-                    .iter_mut()
-                    .find(|(s, l, _)| *s == row.section && *l == row.label)
+                if groups
+                    .iter()
+                    .any(|(section, label, _)| *section == row.section && *label == row.label)
                 {
-                    Some((_, _, keys)) => keys.push(row.keystroke),
-                    None => groups.push((row.section, row.label, vec![row.keystroke])),
+                    continue;
                 }
+                let keys = bindings
+                    .bindings()
+                    .filter(|binding| binding.action().name() == row.binding.action().name())
+                    .flat_map(|binding| binding.keystrokes().iter().map(|key| key.inner().clone()))
+                    .collect();
+                groups.push((row.section, row.label, keys));
             }
-            let mut body = div().flex().flex_col().gap_4();
+            drop(bindings);
+            let mut body = div()
+                .id("shortcuts-body")
+                .max_h(px(480.))
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .gap_4();
             let mut current_section = "";
             for (section, label, keys) in &groups {
                 if *section != current_section {
@@ -55,12 +69,7 @@ impl QuillApp {
                 }
                 let mut chips = div().flex().gap_1();
                 for keystroke in keys {
-                    // The keystroke strings are the same statics `bind_keys`
-                    // already parsed successfully; a parse failure here is a
-                    // programming error, not user input.
-                    let stroke =
-                        Keystroke::parse(keystroke).expect("shortcut_rows keystrokes must parse");
-                    chips = chips.child(Kbd::new(stroke));
+                    chips = chips.child(Kbd::new(keystroke.clone()));
                 }
                 body = body.child(
                     div()
