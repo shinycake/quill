@@ -14,6 +14,7 @@ mod gifs;
 mod group_calls;
 mod groups;
 mod live;
+mod marketplace;
 mod media;
 mod message_actions;
 mod messages;

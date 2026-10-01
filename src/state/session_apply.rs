@@ -46,6 +46,11 @@ impl Session {
             // media-send captions); every other option parses but is
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
+                if name == "gift_text_length_max"
+                    && let OptionValue::Integer(limit) = &value
+                {
+                    self.gift_text_length_max = usize::try_from(*limit).ok();
+                }
                 if name == "pending_text_message_period"
                     && let OptionValue::Integer(period) = &value
                 {
@@ -1929,6 +1934,61 @@ impl Session {
                         self.payment_verification_url = Some(result.verification_url);
                     } else {
                         self.payment_note = Some("Payment failed".to_string());
+                    }
+                }
+            }
+            EnvelopePayload::MarketplaceGift(quote) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMarketplaceGift)
+                    && let Some(gift) = self.marketplace_gift.as_mut()
+                {
+                    gift.loading = false;
+                    if let Some(quote) = quote.filter(|q| q.name == gift.requested_name) {
+                        gift.price = quote.stars.or(quote.ton);
+                        gift.note = gift
+                            .price
+                            .is_none()
+                            .then(|| "This gift is not available for resale.".into());
+                        gift.quote = Some(quote);
+                    } else {
+                        gift.note =
+                            Some("Could not verify the returned gift. Load the gift again.".into());
+                    }
+                }
+            }
+            EnvelopePayload::GiftTextLimit(limit) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGiftTextLimit) {
+                    self.gift_text_length_max = usize::try_from(limit).ok();
+                }
+            }
+            EnvelopePayload::GiftPurchaseResult(result) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMarketplaceGift)
+                    && let Some(gift) = self.marketplace_gift.as_mut()
+                {
+                    gift.sending = false;
+                    match result {
+                        crate::marketplace::GiftPurchaseResult::Sent(_) => {
+                            // The receipt id is intentionally empty for gifts sent to others.
+                            gift.completed = true;
+                            gift.note = Some("Gift sent successfully.".into());
+                            gift.price = None;
+                        }
+                        crate::marketplace::GiftPurchaseResult::PriceIncreased(price) => {
+                            gift.price = price;
+                            if price.is_none() {
+                                gift.quote = None;
+                            }
+                            if let (Some(q), Some(price)) = (gift.quote.as_mut(), price) {
+                                match price {
+                                    crate::marketplace::GiftPrice::Stars(_) => {
+                                        q.stars = Some(price)
+                                    }
+                                    crate::marketplace::GiftPrice::TonCents(_) => {
+                                        q.ton = Some(price)
+                                    }
+                                }
+                            }
+                            gift.note=Some("The price increased. Review the new amount and confirm again; nothing was purchased.".into());
+                        }
                     }
                 }
             }

@@ -666,6 +666,30 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — ⭐ subscriptions".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyMarketplaceGift)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                let quote=quill::marketplace::GiftQuote::parse(&serde_json::json!({"name":"PlushPepe-123","title":"Plush Pepe","resale_parameters":{"star_count":25,"gram_cent_count":0,"gram_only":false}})).unwrap();
+                session.gift_text_length_max = Some(128);
+                session.marketplace_gift = Some(quill::marketplace::GiftPurchase {
+                    chat_id: ChatId(11),
+                    recipient: quill::telegram::envelope::MessageSender::User { user_id: 11 },
+                    recipient_name: "Demo chat A".into(),
+                    requested_name: quote.name.clone(),
+                    price: quote.stars,
+                    quote: Some(quote),
+                    loading: false,
+                    sending: false,
+                    completed: false,
+                    note: Some("Injected quote — no purchase is sent in this demo.".into()),
+                });
+            }
+            self.marketplace_name_input
+                .update(cx, |input, cx| input.set_value("PlushPepe-123", window, cx));
+            self.marketplace_comment_input.update(cx, |input, cx| {
+                input.set_value("A little gift for you 🎁", window, cx)
+            });
+            self.marketplace_open = true;
+        }
         // Settings → Appearance: the Appearance dialog open over the
         // ReadyChats fixture (injected, no live Telegram). Non-default
         // values so the screenshot shows the slice live: dark theme,

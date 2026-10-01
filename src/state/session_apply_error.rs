@@ -140,6 +140,16 @@ impl Session {
                 self.payment_receipt_error =
                     Some(format!("Receipt failed: {}", error_reason(&err)));
             }
+            Some(RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift) => {
+                if let Some(gift) = self.marketplace_gift.as_mut() {
+                    gift.loading = false;
+                    gift.sending = false;
+                    gift.note = Some(format!("Gift request failed: {}", error_reason(&err)));
+                }
+            }
+            Some(RequestPurpose::GetGiftTextLimit) => {
+                self.gift_text_length_max = None;
+            }
             // Slice `parity:bots-payment-recurring`: a subscriptions
             // request failed — surface the reason in the dialog
             // instead of spinning forever; a failed mutation also

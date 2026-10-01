@@ -402,6 +402,9 @@ pub enum RequestPurpose {
     /// Slice P1: `getPaymentForm` after a Buy button press. Response is
     /// `paymentForm` (schema 1.8.67, line 15262).
     GetPaymentForm,
+    GetMarketplaceGift,
+    GetGiftTextLimit,
+    SendMarketplaceGift,
     /// Slice P1: `validateOrderInfo` after the order-info form validates.
     /// Response is `validatedOrderInfo` (schema 1.8.67, line 15268).
     ValidateOrderInfo,

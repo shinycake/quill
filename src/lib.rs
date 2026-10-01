@@ -25,6 +25,7 @@ pub mod key_fingerprint;
 pub mod layout;
 pub mod lifecycle;
 pub mod local_path;
+pub mod marketplace;
 pub mod media_viewer;
 pub mod notify;
 pub mod pins;

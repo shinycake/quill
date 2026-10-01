@@ -1454,6 +1454,39 @@ impl QuillApp {
                                 this.open_subscriptions(cx);
                             })),
                     );
+                    list = list.child(
+                        Button::new("marketplace-gift")
+                            .label("Collectible gift")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                if this.session().and_then(|s| s.open_chat).is_some() {
+                                    let busy = this
+                                        .session()
+                                        .and_then(|s| s.marketplace_gift.as_ref())
+                                        .is_some_and(|g| g.loading || g.sending);
+                                    if !busy {
+                                        this.marketplace_name_input.update(cx, |input, cx| {
+                                            input.set_value("", window, cx)
+                                        });
+                                        this.marketplace_comment_input.update(cx, |input, cx| {
+                                            input.set_value("", window, cx)
+                                        });
+                                        this.marketplace_private = true;
+                                        this.marketplace_error = None;
+                                        if let Some(live) = this.live.as_mut() {
+                                            live.driver.session.marketplace_gift = None;
+                                        } else if let Some(session) = this.demo_session.as_mut() {
+                                            session.marketplace_gift = None;
+                                        }
+                                    }
+                                    this.marketplace_open = true;
+                                } else {
+                                    this.status_note =
+                                    "Open a private chat or channel to choose the gift recipient."
+                                        .into();
+                                }
+                                cx.notify();
+                            })),
+                    );
                     // Settings → Appearance slice: theme, auto-night,
                     // accent, wallpaper, font size, bubble style
                     // (client-side only — no TDLib setting exists for
