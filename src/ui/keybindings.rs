@@ -8,6 +8,41 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::settings::CustomKeybinding;
 
+/// Dismissing Appearance must also release ownership of composer keystrokes.
+pub(super) fn close_appearance_capture(
+    appearance_open: &mut bool,
+    capture: &mut Option<String>,
+    error: &mut Option<(String, String)>,
+) {
+    *appearance_open = false;
+    *capture = None;
+    *error = None;
+}
+
+/// Also discard stale capture state if a dialog was dismissed elsewhere.
+pub(super) fn capture_active(
+    appearance_open: bool,
+    capture: &mut Option<String>,
+    error: &mut Option<(String, String)>,
+) -> bool {
+    if !appearance_open {
+        *capture = None;
+        *error = None;
+    }
+    appearance_open && capture.is_some()
+}
+
+/// A new prefs root needs its own keymap, even when it has no overrides.
+pub(super) fn invalidate_account_keybindings(
+    applied: &mut bool,
+    capture: &mut Option<String>,
+    error: &mut Option<(String, String)>,
+) {
+    *applied = false;
+    *capture = None;
+    *error = None;
+}
+
 /// Parity slice (platform-custom-keybindings): a user-rebindable action.
 pub struct RebindableAction {
     /// Stable id used in persisted prefs (e.g. "focus-composer").
@@ -528,8 +563,9 @@ mod tests {
     // attribute and fail macro expansion ("recursion limit reached").
     use super::{
         Action, KeybindingConflict, Keystroke, Modifiers, QuitApp, REBINDABLE_ACTIONS,
-        canonical_event_chord, conflict_message, fixed_keystrokes, keybinding_conflict,
-        keybinding_for, resolve_keybindings,
+        canonical_event_chord, capture_active, close_appearance_capture, conflict_message,
+        fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict, keybinding_for,
+        resolve_keybindings,
     };
     use quill::settings::CustomKeybinding;
 
@@ -537,6 +573,72 @@ mod tests {
         CustomKeybinding {
             id: id.to_string(),
             keystroke: keystroke.to_string(),
+        }
+    }
+
+    #[test]
+    fn appearance_dismiss_clears_capture_and_error() {
+        let mut open = true;
+        let mut capture = Some("focus-composer".to_string());
+        let mut error = Some(("focus-composer".to_string(), "Conflict".to_string()));
+        close_appearance_capture(&mut open, &mut capture, &mut error);
+        assert!(!open);
+        assert_eq!(capture, None);
+        assert_eq!(error, None);
+        assert!(!capture_active(open, &mut capture, &mut error));
+    }
+
+    #[test]
+    fn capture_only_consumes_keys_while_appearance_is_open_and_armed() {
+        let mut capture = None;
+        let mut error = None;
+        assert!(!capture_active(true, &mut capture, &mut error));
+        capture = Some("focus-composer".to_string());
+        assert!(capture_active(true, &mut capture, &mut error));
+        error = Some(("focus-composer".to_string(), "Conflict".to_string()));
+        assert!(!capture_active(false, &mut capture, &mut error));
+        assert_eq!(capture, None);
+        assert_eq!(error, None);
+    }
+
+    #[test]
+    fn account_change_invalidates_applied_bindings_and_capture() {
+        let mut applied = true;
+        let mut capture = Some("focus-composer".to_string());
+        let mut error = Some(("focus-composer".to_string(), "Conflict".to_string()));
+        invalidate_account_keybindings(&mut applied, &mut capture, &mut error);
+        assert!(!applied);
+        assert_eq!(capture, None);
+        assert_eq!(error, None);
+    }
+
+    #[test]
+    fn account_overrides_and_empty_prefs_resolve_independently() {
+        let account_a = vec![custom("focus-composer", "ctrl-9")];
+        let account_b = vec![];
+        let account_c = vec![custom("focus-composer", "ctrl-8")];
+        // Each apply rebuilds from this resolver, never from the prior keymap.
+        for prefs in [&account_a, &account_b, &account_c, &account_b, &account_a] {
+            let resolved = resolve_keybindings(prefs);
+            if prefs.is_empty() {
+                for (row, action) in resolved.iter().zip(REBINDABLE_ACTIONS) {
+                    assert_eq!(row.id, action.id);
+                    assert_eq!(row.live, action.defaults);
+                    assert_eq!(row.rejected, None);
+                }
+                assert!(!resolved.iter().any(|row| {
+                    row.live
+                        .iter()
+                        .any(|chord| chord == "ctrl-9" || chord == "ctrl-8")
+                }));
+            } else {
+                let focus = resolved
+                    .iter()
+                    .find(|row| row.id == "focus-composer")
+                    .unwrap();
+                assert_eq!(focus.live, vec![prefs[0].keystroke.clone()]);
+                assert_eq!(focus.rejected, None);
+            }
         }
     }
 

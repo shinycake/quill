@@ -50,6 +50,22 @@ const WALLPAPER_PRESETS: &[(u32, &str)] = &[
 ];
 
 impl QuillApp {
+    pub(super) fn close_appearance(&mut self) {
+        super::keybindings::close_appearance_capture(
+            &mut self.appearance_open,
+            &mut self.keybinding_capture,
+            &mut self.keybinding_error,
+        );
+    }
+
+    pub(super) fn keybinding_capture_active(&mut self) -> bool {
+        super::keybindings::capture_active(
+            self.appearance_open,
+            &mut self.keybinding_capture,
+            &mut self.keybinding_error,
+        )
+    }
+
     /// Account-rooted prefs path. Appearance is a device setting (like
     /// Telegram's locally stored theme choice), so it lives under the
     /// primary account's root rather than per-account data.
@@ -250,7 +266,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Appearance, |this, _, cx| {
-                this.appearance_open = false;
+                this.close_appearance();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -295,7 +311,7 @@ impl QuillApp {
                     .label("Close")
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.appearance_open = false;
+                        this.close_appearance();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::Appearance, window, cx);
                     })),
@@ -960,8 +976,10 @@ impl QuillApp {
                         // a global binding. GPUI also matches keybindings
                         // before this bubble handler; the capture interceptor
                         // consumes those. Modifier-only presses stay armed.
-                        cx.stop_propagation();
-                        this.handle_keybinding_capture(&event.keystroke, cx);
+                        if this.keybinding_capture_active() {
+                            cx.stop_propagation();
+                            this.handle_keybinding_capture(&event.keystroke, cx);
+                        }
                     }))
                     .into_any_element()
             } else {
@@ -1002,6 +1020,9 @@ impl QuillApp {
         };
         use quill::settings::CustomKeybinding;
 
+        if !self.keybinding_capture_active() {
+            return;
+        }
         let Some(id) = self.keybinding_capture.clone() else {
             return;
         };

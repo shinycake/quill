@@ -72,19 +72,33 @@ impl QuillApp {
         .detach();
     }
 
+    pub(super) fn reload_account_keybindings(&mut self, cx: &mut Context<Self>) {
+        super::keybindings::invalidate_account_keybindings(
+            &mut self.keybindings_applied,
+            &mut self.keybinding_capture,
+            &mut self.keybinding_error,
+        );
+        self.apply_pending_keybindings(cx);
+    }
+
+    fn apply_pending_keybindings(&mut self, cx: &mut Context<Self>) {
+        if self.keybindings_applied {
+            return;
+        }
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
+        let customs = live.driver.load_custom_keybindings();
+        // Empty prefs rebuild defaults too, replacing the previous account's chords.
+        super::keybindings::apply_custom_bindings(cx, &customs);
+        self.keybindings_applied = true;
+    }
+
     pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) {
+        self.apply_pending_keybindings(cx);
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        // Parity slice (platform-custom-keybindings): apply saved shortcut
-        // overrides once the driver (and its prefs paths) is ready.
-        if !self.keybindings_applied {
-            self.keybindings_applied = true;
-            let customs = live.driver.load_custom_keybindings();
-            if !customs.is_empty() {
-                super::keybindings::apply_custom_bindings(cx, &customs);
-            }
-        }
         let prev_auth = live.driver.session.auth.clone();
         let mut progressed = false;
         let mut send_failed = false;
@@ -367,6 +381,7 @@ impl QuillApp {
         quill::local_path::sweep_media_caches();
         let (status, live, note, auth) = bootstrap_connect(self.credentials.clone());
         self.live = live;
+        self.reload_account_keybindings(cx);
         self.connect_status = status;
         self.status_note = note;
         self.auth_demo = auth;

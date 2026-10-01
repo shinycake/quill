@@ -1475,7 +1475,7 @@ impl QuillApp {
             // first so it observes `keybinding_capture` before the capture
             // handler clears it.
             let capturing = menu_app
-                .update(cx, |this, _| this.keybinding_capture.is_some())
+                .update(cx, |this, _| this.keybinding_capture_active())
                 .unwrap_or(false);
             if capturing || event.keystroke.modifiers.modified() {
                 return;
@@ -1512,7 +1512,7 @@ impl QuillApp {
         cx.intercept_keystrokes(move |event, _window, cx| {
             let keystroke = event.keystroke.clone();
             let armed = capture_app
-                .update(cx, |this, _| this.keybinding_capture.is_some())
+                .update(cx, |this, _| this.keybinding_capture_active())
                 .unwrap_or(false);
             if !armed {
                 return;

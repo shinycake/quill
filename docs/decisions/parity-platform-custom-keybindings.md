@@ -9,7 +9,8 @@ Slice `parity:platform-custom-keybindings`. Users can rebind 16 shortcuts (focus
 - An override replaces all default keystrokes for its action (for example both cmd-1 and ctrl-1 for Focus chat list). One custom keystroke per action.
 - The capture UI uses a focused div with `on_key_down`. That handler calls `stop_propagation` so the key does not also run as a normal shortcut. GPUI matches keybindings before bubble-phase `on_key_down`, so a keystroke interceptor also consumes the key while capture is armed — otherwise Escape still dismisses Appearance and quit/close still fire. Escape cancels capture. Bare modifier keys do not end capture. The saved chord is `canonical_event_chord` (`ctrl-k`), not `Keystroke`'s display form, which does not round-trip through `Keystroke::parse`.
 - Default pairs longer than 20 characters (currently only Previous search result, `cmd-shift-g / ctrl-shift-g`) stack on two lines so the label does not paint under the keystroke chip.
-- Startup application is a one-shot in `poll_live` when the live driver (and its prefs paths) is first ready. `bind_keys` in main.rs runs before prefs are loadable.
+- Every Appearance dismiss path (Close, Esc, backdrop, and ✕) clears capture and its error. The interceptor consumes keys only while Appearance is open and capture is armed; encountering stale capture while the dialog is closed clears it without consuming composer keys.
+- Startup application runs once in `poll_live` when the live driver (and its prefs paths) is first ready. `bind_keys` in main.rs runs before prefs are loadable. Account switch and logout reconnect invalidate that state and immediately re-apply the new driver's bindings when available. Empty prefs restore defaults, so the previous account's keymap cannot stick around.
 - `apply_custom_bindings` does not wipe the whole keymap. It snapshots `cx.key_bindings()`, keeps non-Quill bindings (action name not under the `quill_ui::` namespace — kit's List/command-palette keys), then clears and re-adds the kept bindings plus the Quill set.
 - A chord reserved by fixed chrome (cmd-q, cmd-w, cmd-m, f11, …) is not saved. The shortcuts chip keeps showing the chord that is actually bound, and the row shows why the press was not applied. A saved override that already collides is not installed and is not shown as the active chip.
 - Two rebindable actions cannot share one live chord. Capture refuses a chord another action is already using. If prefs already contain a clash, the earlier action in `REBINDABLE_ACTIONS` keeps the chord and the other falls back to whichever of its defaults are still free; the row explains the clash. GPUI would otherwise resolve the tie later-added-wins and leave both chips showing a chord only one of them owns.
@@ -17,6 +18,8 @@ Slice `parity:platform-custom-keybindings`. Users can rebind 16 shortcuts (focus
 ## Tests
 
 `keybinding_for_valid_id_and_keystroke`, `keybinding_for_unknown_id_is_none`, `keybinding_for_invalid_keystroke_is_none`, `rebindable_ids_are_unique`, `custom_keystroke_on_fixed_keystroke_is_rejected`, `rebindable_conflict_blocks_a_shared_live_chord`, `rejected_chords_are_not_reported_as_live`, `resolved_live_chords_do_not_overlap`, `captured_event_chord_round_trips_and_matches_fixed_chrome` (UI tests, run with the ui feature).
+
+Lifecycle regressions: `appearance_dismiss_clears_capture_and_error`, `capture_only_consumes_keys_while_appearance_is_open_and_armed`, `account_change_invalidates_applied_bindings_and_capture`, and `account_overrides_and_empty_prefs_resolve_independently` exercise the dismiss/interceptor helpers, the account reload trigger, and transitions between distinct overrides and empty/default prefs.
 
 ## Out of this slice
 
