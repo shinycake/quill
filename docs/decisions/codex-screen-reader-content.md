@@ -1,0 +1,7 @@
+# Native accessibility for conversation content
+
+The current GPUI dependency provides an AccessKit macOS adapter. A native audit of the injected text-entity demo found named controls and editable inputs already exposed, but message bodies and captions were absent from the accessibility tree. The README's older claim of no accessibility API usage is therefore stale; broad accessibility parity remains unchecked while other app flows are audited.
+
+The shared text-run renderer now exposes visible text as labels and URLs as links. Hidden spoilers expose only a "Reveal spoiler" button, then replace it with readable text after activation. Whitespace-only runs emit no accessibility node. The shared message shell labels fallback text, sender names and timestamp/delivery state. Composer formatting controls and the folder-management menu have descriptive labels rather than glyph-only names.
+
+`scripts/macos-accessibility-smoke.sh` launches only the injected native demo, queries that process's window tree, and retains its results. It asserts message text, link roles, named controls and hidden-spoiler protection, then uses actual AXPress to reveal a spoiler and AXValue editing to change the composer draft. It never sends the draft. This passed against the UI build; formatting and strict core clippy also passed. This is native accessibility-client evidence, not a claim that spoken VoiceOver navigation, all dialogs or every media surface have been verified. Neither broad screen-reader nor VoiceOver parity anchors are checked by this patch.
