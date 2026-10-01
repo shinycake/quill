@@ -1193,6 +1193,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(
                 RequestPurpose::ManageStickerSet { .. }
+                    | RequestPurpose::ReorderInstalledStickerSets
                     | RequestPurpose::SearchStickers
                     | RequestPurpose::SearchStickerSets
                     | RequestPurpose::GetFavoriteStickers

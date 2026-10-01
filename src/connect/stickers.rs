@@ -6,8 +6,8 @@ use crate::state::{RequestPurpose, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::telegram::requests::{
     add_favorite_sticker, change_sticker_set, clear_recent_stickers, get_favorite_stickers,
-    get_recent_stickers, get_trending_sticker_sets, remove_favorite_sticker, search_sticker_sets,
-    view_trending_sticker_sets,
+    get_recent_stickers, get_trending_sticker_sets, remove_favorite_sticker,
+    reorder_installed_sticker_sets, search_sticker_sets, view_trending_sticker_sets,
 };
 use crate::telegram::requests::{
     get_installed_sticker_sets, get_saved_animations, get_sticker_set, search_stickers,
@@ -206,7 +206,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                         archived,
                     })
             });
-        if busy {
+        if busy
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::ReorderInstalledStickerSets)
+        {
             return Ok(None);
         }
         self.sticker_request(
@@ -226,6 +231,50 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetInstalledStickerSets,
             get_installed_sticker_sets,
         )
+    }
+
+    /// Move an installed set to the target slot; commit only after TDLib confirms.
+    pub fn reorder_sticker_set(
+        &mut self,
+        source: i64,
+        target: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let mut ids: Vec<_> = self
+            .session
+            .stickers
+            .sets
+            .iter()
+            .map(|set| set.id)
+            .collect();
+        let from = ids.iter().position(|id| *id == source);
+        let to = ids.iter().position(|id| *id == target);
+        let (Some(from), Some(to)) = (from, to) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        if unique.len() != ids.len() || ids.iter().any(|id| *id <= 0) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if from == to
+            || self.session.requests.pending.values().any(|pending| {
+                matches!(
+                    pending.purpose,
+                    RequestPurpose::ManageStickerSet { .. }
+                        | RequestPurpose::ReorderInstalledStickerSets
+                        | RequestPurpose::GetInstalledStickerSets
+                )
+            })
+        {
+            return Ok(None);
+        }
+        ids.remove(from);
+        ids.insert(to, source);
+        self.sticker_request(RequestPurpose::ReorderInstalledStickerSets, |id| {
+            reorder_installed_sticker_sets(id, &ids)
+        })
     }
 
     pub fn fetch_trending_stickers(

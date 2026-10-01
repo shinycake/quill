@@ -87,6 +87,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    fn reorder_sticker_set(&mut self, source: i64, target: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.reorder_sticker_set(source, target) {
+                Ok(Some(_)) => "saving sticker set order…".into(),
+                Ok(None) => "sticker order unchanged or update already pending".into(),
+                Err(_) => "could not reorder sticker sets".into(),
+            };
+        }
+        cx.notify();
+    }
+
     fn sticker_set_action(
         &self,
         set: &quill::telegram::envelope::StickerSetInfo,
@@ -197,6 +208,7 @@ impl QuillApp {
                 set.title.clone()
             };
             let row = div()
+                .id(format!("sticker-set-drag-{set_id}"))
                 .flex()
                 .items_center()
                 .gap_1()
@@ -212,7 +224,20 @@ impl QuillApp {
                             cx.listener(move |this, _, _, cx| this.select_sticker_set(set_id, cx)),
                         ),
                 )
-                .child(self.sticker_set_action(set, "row", cx));
+                .child(self.sticker_set_action(set, "row", cx))
+                .when(panel.tab == StickerTab::Installed, |row| {
+                    row.cursor_move()
+                        .on_drag(
+                            StickerSetDrag {
+                                id: set_id,
+                                title: title.clone(),
+                            },
+                            |drag: &StickerSetDrag, _, _, cx| cx.new(|_| drag.clone()),
+                        )
+                        .on_drop(cx.listener(move |this, drag: &StickerSetDrag, _, cx| {
+                            this.reorder_sticker_set(drag.id, set_id, cx);
+                        }))
+                });
             sets = sets.child(row);
         }
         if panel.tab == StickerTab::Trending && panel.trending_next_offset < panel.trending_total {
@@ -367,7 +392,7 @@ impl QuillApp {
                     "No sticker sets installed.".into()
                 }
                 StickerTab::Installed => format!(
-                    "{} sets installed · Tap a sticker to send it.",
+                    "{} sets installed · Drag sets to reorder. Tap a sticker to send it.",
                     panel.sets.len()
                 ),
                 StickerTab::Recent if panel.recent.is_empty() => "No recent stickers.".into(),
@@ -453,5 +478,23 @@ impl QuillApp {
                     .overflow_y_scroll()
                     .child(grid),
             )
+    }
+}
+
+#[derive(Clone)]
+struct StickerSetDrag {
+    id: i64,
+    title: String,
+}
+
+impl Render for StickerSetDrag {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .bg(cx.theme().accent.opacity(0.15))
+            .text_sm()
+            .child(self.title.clone())
     }
 }

@@ -126,7 +126,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(RequestPurpose::AddFavoriteSticker | RequestPurpose::RemoveFavoriteSticker)
             );
         let sticker_set_changed = matches!(owned.envelope.payload, EnvelopePayload::Ok)
-            && matches!(view_purpose, Some(RequestPurpose::ManageStickerSet { .. }));
+            && matches!(
+                view_purpose,
+                Some(
+                    RequestPurpose::ManageStickerSet { .. }
+                        | RequestPurpose::ReorderInstalledStickerSets
+                )
+            );
         let recent_cleared = matches!(owned.envelope.payload, EnvelopePayload::Ok)
             && view_purpose == Some(RequestPurpose::ClearRecentStickers);
         let trending_answer = matches!(
