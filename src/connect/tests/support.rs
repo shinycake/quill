@@ -392,6 +392,7 @@ pub(crate) fn tracked_group_call(
         id: 77,
         title: "Team voice".into(),
         is_video_chat: false,
+        is_live_story: false,
         is_joined: true,
         need_rejoin,
         can_be_managed,

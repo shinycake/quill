@@ -254,6 +254,27 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// stories-live-play: the viewer Join button for a live story.
+    /// The driver two-steps (`getGroupCall`, then the pump issues
+    /// `join_video_chat` once the tracker exists); failures surface as a
+    /// status note instead of a silent no-op.
+    pub(super) fn join_live_story_from_viewer(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.join_live_story(chat_id, story_id) {
+                Ok(_) => "joining live story…".into(),
+                Err(_) => "could not join the live story".into(),
+            };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — live stories join with live TDLib".into();
+        }
+        cx.notify();
+    }
+
     /// Phase 9.2: toggle the reaction picker above the viewer. The first
     /// open on a live connection fetches `getStoryAvailableReactions`
     /// (`schema/td_api.tl:13802`).
@@ -1594,6 +1615,7 @@ impl QuillApp {
                 duration_label: None,
                 duration_secs: None,
                 is_live: false,
+                live_call: None,
                 areas: Vec::new(),
             });
         let (position, total) = self.story_viewer.position().unwrap_or((0, 0));
@@ -1654,14 +1676,47 @@ impl QuillApp {
                 (Some(duration), _) => format!("Video · {duration} — {status}"),
                 _ => status,
             };
-            let status = if matches!(
-                item.kind,
-                StoryViewerKind::Live | StoryViewerKind::Unsupported
-            ) {
-                format!("{kind_label} — not supported in this slice")
-            } else {
-                status
-            };
+            // stories-live-play: live stories backed by an ordinary group
+            // call get a Join button; unverified RTMP playback
+            // and unsupported content keep an
+            // honest placeholder.
+            let joinable = matches!(item.kind, StoryViewerKind::Live)
+                && item.live_call.is_some_and(|call| !call.is_rtmp_stream);
+            let body: AnyElement =
+                if joinable {
+                    let chat_id = item.chat_id;
+                    let story_id = item.story_id;
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(text_bright())
+                                .child("🔴 Live story"),
+                        )
+                        .child(Button::new("story-join-live").label("Join live").on_click(
+                            cx.listener(move |this, _, _, cx| {
+                                this.join_live_story_from_viewer(chat_id, story_id, cx);
+                            }),
+                        ))
+                        .into_any_element()
+                } else {
+                    let status = if matches!(item.kind, StoryViewerKind::Live) {
+                        format!("{kind_label} — RTMP playback is not supported yet")
+                    } else if matches!(item.kind, StoryViewerKind::Unsupported) {
+                        format!("{kind_label} — not supported in this slice")
+                    } else {
+                        status
+                    };
+                    div()
+                        .text_sm()
+                        .text_color(text_bright())
+                        .child(status)
+                        .into_any_element()
+                };
             div()
                 .id(("story-viewer-loading", item.story_id as u64))
                 .w(px(360.))
@@ -1671,7 +1726,7 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().text_color(text_bright()).child(status))
+                .child(body)
                 .into_any_element()
         };
         // Phase 9.8: clickable story areas — chips over the 360x640 media

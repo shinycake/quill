@@ -8,11 +8,11 @@ use crate::telegram::requests::{
     GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, ban_group_call_participants,
     create_video_chat, decline_group_call_invitation, end_group_call, end_group_call_recording,
     end_group_call_screen_sharing, get_group_call, get_video_chat_invite_link,
-    get_video_chat_rtmp_url, invite_group_call_participant, join_group_call, join_video_chat,
-    leave_group_call, load_group_call_participants, replace_video_chat_rtmp_url,
-    revoke_group_call_invite_link, send_group_call_message,
-    set_group_call_participant_volume_level, set_video_chat_title, start_group_call_recording,
-    start_group_call_screen_sharing, start_scheduled_video_chat,
+    get_video_chat_rtmp_url, invite_group_call_participant, join_group_call,
+    join_live_story as join_live_story_request, join_video_chat, leave_group_call,
+    load_group_call_participants, replace_video_chat_rtmp_url, revoke_group_call_invite_link,
+    send_group_call_message, set_group_call_participant_volume_level, set_video_chat_title,
+    start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_video_chat_enabled_start_notification,
@@ -297,12 +297,64 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::JoinVideoChat { group_call_id }, None);
         if let Err(err) =
             self.sender
-                .send_json(&join_video_chat(extra, group_call_id, None, &params, ""))
+                .send_json(&self.group_join_request(extra, group_call_id, &params))
         {
             self.session.requests.take(extra);
             return Err(err);
         }
         Ok(extra)
+    }
+
+    /// Select the schema method for initial joins, overlay retries, and reconnects.
+    fn group_join_request(
+        &self,
+        extra: RequestId,
+        id: i32,
+        params: &GroupCallJoinParams,
+    ) -> String {
+        if self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_live_story)
+        {
+            join_live_story_request(extra, id, params)
+        } else {
+            join_video_chat(extra, id, None, params, "")
+        }
+    }
+
+    /// stories-live-play: the story viewer's "Join live" sets
+    /// `pending_live_story_join`; once the `getGroupCall` answer has
+    /// created the unjoined tracker, issue `join_video_chat` for it.
+    /// The intent is kept while the `getGroupCall` request is in flight
+    /// and dropped when the request completes without a tracker (fetch
+    /// failed — a later tap can retry). The group-call overlay's Join
+    /// button stays the manual fallback either way.
+    pub(crate) fn maybe_join_live_story(&mut self) -> Result<(), ConnectSendError> {
+        let intent = match self.session.pending_live_story_join {
+            Some(intent) => intent,
+            None => return Ok(()),
+        };
+        let ready = self
+            .session
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.id == intent.group_call_id && !call.is_joined);
+        if ready {
+            self.session.pending_live_story_join = None;
+            self.join_video_chat(intent.group_call_id)?;
+            return Ok(());
+        }
+        // The `getGroupCall` request finished without producing a
+        // tracker: the fetch failed. Drop the intent so a later tap can
+        // retry; while the request is still in flight the intent is kept,
+        // so the join can't fire before the tracker exists and can't be
+        // lost to an early ingest either.
+        if self.session.requests.get(intent.request).is_none() {
+            self.session.pending_live_story_join = None;
+        }
+        Ok(())
     }
 
     /// Phase C3a: `getGroupCall` for a known call id (schema 1.8.67,
@@ -376,7 +428,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let params = self.group_join_params(group_call_id, is_muted);
         if let Err(err) =
             self.sender
-                .send_json(&join_video_chat(extra, group_call_id, None, &params, ""))
+                .send_json(&self.group_join_request(extra, group_call_id, &params))
         {
             self.session.requests.take(extra);
             // The attempt never went out: re-arm so the next ingest

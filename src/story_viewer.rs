@@ -134,6 +134,15 @@ impl StoryViewerKind {
     }
 }
 
+/// stories-live-play: what the viewer needs to join a live story — the
+/// group call behind `storyContentLive` (`schema/td_api.tl:6662`).
+/// RTMP playback remains outside this slice and is unverified.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveStoryCall {
+    pub group_call_id: i32,
+    pub is_rtmp_stream: bool,
+}
+
 /// One openable story.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoryViewerItem {
@@ -157,9 +166,12 @@ pub struct StoryViewerItem {
     /// playback progress / auto-advance for video stories (Phase 9.6).
     /// `None` for photos, live, and unsupported stories.
     pub duration_secs: Option<i32>,
-    /// `storyInfo.is_live` — a live story shows a placeholder even if a
-    /// `storyVideo` thumbnail were present (no group-call join in 9.1).
+    /// `storyInfo.is_live` — a live story shows the live placeholder
+    /// (or the Join button) even if a `storyVideo` thumbnail were present.
     pub is_live: bool,
+    /// stories-live-play: `Some` for live stories — the group call the
+    /// viewer's Join button joins. `None` for photo/video/unsupported.
+    pub live_call: Option<LiveStoryCall>,
     /// Phase 9.8: clickable areas (`storyArea`, `schema/td_api.tl:6566`),
     /// positioned as media-size fractions; the UI hit-tests them.
     pub areas: Vec<StoryAreaView>,
@@ -263,6 +275,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 duration_label: None,
                 duration_secs: None,
                 is_live: false,
+                live_call: None,
                 areas: story.areas.clone(),
             }
         }
@@ -287,10 +300,14 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 duration_label: Some(format_voice_duration(*duration_secs)),
                 duration_secs: Some(*duration_secs),
                 is_live: false,
+                live_call: None,
                 areas: story.areas.clone(),
             }
         }
-        StoryContentView::Live => StoryViewerItem {
+        StoryContentView::Live {
+            group_call_id,
+            is_rtmp_stream,
+        } => StoryViewerItem {
             chat_id,
             story_id: story.id,
             kind: StoryViewerKind::Live,
@@ -301,6 +318,10 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             duration_label: None,
             duration_secs: None,
             is_live: true,
+            live_call: Some(LiveStoryCall {
+                group_call_id: *group_call_id,
+                is_rtmp_stream: *is_rtmp_stream,
+            }),
             areas: story.areas.clone(),
         },
         StoryContentView::Unsupported => StoryViewerItem {
@@ -314,6 +335,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             duration_label: None,
             duration_secs: None,
             is_live: false,
+            live_call: None,
             areas: story.areas.clone(),
         },
     };
@@ -445,6 +467,7 @@ mod tests {
             duration_label: None,
             duration_secs,
             is_live: false,
+            live_call: None,
             areas: Vec::new(),
         }
     }
@@ -560,7 +583,10 @@ mod tests {
     #[test]
     fn collect_live_and_unsupported_keep_placeholder_items() {
         let mut live = photo_story(7, 10, vec![size(1, 100, 100)], "");
-        live.content = StoryContentView::Live;
+        live.content = StoryContentView::Live {
+            group_call_id: 99,
+            is_rtmp_stream: false,
+        };
         let mut unsupported = photo_story(7, 11, vec![size(2, 100, 100)], "");
         unsupported.content = StoryContentView::Unsupported;
         let stories = cache(vec![live, unsupported]);
@@ -568,6 +594,13 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].kind, StoryViewerKind::Live);
         assert!(items[0].is_live);
+        assert_eq!(
+            items[0].live_call,
+            Some(LiveStoryCall {
+                group_call_id: 99,
+                is_rtmp_stream: false,
+            })
+        );
         assert_eq!(items[1].kind, StoryViewerKind::Unsupported);
         assert!(items[0].display_file_ids.is_empty());
     }
