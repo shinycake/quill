@@ -552,7 +552,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Payment receipts: getPaymentReceipt dialog from paid invoices ("View receipt") plus messagePaymentSuccessful/messagePaymentSuccessfulBot rows (ui/mod.rs) <!-- parity:bots-payment-receipt -->
 - [x] Recurring payments: ⭐ Subscriptions dialog — `getStarSubscriptions` list with pagination + star balance, `editStarSubscription` cancel/re-enable (inline confirm), `reuseStarSubscription` to rejoin the chat of an active channel subscription when the type's `can_reuse` is set (expired channel subs renew via the type's `invite_link`, opened in the OS browser); mutations refetch from the authoritative `ok`, never optimistic; recurring-invoice terms (`recurring_payment_terms_of_service_url`) surfaced in the checkout dialog <!-- parity:bots-payment-recurring -->
 - [x] Clear payment/shipping info (privacy) <!-- parity:bots-payment-clear -->
-- [ ] Signed gifts: personal comment when buying a collectible gift via Marketplace (sendResoldGift text) <!-- parity:gifts-signed-comment -->
+- [x] Signed gifts: personal comment when buying a collectible gift via Marketplace (sendResoldGift text) <!-- parity:gifts-signed-comment --> (merged #292: price-bound Stars/TON quotes, personal comment and receiver-only/public visibility; core and native AX checks passed; live purchase unverified)
 - [ ] Signed gifts: custom signature on Marketplace gift purchase (blocked: no TDLib/raw API for a gift signature field — concept-level search: sendResoldGift/inputInvoiceStarGiftResale carry text/message only) <!-- parity:gifts-signed-signature -->
 
 ### Settings
@@ -597,8 +597,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Global keyboard shortcuts: 22 bindings wired in `bind_keys` (Quit, focus sidebar/composer, chat search, media viewer nav/zoom) (src/ui/mod.rs:125) <!-- parity:platform-keyboard-shortcuts -->
 - [x] Keyboard shortcuts reference/help overlay listing all bindings <!-- parity:platform-shortcuts-reference -->
 - [x] Customizable key bindings <!-- parity:platform-custom-keybindings -->
-- [ ] Screen-reader accessible labels/roles on UI elements (no accessibility API usage in src) <!-- parity:platform-screen-reader-labels -->
-- [ ] VoiceOver support (blocked: Linux desktop has no VoiceOver; no accessibility tree backend in the UI layer) <!-- parity:platform-voiceover -->
+- [ ] Screen-reader accessible labels/roles on UI elements (partial: #287 adds conversation text/link/spoiler roles and named controls; native macOS AX actions verified; other flows remain to audit) <!-- parity:platform-screen-reader-labels -->
+- [ ] VoiceOver support (partial: macOS AccessKit tree and native AX actions verified by #287; spoken VoiceOver navigation across all flows remains unverified) <!-- parity:platform-voiceover -->
 - [x] High-contrast theme/mode <!-- parity:platform-high-contrast -->
 - [x] System tray icon with unread count (src/tray.rs: tray-icon 0.21 crate, programmatic 64x64 RGBA icon + red unread pill capped at "99+", tooltip — no-op on Linux per tray-icon's docs; 1s UI-thread sync from main.rs; silent no-op when the OS has no system tray; badge sums non-archived chats incl. muted — Telegram Desktop's actual default `_includeMutedCounter = true`) <!-- parity:platform-tray-icon -->
 - [ ] Minimize/close-to-tray behavior <!-- parity:platform-minimize-to-tray -->
@@ -612,7 +612,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
 - [x] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->
 - [ ] One-click download, install, and restart (replace own binary, relaunch; user confirms — no silent auto-install) <!-- parity:platform-update-install -->
-- [ ] Honest updater states: already up to date, no network, download/install failed with retry <!-- parity:platform-update-states -->
+- [ ] Honest updater states: already up to date, no network, download/install failed with retry (partial: #282 implements release-check states and retry; download/install failure states remain) <!-- parity:platform-update-states -->
 - [ ] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder -->
 - [ ] Update changelog display after updates <!-- parity:platform-update-changelog -->
 - [x] Offline connection indicator in UI: slim strip below the title bar driven by `Session::connection` — kit warning banner "Waiting for network…" when offline, presence dot for transitional states (Connecting/Updating/ConnectingToProxy); per-state reconnect labels are parity:platform-reconnect-states <!-- parity:platform-offline-indicator -->
