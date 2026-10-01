@@ -46,7 +46,7 @@ impl QuillApp {
                         .label(label)
                         .checked(accepted)
                         .disabled(pending)
-                        .on_click(cx.listener(move |this, &on, _, cx| {
+                        .on_click(cx.listener(move |this, &on: &bool, _, cx| {
                             this.accepted_registration_terms = on.then(|| terms.clone());
                             cx.notify();
                         })),
