@@ -1,0 +1,25 @@
+# Install as shinycake/quill/.github/workflows/dashboard-data.yml.
+# Replace BOTH DASHBOARD_COMMIT_SHA placeholders with the dashboard implementation SHA.
+name: Publish dashboard repository state
+on:
+  push:
+    branches-ignore: [codex/dashboard-data]
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed, edited, ready_for_review, converted_to_draft, labeled, unlabeled]
+  workflow_run:
+    workflows: [ci, quill-worker, quill-publisher]
+    types: [completed]
+  workflow_dispatch:
+  schedule:
+    - cron: '2-59/15 * * * *'
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: dashboard-repository-projection
+  cancel-in-progress: false
+jobs:
+  project:
+    uses: shinycake/quill-dashboard/.github/workflows/project-data.yml@44a11d64c73e53cda040bfccb4704def69828c2d
+    with:
+      implementation_ref: 44a11d64c73e53cda040bfccb4704def69828c2d
