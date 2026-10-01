@@ -1387,6 +1387,7 @@ impl QuillApp {
             group_call_start_dialog: None,
             group_call_invite_open: false,
             notif_sound_picker_open: false,
+            story_sound_picker_open: false,
             notification_defaults_open: false,
             defaults_sound_picker: None,
             defaults_exceptions_scope: None,

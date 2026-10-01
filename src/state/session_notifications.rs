@@ -48,6 +48,32 @@ impl Session {
         self.scope_settings_for(scope).show_preview
     }
 
+    /// Parity slice (`parity:stories-notify-settings`): effective
+    /// story-notification mute — the chat's own flag, or the scope
+    /// default's `mute_stories` when the chat keeps
+    /// `use_default_mute_stories`.
+    pub fn effective_story_muted(&self, chat: &ChatSummary) -> bool {
+        let settings = &chat.notification_settings;
+        if !settings.use_default_mute_stories {
+            return settings.mute_stories;
+        }
+        let scope = scope_for_chat_kind(&chat.kind);
+        self.scope_settings_for(scope).mute_stories
+    }
+
+    /// Parity slice (`parity:stories-notify-settings`): effective
+    /// story-poster allowance — the chat's own flag, or the scope
+    /// default's `show_story_poster` when the chat keeps
+    /// `use_default_show_story_poster`.
+    pub fn effective_story_poster(&self, chat: &ChatSummary) -> bool {
+        let settings = &chat.notification_settings;
+        if !settings.use_default_show_story_poster {
+            return settings.show_story_poster;
+        }
+        let scope = scope_for_chat_kind(&chat.kind);
+        self.scope_settings_for(scope).show_story_poster
+    }
+
     /// Phase 8.1: pure notify / don't-notify decision for an `updateNewMessage`.
     /// Both the UI's `app_active` write and the reducer run on the UI thread,
     /// so no locking is needed. Returns `None` when the chat is unknown (no

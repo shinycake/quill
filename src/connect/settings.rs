@@ -366,6 +366,75 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_notification_settings(chat_id, &settings)
     }
 
+    /// Parity slice: set the chat's story-notification mute exception
+    /// (`parity:stories-notify-settings`).
+    pub fn set_chat_story_mute(
+        &mut self,
+        chat_id: ChatId,
+        mute_stories: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat) = self.session.chats.get(&chat_id.0) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !chat.supported() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let mut settings = chat.notification_settings.clone();
+        settings.use_default_mute_stories = false;
+        settings.mute_stories = mute_stories;
+        self.send_notification_settings(chat_id, &settings)
+    }
+
+    /// Parity slice: set the chat's story-poster exception
+    /// (`parity:stories-notify-settings`).
+    pub fn set_chat_story_poster(
+        &mut self,
+        chat_id: ChatId,
+        show_story_poster: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat) = self.session.chats.get(&chat_id.0) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !chat.supported() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let mut settings = chat.notification_settings.clone();
+        settings.use_default_show_story_poster = false;
+        settings.show_story_poster = show_story_poster;
+        self.send_notification_settings(chat_id, &settings)
+    }
+
+    /// Parity slice: set the chat's story-sound exception
+    /// (`parity:stories-notify-settings`). `use_default_story_sound = true`
+    /// keeps the scope default; `story_sound_id = 0` disables sound (schema
+    /// line 3350).
+    pub fn set_chat_story_sound(
+        &mut self,
+        chat_id: ChatId,
+        use_default_story_sound: bool,
+        story_sound_id: i64,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat) = self.session.chats.get(&chat_id.0) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !chat.supported() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let mut settings = chat.notification_settings.clone();
+        settings.use_default_story_sound = use_default_story_sound;
+        settings.story_sound_id = story_sound_id;
+        self.send_notification_settings(chat_id, &settings)
+    }
+
     /// Parity slice: `getSavedNotificationSounds` once per Ready (guarded by
     /// loaded / in-flight). Drives the sound picker and custom-sound
     /// playback.
