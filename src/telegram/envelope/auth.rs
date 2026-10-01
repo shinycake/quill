@@ -65,6 +65,12 @@ impl TdError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistrationTerms {
+    pub text: String,
+    pub min_user_age: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthorizationState {
     WaitTdlibParameters,
     WaitPhoneNumber,
@@ -80,7 +86,9 @@ pub enum AuthorizationState {
     WaitOtherDeviceConfirmation {
         link: String,
     },
-    WaitRegistration,
+    WaitRegistration {
+        terms: Option<RegistrationTerms>,
+    },
     WaitPassword {
         has_recovery_email: bool,
     },
@@ -159,7 +167,27 @@ pub(crate) fn parse_auth(value: &Value) -> AuthorizationState {
                 link: json_field_str(value, "link"),
             }
         }
-        "authorizationStateWaitRegistration" => AuthorizationState::WaitRegistration,
+        "authorizationStateWaitRegistration" => {
+            let terms = value
+                .get("terms_of_service")
+                .filter(|terms| !terms.is_null());
+            let parsed = terms.and_then(|terms| {
+                let text = terms.get("text")?.get("text")?.as_str()?;
+                let age = i32::try_from(terms.get("min_user_age")?.as_i64()?).ok()?;
+                if terms.get("@type")?.as_str()? != "termsOfService" || text.is_empty() || age < 0 {
+                    return None;
+                }
+                Some(RegistrationTerms {
+                    text: text.into(),
+                    min_user_age: age,
+                })
+            });
+            if terms.is_some() && parsed.is_none() {
+                AuthorizationState::Unknown("invalid-registration-terms".into())
+            } else {
+                AuthorizationState::WaitRegistration { terms: parsed }
+            }
+        }
         "authorizationStateWaitPassword" => AuthorizationState::WaitPassword {
             has_recovery_email: value
                 .get("has_recovery_email_address")

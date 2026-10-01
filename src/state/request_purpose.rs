@@ -14,6 +14,7 @@ pub enum RequestPurpose {
     SetPhoneNumber,
     CheckAuthenticationCode,
     SetAuthenticationEmail,
+    RegisterUser,
     CheckAuthenticationEmailCode,
     CheckAuthenticationPassword,
     /// Slice A1: `resendAuthenticationCode` from the code-entry screen.

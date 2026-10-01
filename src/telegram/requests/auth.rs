@@ -422,3 +422,12 @@ pub fn set_authentication_email_address(extra: RequestId, email: &str) -> String
 pub fn check_authentication_email_code(extra: RequestId, code: &str) -> String {
     json!({"@type":"checkAuthenticationEmailCode","@extra":extra.as_extra(),"code":{"@type":"emailAddressAuthenticationCode","code":code}}).to_string()
 }
+
+pub fn register_user(
+    extra: RequestId,
+    first: &str,
+    last: &str,
+    disable_notification: bool,
+) -> String {
+    json!({"@type":"registerUser","@extra":extra.as_extra(),"first_name":first,"last_name":last,"disable_notification":disable_notification}).to_string()
+}

@@ -15,6 +15,7 @@ mod groups;
 mod message_ops;
 mod messaging;
 mod payments;
+mod registration;
 mod search;
 mod settings;
 mod sticker_tabs;

@@ -122,6 +122,12 @@ impl QuillApp {
             return;
         };
         self.close_accounts(window, cx);
+        self.accepted_registration_terms = None;
+        self.registration_notify_contacts = false;
+        self.registration_first_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.registration_last_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.email_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.code_input

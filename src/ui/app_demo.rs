@@ -932,6 +932,16 @@ impl QuillApp {
                 .placeholder("Search stickers and sets")
                 .auto_grow(1, 1)
         });
+        let registration_first_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("First name")
+                .auto_grow(1, 1)
+        });
+        let registration_last_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Last name (optional)")
+                .auto_grow(1, 1)
+        });
         let email_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Email address")
@@ -1298,6 +1308,10 @@ impl QuillApp {
             emoji_search_input,
             emoji_set_search_input,
             gif_search_input,
+            registration_first_input,
+            registration_last_input,
+            accepted_registration_terms: None,
+            registration_notify_contacts: false,
             email_input,
             phone_input,
             code_input,

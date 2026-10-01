@@ -14,6 +14,7 @@ pub enum AuthAction {
     ProvideParameters,
     EnterPhone,
     EnterEmail,
+    Register,
     EnterCode,
     EnterPassword,
     WaitOtherDevice,
@@ -91,12 +92,10 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             action: AuthAction::EnterCode,
             blocking: true,
         },
-        AuthorizationState::WaitRegistration => AuthView {
-            title: "Unsupported sign-in state",
-            body: "Quill will not auto-register a new Telegram user or accept terms on your behalf. Finish registration in an official client.".into(),
-            action: AuthAction::UnsupportedHalt {
-                reason: "registration",
-            },
+        AuthorizationState::WaitRegistration { .. } => AuthView {
+            title: "Create Telegram account",
+            body: "Enter your name and review any Telegram terms before creating your account.".into(),
+            action: AuthAction::Register,
             blocking: true,
         },
         AuthorizationState::Unknown(name) => AuthView {
@@ -153,10 +152,9 @@ mod tests {
     };
 
     #[test]
-    fn premium_and_email_do_not_auto_act() {
+    fn unsupported_auth_does_not_auto_act() {
         for state in [
             AuthorizationState::WaitPremiumPurchase,
-            AuthorizationState::WaitRegistration,
             AuthorizationState::Unknown("authorizationStateWaitSomethingNew".into()),
         ] {
             let view = view_for(&state);
