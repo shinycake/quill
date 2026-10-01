@@ -615,6 +615,15 @@ impl QuillApp {
                 };
                 this.child(
                     div()
+                        .id("composer-file-drop")
+                        .when(
+                            show_attach && !self.rich_editor_open && !self.recording_active(),
+                            |this| {
+                                this.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                                    this.attach_dropped_files(paths.paths(), cx);
+                                }))
+                            },
+                        )
                         .p_3()
                         .border_t_1()
                         .border_color(cx.theme().border)

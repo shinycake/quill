@@ -91,6 +91,26 @@ pub struct ComposerAttachment {
 }
 
 impl ComposerAttachment {
+    /// Append an explicit OS file drop as documents, preserving the draft on failure.
+    pub fn append_dropped_files(
+        list: &mut Vec<Self>,
+        paths: &[PathBuf],
+    ) -> Result<usize, &'static str> {
+        if paths.is_empty() {
+            return Ok(0);
+        }
+        if paths.len() > crate::album::ALBUM_MAX_ITEMS.saturating_sub(list.len()) {
+            return Err("Attach at most 10 files at a time.");
+        }
+        let picked = paths
+            .iter()
+            .map(|path| Self::pick(path, AttachmentKind::Document))
+            .collect::<Option<Vec<_>>>()
+            .ok_or("Could not attach files. Drop existing files, not folders.")?;
+        list.extend(picked);
+        Ok(paths.len())
+    }
+
     /// Validate `candidate` as a user-picked send path. Never call with paths
     /// taken from untrusted TDLib JSON.
     pub fn pick(candidate: &Path, kind: AttachmentKind) -> Option<Self> {
@@ -1569,6 +1589,46 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].kind, AttachmentKind::VideoNote);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dropped_files_append_atomically_and_keep_every_file() {
+        let root = scratch("file-drop");
+        let photo = root.join("draft.png");
+        let file = root.join("notes.txt");
+        fs::write(&photo, [1]).unwrap();
+        fs::write(&file, b"notes").unwrap();
+        let mut list = vec![ComposerAttachment::pick(&photo, AttachmentKind::Photo).unwrap()];
+        assert_eq!(
+            ComposerAttachment::append_dropped_files(&mut list, &[]),
+            Ok(0)
+        );
+        let before = list.clone();
+        for invalid in [root.clone(), root.join("missing.txt")] {
+            assert!(
+                ComposerAttachment::append_dropped_files(&mut list, &[file.clone(), invalid])
+                    .is_err()
+            );
+            assert_eq!(list, before);
+        }
+        assert!(
+            ComposerAttachment::append_dropped_files(&mut list, &vec![file.clone(); 10]).is_err()
+        );
+        assert_eq!(list, before);
+        assert_eq!(
+            ComposerAttachment::append_dropped_files(&mut list, &[file.clone(), photo.clone()]),
+            Ok(2)
+        );
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0], before[0]);
+        assert!(
+            list[1..]
+                .iter()
+                .all(|att| att.kind == AttachmentKind::Document && att.send_path_str().is_some())
+        );
+        assert_eq!(list[1].path, fs::canonicalize(file).unwrap());
+        assert_eq!(list[2].path, fs::canonicalize(photo).unwrap());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

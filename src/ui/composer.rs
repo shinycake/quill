@@ -128,8 +128,8 @@ impl QuillApp {
                                 self.composer_caption_above && !self.open_chat_is_secret(),
                             ),
                         );
-                    } else if albumable {
-                        // "Ungrouped": one message per photo/video, the
+                    } else if attachments.len() >= 2 {
+                        // One message per ungrouped attachment, the
                         // caption riding the first.
                         for (i, att) in attachments.into_iter().enumerate() {
                             snaps.push(
@@ -279,7 +279,7 @@ impl QuillApp {
                         });
                     if albumable && self.composer_group_media_effective() {
                         self.apply_demo_album(&text, &attachments, reply.as_ref());
-                    } else if albumable {
+                    } else if attachments.len() >= 2 {
                         for (i, att) in attachments.iter().enumerate() {
                             self.apply_demo_outgoing(
                                 if i == 0 { &text } else { "" },
@@ -436,6 +436,15 @@ impl QuillApp {
                 self.status_note = "could not send rich message".into();
             }
         }
+        cx.notify();
+    }
+
+    pub(super) fn attach_dropped_files(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        self.status_note =
+            match ComposerAttachment::append_dropped_files(&mut self.pending_attachments, paths) {
+                Ok(count) => format!("Attached {count} files. Send to upload."),
+                Err(note) => note.into(),
+            };
         cx.notify();
     }
 
