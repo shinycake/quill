@@ -1,4 +1,0 @@
-parity:stickers-search
-parity:stickers-install
-parity:stickers-remove
-parity:stickers-set-preview
