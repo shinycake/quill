@@ -681,6 +681,12 @@ impl QuillApp {
                                             .child("Polls restricted in this chat")
                                             .into_any_element()
                                     })
+                                    .child(Button::new("open-emoji").label("Emoji").on_click(
+                                        cx.listener(|this, _, _, cx| {
+                                            this.emoji_picker_open = !this.emoji_picker_open;
+                                            cx.notify();
+                                        }),
+                                    ))
                                     .child(
                                         Button::new("open-gifs")
                                             .label(if self.gif_panel_open() {
@@ -1114,6 +1120,9 @@ impl QuillApp {
             })
             .when(self.pending_react.is_some(), |this| {
                 this.child(self.reaction_picker_panel(cx))
+            })
+            .when(self.emoji_picker_open, |this| {
+                this.child(self.emoji_picker_panel(cx))
             })
             .when(self.gif_panel_open(), |this| {
                 this.child(self.gif_picker_panel(cx))

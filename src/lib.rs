@@ -16,6 +16,7 @@ pub mod credentials;
 pub mod data_settings;
 pub mod diagnostics;
 pub mod emoji;
+pub mod emoji_catalog;
 pub mod folders;
 pub mod force_reply;
 pub mod icon_badge;

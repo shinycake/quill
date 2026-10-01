@@ -122,6 +122,11 @@ impl QuillApp {
             return;
         };
         self.close_accounts(window, cx);
+        self.emoji_picker_open = false;
+        self.emoji_category = 1;
+        self.emoji_visible_count = 120;
+        self.emoji_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.gif_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.sticker_settings_open = false;
