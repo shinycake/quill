@@ -386,7 +386,7 @@ pub(super) fn session_history_row(
     // Seek-bar view for audio/voice rows (`None` for other content).
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
-    animation_frame: Option<PathBuf>,
+    animation_frame: Option<Arc<RenderImage>>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
@@ -846,7 +846,7 @@ pub(super) fn session_history_row(
             downloading,
             media_roots,
             animation_playing,
-            animation_frame.as_deref(),
+            animation_frame,
             None,
             cx,
         )),

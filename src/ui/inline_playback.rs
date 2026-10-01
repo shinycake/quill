@@ -175,12 +175,25 @@ pub(super) fn apply_ready_video_send(
 
 impl QuillApp {
     pub(super) fn stop_animation_playback(&mut self) {
+        if let Some(cancel) = self.animation_extract_cancel.take() {
+            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(slot) = self.animation_extract_child.take() {
+            let child = slot.lock().ok().and_then(|mut guard| guard.take());
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        self.animation_extract_epoch = self.animation_extract_epoch.wrapping_add(1);
         if let Some(file_id) = self.animation_cache_file.take() {
             quill::animation::discard_frame_cache(file_id);
         }
         self.playing_animation = None;
         self.animation_frames.clear();
         self.animation_frame = 0;
+        self.animation_started_at = None;
+        self.animation_tick = false;
         self.pending_gif_play = None;
     }
 
@@ -189,18 +202,30 @@ impl QuillApp {
             return;
         }
         self.animation_tick = true;
+        let epoch = self.animation_extract_epoch;
+        self.animation_started_at = Some(std::time::Instant::now());
         cx.spawn(async move |this, cx| {
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(400))
-                    .await;
+                let delay = this
+                    .update(cx, |this, _| {
+                        Duration::from_secs_f64(1.0 / this.animation_fps.max(0.01))
+                    })
+                    .unwrap_or(Duration::from_millis(125));
+                cx.background_executor().timer(delay).await;
                 let cont = this
                     .update(cx, |this, cx| {
+                        if this.animation_extract_epoch != epoch {
+                            return false;
+                        }
                         let playing =
                             this.playing_animation.is_some() && this.animation_frames.len() > 1;
                         if playing {
-                            this.animation_frame =
-                                (this.animation_frame + 1) % this.animation_frames.len();
+                            let elapsed = this
+                                .animation_started_at
+                                .map(|t| t.elapsed().as_secs_f64())
+                                .unwrap_or(0.0);
+                            this.animation_frame = (elapsed * this.animation_fps) as usize
+                                % this.animation_frames.len();
                             cx.notify();
                         }
                         this.playing_animation.is_some()
@@ -211,7 +236,9 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.animation_tick = false;
+                if this.animation_extract_epoch == epoch {
+                    this.animation_tick = false;
+                }
             });
         })
         .detach();
@@ -250,30 +277,52 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        let cache = quill::animation::gif_frame_cache_dir(file_id.0);
-        match quill::animation::playback_frames(&safe, &mime, &cache) {
-            Ok(frames) if !frames.is_empty() => {
-                self.stop_voice_playback();
-                self.stop_audio_playback();
-                self.stop_video_playback();
-                self.stop_viewer_video();
-                self.pending_gif_play = None;
-                if self.animation_cache_file.is_some_and(|id| id != file_id.0)
-                    && let Some(old) = self.animation_cache_file.take()
-                {
-                    quill::animation::discard_frame_cache(old);
+        self.stop_animation_playback();
+        self.stop_voice_playback();
+        self.stop_audio_playback();
+        self.stop_video_playback();
+        self.stop_viewer_video();
+        let epoch = self.animation_extract_epoch;
+        let cache = quill::animation::gif_frame_cache_dir(file_id.0).join(epoch.to_string());
+        self.animation_cache_file = Some(file_id.0);
+        self.playing_animation = Some(message_id);
+        self.status_note = "Loading GIF playback…".into();
+        let slot = Arc::new(std::sync::Mutex::new(None));
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.animation_extract_child = Some(slot.clone());
+        self.animation_extract_cancel = Some(cancel.clone());
+        let cache_for_task = cache.clone();
+        cx.spawn(async move |this, cx| {
+            let extracted = cx.background_executor().spawn(async move {
+                let result = quill::animation::full_playback_frames_cancelable(&safe, &mime, &cache_for_task, &slot, &cancel).and_then(|frames| {
+                    let decoded = Self::decode_viewer_frames(&frames.frames)?;
+                    Ok((decoded, frames.fps))
+                });
+                if result.is_err() { let _ = std::fs::remove_dir_all(&cache_for_task); }
+                result
+            }).await;
+            let applied = this.update(cx, |this, cx| {
+                if this.animation_extract_epoch != epoch || this.playing_animation != Some(message_id) { return false; }
+                this.animation_extract_child = None;
+                this.animation_extract_cancel = None;
+                match extracted {
+                    Ok((frames, fps)) => {
+                        this.animation_frames = frames;
+                        this.animation_fps = fps;
+                        this.animation_frame = 0;
+                        this.spawn_animation_tick(cx);
+                        this.status_note = "Playing GIF".into();
+                    }
+                    Err(_) => {
+                        this.stop_animation_playback();
+                        this.status_note = "Could not play GIF. Check that ffmpeg and ffprobe are installed, then retry.".into();
+                    }
                 }
-                self.animation_cache_file = Some(file_id.0);
-                self.playing_animation = Some(message_id);
-                self.animation_frames = frames;
-                self.animation_frame = 0;
-                self.spawn_animation_tick(cx);
-                self.status_note = "playing GIF".into();
-            }
-            _ => {
-                self.status_note = "could not play GIF".into();
-            }
-        }
+                cx.notify();
+                true
+            }).unwrap_or(false);
+            if !applied { let _ = std::fs::remove_dir_all(&cache); }
+        }).detach();
         cx.notify();
     }
 

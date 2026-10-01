@@ -200,9 +200,13 @@ impl QuillApp {
         paths
             .iter()
             .map(|path| {
-                let rgba = image::open(path)
+                let mut rgba = image::open(path)
                     .map_err(|err| format!("{}: {err}", path.display()))?
                     .into_rgba8();
+                // RenderImage stores BGRA, as does the shared call-frame decoder below.
+                for pixel in rgba.chunks_exact_mut(4) {
+                    pixel.swap(0, 2);
+                }
                 Ok(Arc::new(RenderImage::new(SmallVec::from_buf([
                     image::Frame::new(rgba),
                 ]))))
