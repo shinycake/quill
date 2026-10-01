@@ -906,8 +906,23 @@ pub(super) fn session_history_row(
         | MessageContent::ChatRemovedFromCommunity
         // Slice G9: the join-from-community service row renders no extra
         // media either (the name ships in the centered row text).
-        | MessageContent::ChatJoinFromCommunity { .. }
-        | MessageContent::Unsupported { .. } => None,
+        | MessageContent::ChatJoinFromCommunity { .. } => None,
+        MessageContent::Unsupported { type_name } if matches!(type_name.as_str(), "messageExpiredPhoto" | "messageExpiredVideo" | "messageExpiredVideoNote" | "messageExpiredVoiceNote") => Some(
+            div().id(("expired-message-label", message.id.0 as u64)).role(Role::Label)
+                .aria_label("This message has expired.").child("This message has expired.").into_any_element(),
+        ),
+        MessageContent::Unsupported { .. } => Some(
+            div().id(("unsupported-update-card", message.id.0 as u64))
+                .flex().flex_col().gap_2().p_3()
+                .child(div().id(("unsupported-message-label", message.id.0 as u64))
+                    .role(Role::Label)
+                    .aria_label("Quill cannot display this message. A newer release may support it.")
+                    .child("Quill cannot display this message. A newer release may support it."))
+                .child(Button::new(("unsupported-update", message.id.0 as u64))
+                    .label("Get latest Quill")
+                    .on_click(cx.listener(|_, _, _, cx| cx.open_url(quill::updater::RELEASES_URL))))
+                .into_any_element(),
+        ),
     };
     let keyboard = inline_keyboard(message, cx);
     // Phase B3: self-destruct timer badge (`message.self_destruct_type` /
@@ -1007,10 +1022,6 @@ pub(super) fn session_history_row(
             )
             .into_any_element(),
     );
-    let unsupported_body = match &message.content {
-        MessageContent::Unsupported { type_name } => format!("({type_name})"),
-        _ => String::new(),
-    };
     // kit Phase 4: the shared kit-shell chrome, built fresh per divergent
     // branch below (`MessageChrome` isn't `Clone` — it holds elements).
     let chrome = || {
@@ -1079,7 +1090,7 @@ pub(super) fn session_history_row(
     session_bubble_quoted(
         message.id.0 as u64,
         chrome(),
-        unsupported_body,
+        String::new(),
         message.is_outgoing,
         extra,
         header,

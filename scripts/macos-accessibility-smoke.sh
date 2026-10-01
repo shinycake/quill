@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Verify native AX roles, readable messages, protected spoilers and actions in the demo.
-# Usage: scripts/macos-accessibility-smoke.sh [ui-binary] [evidence-directory] [ready-text-entities|ready-marketplace-gift]
+# Usage: scripts/macos-accessibility-smoke.sh [ui-binary] [evidence-directory] [ready-text-entities|ready-marketplace-gift|ready-unsupported-message]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY="${1:-$ROOT/target/debug/quill}"
 OUT="${2:-$(mktemp -d /tmp/quill-ax-evidence.XXXXXX)}"
 DEMO="${3:-ready-text-entities}"
-case "$DEMO" in ready-text-entities|ready-marketplace-gift) ;; *) exit 2 ;; esac
+case "$DEMO" in ready-text-entities|ready-marketplace-gift|ready-unsupported-message) ;; *) exit 2 ;; esac
 [[ "$(uname -s)" == Darwin ]]
 if pgrep -x quill >/dev/null; then echo 'Close the existing Quill process before this isolated smoke check.' >&2; exit 2; fi
 mkdir -p "$OUT"
@@ -65,6 +65,12 @@ if CommandLine.arguments[2] == "ready-marketplace-gift" {
     precondition(attribute(freshName,kAXValueAttribute) as? String == "", "Gift draft not cleared on reopen")
     precondition(!fresh.contains { name($0).hasPrefix("Buy for 25 Stars") }, "Old quote remained on reopen")
     print("PASS: native quote/price, comment editing, visibility, stale-gift refusal and fresh-dialog clearing")
+} else if CommandLine.arguments[2] == "ready-unsupported-message" {
+    precondition(before.contains { role($0) == "AXStaticText" && name($0) == "Quill cannot display this message. A newer release may support it." }, "Unsupported message card absent")
+    precondition(before.filter { role($0) == "AXButton" && name($0) == "Get latest Quill" }.count == 1, "Expected one release action, with none on expired media")
+    precondition(before.contains { role($0) == "AXStaticText" && name($0) == "This message has expired." }, "Expired-media notice absent")
+    precondition(!before.contains { name($0).contains("messageFutureFeature") }, "Raw API constructor shown to user")
+    print("PASS: unsupported card, accessible release action, expiry notice without update action and no raw API constructor")
 } else {
 precondition(before.contains { role($0) == "AXStaticText" && name($0) == "Bold" }, "Message text absent")
 precondition(before.contains { role($0) == "AXButton" && name($0) == "Bold" }, "Formatting label absent")
