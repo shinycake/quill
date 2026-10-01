@@ -312,11 +312,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Viewer Prev / Next / Close; Escape closes viewer before other overlays (DECISIONS.md Phase 9.1) <!-- parity:stories-viewer-nav -->
 - [x] Segmented progress bar with auto-advance to next story (src/story_viewer.rs StoryPlayback: 5s photos per Telegram Desktop kPhotoDuration, video uses its own storyVideo.duration; src/ui/mod.rs story_progress_bar + 100ms tick; DECISIONS.md Phase 9.8) <!-- parity:stories-progress-bar -->
 - [x] Live/unsupported story content degrades to a placeholder in the item list (src/story_viewer.rs:11-13) <!-- parity:stories-live-placeholder -->
-- [x] Join or play live stories (storyContentLive / startLiveStory in schema) <!-- parity:stories-live-play -->
+- [x] Join live stories through getGroupCall / joinLiveStory; RTMP playback remains unsupported and unverified <!-- parity:stories-live-play -->
 - [x] openStory/closeStory mark stories viewed; read state from max_read_story_id (telegram/requests.rs:2519,2531) <!-- parity:stories-read-state -->
 - [x] Quick-react ❤️ toggle on viewer, chosen state shown (ui/mod.rs:5505-5566) <!-- parity:stories-quick-react -->
 - [x] Reaction picker fed by getStoryAvailableReactions (ui/mod.rs:5532 toggle_story_reaction_picker) <!-- parity:stories-reaction-picker -->
-- [x] Chosen custom-emoji or paid reactions (partial: envelope parses reactionTypeCustomEmoji/reactionTypePaid into story state + viewers list (S13), setStoryReaction custom-emoji builder + driver; viewer render + picker offer pending post-Phase-9) <!-- parity:stories-custom-reactions -->
+- [x] Chosen custom-emoji and paid reactions render in the viewer; picker offers emoji and custom emoji (paid reactions cannot be set via setStoryReaction) <!-- parity:stories-custom-reactions -->
 - [x] Reaction removal (setStoryReaction with null; request asserts, telegram/requests.rs:2556) <!-- parity:stories-reaction-remove -->
 - [x] Interaction counters (views / hearts / reposts, non-zero, when can_get_interactions) (ui/mod.rs Phase 9.2) <!-- parity:stories-interaction-counters -->
 - [x] Detailed viewers list (getStoryInteractions, gated on can_get_interactions; paginated panel with reactions, forwards, Load more; ui/mod.rs Phase 9.5) <!-- parity:stories-viewers-list -->
@@ -328,7 +328,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Archive story list via getChatArchivedStories with load-more pagination (DECISIONS.md Phase 9.1 "Out of this slice") <!-- parity:stories-archive -->
 - [x] Pinned stories on chat page (getChatPostedToChatPageStories + setChatPinnedStories full-list semantics) <!-- parity:stories-pinned -->
 - [x] Clickable story areas (location, venue, suggested reaction, message, link, weather, gift) — parsed from `story.areas` (telegram/envelope.rs), rendered as clickable chips on the viewer, taps perform each area's action (ui/mod.rs Phase 9.8) <!-- parity:stories-areas-view -->
-- [x] Story notification settings (mute stories per chat, story sound, show story poster) — parsed into fields only (telegram/envelope.rs:1859-1860) <!-- parity:stories-notify-settings -->
+- [x] Story notification settings (mute stories per chat, story sound, show story poster) — per-chat controls and scope-default fallback <!-- parity:stories-notify-settings -->
 - [x] Story-restriction notices (TGX-verbatim `ChatDisabledStory` / `ChatRestrictedStory`): the `canPostStory` error channel delivers the Disabled notice for both the TDLib client-side-gate message ("Not enough rights to post stories in this group") and `CHAT_ADMIN_REQUIRED`, and the Restricted notice for `USER_RESTRICTED`; unrecognized errors keep the generic eligibility failure. No Until variant — the channel carries no until-date. <!-- parity:stories-restriction-notice -->
 
 #### Post stories
@@ -565,7 +565,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Tray context menu (open window, quit) <!-- parity:platform-tray-menu -->
 - [ ] Start minimized to tray <!-- parity:platform-start-minimized -->
 - [x] Autostart on login (OS-level; schema `autostart` is bot-start-only, no TDLib involvement) — Linux XDG Autostart `.desktop` + macOS LaunchAgents plist; Windows unsupported (registry Run key needs a Windows setup to verify; explicit follow-up) <!-- parity:platform-autostart -->
-- [x] Spellcheck in composer <!-- parity:platform-spellcheck -->
+- [x] Spellcheck in composer (on-device English dictionary, corrections panel and custom words) <!-- parity:platform-spellcheck -->
 - [x] Chat history export to file (JSON export of the full history to Downloads, via client-side `getChatHistory` paging — no exportHistory constructor in schema; per-message sender names absent by design, Quill plumbs no sender identity) <!-- parity:platform-history-export -->
 - [ ] Full account data export (Telegram Desktop "Export Telegram data") <!-- parity:platform-data-export -->
 - [ ] Check for updates automatically on launch against GitHub Releases (latest tag vs compiled-in `CARGO_PKG_VERSION`), with an opt-out toggle in Settings <!-- parity:platform-update-check-auto -->
