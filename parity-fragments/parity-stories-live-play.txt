@@ -1,2 +1,0 @@
-# Live-story join; RTMP playback remains unverified and unsupported.
-parity:stories-live-play

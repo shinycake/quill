@@ -1,2 +1,0 @@
-# stories custom-emoji / paid reactions — viewer render + picker
-parity:stories-custom-reactions

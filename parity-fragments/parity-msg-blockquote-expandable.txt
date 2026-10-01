@@ -1,2 +1,0 @@
-# parity:msg-blockquote-expandable — long block quotes collapse with Show more/less
-parity:msg-blockquote-expandable

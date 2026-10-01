@@ -1,2 +1,0 @@
-# Slice parity:platform-offline-errors — honest "you're offline" messaging
-parity:platform-offline-errors
