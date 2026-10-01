@@ -57,7 +57,10 @@ if CommandLine.arguments[2] == "ready-marketplace-gift" {
     let close = windows.flatMap { nodes($0) }.first { role($0) == "AXButton" && name($0) == "Close" }!
     precondition(AXUIElementPerformAction(close, kAXPressAction as CFString) == .success)
     Thread.sleep(forTimeInterval:0.3)
-    let open = windows.flatMap { nodes($0) }.first { role($0) == "AXButton" && name($0) == "Collectible gift" }!
+    let menu = windows.flatMap { nodes($0) }.first { role($0) == "AXButton" && name($0) == "Chat actions" }!
+    precondition(AXUIElementPerformAction(menu, kAXPressAction as CFString) == .success)
+    Thread.sleep(forTimeInterval:0.3)
+    let open = windows.flatMap { nodes($0) }.first { role($0) == "AXMenuItem" && name($0) == "Send collectible gift" }!
     precondition(AXUIElementPerformAction(open, kAXPressAction as CFString) == .success)
     Thread.sleep(forTimeInterval:0.3)
     let fresh = windows.flatMap { nodes($0) }
