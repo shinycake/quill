@@ -1,5 +1,0 @@
-parity:stickers-trending
-parity:stickers-favorites
-parity:stickers-recent
-parity:stickers-empty-state
-parity:gifs-empty-state
