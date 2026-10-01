@@ -1,0 +1,4 @@
+parity:gifs-search-trending
+parity:gifs-save
+parity:gifs-delete
+parity:gifs-search-parameters

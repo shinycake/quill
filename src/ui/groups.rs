@@ -1278,6 +1278,10 @@ impl QuillApp {
                         .driver
                         .cancel_recovery_email_setup()
                         .map(|_| "aborting email setup…".to_string()),
+                    GroupConfirmAction::RemoveSavedGif { file_id } => live
+                        .driver
+                        .set_gif_saved(file_id, false)
+                        .map(|id| sent_note(id, "removing saved GIF…")),
                     GroupConfirmAction::RemoveInstalledStickerSets => {
                         let ids: Vec<_> = live
                             .driver
@@ -1660,6 +1664,11 @@ impl QuillApp {
                         "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.".to_string(),
                         "Delete".to_string(),
                     ),
+                    GroupConfirmAction::RemoveSavedGif { .. } => (
+                        "Remove saved GIF".to_string(),
+                        "Remove this GIF from your saved GIFs?".to_string(),
+                        "Remove".to_string(),
+                    ),
                     GroupConfirmAction::RemoveInstalledStickerSets => (
                         "Remove installed sticker sets".to_string(),
                         format!("Remove all {} installed sticker sets? You can install them again later.",this.session().map(|s|s.stickers.sets.len()).unwrap_or(0)),
@@ -1683,6 +1692,7 @@ impl QuillApp {
                     | GroupConfirmAction::BlockContact { block: true, .. }
                     | GroupConfirmAction::DeleteSyncedContacts
                     | GroupConfirmAction::ClearPaymentInfo
+                    | GroupConfirmAction::RemoveSavedGif { .. }
                     | GroupConfirmAction::RemoveInstalledStickerSets
                     | GroupConfirmAction::RemoveStickerSet { .. }
             );

@@ -544,8 +544,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.gifs.open = true;
+        if self.session.gifs.failed {
+            self.session.gifs.loaded = false;
+        }
+        if self.session.gifs.search_mode && self.session.gifs.search_failed {
+            self.session.gifs.search_loading = true;
+        }
         self.session.gifs.failed = false;
-        self.maybe_refresh_saved_animations()
+        let saved = self.maybe_refresh_saved_animations()?;
+        if self.session.gifs.search_mode && self.session.gifs.search_loading {
+            Ok(self.maybe_search_gifs(false)?.or(saved))
+        } else {
+            Ok(saved)
+        }
     }
 
     pub fn close_gif_panel(&mut self) {
@@ -565,7 +576,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let needs = self.session.gifs.animations.is_empty() || self.session.gifs.stale;
+        let needs = !self.session.gifs.loaded || self.session.gifs.stale;
         if !needs {
             return Ok(None);
         }
@@ -579,6 +590,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.gifs.loading = false;
+                self.session.gifs.loaded = true;
+                self.session.gifs.failed = true;
                 Err(err)
             }
         }

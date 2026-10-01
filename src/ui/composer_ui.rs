@@ -1,4 +1,4 @@
-//! composer panels: GIF/sticker pickers, quote-reply/edit banners, link-preview chips, caption bar.
+//! Composer command menus, quote/reply/edit banners, link previews and captions.
 
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
@@ -15,7 +15,6 @@ use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo, find_urls};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
-use quill::local_path::sandboxed_display_path;
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::effective_content;
@@ -487,127 +486,6 @@ impl QuillApp {
                 .footer(footer)
                 .on_close(on_close)
         })
-    }
-
-    pub(super) fn gif_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let panel = self
-            .session()
-            .map(|session| session.gifs.clone())
-            .unwrap_or_default();
-        let files = self
-            .session()
-            .map(|session| session.files.clone())
-            .unwrap_or_default();
-        let roots = self.media_display_roots();
-        let mut grid = div().id("gif-grid").flex().flex_wrap().gap_2();
-        for (index, animation) in panel.animations.iter().enumerate() {
-            let file_id = animation.file_id;
-            let duration = animation.duration;
-            let width = animation.width;
-            let height = animation.height;
-            let display_id = animation.thumb_file_id.filter(|id| id.0 != 0);
-            let path = display_id.and_then(|id| {
-                files
-                    .get(&id.0)
-                    .and_then(|file| file.usable_path())
-                    .and_then(|path| sandboxed_display_path(path, &roots))
-            });
-            let label = if animation.file_name.is_empty() {
-                "GIF".to_string()
-            } else {
-                animation.file_name.clone()
-            };
-            let cell_id = format!("gif-pick-{index}-{file_id}", file_id = file_id.0);
-            let cell = if let Some(path) = path {
-                img(path)
-                    .id(SharedString::from(cell_id.clone()))
-                    .w(px(96.))
-                    .h(px(72.))
-                    .rounded_md()
-                    .object_fit(ObjectFit::Cover)
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.send_gif_pick(file_id, duration, width, height, cx);
-                    }))
-                    .with_fallback({
-                        let label = label.clone();
-                        move || {
-                            div()
-                                .w(px(96.))
-                                .h(px(72.))
-                                .rounded_md()
-                                .bg(accent_strong())
-                                .text_color(text_on_fill())
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(label.clone())
-                                .into_any_element()
-                        }
-                    })
-                    .into_any_element()
-            } else {
-                div()
-                    .id(SharedString::from(cell_id))
-                    .w(px(96.))
-                    .h(px(72.))
-                    .rounded_md()
-                    .bg(accent_strong())
-                    .text_color(text_on_fill())
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.send_gif_pick(file_id, duration, width, height, cx);
-                    }))
-                    .child(label)
-                    .into_any_element()
-            };
-            grid = grid.child(cell);
-        }
-        let status = if panel.loading {
-            "Loading saved GIFs…"
-        } else if panel.failed {
-            "Could not load saved GIFs."
-        } else if panel.animations.is_empty() {
-            "No saved GIFs."
-        } else {
-            "Tap a GIF to send it."
-        };
-        div()
-            .id("gif-picker")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(div().font_semibold().child("GIFs"))
-                    .child(
-                        Button::new("close-gif-picker")
-                            .label("Close")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_gif_panel(cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(status),
-            )
-            .child(grid)
     }
 
     pub(super) fn composer_edit_banner(

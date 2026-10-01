@@ -167,7 +167,7 @@ impl Session {
             }
         }
         if self.gifs.open {
-            for animation in &self.gifs.animations {
+            for animation in self.gifs.visible_animations() {
                 let file_id = animation.thumb_file_id.filter(|id| id.0 != 0);
                 if let Some(file_id) = file_id
                     && self.should_download(file_id)

@@ -662,3 +662,254 @@ fn premium_sticker_send_uses_full_type_and_current_account_entitlement() {
     assert!(driver.send_sticker(ChatId(7), send(9)).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let saved = driver.open_gif_panel().unwrap().unwrap();
+    driver.search_gifs("before bot option").unwrap();
+    assert!(driver.session.gifs.search_failed);
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"animations","@extra":saved.as_extra(),"animations":[]})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.gifs.loaded);
+    assert!(driver.session.gifs.search_failed); // Saved loading must not hide a search failure.
+    driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"gif"}}).to_string(),&seq,&sink).unwrap()).unwrap();
+    let count_saved = || {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|request| {
+                serde_json::from_str::<serde_json::Value>(request).unwrap()["@type"]
+                    == "getSavedAnimations"
+            })
+            .count()
+    };
+    assert_eq!(count_saved(), 1); // A confirmed empty collection must not fetch on every update.
+    driver.search_gifs("old").unwrap();
+    let old_bot = sent_request(&recorder, "searchPublicChat")["@extra"].clone();
+    driver.search_gifs(" cats ").unwrap();
+    let bot = sent_request(&recorder, "searchPublicChat")["@extra"].clone();
+    assert_ne!(old_bot, bot);
+    let resolved = |extra| {
+        json!({"@type":"chat","@extra":extra,"id":7,"title":"GIF bot","type":{"@type":"chatTypePrivate","user_id":7}}).to_string()
+    };
+    driver
+        .ingest(copy_and_parse(&resolved(old_bot), &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.gifs.search_bot_user_id, None);
+    driver
+        .ingest(copy_and_parse(&resolved(bot), &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(
+        sent_request(&recorder, "getInlineQueryResults")["query"],
+        "cats"
+    );
+    let old = sent_request(&recorder, "getInlineQueryResults")["@extra"].clone();
+    let fresh = driver.search_gifs("dogs").unwrap().unwrap();
+    let animation = |id| json!({"@type":"animation","duration":1,"width":100,"height":100,"animation":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":false},"remote":{"@type":"remoteFile"}},"thumbnail":{"@type":"thumbnail","width":100,"height":100,"file":{"@type":"file","id":id+100,"local":{"@type":"localFile","can_be_downloaded":true},"remote":{"@type":"remoteFile"}}}});
+    let page = |extra, ids: Vec<i32>, next: &str| {
+        json!({"@type":"inlineQueryResults","@extra":extra,"inline_query_id":"1","results":ids.iter().map(|id|json!({"@type":"inlineQueryResultAnimation","id":id.to_string(),"animation":animation(*id)})).collect::<Vec<_>>(),"next_offset":next}).to_string()
+    };
+    driver
+        .ingest(copy_and_parse(&page(old, vec![8], ""), &seq, &sink).unwrap())
+        .unwrap();
+    assert!(driver.session.gifs.search_results.is_empty());
+    driver
+        .ingest(copy_and_parse(&page(json!(fresh.as_extra()), vec![9], "p2"), &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.gifs.search_results.len(), 1);
+    assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 109);
+    let more = driver.more_gif_search_results().unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "getInlineQueryResults")["offset"],
+        "p2"
+    );
+    driver
+        .ingest(
+            copy_and_parse(
+                &page(json!(more.as_extra()), vec![9, 10], "p2"),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.gifs.search_results.len(), 2);
+    assert!(driver.session.gifs.search_next_offset.is_empty());
+    assert_eq!(driver.more_gif_search_results().unwrap(), None);
+    let old_saved = driver.show_saved_gifs().unwrap().unwrap();
+    let add = driver.set_gif_saved(FileId(9), true).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "addSavedAnimation")["animation"]["id"],
+        9
+    );
+    assert_eq!(driver.set_gif_saved(FileId(9), false).unwrap(), None);
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":add.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let fresh_saved = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
+    assert_ne!(fresh_saved, json!(old_saved.as_extra()));
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"animations","@extra":old_saved.as_extra(),"animations":[]})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!driver.session.gifs.loaded);
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"animations","@extra":fresh_saved,"animations":[animation(9)]})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let remove = driver.set_gif_saved(FileId(9), false).unwrap().unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"error","@extra":remove.as_extra(),"code":500,"message":"test"})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.gifs.animations.len(), 1);
+    assert!(driver.session.gifs.failed);
+    let remove = driver.set_gif_saved(FileId(9), false).unwrap().unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":remove.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let final_saved = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"animations","@extra":final_saved,"animations":[]}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let count = count_saved();
+    driver.ingest(copy_and_parse(&json!({"@type":"updateAnimationSearchParameters","provider":"Tenor","emojis":["🔥"]}).to_string(),&seq,&sink).unwrap()).unwrap();
+    assert_eq!(count_saved(), count);
+    assert_eq!(driver.session.gifs.provider_emojis, vec!["🔥"]);
+    driver.close_gif_panel();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"updateSavedAnimations","animation_ids":[]}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.gifs.stale);
+    assert!(driver.open_gif_panel().unwrap().is_some());
+    let failed_fetch = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"error","@extra":failed_fetch,"code":500,"message":"test"})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.gifs.failed);
+    let count = count_saved();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"updateAnimationSearchParameters","provider":"Tenor","emojis":[]})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(count_saved(), count); // Errors also wait for an explicit retry.
+    assert!(driver.open_gif_panel().unwrap().is_some());
+    let old_saved = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"updateSavedAnimations","animation_ids":[]}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let new_saved = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
+    assert_ne!(old_saved, new_saved);
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"animations","@extra":old_saved,"animations":[animation(99)]})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.gifs.animations.is_empty());
+    driver.search_gifs("").unwrap();
+    let old_page = sent_request(&recorder, "getInlineQueryResults")["@extra"].clone();
+    driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"othergif"}}).to_string(),&seq,&sink).unwrap()).unwrap();
+    assert_eq!(
+        sent_request(&recorder, "searchPublicChat")["username"],
+        "othergif"
+    );
+    assert_eq!(driver.session.gifs.search_bot_user_id, None);
+    driver
+        .ingest(copy_and_parse(&page(old_page, vec![99], ""), &seq, &sink).unwrap())
+        .unwrap();
+    assert!(driver.session.gifs.search_results.is_empty());
+    driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    assert!(driver.set_gif_saved(FileId(9), true).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}

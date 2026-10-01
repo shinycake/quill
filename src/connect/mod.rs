@@ -9,6 +9,7 @@ mod connect_flow;
 mod contacts;
 mod core;
 mod deep_links;
+mod gifs;
 mod group_calls;
 mod groups;
 mod live;

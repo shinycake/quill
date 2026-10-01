@@ -38,6 +38,21 @@ impl Session {
         if let Some(file) = &photo {
             self.remember_files(std::slice::from_ref(file));
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
+            self.gifs.search_bot_user_id = match &kind {
+                ChatKind::Private { user_id }
+                    if user_id.0 > 0
+                        && !self.users.get(&user_id.0).is_some_and(|user| !user.is_bot) =>
+                {
+                    Some(user_id.0)
+                }
+                _ => None,
+            };
+            if self.gifs.search_bot_user_id.is_none() {
+                self.gifs.search_failed = true;
+                self.gifs.search_loading = false;
+            }
+        }
         // Bots slice: `searchPublicChat` answer for `@botname`
         // resolution. A bot username yields `ChatKind::Private`
         // with the bot's user id; any other kind means the

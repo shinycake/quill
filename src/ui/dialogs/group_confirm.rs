@@ -63,6 +63,9 @@ pub enum GroupConfirmAction {
     /// lines 15286 / 15289). The dialog's chat id is a dummy.
     ClearPaymentInfo,
     RemoveInstalledStickerSets,
+    RemoveSavedGif {
+        file_id: quill::ids::FileId,
+    },
     RemoveStickerSet {
         set_id: i64,
     },

@@ -45,6 +45,16 @@ impl Session {
             // media-send captions); every other option parses but is
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
+                if name == "animation_search_bot_username" {
+                    let username = match &value {
+                        OptionValue::String(name) => name.clone(),
+                        _ => String::new(),
+                    };
+                    if self.gifs.search_bot_username != username {
+                        self.gifs.search_bot_username = username;
+                        self.gifs.search_bot_user_id = None;
+                    }
+                }
                 if name == "message_caption_length_max"
                     && let OptionValue::Integer(limit) = value
                 {
@@ -1889,9 +1899,7 @@ impl Session {
                 }
             }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
-                if self.gifs.open {
-                    self.gifs.stale = true;
-                }
+                self.gifs.stale = true;
             }
             // Slice S9: `updateAnimationSearchParameters` (schema 1.8.67,
             // line 11064) — server-pushed; store the provider name and the

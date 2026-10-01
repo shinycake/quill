@@ -91,6 +91,7 @@ pub struct QuillApp {
     pub(super) inline_results_selected: usize,
     pub(super) inline_query_token: u64,
     pub(super) inline_query_armed: Option<(String, String)>,
+    pub(super) gif_search_input: Entity<TextareaState>,
     pub(super) sticker_search_input: Entity<TextareaState>,
     pub(super) phone_input: Entity<TextareaState>,
     pub(super) code_input: Entity<TextareaState>,
