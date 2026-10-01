@@ -357,7 +357,7 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sponsored / recommended channel rows".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyCustomEmoji => (
+        ScreenshotDemo::ReadyEmojiPacks | ScreenshotDemo::ReadyCustomEmoji => (
             Some(seed_ready_custom_emoji_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — custom emoji rendered inline in message text".into(),

@@ -1239,8 +1239,12 @@ impl Session {
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ChangeEmojiSet) {
             self.emoji.mutation_failed = true;
+            self.emoji.mutating_set = None;
         }
         let emoji_purpose = pending.map(|p| p.purpose);
+        if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
+            self.emoji.pending_status_emoji = None;
+        }
         if emoji_purpose == Some(RequestPurpose::GetEmojiSet)
             || emoji_purpose == Some(RequestPurpose::ChangeEmojiSet)
             || (emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets)

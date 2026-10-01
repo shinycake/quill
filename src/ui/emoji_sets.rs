@@ -5,6 +5,7 @@ use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::emoji::EmojiSetTab;
@@ -324,15 +325,18 @@ impl QuillApp {
                     ),
             );
         }
-        let sets = match panel.tab {
-            EmojiSetTab::Installed => &panel.installed_sets,
-            EmojiSetTab::Trending => &panel.trending_sets,
-            EmojiSetTab::Search => &panel.found_sets,
+        let sets: Vec<_> = match panel.tab {
+            EmojiSetTab::Installed => session.map(|s| s.ordered_emoji_packs()).unwrap_or_default(),
+            EmojiSetTab::Trending => panel.trending_sets.iter().collect(),
+            EmojiSetTab::Search => panel.found_sets.iter().collect(),
         };
         let mut rows = div().id("emoji-pack-rows").flex().flex_col().gap_2();
-        for set in sets {
+        for set in &sets {
             let id = set.id;
             let installed = set.is_installed;
+            let state = session
+                .map(|s| s.emoji_pack_download_state(id))
+                .unwrap_or("Not downloaded");
             rows = rows.child(
                 div()
                     .flex()
@@ -347,6 +351,14 @@ impl QuillApp {
                             ),
                     )
                     .child(div().text_xs().child(format!("{} emoji", set.size)))
+                    .child(
+                        div()
+                            .id(format!("emoji-pack-state-{id}"))
+                            .text_xs()
+                            .role(Role::Label)
+                            .aria_label(state)
+                            .child(state),
+                    )
                     .child(
                         Button::new(format!("emoji-pack-manage-{id}"))
                             .label(if installed { "Remove" } else { "Install" })
@@ -414,6 +426,26 @@ impl QuillApp {
                 grid = grid.child(cell);
             }
             preview = preview.child(grid);
+            let id = panel.selected_set_id.unwrap();
+            preview = preview.child(
+                Button::new("download-emoji-pack")
+                    .label("Download or retry pack")
+                    .disabled(
+                        loading || panel.outdated_packs.contains(&id) || panel.preview.is_empty(),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(live) = this.live.as_mut() {
+                            this.status_note = match live.driver.download_emoji_pack(id) {
+                                Ok(()) => "Emoji pack download requested.".into(),
+                                Err(_) => {
+                                    "Could not download emoji pack. Refresh the preview and retry."
+                                        .into()
+                                }
+                            };
+                        }
+                        cx.notify();
+                    })),
+            );
         }
         let status = if panel.failed || panel.mutation_failed {
             "Could not update emoji packs. Retry the action."
@@ -434,6 +466,21 @@ impl QuillApp {
             .max_h(px(460.))
             .overflow_y_scroll()
             .child(self.emoji_status_panel(cx))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Switch::new("dynamic-emoji-pack-order")
+                            .checked(session.is_none_or(|s| s.media_prefs.dynamic_emoji_pack_order))
+                            .accessibility_label("Dynamic emoji pack order")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_media_pref(|prefs| prefs.dynamic_emoji_pack_order = on, cx)
+                            })),
+                    )
+                    .child(div().child("Dynamic emoji pack order")),
+            )
             .child(tabs)
             .child(Textarea::new(&self.emoji_set_search_input).aria_label("Search emoji packs"))
             .child(

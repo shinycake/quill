@@ -34,6 +34,10 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         json!({"@type":"stickerSets","@extra":installed.as_extra(),"sets":[set(1,true)]}),
     );
     assert_eq!(driver.session.emoji.installed_sets.len(), 1);
+    assert_eq!(
+        driver.session.emoji_pack_download_state(1),
+        "Not downloaded"
+    );
     assert!(driver.session.stickers.sets.is_empty());
     let old = driver.search_emoji_packs("old").unwrap().unwrap();
     let current = driver.search_emoji_packs("new").unwrap().unwrap();
@@ -86,9 +90,23 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
     );
     assert_eq!(driver.session.emoji.preview_title, "New");
     assert_eq!(driver.session.emoji.preview[0].file_id, FileId(109));
+    assert_eq!(driver.session.emoji_pack_download_state(2), "Downloading…");
+    driver.download_emoji_pack(2).unwrap(); // In-flight file is deduped.
+    ingest(
+        &mut driver,
+        json!({"@type":"updateFile","file":{"@type":"file","id":109,"size":5,"local":{"@type":"localFile","path":"/tmp/emoji.webp","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":true}}}),
+    );
+    assert_eq!(driver.session.emoji_pack_download_state(2), "Downloaded");
+    ingest(
+        &mut driver,
+        json!({"@type":"updateStickerSet","sticker_set":{"@type":"stickerSet","id":"2","sticker_type":{"@type":"stickerTypeCustomEmoji"}}}),
+    );
+    assert_eq!(driver.session.emoji_pack_download_state(2), "Update needed");
+    assert!(driver.download_emoji_pack(2).is_err());
     assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 109); // Preview works without a chat.
     assert!(driver.session.stickers.stickers.is_empty());
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
+    assert_eq!(driver.session.emoji_pack_download_state(1), "Removing…");
     assert!(driver.set_emoji_pack_installed(2, true).unwrap().is_none());
     ingest(
         &mut driver,
@@ -96,6 +114,17 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
     );
     assert_eq!(driver.session.emoji.installed_sets.len(), 1);
     assert!(driver.session.emoji.mutation_failed);
+    assert_eq!(
+        driver.session.emoji_pack_download_state(1),
+        "Not downloaded"
+    );
+    let install = driver.set_emoji_pack_installed(2, true).unwrap().unwrap();
+    assert_eq!(driver.session.emoji_pack_download_state(2), "Installing…");
+    ingest(
+        &mut driver,
+        json!({"@type":"error","@extra":install.as_extra(),"code":500,"message":"test"}),
+    );
+    assert_eq!(driver.session.emoji_pack_download_state(2), "Update needed");
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
     // An installed list issued before mutation success must not restore removed entries later.
     let stale = driver
@@ -221,6 +250,7 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
     assert!(expiry >= before + 3600 && expiry <= crate::state::unix_ms_now() / 1000 + 3600);
     assert!(driver.clear_recent_emoji_statuses().unwrap().is_none());
     assert_eq!(driver.session.emoji.recent_statuses.len(), 1);
+    assert!(driver.session.media_prefs.recent_emoji_packs.is_empty());
     ingest(
         &mut driver,
         json!({"@type":"error","@extra":set.as_extra(),"code":400,"message":"PRIVATE_DETAIL"}),
@@ -241,9 +271,31 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         0
     );
     ingest(&mut driver, json!({"@type":"ok","@extra":set.as_extra()}));
+    assert_eq!(driver.session.media_prefs.recent_emoji_packs, vec![1]);
+    assert_eq!(
+        crate::settings::load_media_prefs(&driver.paths).recent_emoji_packs,
+        vec![1]
+    );
     assert_eq!(
         driver.session.emoji.status_note.as_deref(),
         Some("Emoji status updated.")
+    );
+    driver
+        .session
+        .emoji
+        .custom_emoji_stickers
+        .iter_mut()
+        .find(|item| item.custom_emoji_id == Some(92))
+        .unwrap()
+        .set_id = 2;
+    ingest(
+        &mut driver,
+        json!({"@type":"updateMessageSendSucceeded","old_message_id":900,"message":{"@type":"message","id":901,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"😀","entities":[{"@type":"textEntity","offset":0,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"92"}}]}}}}),
+    );
+    assert_eq!(driver.session.media_prefs.recent_emoji_packs, vec![2, 1]);
+    assert_eq!(
+        crate::settings::load_media_prefs(&driver.paths).recent_emoji_packs,
+        vec![2, 1]
     );
     let remove = driver.change_emoji_status(None, 3600).unwrap().unwrap();
     assert!(sent_request(&recorder, "setEmojiStatus")["emoji_status"].is_null());

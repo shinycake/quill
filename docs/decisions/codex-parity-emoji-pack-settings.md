@@ -1,0 +1,7 @@
+# Emoji pack order and download states
+
+Emoji pack settings expose a persisted Dynamic emoji pack order switch. Enabled ordering follows confirmed emoji-status selections and successful outgoing custom-emoji messages. Disabling it restores the unchanged server catalog order. A bounded recent custom-emoji list preserves actual usage order when sticker resolution completes out of order; incoming/history traffic and rejected status changes do not move packs.
+
+Each row shows Not downloaded, Downloading…, Downloaded, Update needed, Installing… or Removing…. Downloaded requires usable files for every emoji in the fetched pack. Preview thumbnails do not count as a downloaded pack. Download or retry pack requests its full files through the existing deduplicated downloader. An updateStickerSet event invalidates cached pack metadata and drops a stale in-flight preview. Opening the preview again gets authoritative contents and clears the update-needed state. Installation/removal state is tied to the specific request and clears on a correlated success/error.
+
+Validation: full core/replay suite, strict core clippy, macOS UI compilation, and native AX check for all four requested labels plus toggling dynamic ordering back to server order. The demo activates its window after creation so the native AX test can enumerate it. The regression covers persistence, older preference files, delayed resolution, duplicate use, server order preservation, actual outgoing-send updates, mutation errors and file/update states. No live Telegram account was used.

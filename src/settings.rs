@@ -165,6 +165,12 @@ pub struct MediaPrefs {
     #[serde(default = "default_true")]
     pub autoplay_gifs: bool,
     #[serde(default = "default_true")]
+    pub dynamic_emoji_pack_order: bool,
+    #[serde(default)]
+    pub recent_emoji_packs: Vec<i64>,
+    #[serde(default)]
+    pub recent_custom_emoji_ids: Vec<i64>,
+    #[serde(default = "default_true")]
     pub big_emoji: bool,
     #[serde(default)]
     pub recent_emoji: Vec<String>,
@@ -215,6 +221,9 @@ impl Default for MediaPrefs {
     fn default() -> Self {
         Self {
             autoplay_gifs: true,
+            dynamic_emoji_pack_order: true,
+            recent_emoji_packs: Vec::new(),
+            recent_custom_emoji_ids: Vec::new(),
             big_emoji: true,
             recent_emoji: Vec::new(),
             remember_media_grouping: false,
@@ -873,6 +882,8 @@ mod tests {
         assert!(MediaPrefs::default().default_grouping());
         let prefs = MediaPrefs {
             autoplay_gifs: false,
+            dynamic_emoji_pack_order: false,
+            recent_emoji_packs: vec![2, 1],
             remember_media_grouping: true,
             group_media: false,
             hq_round_videos: true,
@@ -916,6 +927,8 @@ mod tests {
         .unwrap();
         let loaded = load_media_prefs(&paths);
         assert!(loaded.autoplay_gifs);
+        assert!(loaded.dynamic_emoji_pack_order);
+        assert!(loaded.recent_emoji_packs.is_empty());
         assert!(loaded.remember_media_grouping);
         assert!(loaded.hq_round_videos);
         assert!(!loaded.data_saver);

@@ -31,6 +31,10 @@ pub enum OptionValue {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnvelopePayload {
     AccountExport(Value),
+    UpdateStickerSet {
+        id: i64,
+        is_custom_emoji: bool,
+    },
     UpdateAuthorizationState(AuthorizationState),
     /// MED4: `updateOption` (TDLib 1.8.67, `schema/td_api.tl:10926`).
     /// Only the options Quill reads are kept; everything else is still a

@@ -128,6 +128,7 @@ pub enum ScreenshotDemo {
     /// Animated emoji suggestion above the composer (injected
     /// `animatedEmoji` answer + downloaded sticker fixture).
     ReadyAnimatedEmoji,
+    ReadyEmojiPacks,
     /// Broadcast channel demo (injected, no live Telegram): the ungated demo
     /// channel (id 13) renders broadcast posts with channel author + view
     /// counts, composer hidden for the non-admin viewer, and the join/leave
