@@ -43,6 +43,15 @@ pub(super) fn seed_ready_offline_session(sink: Arc<MemorySink>) -> Session {
     session
 }
 
+/// Slice parity:platform-reconnect-states — ReadyChats fixture with the
+/// client mid-reconnect (`connectionStateUpdating`), so the transitional
+/// strip renders with its per-state label for screenshots.
+pub(super) fn seed_ready_reconnecting_session(sink: Arc<MemorySink>) -> Session {
+    let mut session = seed_ready_chats_session(sink);
+    session.connection = ConnectionState::Updating;
+    session
+}
+
 /// Phase C1b: connected-video-call fixture — Zed's incoming video
 /// call goes pending → exchanging keys → ready, so the call overlay
 /// renders the video-stage placeholder grid. Injected, no live

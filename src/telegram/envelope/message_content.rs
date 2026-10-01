@@ -153,6 +153,9 @@ impl RichMessageContent {
                     parts.push(file_name.clone());
                     parts.push(caption.clone());
                 }
+                RichBlock::Photo { caption, .. } | RichBlock::Video { caption, .. } => {
+                    parts.push(caption.clone());
+                }
                 RichBlock::Table { rows } => parts.extend(rows.iter().map(|row| row.join(" "))),
                 RichBlock::ButtonRow { .. }
                 | RichBlock::Divider

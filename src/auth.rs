@@ -202,10 +202,38 @@ mod tests {
                 "too many recovery attempts — wait and try again",
             ),
         ] {
-            let err = AuthRequestError { purpose, class };
+            let err = AuthRequestError {
+                purpose,
+                class,
+                flood_wait_secs: None,
+            };
             assert_eq!(err.user_message(), message);
             assert!(is_auth_submit(purpose));
         }
+    }
+
+    #[test]
+    fn auth_flood_error_shows_retry_countdown() {
+        // Slice parity:platform-flood-errors — a known FLOOD_WAIT becomes
+        // "… try again in N seconds"; unknown stays the static line.
+        let err = AuthRequestError {
+            purpose: RequestPurpose::CheckAuthenticationCode,
+            class: ErrorClass::Flood,
+            flood_wait_secs: Some(30),
+        };
+        assert_eq!(
+            err.user_message(),
+            "too many code attempts — try again in 30 seconds"
+        );
+        let err = AuthRequestError {
+            purpose: RequestPurpose::CheckAuthenticationCode,
+            class: ErrorClass::Flood,
+            flood_wait_secs: None,
+        };
+        assert_eq!(
+            err.user_message(),
+            "too many code attempts — wait and try again"
+        );
     }
 
     #[test]

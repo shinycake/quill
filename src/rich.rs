@@ -48,6 +48,16 @@ pub enum RichBlock {
         /// Set only for editor-created blocks (outgoing `inputDocumentFile`).
         local_path: Option<PathBuf>,
     },
+    Photo {
+        caption: String,
+        /// Set only for editor-created blocks (outgoing `inputPhoto`).
+        local_path: Option<PathBuf>,
+    },
+    Video {
+        caption: String,
+        /// Set only for editor-created blocks (outgoing `inputVideo`).
+        local_path: Option<PathBuf>,
+    },
     Table {
         rows: Vec<Vec<String>>,
     },
@@ -75,6 +85,7 @@ impl RichBlock {
             RichBlock::Document {
                 file_name, caption, ..
             } => len(file_name) + len(caption),
+            RichBlock::Photo { caption, .. } | RichBlock::Video { caption, .. } => len(caption),
             RichBlock::Table { rows } => rows.iter().flatten().map(|cell| len(cell)).sum(),
             RichBlock::ButtonRow { .. }
             | RichBlock::Divider
@@ -94,6 +105,9 @@ impl RichBlock {
             }
             RichBlock::Document { file_name, .. } => {
                 (!file_name.is_empty()).then_some(file_name.as_str())
+            }
+            RichBlock::Photo { caption, .. } | RichBlock::Video { caption, .. } => {
+                (!caption.is_empty()).then_some(caption.as_str())
             }
             _ => None,
         }
@@ -117,6 +131,18 @@ fn field_str(value: &Value, field: &str) -> String {
 
 fn block_type(value: &Value) -> &str {
     value.get("@type").and_then(Value::as_str).unwrap_or("")
+}
+
+/// Plain text of a `pageBlockCaption` node (`pageBlockPhoto`,
+/// `pageBlockVideo`, `pageBlockDocument` share this shape).
+fn block_caption(value: &Value) -> String {
+    rich_text_to_parts(
+        value
+            .get("caption")
+            .and_then(|c| c.get("text"))
+            .unwrap_or(&Value::Null),
+    )
+    .0
 }
 
 #[derive(Default)]
@@ -417,18 +443,21 @@ pub fn parse_page_block(value: &Value) -> RichBlock {
         }
         "pageBlockDocument" => {
             let document = value.get("document").unwrap_or(&Value::Null);
-            let (caption, _, _) = rich_text_to_parts(
-                value
-                    .get("caption")
-                    .and_then(|c| c.get("text"))
-                    .unwrap_or(&Value::Null),
-            );
             RichBlock::Document {
                 file_name: field_str(document, "file_name"),
-                caption,
+                caption: block_caption(value),
                 local_path: None,
             }
         }
+        // Schema :4279 (`pageBlockPhoto`) and :4287 (`pageBlockVideo`).
+        "pageBlockPhoto" => RichBlock::Photo {
+            caption: block_caption(value),
+            local_path: None,
+        },
+        "pageBlockVideo" => RichBlock::Video {
+            caption: block_caption(value),
+            local_path: None,
+        },
         "pageBlockButtonRow" => {
             let buttons = value
                 .get("buttons")
@@ -570,8 +599,17 @@ fn block_rich_text(text: &str) -> Value {
     formatted_to_rich_text(&clean, &entities)
 }
 
+/// `pageBlockCaption` for an outgoing media block (schema :4133).
+fn page_block_caption(caption: &str) -> Value {
+    json!({
+        "@type": "pageBlockCaption",
+        "text": block_rich_text(caption),
+        "credit": plain(""),
+    })
+}
+
 /// Build one `inputPageBlock*` object. `None` for blocks with no honest
-/// input mapping (invisible, unsupported, or a document without a local
+/// input mapping (invisible, unsupported, or a media block without a local
 /// path — never a JSON `local.path`).
 pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
     match block {
@@ -626,11 +664,56 @@ pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
                     "thumbnail": Value::Null,
                     "disable_content_type_detection": false,
                 },
-                "caption": {
-                    "@type": "pageBlockCaption",
-                    "text": block_rich_text(caption),
-                    "credit": plain(""),
+                "caption": page_block_caption(caption),
+            }))
+        }
+        RichBlock::Photo {
+            caption,
+            local_path,
+        } => {
+            let path = local_path.as_ref()?.to_string_lossy().into_owned();
+            Some(json!({
+                // Schema :6029 (`inputPageBlockPhoto`); `inputPhoto` is
+                // :5837 — thumbnail null uploads from the file, same as
+                // `input_message_photo` in telegram/requests/media.rs.
+                "@type": "inputPageBlockPhoto",
+                "photo": {
+                    "@type": "inputPhoto",
+                    "photo": { "@type": "inputFileLocal", "path": path },
+                    "thumbnail": Value::Null,
+                    "video": Value::Null,
+                    "added_sticker_file_ids": [],
+                    "width": 0,
+                    "height": 0,
                 },
+                "caption": page_block_caption(caption),
+                "has_spoiler": false,
+            }))
+        }
+        RichBlock::Video {
+            caption,
+            local_path,
+        } => {
+            let path = local_path.as_ref()?.to_string_lossy().into_owned();
+            Some(json!({
+                // Schema :6035 (`inputPageBlockVideo`); `inputVideo` is
+                // :5856 — zeros let TDLib probe the local file, same as
+                // `input_message_video` in telegram/requests/media.rs.
+                "@type": "inputPageBlockVideo",
+                "video": {
+                    "@type": "inputVideo",
+                    "video": { "@type": "inputFileLocal", "path": path },
+                    "thumbnail": Value::Null,
+                    "cover": Value::Null,
+                    "start_timestamp": 0,
+                    "added_sticker_file_ids": [],
+                    "duration": 0,
+                    "width": 0,
+                    "height": 0,
+                    "supports_streaming": false,
+                },
+                "caption": page_block_caption(caption),
+                "has_spoiler": false,
             }))
         }
         RichBlock::Table { rows } => {
@@ -775,6 +858,133 @@ pub fn markup_to_blocks(text: &str) -> Vec<RichBlock> {
     flush_paragraph(&mut paragraph, &mut blocks);
     flush_list(&mut list_items, list_ordered, &mut blocks);
     blocks
+}
+
+/// Serialize blocks to the composer markup [`markup_to_blocks`] parses.
+///
+/// Inverse of the editor's block markers (`#` / `##` / `###`, `-` and
+/// `1.` lists, `[ ]` / `[x]` checkboxes, `>>` collapsible blocks, `---`).
+/// Rich AI answers are written back through this so the rich send path
+/// rebuilds the same structure. Clipboard
+/// [`crate::telegram::envelope::RichMessageContent::copy_text`] drops those
+/// markers, and the send path then sees flat paragraph(s).
+///
+/// Inline `TextEntity` spans stay plain text: the editor stores styling as
+/// markup characters inside the block text, and incoming entity spans have
+/// no marker here. Tables, captions, and document names have no block
+/// marker either — their text is kept as paragraphs so the words are not
+/// dropped. Button rows, anchors, and unsupported blocks contribute nothing.
+pub fn blocks_to_markup(blocks: &[RichBlock]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for block in blocks {
+        if let Some(chunk) = block_to_markup(block)
+            && !chunk.is_empty()
+        {
+            parts.push(chunk);
+        }
+    }
+    parts.join("\n\n")
+}
+
+fn one_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn block_to_markup(block: &RichBlock) -> Option<String> {
+    match block {
+        RichBlock::Paragraph { text, .. } => {
+            let text = text.trim();
+            if text.is_empty() {
+                None
+            } else {
+                Some(text.to_string())
+            }
+        }
+        RichBlock::Heading { level, text, .. } => {
+            let level = (*level).clamp(1, 3) as usize;
+            Some(format!("{} {}", "#".repeat(level), one_line(text)))
+        }
+        RichBlock::List { ordered, items } => {
+            if items.is_empty() {
+                return None;
+            }
+            let lines: Vec<String> = items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let marker = if *ordered {
+                        format!("{}. ", index + 1)
+                    } else {
+                        String::from("- ")
+                    };
+                    let check = match item.checked {
+                        Some(true) => "[x] ",
+                        Some(false) => "[ ] ",
+                        None => "",
+                    };
+                    format!("{marker}{check}{}", one_line(&item.text))
+                })
+                .collect();
+            Some(lines.join("\n"))
+        }
+        RichBlock::Collapsible { header, body, .. } => {
+            let mut lines = vec![format!(">> {}", one_line(header))];
+            let body = body
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !body.is_empty() {
+                lines.push(body);
+            }
+            Some(lines.join("\n"))
+        }
+        RichBlock::Divider => Some("---".to_string()),
+        RichBlock::Table { rows } => {
+            let lines: Vec<String> = rows
+                .iter()
+                .filter_map(|row| {
+                    let line = row
+                        .iter()
+                        .map(String::as_str)
+                        .map(str::trim)
+                        .filter(|cell| !cell.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    if line.is_empty() { None } else { Some(line) }
+                })
+                .collect();
+            if lines.is_empty() {
+                None
+            } else {
+                Some(lines.join("\n"))
+            }
+        }
+        RichBlock::Document {
+            file_name, caption, ..
+        } => nonempty_lines(&[file_name, caption]),
+        RichBlock::Photo { caption, .. } | RichBlock::Video { caption, .. } => {
+            nonempty_lines(&[caption])
+        }
+        RichBlock::ButtonRow { .. } | RichBlock::Empty | RichBlock::Unsupported { .. } => None,
+    }
+}
+
+fn nonempty_lines(parts: &[&str]) -> Option<String> {
+    let lines: Vec<&str> = parts
+        .iter()
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
 }
 
 /// M2: resolve editor markup to clean text + render entities for the live
@@ -1033,6 +1243,39 @@ mod tests {
                 local_path: None,
             }
         );
+        let photo = json!({
+            "@type": "pageBlockPhoto",
+            "photo": { "@type": "photo", "id": 1 },
+            "caption": { "@type": "pageBlockCaption",
+                "text": { "@type": "richTextPlain", "text": "sunset" },
+                "credit": { "@type": "richTextPlain", "text": "" } },
+            "url": "",
+            "has_spoiler": false,
+        });
+        assert_eq!(
+            parse_page_block(&photo),
+            RichBlock::Photo {
+                caption: "sunset".into(),
+                local_path: None,
+            }
+        );
+        let video = json!({
+            "@type": "pageBlockVideo",
+            "video": { "@type": "video", "id": 2 },
+            "caption": { "@type": "pageBlockCaption",
+                "text": { "@type": "richTextPlain", "text": "clip" },
+                "credit": { "@type": "richTextPlain", "text": "" } },
+            "need_autoplay": false,
+            "is_looped": false,
+            "has_spoiler": false,
+        });
+        assert_eq!(
+            parse_page_block(&video),
+            RichBlock::Video {
+                caption: "clip".into(),
+                local_path: None,
+            }
+        );
     }
 
     #[test]
@@ -1094,6 +1337,48 @@ mod tests {
         assert!(
             matches!(&blocks[5], RichBlock::Paragraph { text, .. } if text.contains("**bold**"))
         );
+    }
+
+    #[test]
+    fn blocks_to_markup_round_trips_structure_copy_text_flattens() {
+        // Rich AI answers must land as editor markup the send path
+        // re-parses. `copy_text` drops the markers, so the same blocks
+        // become flat paragraph(s).
+        let source = "# Title\n\n## Sub\n\n### Small\n\n- a\n- [ ] b\n- [x] c\n\n1. first\n2. second\n\n>> More\nbody line\nstill body\n\n---\n\nplain **bold** tail";
+        let blocks = markup_to_blocks(source);
+        let markup = blocks_to_markup(&blocks);
+        assert_eq!(markup_to_blocks(&markup), blocks);
+
+        let sent = input_rich_message(&markup_to_blocks(&markup)).expect("sendable");
+        let types: Vec<&str> = sent["source"]["blocks"]
+            .as_array()
+            .expect("blocks")
+            .iter()
+            .map(|block| block["@type"].as_str().unwrap_or(""))
+            .collect();
+        for kind in [
+            "inputPageBlockSectionHeading",
+            "inputPageBlockList",
+            "inputPageBlockDetails",
+            "inputPageBlockDivider",
+            "inputPageBlockParagraph",
+        ] {
+            assert!(types.contains(&kind), "missing {kind} in {types:?}");
+        }
+
+        let flat = crate::telegram::envelope::RichMessageContent {
+            blocks: blocks.clone(),
+            is_full: true,
+        }
+        .copy_text();
+        let flat_blocks = markup_to_blocks(&flat);
+        assert!(
+            flat_blocks
+                .iter()
+                .all(|block| matches!(block, RichBlock::Paragraph { .. })),
+            "copy_text must flatten, got {flat_blocks:?}"
+        );
+        assert!(flat_blocks.len() < blocks.len());
     }
 
     #[test]
@@ -1175,6 +1460,50 @@ mod tests {
         assert_eq!(json["@type"], "inputPageBlockDocument");
         assert_eq!(json["document"]["@type"], "inputDocument");
         assert_eq!(json["document"]["document"]["@type"], "inputFileLocal");
+
+        // Photo/video mirror the document mapping: no local path → no
+        // honest input mapping.
+        for (kind, type_name) in [
+            (
+                RichBlock::Photo {
+                    caption: "cap".into(),
+                    local_path: None,
+                },
+                "inputPageBlockPhoto",
+            ),
+            (
+                RichBlock::Video {
+                    caption: "cap".into(),
+                    local_path: None,
+                },
+                "inputPageBlockVideo",
+            ),
+        ] {
+            assert!(input_page_block_json(&kind).is_none(), "{type_name}");
+        }
+        let photo = RichBlock::Photo {
+            caption: "cap".into(),
+            local_path: Some(PathBuf::from("/tmp/p.jpg")),
+        };
+        let json = input_page_block_json(&photo).expect("photo");
+        assert_eq!(json["@type"], "inputPageBlockPhoto");
+        assert_eq!(json["photo"]["@type"], "inputPhoto");
+        assert_eq!(json["photo"]["photo"]["@type"], "inputFileLocal");
+        assert_eq!(json["photo"]["photo"]["path"], "/tmp/p.jpg");
+        assert_eq!(json["caption"]["@type"], "pageBlockCaption");
+        assert_eq!(json["has_spoiler"], false);
+
+        let video = RichBlock::Video {
+            caption: String::new(),
+            local_path: Some(PathBuf::from("/tmp/v.mp4")),
+        };
+        let json = input_page_block_json(&video).expect("video");
+        assert_eq!(json["@type"], "inputPageBlockVideo");
+        assert_eq!(json["video"]["@type"], "inputVideo");
+        assert_eq!(json["video"]["video"]["@type"], "inputFileLocal");
+        assert_eq!(json["video"]["video"]["path"], "/tmp/v.mp4");
+        assert_eq!(json["caption"]["@type"], "pageBlockCaption");
+        assert_eq!(json["has_spoiler"], false);
     }
 
     #[test]

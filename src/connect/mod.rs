@@ -8,6 +8,7 @@ mod composer;
 mod connect_flow;
 mod contacts;
 mod core;
+mod deep_links;
 mod group_calls;
 mod groups;
 mod live;
@@ -28,11 +29,13 @@ mod types;
 mod typing;
 
 pub use connect_flow::*;
+pub use deep_links::detect_deep_link_arg;
 pub use live::*;
 pub use sender::*;
 pub use types::*;
 
 pub(crate) use connect_flow::group_video_sources;
+pub(crate) use deep_links::parse_deep_link_action;
 pub(crate) use sender::{SignalingOutbox, TransportOutbox, VideoStateOutbox};
 pub(crate) use types::{OutgoingTyping, PendingDraft, ToggleSessionKind};
 

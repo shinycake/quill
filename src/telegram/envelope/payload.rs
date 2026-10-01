@@ -620,6 +620,16 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 rich: RichMessageContent { blocks, is_full },
             })
         }
+        // Slice msg-richtext-ai-tools: `fixedText` (schema:157) — the
+        // `fixTextWithAi` answer.
+        "fixedText" => Ok(EnvelopePayload::FixedText {
+            text: parse_formatted_text(value.get("text")),
+        }),
+        // Slice msg-richtext-ai-tools: bare `formattedText` (schema:3046)
+        // — the `composeTextWithAi` answer.
+        "formattedText" => Ok(EnvelopePayload::FormattedText {
+            text: parse_formatted_text(Some(&value)),
+        }),
         // MED4: `webPageInstantView` (schema:4377) — same `blocks` /
         // `is_full` shape as `richMessage`, so the M2 parser applies.
         "webPageInstantView" => {
@@ -1801,6 +1811,32 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "chatInviteLink" => Ok(EnvelopePayload::ChatInviteLink {
             link: parse_chat_invite_link(Some(&value)).ok_or(ParseError::MissingField)?,
         }),
+        // Checked invite preview; joining requires a separate confirmation.
+        "chatInviteLinkInfo" => Ok(EnvelopePayload::ChatInviteLinkInfo {
+            title: json_field_str(&value, "title"),
+            member_count: int53(value.get("member_count")).unwrap_or(0) as i32,
+            creates_join_request: value
+                .get("creates_join_request")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_channel: value
+                .get("type")
+                .and_then(|t| t.get("@type"))
+                .and_then(Value::as_str)
+                == Some("inviteLinkChatTypeChannel"),
+        }),
+        // `getDeepLinkInfo` answer (schema 1.8.67, line 10087).
+        "deepLinkInfo" => {
+            let text = parse_formatted_text(value.get("text"));
+            Ok(EnvelopePayload::DeepLinkInfo {
+                entities: parse_text_entities(&text, value.get("text")),
+                text,
+                need_update: value
+                    .get("need_update_application")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+        }
         "chatInviteLinks" => Ok(EnvelopePayload::ChatInviteLinks {
             total_count: int53(value.get("total_count")).map(|v| v as i32)?,
             links: value

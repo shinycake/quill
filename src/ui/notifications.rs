@@ -183,6 +183,10 @@ impl QuillApp {
             self.status_note = "message link copied".into();
             progressed = true;
         }
+        // `parity:platform-deep-links`: drive the launch-link flow —
+        // `getDeepLinkInfo` once auth is Ready, then follow-ups / dialog /
+        // deferred chat open from each terminal session state.
+        self.pump_deep_link(cx);
         // M1 fix-up: a "Share link" gated off by
         // `messageProperties.can_get_link` (or a failed `getMessageLink`)
         // and a failed `resendMessages` surface here instead of silently
@@ -213,6 +217,17 @@ impl QuillApp {
             .live
             .as_mut()
             .and_then(|live| live.driver.session.recognize_speech_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
+        // Slice msg-richtext-ai-tools: a failed AI request surfaces in
+        // the status note instead of silently doing nothing after "AI
+        // working…".
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.ai_error.take())
         {
             self.status_note = err;
             progressed = true;

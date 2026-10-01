@@ -836,6 +836,35 @@ impl Session {
                     });
                 }
             }
+            // `parity:platform-deep-links`: a failed deep-link request
+            // surfaces TDLib's error as a dialog; stale failures (a newer
+            // flow is already in flight) are ignored via the generation
+            // guard.
+            Some(
+                RequestPurpose::DeepLinkInfo { generation }
+                | RequestPurpose::DeepLinkResolve { generation }
+                | RequestPurpose::DeepLinkJoin { generation }
+                | RequestPurpose::DeepLinkCheckInvite { generation },
+            ) => {
+                let stale = !matches!(
+                    &self.deep_link,
+                    Some(
+                        DeepLinkState::ResolvingInfo {
+                            generation: slot
+                        }
+                        | DeepLinkState::ResolvingChat {
+                            generation: slot,
+                            ..
+                        }
+                    ) if *slot == generation
+                );
+                if !stale {
+                    self.deep_link = Some(DeepLinkState::ShowText(format!(
+                        "Couldn't open the link (error {}).",
+                        err.code
+                    )));
+                }
+            }
             // Phase D3c: a failed first page lands in the fetch
             // state so the panel shows an honest error instead of
             // spinning forever. A failed "load more" keeps the
@@ -990,6 +1019,26 @@ impl Session {
                     &err,
                     "Could not transcribe this message",
                 ));
+            }
+            // Slice msg-richtext-ai-tools: a failed AI request surfaces
+            // in the status note instead of vanishing into `_ => {}` —
+            // the button said "AI working…" and the user deserves an
+            // answer either way. `AICOMPOSE_FLOOD_PREMIUM` (classified in
+            // `parse_error`) gets the documented plain-language line.
+            Some(
+                RequestPurpose::FixTextWithAi
+                | RequestPurpose::ComposeTextWithAi
+                | RequestPurpose::ComposeRichMessageWithAi
+                | RequestPurpose::CreateRichMessageWithAi
+                | RequestPurpose::FixRichMessageWithAi,
+            ) => {
+                self.ai_error = Some(match err.class {
+                    ErrorClass::AiComposeFloodPremium => {
+                        "AI limit reached — Telegram Premium is required for more requests"
+                            .to_string()
+                    }
+                    _ => format!("AI tools failed: {}", error_reason(&err)),
+                });
             }
             _ => {}
         }
@@ -1224,6 +1273,7 @@ impl Session {
             self.last_auth_error = Some(AuthRequestError {
                 purpose: pending.purpose,
                 class: err.class,
+                flood_wait_secs: err.flood_wait_secs,
             });
         }
     }

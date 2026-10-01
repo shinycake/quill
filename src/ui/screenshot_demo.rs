@@ -11,16 +11,25 @@ pub enum ScreenshotDemo {
     /// with a fake link, rendered as a real QR (no live Telegram).
     WaitQr,
     ReadyChats,
+    ReadyDeepLinkInfo,
+    ReadyDeepLinkInvite,
     /// Slice parity:platform-offline-indicator — the ReadyChats fixture
     /// with `connection` forced to `WaitingForNetwork`, so the offline
     /// banner renders below the title bar (injected, no live Telegram).
     ReadyOffline,
+    /// Slice parity:platform-reconnect-states — the ReadyChats fixture
+    /// with `connection` forced to `Updating`, so the transitional strip
+    /// renders with its per-state label ("Updating…").
+    ReadyReconnecting,
     ReadyChatsComposer,
     ReadyUnread,
     ReadyUnreadRead,
     ReadyMedia,
     /// Composer attachment chip + outgoing photo/document (injected, no live Telegram).
     ReadySendMedia,
+    /// Paste-image: composer with a pasted clipboard photo attachment chip
+    /// (injected, no live Telegram). Visible outcome of Ctrl/Cmd+V image paste.
+    ReadyPasteImage,
     /// Sidebar search over injected recents / `searchChats` / `searchMessages`.
     ReadySearch,
     /// In-chat search (`searchChatMessages`) + jump-to-message.
@@ -492,6 +501,15 @@ pub enum ScreenshotDemo {
     /// chat with the composer in rich mode (markup text, block buttons,
     /// live block preview).
     ReadyRichEditor,
+    /// Slice msg-richtext-ai-tools: the same rich editor with a short
+    /// draft so the AI ghost buttons (✨ Fix / Rewrite / Create / Fix rich /
+    /// Rewrite rich) sit in frame. Injected Ready session, no live Telegram.
+    ReadyRichAiTools,
+    /// Slice msg-richtext-premium-gate: multi-line composer so the ⛶ Rich
+    /// editor button is visible, status note shows the non-Premium refusal
+    /// ("Rich messages require Telegram Premium"). Editor stays closed.
+    /// Injected Ready session, no live Telegram.
+    ReadyRichPremiumGate,
     /// Slice A5: profile management (injected, no live Telegram) — the
     /// "Edit profile" dialog open on the current user (id 777) with a
     /// seeded name, bio, usernames and profile-photo id.

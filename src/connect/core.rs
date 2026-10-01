@@ -13,6 +13,17 @@ use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+/// Status note for a rich AI answer. Create / fix / rewrite must not share
+/// one label — only create actually created the draft.
+fn ai_rich_draft_note(purpose: RequestPurpose) -> &'static str {
+    match purpose {
+        RequestPurpose::FixRichMessageWithAi => "AI fixed the draft",
+        RequestPurpose::ComposeRichMessageWithAi => "AI rewrote the draft",
+        RequestPurpose::CreateRichMessageWithAi => "AI created the draft",
+        _ => "AI updated the draft",
+    }
+}
+
 impl<S: JsonSender> ConnectDriver<S> {
     pub fn new(
         session: Session,
@@ -151,6 +162,54 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .then(|| link.clone()),
             _ => None,
         };
+        // Slice msg-richtext-ai-tools: capture AI text answers
+        // (`fixTextWithAi` → `fixedText`, `composeTextWithAi` →
+        // `formattedText`) before `apply` takes the pending request. The
+        // chat id rides `PendingRequest::chat_id` (the purposes are unit
+        // variants); the UI drains `Session::ai_composer_text` into the
+        // composer draft.
+        let ai_text_answer: Option<(ChatId, String)> = match &owned.envelope.payload {
+            EnvelopePayload::FixedText { text, .. } | EnvelopePayload::FormattedText { text } => {
+                owned
+                    .envelope
+                    .extra
+                    .and_then(|id| self.session.requests.get(id))
+                    .filter(|pending| {
+                        matches!(
+                            pending.purpose,
+                            RequestPurpose::FixTextWithAi | RequestPurpose::ComposeTextWithAi
+                        )
+                    })
+                    .and_then(|pending| pending.chat_id.map(|chat_id| (chat_id, text.clone())))
+            }
+            _ => None,
+        };
+        // Slice msg-richtext-ai-tools: capture AI rich-message answers
+        // (`composeRichMessageWithAi` / `createRichMessageWithAi` /
+        // `fixRichMessageWithAi` → `richMessage`) before `apply` takes
+        // the pending request. Same drain contract as the text answers.
+        // The UI serializes the blocks back to editor markup; the note
+        // records which method answered.
+        let ai_rich_answer: Option<(ChatId, RichMessageContent, &'static str)> =
+            match &owned.envelope.payload {
+                EnvelopePayload::RichMessage { rich } => owned
+                    .envelope
+                    .extra
+                    .and_then(|id| self.session.requests.get(id))
+                    .filter(|pending| {
+                        matches!(
+                            pending.purpose,
+                            RequestPurpose::ComposeRichMessageWithAi
+                                | RequestPurpose::CreateRichMessageWithAi
+                                | RequestPurpose::FixRichMessageWithAi
+                        )
+                    })
+                    .and_then(|pending| {
+                        let note = ai_rich_draft_note(pending.purpose);
+                        pending.chat_id.map(|chat_id| (chat_id, rich.clone(), note))
+                    }),
+                _ => None,
+            };
         // M1 fix-up: capture the `getMessageProperties` answer for the
         // "Share link" gate before `apply` takes the pending request.
         let link_gate: Option<(ChatId, MessageId, bool)> = match &owned.envelope.payload {
@@ -448,6 +507,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some(link) = message_link_answer {
             self.session.message_link_result = Some(link);
+        }
+        // Slice msg-richtext-ai-tools: stash AI answers for the composer
+        // drain. A late answer for a chat the user has since left is
+        // dropped by the UI (chat-id check), never applied blindly.
+        if let Some((chat_id, text)) = ai_text_answer {
+            self.session.ai_composer_text = Some((chat_id, text));
+        }
+        if let Some((chat_id, rich, note)) = ai_rich_answer {
+            self.session.ai_composer_blocks = Some((chat_id, rich, note));
         }
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.

@@ -76,6 +76,11 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    // `parity:platform-deep-links`: a `t.me` / `tg:` launch argument is
+    // stashed on the app and resolved via `getDeepLinkInfo` once auth is
+    // Ready (see `ui::deep_links`).
+    let pending_deep_link = quill::connect::detect_deep_link_arg(args);
+
     let credentials = quill::credentials::load();
     gpui_kit::application()
         .with_assets(QuillAssets)
@@ -84,6 +89,11 @@ fn ui_main(args: &[String]) {
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
             ui::set_theme_mode(startup_theme_mode(), None, cx);
+            // stories-high-contrast: screenshot demos can opt into the
+            // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
+            ui::set_high_contrast(
+                std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
+            );
             // kit Phase 9: honor the OS reduce-motion preference.
             cx.set_reduce_motion(os_prefers_reduced_motion());
             ui::bind_keys(cx);
@@ -101,7 +111,11 @@ fn ui_main(args: &[String]) {
                         ..quill_window_options("Quill")
                     },
                     move |window, cx| {
-                        let view = cx.new(|cx| ui::QuillApp::new(window, cx, credentials.clone()));
+                        let view = cx.new(|cx| {
+                            let mut app = ui::QuillApp::new(window, cx, credentials.clone());
+                            app.pending_deep_link = pending_deep_link.clone();
+                            app
+                        });
                         // parity:platform-tray-icon — system tray icon with
                         // unread count, synced on a 1s UI-thread timer. The
                         // tray module no-ops when the count is unchanged or
@@ -115,7 +129,12 @@ fn ui_main(args: &[String]) {
                                         .await;
                                     let alive = tray_view
                                         .update(cx, |this, _| {
-                                            quill::tray::sync_tray(this.session())
+                                            quill::tray::sync_tray(this.session());
+                                            // parity:platform-app-icon-badge — unread
+                                            // badge on the app/taskbar icon
+                                            // (Linux LauncherEntry D-Bus
+                                            // signal; no-op elsewhere).
+                                            quill::icon_badge::sync_icon_badge(this.session())
                                         })
                                         .is_ok();
                                     if !alive {
@@ -174,13 +193,17 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "wait-password" => ScreenshotDemo::WaitPassword,
                 "wait-qr" => ScreenshotDemo::WaitQr,
                 "ready-chats" => ScreenshotDemo::ReadyChats,
+                "ready-deep-link-info" => ScreenshotDemo::ReadyDeepLinkInfo,
+                "ready-deep-link-invite" => ScreenshotDemo::ReadyDeepLinkInvite,
                 "ready-offline" => ScreenshotDemo::ReadyOffline,
+                "ready-reconnecting" => ScreenshotDemo::ReadyReconnecting,
                 "ready-chats-composer" => ScreenshotDemo::ReadyChatsComposer,
                 "ready-unread" => ScreenshotDemo::ReadyUnread,
                 "ready-unread-read" => ScreenshotDemo::ReadyUnreadRead,
                 "ready-media" => ScreenshotDemo::ReadyMedia,
                 "ready-downloads" => ScreenshotDemo::ReadyDownloads,
                 "ready-send-media" => ScreenshotDemo::ReadySendMedia,
+                "ready-paste-image" => ScreenshotDemo::ReadyPasteImage,
                 "ready-search" => ScreenshotDemo::ReadySearch,
                 "ready-search-in-chat" => ScreenshotDemo::ReadySearchInChat,
                 "ready-reply" => ScreenshotDemo::ReadyReply,
@@ -287,11 +310,13 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-privacy" => ScreenshotDemo::ReadyPrivacy,
                 "ready-rich-message" => ScreenshotDemo::ReadyRichMessage,
                 "ready-rich-editor" => ScreenshotDemo::ReadyRichEditor,
+                "ready-rich-ai-tools" => ScreenshotDemo::ReadyRichAiTools,
+                "ready-rich-premium-gate" => ScreenshotDemo::ReadyRichPremiumGate,
                 "ready-profile-edit" => ScreenshotDemo::ReadyProfileEdit,
                 "ready-username" => ScreenshotDemo::ReadyUsername,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-qr|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-game-card|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-inline-results|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-story-viewers|ready-story-areas|ready-story-composer|ready-story-albums|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-appearance|ready-accounts|ready-group-manage|ready-group-info-edit|ready-groups2|ready-community-create|ready-community-hub|ready-community-info|ready-2fa-manage|ready-recovery-email|ready-account|ready-group-call-scheduled)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-qr|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-paste-image|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-game-card|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-inline-results|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-story-viewers|ready-story-areas|ready-story-composer|ready-story-albums|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-rich-ai-tools|ready-rich-premium-gate|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-appearance|ready-accounts|ready-group-manage|ready-group-info-edit|ready-groups2|ready-community-create|ready-community-hub|ready-community-info|ready-2fa-manage|ready-recovery-email|ready-account|ready-group-call-scheduled)"
                     );
                     std::process::exit(2);
                 }
@@ -360,14 +385,18 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::WaitCode => ".quill-ready-wait-code",
         ScreenshotDemo::WaitPassword => ".quill-ready-wait-password",
         ScreenshotDemo::WaitQr => ".quill-ready-wait-qr",
+        ScreenshotDemo::ReadyDeepLinkInfo => ".quill-ready-ready-deep-link-info",
+        ScreenshotDemo::ReadyDeepLinkInvite => ".quill-ready-ready-deep-link-invite",
         ScreenshotDemo::ReadyChats => ".quill-ready-ready-chats",
         ScreenshotDemo::ReadyOffline => ".quill-ready-ready-offline",
+        ScreenshotDemo::ReadyReconnecting => ".quill-ready-ready-reconnecting",
         ScreenshotDemo::ReadyChatsComposer => ".quill-ready-ready-chats-composer",
         ScreenshotDemo::ReadyUnread => ".quill-ready-ready-unread",
         ScreenshotDemo::ReadyUnreadRead => ".quill-ready-ready-unread-read",
         ScreenshotDemo::ReadyMedia => ".quill-ready-ready-media",
         ScreenshotDemo::ReadyDownloads => ".quill-ready-ready-downloads",
         ScreenshotDemo::ReadySendMedia => ".quill-ready-ready-send-media",
+        ScreenshotDemo::ReadyPasteImage => ".quill-ready-ready-paste-image",
         ScreenshotDemo::ReadySearch => ".quill-ready-ready-search",
         ScreenshotDemo::ReadySearchInChat => ".quill-ready-ready-search-in-chat",
         ScreenshotDemo::ReadyReply => ".quill-ready-ready-reply",
@@ -475,6 +504,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyPrivacy => ".quill-ready-ready-privacy",
         ScreenshotDemo::ReadyRichMessage => ".quill-ready-ready-rich-message",
         ScreenshotDemo::ReadyRichEditor => ".quill-ready-ready-rich-editor",
+        ScreenshotDemo::ReadyRichAiTools => ".quill-ready-ready-rich-ai-tools",
+        ScreenshotDemo::ReadyRichPremiumGate => ".quill-ready-ready-rich-premium-gate",
         ScreenshotDemo::ReadyProfileEdit => ".quill-ready-ready-profile-edit",
         ScreenshotDemo::ReadyUsername => ".quill-ready-ready-username",
         ScreenshotDemo::ReadyChatPreview => ".quill-ready-ready-chat-preview",
@@ -505,6 +536,11 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
             ui::set_theme_mode(startup_theme_mode(), None, cx);
+            // stories-high-contrast: screenshot demos can opt into the
+            // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
+            ui::set_high_contrast(
+                std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
+            );
             // kit Phase 9: honor the OS reduce-motion preference.
             cx.set_reduce_motion(os_prefers_reduced_motion());
             ui::bind_keys(cx);

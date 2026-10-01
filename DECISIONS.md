@@ -6926,14 +6926,16 @@ name `platform-chat-export` is kept in code/comments.)
 - **Out of this slice:** Windows Run-key support; "start minimized" /
   tray-on-startup options; per-user vs system-wide autostart.
 
-## Parity slice — Story notification settings (2026-09-30)
+## Parity slice — OS desktop notifications: verify + check (2026-09-30)
 
-- **Scope:** per-chat story controls in the notifications panel (`parity:stories-notify-settings`). Parse (`chatNotificationSettings` story fields), scope-defaults UI (story mute + poster toggles), and the request builders already existed; the per-chat panel had no story controls.
-- **Built:**
-  - Driver (`connect/settings.rs`): `set_chat_story_mute`, `set_chat_story_poster`, `set_chat_story_sound` — clone the chat's current settings, change only the story fields (clearing the `use_default_*` flag on explicit set, Unigram-style), send full object via `setChatNotificationSettings`.
-  - State (`state/session_notifications.rs`): `effective_story_muted`, `effective_story_poster` — chat flag, or the scope default when the chat keeps `use_default_*` (same rule as `effective_muted`/`effective_preview_allowed`).
-  - UI (`ui/notification_settings.rs`): "Mute story notifications" and "Show story poster" Switches plus a "Story sound" row reusing the saved-sound picker via a new `SoundPickerTarget::ChatStory` variant (Default/None/custom, same shape as the message sound).
-  - Test: scope-default → per-chat-exception override for both effective helpers.
-  - README `parity:stories-notify-settings` checked.
-- **Key decisions (ponytail):** scope-level story sound stays omitted (prior deliberate call — the per-scope message-sound picker covers it); story sound UI is per-chat only. No story-notification *generation* exists yet (the OS notification path is message-only), so these settings take effect for the TDLib-side behavior and any future story toast path.
-- **Out of this slice:** story notification toasts themselves (no such path exists); `parity:stories-live-play`, `parity:stories-custom-reactions`.
+- **Scope:** `parity:platform-os-notifications`. The README line claimed "no OS dispatch", but that note was stale — written in the original checklist (#74, 2026-09-27); OS dispatch landed later in "Phase 8.1: desktop notifications for incoming messages" (66440fd) and the checklist was never updated.
+- **Verified (no code changes needed):**
+  - Reducer: `notify::decide_notify` → `coalesce_notification_with_sound` → `session.pending_notifications` (`src/state/session_notifications.rs:62,109`).
+  - Every render: `flush_notifications` (`src/ui/app_render.rs:27`) drains the queue and calls `spawn_os_notification` per notification.
+  - Dispatch: `notify::build_notification_command` (notify-send `--wait --action` on Linux, osascript `display notification` on macOS) + `run_notification_command` on a capped worker-thread pool (`src/ui/notifications.rs:451`).
+  - Click-to-focus: Linux `--wait` action reports "default" → chat id pushed to `notify_clicks` → next `flush_notifications` calls `select_listed_chat`.
+  - Sounds ride the same worker-thread pattern (`spawn_sound_command`).
+  - README box checked with a corrected description.
+- **Key decisions (ponytail):** verified instead of rebuilt — the code was complete and tested (`linux_command_shape`, `macos_command_escapes_quotes`, coalescing tests all pass). No new code was the right diff.
+- **Tests:** existing suite covers it; no new tests needed.
+- **Out of this slice:** none identified.
