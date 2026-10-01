@@ -524,4 +524,8 @@ pub enum ScreenshotDemo {
     /// verdict — intended for a taller capture
     /// (`QUILL_DEMO_WINDOW_SIZE`) so the username section is visible.
     ReadyUsername,
+    /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
+    /// reference dialog open over the demo chat list (injected, no live
+    /// Telegram).
+    ReadyShortcuts,
 }

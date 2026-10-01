@@ -1,8 +1,8 @@
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
     FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
-    OpenSearch, QuitApp, ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn,
-    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    OpenSearch, OpenShortcuts, QuitApp, ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev,
+    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -491,6 +491,104 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     }
     cx.clear_key_bindings();
     cx.bind_keys(bindings);
+}
+
+/// One row of the app's keyboard-shortcut reference: the single source of
+/// truth for both `bind_keys` (what the app listens for) and the shortcuts
+/// reference dialog (what the user sees). `keystroke` is gpui format
+/// (e.g. `"cmd-q"`); the dialog renders it through kit's `Kbd`.
+pub struct ShortcutRow {
+    pub keystroke: &'static str,
+    pub label: &'static str,
+    pub section: &'static str,
+    pub binding: KeyBinding,
+}
+
+fn row<A: Action>(
+    keystroke: &'static str,
+    label: &'static str,
+    section: &'static str,
+    action: A,
+) -> ShortcutRow {
+    ShortcutRow {
+        keystroke,
+        label,
+        section,
+        binding: KeyBinding::new(keystroke, action, None),
+    }
+}
+
+/// Every keybinding the app registers, in reference-dialog order. Rows that
+/// share a label (e.g. `cmd-q` / `ctrl-q`) render as one entry with both
+/// chips.
+pub fn shortcut_rows() -> Vec<ShortcutRow> {
+    vec![
+        // General.
+        row("cmd-q", "Quit Quill", "General", QuitApp),
+        row("ctrl-q", "Quit Quill", "General", QuitApp),
+        // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
+        // minimize; F11 / Cmd+Ctrl+F fullscreen).
+        row("cmd-w", "Close window", "General", CloseWindow),
+        row("ctrl-w", "Close window", "General", CloseWindow),
+        row("cmd-m", "Minimize window", "General", MinimizeWindow),
+        row("ctrl-m", "Minimize window", "General", MinimizeWindow),
+        row("f11", "Toggle fullscreen", "General", ToggleFullscreen),
+        row(
+            "cmd-ctrl-f",
+            "Toggle fullscreen",
+            "General",
+            ToggleFullscreen,
+        ),
+        // Navigation.
+        row("cmd-1", "Focus chat list", "Navigation", FocusSidebar),
+        row("ctrl-1", "Focus chat list", "Navigation", FocusSidebar),
+        row(
+            "cmd-l",
+            "Focus message composer",
+            "Navigation",
+            FocusComposer,
+        ),
+        row(
+            "ctrl-l",
+            "Focus message composer",
+            "Navigation",
+            FocusComposer,
+        ),
+        row("cmd-up", "Load older messages", "Navigation", LoadOlder),
+        row("ctrl-up", "Load older messages", "Navigation", LoadOlder),
+        // Search.
+        row("cmd-k", "Quick switch chats", "Search", OpenSearch),
+        row("ctrl-k", "Quick switch chats", "Search", OpenSearch),
+        row("cmd-f", "Find in chat", "Search", OpenChatSearch),
+        row("ctrl-f", "Find in chat", "Search", OpenChatSearch),
+        row("cmd-g", "Next search result", "Search", ChatSearchNewer),
+        row("ctrl-g", "Next search result", "Search", ChatSearchNewer),
+        row(
+            "cmd-shift-g",
+            "Previous search result",
+            "Search",
+            ChatSearchOlder,
+        ),
+        row(
+            "ctrl-shift-g",
+            "Previous search result",
+            "Search",
+            ChatSearchOlder,
+        ),
+        row("escape", "Close search / cancel", "Search", CancelSearch),
+        // Parity slice 5: the handlers no-op (and let the keystroke reach
+        // text inputs) unless the media viewer is open.
+        row("left", "Previous item", "Media viewer", ViewerPrev),
+        row("right", "Next item", "Media viewer", ViewerNext),
+        row("0", "Reset zoom", "Media viewer", ViewerZoomReset),
+        row("=", "Zoom in", "Media viewer", ViewerZoomIn),
+        row("-", "Zoom out", "Media viewer", ViewerZoomOut),
+        // M1: composer formatting shortcuts; the handlers no-op unless
+        // the composer textarea has focus.
+        row("ctrl-b", "Bold", "Composer", FormatBold),
+        row("ctrl-i", "Italic", "Composer", FormatItalic),
+        row("ctrl-u", "Underline", "Composer", FormatUnderline),
+    ]
 }
 
 /// kit Phase 7: the application menus — File / Edit / View / Window / Help,

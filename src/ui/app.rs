@@ -285,6 +285,9 @@ pub struct QuillApp {
     /// Screenshot proof for the keyboard-shortcuts section. The Appearance
     /// dialog then shows that section alone so the frame is the rebind UI.
     pub(super) keybindings_screenshot: bool,
+    /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
+    /// reference dialog is on screen.
+    pub(super) shortcuts_open: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.

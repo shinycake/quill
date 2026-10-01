@@ -29,6 +29,9 @@ actions!(
         ToggleTheme,
         /// kit Phase 7: open the Quill repo in the browser (Help menu).
         OpenHelp,
+        /// Slice parity:platform-shortcuts-reference: open the keyboard
+        /// shortcuts reference dialog (Help menu).
+        OpenShortcuts,
         SubmitPhone,
         SubmitCode,
         SubmitPassword,
