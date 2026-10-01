@@ -222,6 +222,11 @@ impl Render for QuillApp {
             // View / Help menus (same dispatch path as the key bindings).
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
                 let _ = this;
+                #[cfg(target_os = "macos")]
+                if quill::tray::tray_available() {
+                    cx.hide();
+                    return;
+                }
                 window.remove_window();
                 // macOS keeps a windowless app alive for its menu bar;
                 // elsewhere closing the only window quits.

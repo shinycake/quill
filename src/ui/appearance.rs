@@ -304,6 +304,13 @@ impl QuillApp {
                 // (the tag TDLib gets in `setTdlibParameters`).
                 body = body.child(this.appearance_language_section(cx));
                 body = body.child(this.general_autostart_section(cx));
+                body = body.child(this.appearance_section(
+                    cx, "Start in tray", "Open Quill from its tray menu when needed.",
+                    Switch::new("general-start-in-tray").checked(this.appearance.start_in_tray)
+                        .accessibility_label("Start Quill in the system tray")
+                        .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.start_in_tray = on)))
+                        .into_any_element(),
+                ));
                 // Parity slice (platform-custom-keybindings).
                 body = body.child(this.appearance_keybindings_section(cx));
             }
