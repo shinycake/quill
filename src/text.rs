@@ -258,6 +258,13 @@ pub fn quote_collapses(quote_text: &str) -> bool {
     quote_text.lines().count() > QUOTE_COLLAPSE_LINES
 }
 
+/// Byte length of the first three logical lines, measured before style runs split them.
+pub fn collapsed_quote_len(text: &str) -> usize {
+    text.match_indices('\n')
+        .nth(QUOTE_COLLAPSE_LINES - 1)
+        .map_or(text.len(), |(index, _)| index)
+}
+
 /// `http`/`https` only, no whitespace or control characters (passed to xdg-open/open).
 pub fn openable_http_url(url: &str) -> bool {
     let url = url.trim();
@@ -622,7 +629,11 @@ mod tests {
     fn quote_collapse_predicate() {
         assert!(!quote_collapses("one line"));
         assert!(!quote_collapses("one\ntwo\nthree")); // boundary: 3 lines stay
-        assert!(quote_collapses("one\ntwo\nthree\nfour")); // 4 lines collapse
+        assert!(quote_collapses("one\ntwo\nthree\nfour"));
+        assert_eq!(
+            collapsed_quote_len("é\n二\nthree\nfour"),
+            "é\n二\nthree".len()
+        ); // 4 lines collapse
         let long = (1..=50).map(|i| format!("line {i}")).collect::<Vec<_>>();
         assert!(quote_collapses(&long.join("\n")));
     }

@@ -18,7 +18,7 @@ use quill::state::{OutboxReceipt, Session, message_time_hhmm};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{MessageContent, MessageInteractionInfo, ParsedFile};
 use quill::text::{
-    QUOTE_COLLAPSE_LINES, TextEntity, TextRun, quote_collapses, styled_runs, utf8_to_utf16_offset,
+    TextEntity, TextRun, collapsed_quote_len, quote_collapses, styled_runs, utf8_to_utf16_offset,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -450,7 +450,8 @@ fn quote_block(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote_text: String = group.iter().map(|run| run.text.as_str()).collect();
-    let key = (msg_key.0, msg_key.1, start as u64, is_caption);
+    // Keep quote expansion separate from spoiler visibility at the same run.
+    let key = (msg_key.0, msg_key.1, (start as u64) | (1 << 63), is_caption);
     let expanded = revealed.contains(&key);
     let collapsible = quote_collapses(&quote_text);
     let mut runs_row = div()
@@ -461,15 +462,15 @@ fn quote_block(
     if collapsible && !expanded {
         // Truncate to the first QUOTE_COLLAPSE_LINES lines, keeping each
         // run's own styling on the visible portion.
-        let mut remaining = QUOTE_COLLAPSE_LINES;
+        let mut remaining = collapsed_quote_len(&quote_text);
         for (offset, run) in group.iter().enumerate() {
             if remaining == 0 {
                 break;
             }
-            let shown: Vec<&str> = run.text.lines().take(remaining).collect();
-            remaining = remaining.saturating_sub(shown.len());
+            let shown_len = remaining.min(run.text.len());
+            remaining -= shown_len;
             let mut shown_run = run.clone();
-            shown_run.text = shown.join("\n");
+            shown_run.text.truncate(shown_len);
             runs_row = runs_row.child(paint_text_run(
                 &shown_run,
                 start + offset,

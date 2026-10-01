@@ -15,7 +15,7 @@
   - Quotes ≤ 3 lines render fully with no affordance; nested styles are
     preserved on the visible portion.
   - Expansion state reuses the spoiler `revealed` set (documented;
-    theoretical index collision is benign).
+    high-bit quote keys keep spoiler visibility independent).
   - README box `parity:msg-blockquote-expandable` declared via
     `parity-fragments/parity-msg-blockquote-expandable.txt` (merge pipeline
     checks the box after merge).
