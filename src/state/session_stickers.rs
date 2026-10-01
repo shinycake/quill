@@ -2,6 +2,22 @@
 use super::*;
 
 impl Session {
+    pub(crate) fn finish_sticker_batch_item(&mut self, set_id: i64, success: bool) {
+        if let Some(index) = self
+            .stickers
+            .batch_pending
+            .iter()
+            .position(|id| *id == set_id)
+        {
+            self.stickers.batch_pending.remove(index);
+            if success {
+                self.stickers.batch_completed += 1;
+            } else {
+                self.stickers.batch_failed += 1;
+            }
+        }
+    }
+
     pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         let next = sets.last().map(|set| set.id).unwrap_or(0);
         self.stickers.archived_has_more =

@@ -1189,6 +1189,9 @@ impl Session {
             self.stickers.loading_set = false;
             self.stickers.failed = true;
         }
+        if let Some(RequestPurpose::ManageStickerSet { set_id, .. }) = pending.map(|p| p.purpose) {
+            self.finish_sticker_batch_item(set_id, false);
+        }
         if matches!(
             pending.map(|p| p.purpose),
             Some(

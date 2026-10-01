@@ -548,3 +548,79 @@ fn composer_suggestions_wait_for_installed_sets_and_keep_the_latest_emoji() {
     assert!(!driver.session.stickers.suggest_waiting_for_sets);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    assert!(driver.manage_sticker_sets(&[77, -1], true).is_err());
+    assert_eq!(driver.session.stickers.batch_total, 0);
+    assert_eq!(driver.manage_sticker_sets(&[77, 88, 77], true).unwrap(), 2);
+    assert_eq!(driver.session.stickers.batch_total, 2);
+    assert_eq!(driver.session.stickers.batch_completed, 0);
+    assert_eq!(driver.session.stickers.batch_pending, vec![77, 88]);
+    assert!(driver.manage_sticker_sets(&[99], false).is_err());
+    let ok = driver
+        .session
+        .requests
+        .pending
+        .values()
+        .find(|pending| {
+            pending.purpose
+                == RequestPurpose::ManageStickerSet {
+                    set_id: 77,
+                    installed: true,
+                    archived: false,
+                }
+        })
+        .unwrap()
+        .id;
+    let err = sent_request(&recorder, "changeStickerSet")["@extra"].clone();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":ok.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.stickers.batch_completed, 1);
+    assert_eq!(driver.session.stickers.batch_pending, vec![88]);
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"error","@extra":err,"code":500,"message":"test"}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.stickers.batch_failed, 1);
+    assert!(driver.session.stickers.batch_pending.is_empty());
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":ok.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.stickers.batch_completed, 1);
+    assert_eq!(driver.manage_sticker_sets(&[88], false).unwrap(), 1);
+    assert_eq!(driver.session.stickers.batch_failed, 0);
+    assert_eq!(driver.session.stickers.batch_completed, 0);
+    assert_eq!(driver.session.stickers.batch_total, 1);
+    assert_eq!(
+        sent_request(&recorder, "changeStickerSet")["is_installed"],
+        false
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

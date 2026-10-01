@@ -17,6 +17,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 impl QuillApp {
+    fn batch_install_sticker_sets(&mut self, ids: &[i64], cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.manage_sticker_sets(ids, true) {
+                Ok(sent) => format!("installing {sent} sticker sets…"),
+                Err(_) => "could not start sticker batch; wait for pending updates".into(),
+            };
+        }
+        cx.notify();
+    }
+
     pub(super) fn sync_sticker_suggestions(&mut self, text: &str, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.update_sticker_suggestions(text).is_err() {
@@ -426,6 +436,37 @@ impl QuillApp {
                 .collect(),
             _ => vec![],
         };
+        let batch_ids: Vec<_> = visible_sets
+            .iter()
+            .filter(|set| !set.is_installed)
+            .map(|set| set.id)
+            .collect();
+        if !batch_ids.is_empty() {
+            tabs = tabs.child(
+                Button::new("install-displayed-sticker-sets")
+                    .label(format!("Install {} displayed sets", batch_ids.len()))
+                    .disabled(!panel.batch_pending.is_empty())
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.batch_install_sticker_sets(&batch_ids, cx)
+                    })),
+            );
+        }
+        if panel.tab == StickerTab::Installed && !panel.sets.is_empty() {
+            tabs = tabs.child(
+                Button::new("remove-installed-sticker-sets")
+                    .label("Remove all installed")
+                    .disabled(!panel.batch_pending.is_empty())
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_group_confirm(
+                            ChatId(0),
+                            GroupConfirmAction::RemoveInstalledStickerSets,
+                            cx,
+                        );
+                    })),
+            );
+        }
         for set in &visible_sets {
             let set_id = set.id;
             let selected = panel.selected_set_id == Some(set_id);
@@ -630,6 +671,15 @@ impl QuillApp {
             )
             .child(tabs)
             .child(suggest_modes)
+            .when(panel.batch_total > 0, |body| {
+                body.child(div().text_sm().child(format!(
+                    "Batch: {} of {} updated · {} pending · {} failed",
+                    panel.batch_completed,
+                    panel.batch_total,
+                    panel.batch_pending.len(),
+                    panel.batch_failed
+                )))
+            })
             .when(panel.tab == StickerTab::Search, |body| {
                 body.child(
                     div()

@@ -166,6 +166,7 @@ impl Session {
             set_id, installed, ..
         }) = pending.map(|p| p.purpose)
         {
+            self.finish_sticker_batch_item(set_id, true);
             for sets in [&mut self.stickers.trending, &mut self.stickers.found_sets] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {
                     set.is_installed = installed;

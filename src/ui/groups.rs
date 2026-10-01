@@ -1278,6 +1278,19 @@ impl QuillApp {
                         .driver
                         .cancel_recovery_email_setup()
                         .map(|_| "aborting email setup…".to_string()),
+                    GroupConfirmAction::RemoveInstalledStickerSets => {
+                        let ids: Vec<_> = live
+                            .driver
+                            .session
+                            .stickers
+                            .sets
+                            .iter()
+                            .map(|set| set.id)
+                            .collect();
+                        live.driver
+                            .manage_sticker_sets(&ids, false)
+                            .map(|sent| format!("removing {sent} sticker sets…"))
+                    }
                     GroupConfirmAction::RemoveStickerSet { set_id } => live
                         .driver
                         .manage_sticker_set(set_id, false, false)
@@ -1647,6 +1660,11 @@ impl QuillApp {
                         "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.".to_string(),
                         "Delete".to_string(),
                     ),
+                    GroupConfirmAction::RemoveInstalledStickerSets => (
+                        "Remove installed sticker sets".to_string(),
+                        format!("Remove all {} installed sticker sets? You can install them again later.",this.session().map(|s|s.stickers.sets.len()).unwrap_or(0)),
+                        "Remove all".to_string(),
+                    ),
                     GroupConfirmAction::RemoveStickerSet { .. } => (
                         "Remove sticker set".to_string(),
                         "Remove this sticker set from your installed stickers? You can install it again later.".to_string(),
@@ -1665,6 +1683,7 @@ impl QuillApp {
                     | GroupConfirmAction::BlockContact { block: true, .. }
                     | GroupConfirmAction::DeleteSyncedContacts
                     | GroupConfirmAction::ClearPaymentInfo
+                    | GroupConfirmAction::RemoveInstalledStickerSets
                     | GroupConfirmAction::RemoveStickerSet { .. }
             );
             let body = div()
