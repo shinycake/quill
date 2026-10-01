@@ -1,0 +1,2 @@
+parity:platform-tray-menu
+parity:platform-start-minimized

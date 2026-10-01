@@ -338,6 +338,8 @@ pub struct AppearancePrefs {
     /// in the chat-list preview instead of plain text.
     #[serde(default)]
     pub chat_list_rich_preview: bool,
+    #[serde(default)]
+    pub start_in_tray: bool,
 }
 
 fn default_night_start() -> u16 {
@@ -370,6 +372,7 @@ impl Default for AppearancePrefs {
             preview_lines: crate::chatlist_style::PREVIEW_LINES_DEFAULT,
             chat_list_media_icons: false,
             chat_list_rich_preview: false,
+            start_in_tray: false,
         }
     }
 }
@@ -997,6 +1000,7 @@ mod tests {
             preview_lines: 3,
             chat_list_media_icons: true,
             chat_list_rich_preview: true,
+            start_in_tray: true,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_appearance_prefs(&paths), prefs);

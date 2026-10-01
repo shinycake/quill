@@ -28,6 +28,20 @@ use crate::state::Session;
 /// Icon edge length in pixels.
 pub const ICON_SIZE: u32 = 64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayAction {
+    Open,
+    Quit,
+}
+
+pub fn menu_action(id: &str) -> Option<TrayAction> {
+    match id {
+        "quill-tray-open" => Some(TrayAction::Open),
+        "quill-tray-quit" => Some(TrayAction::Quit),
+        _ => None,
+    }
+}
+
 /// Badge count honoring [`BadgePrefs`]: archived chats are skipped unless
 /// `include_archived`; muted chats are skipped unless `include_muted`;
 /// the count is the unread-message sum when `count_messages` is on, else
@@ -196,9 +210,18 @@ pub struct Tray {
 #[cfg(feature = "ui")]
 impl Tray {
     fn new() -> Option<Self> {
+        use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
+        let menu = Menu::new();
+        menu.append_items(&[
+            &MenuItem::with_id("quill-tray-open", "Open Quill", true, None),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id("quill-tray-quit", "Quit Quill", true, None),
+        ])
+        .ok()?;
         let (rgba, w, h) = render_tray_icon(0);
         let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
         let tray = tray_icon::TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
             .with_tooltip("Quill")
             .with_icon(icon)
             .build()
@@ -254,9 +277,29 @@ pub fn sync_tray(session: Option<&Session>) {
     });
 }
 
+#[cfg(feature = "ui")]
+pub fn tray_available() -> bool {
+    TRAY.with(|cell| cell.borrow().is_some())
+}
+
+#[cfg(feature = "ui")]
+pub fn take_tray_actions() -> Vec<TrayAction> {
+    tray_icon::menu::MenuEvent::receiver()
+        .try_iter()
+        .filter_map(|event| menu_action(event.id.as_ref()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tray_menu_routes_only_its_own_actions() {
+        assert_eq!(menu_action("quill-tray-open"), Some(TrayAction::Open));
+        assert_eq!(menu_action("quill-tray-quit"), Some(TrayAction::Quit));
+        assert_eq!(menu_action("quit"), None);
+        assert_eq!(menu_action(""), None);
+    }
     use crate::chatlist_style::ChatPreviewStyle;
     use crate::diagnostics::MemorySink;
     use crate::ids::{AccountKey, ChatId, MessageId};

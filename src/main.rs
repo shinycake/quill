@@ -82,6 +82,8 @@ fn ui_main(args: &[String]) {
     let pending_deep_link = quill::connect::detect_deep_link_arg(args);
 
     let credentials = quill::credentials::load();
+    let start_in_tray = args.iter().any(|arg| arg == "--start-minimized")
+        || ui::QuillApp::load_appearance().start_in_tray;
     gpui_kit::application()
         .with_assets(QuillAssets)
         .run(move |cx| {
@@ -108,9 +110,20 @@ fn ui_main(args: &[String]) {
                             size: size(px(1200.), px(740.)),
                         })),
                         app_id: Some("org.shinycake.quill".into()),
+                        show: !start_in_tray,
+                        focus: !start_in_tray,
                         ..quill_window_options("Quill")
                     },
                     move |window, cx| {
+                        #[cfg(target_os = "macos")]
+                        window.on_window_should_close(cx, |_, cx| {
+                            if quill::tray::tray_available() {
+                                cx.hide();
+                                false
+                            } else {
+                                true
+                            }
+                        });
                         let view = cx.new(|cx| {
                             let mut app = ui::QuillApp::new(window, cx, credentials.clone());
                             app.pending_deep_link = pending_deep_link.clone();
@@ -122,6 +135,7 @@ fn ui_main(args: &[String]) {
                         // the OS exposes no system tray.
                         cx.spawn({
                             let tray_view = view.downgrade();
+                            let tray_window = window.window_handle();
                             async move |cx| {
                                 loop {
                                     cx.background_executor()
@@ -140,10 +154,29 @@ fn ui_main(args: &[String]) {
                                     if !alive {
                                         break;
                                     }
+                                    for action in quill::tray::take_tray_actions() {
+                                        let _ =
+                                            tray_window.update(cx, |_, window, cx| match action {
+                                                quill::tray::TrayAction::Open => {
+                                                    cx.activate(true);
+                                                    window.activate_window();
+                                                }
+                                                quill::tray::TrayAction::Quit => cx.quit(),
+                                            });
+                                    }
                                 }
                             }
                         })
                         .detach();
+                        if window.focused(cx).is_none() {
+                            window.focus(&view.focus_handle(cx), cx);
+                        }
+                        view.update(cx, |this, _| quill::tray::sync_tray(this.session()));
+                        if start_in_tray && !quill::tray::tray_available() {
+                            // No tray host must never leave the only window inaccessible.
+                            cx.activate(true);
+                            window.activate_window();
+                        }
                         // kit Phase 2 (redo): shell mounts the kit dialog +
                         // notification layers that Root does not mount itself.
                         let shell = cx.new(|_cx| ui::QuillShell::new(view));
