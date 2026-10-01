@@ -586,10 +586,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     Some("message link not available for this message".into());
             }
         }
-        if installed_stickers_answer && self.session.stickers.suggest_waiting_for_sets {
-            if let Some(emoji) = self.session.stickers.suggest_for.take() {
-                self.update_sticker_suggestions(&emoji)?;
-            }
+        if installed_stickers_answer
+            && self.session.stickers.suggest_waiting_for_sets
+            && let Some(emoji) = self.session.stickers.suggest_for.take()
+        {
+            self.update_sticker_suggestions(&emoji)?;
         }
         if thumbs_after
             || self.session.stickers.open
