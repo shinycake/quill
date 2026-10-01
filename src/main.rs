@@ -76,6 +76,11 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    // `parity:platform-deep-links`: a `t.me` / `tg:` launch argument is
+    // stashed on the app and resolved via `getDeepLinkInfo` once auth is
+    // Ready (see `ui::deep_links`).
+    let pending_deep_link = quill::connect::detect_deep_link_arg(args);
+
     let credentials = quill::credentials::load();
     gpui_kit::application()
         .with_assets(QuillAssets)
@@ -106,7 +111,11 @@ fn ui_main(args: &[String]) {
                         ..quill_window_options("Quill")
                     },
                     move |window, cx| {
-                        let view = cx.new(|cx| ui::QuillApp::new(window, cx, credentials.clone()));
+                        let view = cx.new(|cx| {
+                            let mut app = ui::QuillApp::new(window, cx, credentials.clone());
+                            app.pending_deep_link = pending_deep_link.clone();
+                            app
+                        });
                         // parity:platform-tray-icon — system tray icon with
                         // unread count, synced on a 1s UI-thread timer. The
                         // tray module no-ops when the count is unchanged or
@@ -184,6 +193,8 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "wait-password" => ScreenshotDemo::WaitPassword,
                 "wait-qr" => ScreenshotDemo::WaitQr,
                 "ready-chats" => ScreenshotDemo::ReadyChats,
+                "ready-deep-link-info" => ScreenshotDemo::ReadyDeepLinkInfo,
+                "ready-deep-link-invite" => ScreenshotDemo::ReadyDeepLinkInvite,
                 "ready-offline" => ScreenshotDemo::ReadyOffline,
                 "ready-reconnecting" => ScreenshotDemo::ReadyReconnecting,
                 "ready-chats-composer" => ScreenshotDemo::ReadyChatsComposer,
@@ -373,6 +384,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::WaitCode => ".quill-ready-wait-code",
         ScreenshotDemo::WaitPassword => ".quill-ready-wait-password",
         ScreenshotDemo::WaitQr => ".quill-ready-wait-qr",
+        ScreenshotDemo::ReadyDeepLinkInfo => ".quill-ready-ready-deep-link-info",
+        ScreenshotDemo::ReadyDeepLinkInvite => ".quill-ready-ready-deep-link-invite",
         ScreenshotDemo::ReadyChats => ".quill-ready-ready-chats",
         ScreenshotDemo::ReadyOffline => ".quill-ready-ready-offline",
         ScreenshotDemo::ReadyReconnecting => ".quill-ready-ready-reconnecting",

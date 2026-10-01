@@ -84,6 +84,19 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInfo)) {
+            self.deep_link_dialog = Some("This link requires a newer version of Telegram. Please update your app to open it.".into());
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInvite)) {
+            self.deep_link_invite = Some(quill::state::DeepLinkState::InvitePreview {
+                hash: "demo_invite".into(),
+                title: "Rust Community".into(),
+                member_count: 1248,
+                creates_join_request: true,
+                is_channel: false,
+                generation: 1,
+            });
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             self.composer.update(cx, |input, cx| {
                 input.set_value("hello from composer", window, cx);

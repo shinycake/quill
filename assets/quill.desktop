@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Quill
+Comment=Quill — Telegram desktop client
+Exec=quill %u
+Icon=quill
+Terminal=false
+Categories=Network;Chat;
+MimeType=x-scheme-handler/tg;

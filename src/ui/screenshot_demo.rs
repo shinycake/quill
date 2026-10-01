@@ -11,6 +11,8 @@ pub enum ScreenshotDemo {
     /// with a fake link, rendered as a real QR (no live Telegram).
     WaitQr,
     ReadyChats,
+    ReadyDeepLinkInfo,
+    ReadyDeepLinkInvite,
     /// Slice parity:platform-offline-indicator — the ReadyChats fixture
     /// with `connection` forced to `WaitingForNetwork`, so the offline
     /// banner renders below the title bar (injected, no live Telegram).

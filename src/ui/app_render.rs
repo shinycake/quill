@@ -102,6 +102,11 @@ impl Render for QuillApp {
                 self.rebuild_story_viewer(ChatId(chat_id), story_id, cx);
             }
         }
+        // `parity:platform-deep-links`: open the chat the deep link
+        // resolved to (take-once; render owns the `Window`).
+        if let Some((chat_id, action)) = self.pending_deep_link_open.take() {
+            self.open_deep_link_chat(chat_id, &action, window, cx);
+        }
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
         // chats whose active stories should be refreshed (an own story
         // posted from another client appears in the tray this way).

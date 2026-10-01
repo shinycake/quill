@@ -6,6 +6,7 @@ use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusIt
 use crate::telegram::envelope_story::ParsedStoryAlbum;
 use crate::telegram::profile_accent::ProfileAccentColor;
 use crate::telegram::requests::ArchiveChatListSettings;
+use crate::text::TextEntity;
 use serde::Deserialize;
 use serde_json::Value;
 use std::str::FromStr;
@@ -1017,6 +1018,22 @@ pub enum EnvelopePayload {
     /// `PendingRequest::chat_id`.
     ChatInviteLink {
         link: ParsedChatInviteLink,
+    },
+    /// `checkChatInviteLink` answer (schema 1.8.67, line 2684).
+    ChatInviteLinkInfo {
+        title: String,
+        member_count: i32,
+        creates_join_request: bool,
+        is_channel: bool,
+    },
+    /// `parity:platform-deep-links`: `deepLinkInfo` (schema 1.8.67, line
+    /// 10087) — the `getDeepLinkInfo` answer. The actionable data is in
+    /// `entities`: TDLib marks the resolved action with
+    /// `textEntityTypeTextUrl` entities whose `url` is a `tg://` URL.
+    DeepLinkInfo {
+        text: String,
+        need_update: bool,
+        entities: Vec<TextEntity>,
     },
     /// Phase D3a: `chatInviteLinks` (TDLib 1.8.67, line 2630) — the
     /// response of `getChatInviteLinks` / `revokeChatInviteLink`.

@@ -344,3 +344,71 @@ pub struct ContactRow {
     pub is_online: bool,
     pub is_contact: bool,
 }
+
+/// `parity:platform-deep-links`: the actionable destination parsed out of
+/// a `deepLinkInfo` answer. TDLib marks the action with
+/// `textEntityTypeTextUrl` entities whose `url` is a `tg://` URL (see
+/// `parse_deep_link_action` in `connect::deep_links`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeepLinkAction {
+    /// `tg://resolve?domain=<username>` with optional `start=`,
+    /// `post=`, `story=` query params. (`startgroup=` is out of slice
+    /// and ignored.)
+    OpenUsername {
+        domain: String,
+        start_param: Option<String>,
+        post: Option<i64>,
+        story_id: Option<i32>,
+    },
+    /// `tg://join?invite=<hash>`.
+    JoinInvite { hash: String },
+    /// `tg://openmessage?user_id=<id>&message_id=<id>`.
+    OpenMessage { user_id: i64, message_id: i64 },
+    /// `tg://privatepost?channel=<id>&post=<id>` (the `t.me/c/<id>/<msg>`
+    /// form for private channels/supergroups). Resolved via `getChat`
+    /// with the TDLib channel dialog id `-(10^12) - channel_id`, then
+    /// jumps to the post like `post=`.
+    OpenChannelPost { channel_id: i64, post: i64 },
+    /// `tg://user?id=<id>`.
+    OpenUser { user_id: i64 },
+}
+
+/// `parity:platform-deep-links`: the single active deep-link flow. One
+/// slot, not a map — the app processes at most one launch link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeepLinkState {
+    /// Checked invite awaiting explicit user confirmation; never auto-joins.
+    InvitePreview {
+        hash: String,
+        title: String,
+        member_count: i32,
+        creates_join_request: bool,
+        is_channel: bool,
+        generation: u64,
+    },
+    /// `getDeepLinkInfo` in flight; `generation` drops stale answers.
+    ResolvingInfo { generation: u64 },
+    /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
+    /// action it fires the follow-up request, otherwise (or when
+    /// `need_update`) it shows `text` in a dialog.
+    Info {
+        text: String,
+        need_update: bool,
+        action: Option<DeepLinkAction>,
+        generation: u64,
+    },
+    /// Follow-up request (`searchPublicChat` / `createPrivateChat` /
+    /// `checkChatInviteLink` / confirmed `joinChatByInviteLink` / `getChat`) in flight.
+    ResolvingChat {
+        action: DeepLinkAction,
+        generation: u64,
+    },
+    /// Follow-up resolved to a chat; the UI consumes this once to open
+    /// the chat (and jump / prefill / open the story per `action`).
+    ChatReady {
+        chat_id: ChatId,
+        action: DeepLinkAction,
+    },
+    /// Info or error text for the UI to show in a dialog, consumed once.
+    ShowText(String),
+}

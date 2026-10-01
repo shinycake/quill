@@ -43,6 +43,16 @@ pub struct ChatId(pub i64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct MessageId(pub i64);
 
+impl MessageId {
+    /// Convert a Telegram server message ID (as used by deep links) to TDLib's
+    /// client ID. TDLib reserves 20 low bits for local IDs and type flags:
+    /// <https://github.com/tdlib/td/blob/master/td/telegram/MessageId.h>
+    /// (`SERVER_ID_SHIFT` and the `ServerMessageId` constructor).
+    pub fn from_server_id(server_id: i64) -> Self {
+        Self(server_id << 20)
+    }
+}
+
 /// TDLib `int53` user identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UserId(pub i64);
@@ -125,6 +135,12 @@ impl AccountGeneration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn message_id_from_server_id_scales() {
+        assert_eq!(MessageId::from_server_id(42).0, 42 << 20);
+        assert_eq!(MessageId::from_server_id(1).0, 1_048_576);
+    }
 
     #[test]
     fn account_key_new_accepts_safe_ids() {

@@ -464,6 +464,17 @@ pub struct QuillApp {
     pub(super) callback_password_dialog: Option<CallbackPasswordDialog>,
     /// B1: `loginUrlInfoRequestConfirmation` domain/url awaiting user consent.
     pub(super) login_url_confirm: Option<LoginUrlConfirm>,
+    /// `parity:platform-deep-links`: launch link from the CLI (`t.me` /
+    /// `tg:`), set by `main.rs`. Fired once auth reaches Ready, then
+    /// cleared (`pub(crate)` so the binary can set it).
+    pub(crate) pending_deep_link: Option<String>,
+    /// `parity:platform-deep-links`: TDLib's info / error text for the
+    /// deep link, shown in a dialog (`DialogKind::DeepLinkInfo`).
+    pub(super) deep_link_dialog: Option<String>,
+    pub(super) deep_link_invite: Option<quill::state::DeepLinkState>,
+    /// `parity:platform-deep-links`: resolved chat + action waiting for
+    /// render (which owns the `Window`) to open it.
+    pub(super) pending_deep_link_open: Option<(ChatId, quill::state::DeepLinkAction)>,
     /// B1: one-time custom keyboards the user already tapped
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
