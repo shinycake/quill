@@ -33,7 +33,7 @@ impl SyntheticChat {
             row(
                 2,
                 "Ada",
-                "A longer paragraph used to force a mixed-height row. Quill is an independent GPUI + TDLib client, not a ZapFast fork. This text should wrap across several lines in the history pane.",
+                "A longer paragraph used to force a mixed-height row. Quill is an independent GPUI + TDLib Telegram client. This text should wrap across several lines in the history pane.",
                 SyntheticKind::Text,
                 false,
             ),
