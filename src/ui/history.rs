@@ -390,6 +390,7 @@ pub(super) fn session_history_row(
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
     animation_frame: Option<Arc<RenderImage>>,
+    sticker_frame: Option<Arc<RenderImage>>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
@@ -828,6 +829,7 @@ pub(super) fn session_history_row(
             files,
             downloading,
             media_roots,
+            sticker_frame,
             cx,
         )),
         MessageContent::VoiceNote(note) => Some(voice_note_row(

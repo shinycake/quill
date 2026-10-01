@@ -150,6 +150,7 @@ impl QuillApp {
         self.sticker_settings_open = false;
         self.sticker_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.stop_sticker_playback();
         if let Some(mut live) = self.live.take() {
             live.shutdown(CLIENT_CLOSE_TIMEOUT);
         }

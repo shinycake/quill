@@ -261,7 +261,7 @@ pub(super) fn demo_seed_for(
             "screenshot demo — peer typing (injected updateChatAction)".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyStickers => (
+        ScreenshotDemo::ReadyStickers | ScreenshotDemo::ReadyStickerPlayback => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — sticker panel + sticker in history".into(),
@@ -1538,6 +1538,7 @@ impl QuillApp {
             seek_preview_secs: None,
             playback_tick: false,
             playback_positions: HashMap::new(),
+            sticker_playback: Default::default(),
             playing_animation: None,
             animation_frames: Vec::new(),
             autoplayed_gifs: Default::default(),

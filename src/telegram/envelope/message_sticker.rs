@@ -2,7 +2,7 @@ use super::*;
 use crate::ids::FileId;
 use serde_json::Value;
 
-/// Still image vs animation. TGS / WEBM are not played in this slice.
+/// Still-image, vector-animation, and video sticker formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StickerFormat {
     Webp,

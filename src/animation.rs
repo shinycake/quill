@@ -76,8 +76,16 @@ pub fn full_playback_frames_cancelable(
     if fps < 0.01 {
         return Err("GIF duration is outside the supported range".into());
     }
-    let frames =
-        crate::video::extract_frames(src, cache_dir, 0, fps, 240, 600, Some((slot, cancelled)))?;
+    let frames = crate::video::extract_frames(
+        src,
+        cache_dir,
+        0,
+        fps,
+        240,
+        600,
+        Some((slot, cancelled)),
+        None,
+    )?;
     if frames.is_empty() {
         return Err("ffmpeg produced no GIF frames".into());
     }

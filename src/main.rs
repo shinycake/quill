@@ -333,6 +333,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-shared-media" => ScreenshotDemo::ReadySharedMedia,
                 "ready-typing" => ScreenshotDemo::ReadyTyping,
                 "ready-stickers" => ScreenshotDemo::ReadyStickers,
+                "ready-sticker-playback" => ScreenshotDemo::ReadyStickerPlayback,
                 "ready-voice" => ScreenshotDemo::ReadyVoice,
                 "ready-game-card" => ScreenshotDemo::ReadyGameCard,
                 "ready-link-preview" => ScreenshotDemo::ReadyLinkPreview,
@@ -543,6 +544,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
         ScreenshotDemo::ReadyStickers => ".quill-ready-ready-stickers",
+        ScreenshotDemo::ReadyStickerPlayback => ".quill-ready-ready-sticker-playback",
         ScreenshotDemo::ReadyVoice => ".quill-ready-ready-voice",
         ScreenshotDemo::ReadyGameCard => ".quill-ready-ready-game-card",
         ScreenshotDemo::ReadyLinkPreview => ".quill-ready-ready-link-preview",
@@ -727,7 +729,13 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
 
                 // Allow a couple of frames to paint, then signal the capture script.
                 cx.background_executor()
-                    .timer(Duration::from_millis(1500))
+                    .timer(Duration::from_millis(
+                        if kind == ScreenshotDemo::ReadyStickerPlayback {
+                            400
+                        } else {
+                            1500
+                        },
+                    ))
                     .await;
                 let _ = std::fs::write(&marker_for_spawn, b"ready\n");
                 cx.background_executor()
@@ -735,7 +743,11 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                         std::env::var("QUILL_DEMO_LINGER_MS")
                             .ok()
                             .and_then(|v| v.parse::<u64>().ok())
-                            .unwrap_or(3500)
+                            .unwrap_or(if kind == ScreenshotDemo::ReadyStickerPlayback {
+                                7500
+                            } else {
+                                3500
+                            })
                             .clamp(3500, 60000),
                     ))
                     .await;

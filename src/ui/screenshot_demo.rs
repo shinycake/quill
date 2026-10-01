@@ -86,6 +86,7 @@ pub enum ScreenshotDemo {
     ReadyTyping,
     /// Sticker panel + sticker in history (injected, no live Telegram).
     ReadyStickers,
+    ReadyStickerPlayback,
     /// Voice record bar + history playback (injected, no live Telegram).
     ReadyVoice,
     /// Link entities + web page (`linkPreview`) card (injected, no live Telegram).

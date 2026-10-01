@@ -106,6 +106,7 @@ mod shortcuts;
 mod spellcheck_ui;
 mod sponsored;
 mod statistics;
+mod sticker_playback;
 mod stickers_ui;
 mod story_albums;
 mod story_composer;

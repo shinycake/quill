@@ -476,6 +476,7 @@ pub struct QuillApp {
     /// resume from it) after pause/stop.
     pub(super) playback_positions: HashMap<MessageId, f64>,
     /// History row whose GIF is looping (tdesktop clip / Unigram player).
+    pub(super) sticker_playback: super::sticker_playback::StickerPlayback,
     pub(super) playing_animation: Option<MessageId>,
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
     pub(super) animation_frames: Vec<Arc<RenderImage>>,
@@ -849,5 +850,6 @@ impl QuillApp {
 impl Drop for QuillApp {
     fn drop(&mut self) {
         self.stop_animation_playback();
+        self.stop_sticker_playback();
     }
 }

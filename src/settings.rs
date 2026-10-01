@@ -172,6 +172,8 @@ pub struct MediaPrefs {
     pub recent_custom_emoji_ids: Vec<i64>,
     #[serde(default = "default_true")]
     pub big_emoji: bool,
+    #[serde(default = "default_true")]
+    pub loop_animated_stickers: bool,
     #[serde(default)]
     pub recent_emoji: Vec<String>,
     pub remember_media_grouping: bool,
@@ -225,6 +227,7 @@ impl Default for MediaPrefs {
             recent_emoji_packs: Vec::new(),
             recent_custom_emoji_ids: Vec::new(),
             big_emoji: true,
+            loop_animated_stickers: true,
             recent_emoji: Vec::new(),
             remember_media_grouping: false,
             group_media: false,

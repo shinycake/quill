@@ -129,8 +129,12 @@ impl QuillApp {
             emoji.clone()
         };
         let cell_id = format!("sticker-{prefix}-{}-{}", sticker.set_id, sticker.id);
-        let cell = if let Some(path) = path {
-            img(path)
+        let animated = self.sticker_image(file_id, sticker.format, cx);
+        let source = animated
+            .map(ImageSource::Render)
+            .or_else(|| path.map(ImageSource::from));
+        let cell = if let Some(source) = source {
+            img(source)
                 .id(SharedString::from(cell_id.clone()))
                 .w(px(72.))
                 .h(px(72.))
