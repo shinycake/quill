@@ -58,6 +58,30 @@ fn sticker_tabs_requests_failures_and_confirmed_mutations() {
     assert_eq!(driver.set_favorite_sticker(FileId(42), true).unwrap(), None);
     // A successful mutation replaces an older pending fetch; its late answer is ignored.
     let fetch = sent_request(&recorder, "getFavoriteStickers");
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":add.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_ne!(
+        sent_request(&recorder, "getFavoriteStickers")["@extra"],
+        fetch["@extra"]
+    );
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"stickers","@extra":fetch["@extra"],"stickers":[]}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
     assert!(
         driver
             .session
