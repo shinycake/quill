@@ -1487,8 +1487,8 @@ impl QuillApp {
                 _ => status,
             };
             // stories-live-play: live stories backed by an ordinary group
-            // call get a Join button; RTMP lives (one-way broadcast, no
-            // playback URL in the schema) and unsupported content keep an
+            // call get a Join button; unverified RTMP playback
+            // and unsupported content keep an
             // honest placeholder.
             let joinable = matches!(item.kind, StoryViewerKind::Live)
                 && item.live_call.is_some_and(|call| !call.is_rtmp_stream);

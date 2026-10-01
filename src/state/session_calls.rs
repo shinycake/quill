@@ -184,6 +184,7 @@ impl Session {
                 tracked.can_be_managed = group_call.can_be_managed;
                 tracked.is_owned = group_call.is_owned;
                 tracked.is_video_chat = group_call.is_video_chat;
+                tracked.is_live_story = group_call.is_live_story;
                 tracked.scheduled_start_date = group_call.scheduled_start_date;
                 tracked.enabled_start_notification = group_call.enabled_start_notification;
                 return;
@@ -215,6 +216,7 @@ impl Session {
         let tracked = self.active_group_call.as_mut().expect("just inserted");
         tracked.title = group_call.title.clone();
         tracked.is_video_chat = group_call.is_video_chat;
+        tracked.is_live_story = group_call.is_live_story;
         tracked.scheduled_start_date = 0;
         tracked.is_joined = group_call.is_joined;
         tracked.need_rejoin = group_call.need_rejoin;

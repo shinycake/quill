@@ -135,9 +135,8 @@ impl StoryViewerKind {
 }
 
 /// stories-live-play: what the viewer needs to join a live story — the
-/// group call behind `storyContentLive` (`schema/td_api.tl:6662`). RTMP
-/// live stories can't be joined via tgcalls (one-way broadcast; the
-/// schema exposes no playback URL).
+/// group call behind `storyContentLive` (`schema/td_api.tl:6662`).
+/// RTMP playback remains outside this slice and is unverified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LiveStoryCall {
     pub group_call_id: i32,

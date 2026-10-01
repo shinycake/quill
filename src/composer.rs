@@ -139,6 +139,24 @@ impl ComposerAttachment {
     }
 }
 
+/// Parity slice (platform-paste-image): persist clipboard image bytes as a
+/// temp file and pick it as a photo attachment. The temp file lives until the
+/// OS reclaims it; the send path is canonicalized at pick time like any
+/// user-picked file. Returns `None` when the bytes can't be persisted.
+pub fn clipboard_image_attachment(bytes: &[u8], extension: &str) -> Option<ComposerAttachment> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!(
+        "quill-paste-{stamp}-{}.{}",
+        std::process::id(),
+        extension
+    ));
+    std::fs::write(&path, bytes).ok()?;
+    ComposerAttachment::pick(&path, AttachmentKind::Photo)
+}
+
 /// Message the composer is quoting (tdesktop `FieldHeader::replyToMessage`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerReplyTo {
@@ -1346,6 +1364,32 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Parity slice (platform-paste-image): pasted bytes persist to a temp
+    /// file and come back as a Photo attachment with a png suffix.
+    #[test]
+    fn clipboard_image_attachment_persists_png_bytes() {
+        // Minimal 1x1 PNG.
+        let bytes: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let att = clipboard_image_attachment(bytes, "png").expect("persisted");
+        assert_eq!(att.kind, AttachmentKind::Photo);
+        assert!(att.path.extension().and_then(|e| e.to_str()) == Some("png"));
+        assert!(att.path.is_file());
+        assert_eq!(fs::read(&att.path).expect("read back"), bytes);
+        fs::remove_file(&att.path).ok();
+    }
+
+    /// Parity slice (platform-paste-image): distinct pastes get distinct temp
+    /// files (timestamp + pid in the name).
+    #[test]
+    fn clipboard_image_attachment_names_are_unique() {
+        let bytes: &[u8] = &[0x89, b'P', b'N', b'G'];
+        let first = clipboard_image_attachment(bytes, "png").expect("first");
+        let second = clipboard_image_attachment(bytes, "png").expect("second");
+        assert_ne!(first.path, second.path);
+        fs::remove_file(&first.path).ok();
+        fs::remove_file(&second.path).ok();
+    }
 
     fn scratch(label: &str) -> PathBuf {
         let nanos = SystemTime::now()

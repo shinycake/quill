@@ -125,8 +125,11 @@ pub(crate) fn call_request_error_line(err: &TdError, action: &str) -> String {
 /// wrong password / invalid input, 429 = flood-wait); the native message
 /// is never stored (it can contain secrets — see `TdError`).
 pub(crate) fn password_op_error_line(op: PasswordOp, err: &TdError) -> String {
+    // Slice parity:platform-flood-errors — precomputed so the Flood arm
+    // can stay `&str` like the other arms.
+    let flood_detail = err.flood_line("too many attempts — wait and try again");
     let detail = match err.class {
-        ErrorClass::Flood => "too many attempts — wait and try again",
+        ErrorClass::Flood => flood_detail.as_str(),
         ErrorClass::Unauthorized => "session is no longer authorized",
         ErrorClass::Invalid => match op {
             PasswordOp::SetPassword | PasswordOp::DisablePassword => {
@@ -148,8 +151,11 @@ pub(crate) fn password_op_error_line(op: PasswordOp, err: &TdError) -> String {
 /// go, 429 = flood-wait); the native message is never stored (it can
 /// contain secrets — see `TdError`).
 pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
+    // Slice parity:platform-flood-errors — precomputed so the Flood arm
+    // can stay `&str` like the other arms.
+    let flood_detail = err.flood_line("too many requests — wait and try again");
     let detail = match err.class {
-        ErrorClass::Flood => "too many requests — wait and try again",
+        ErrorClass::Flood => flood_detail.as_str(),
         ErrorClass::Unauthorized => "session is no longer authorized",
         ErrorClass::Invalid => "Telegram refused the request",
         ErrorClass::NotFound => "no longer exists",
@@ -159,7 +165,12 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
         ErrorClass::StoryUserRestricted => {
             return format!("Could not {action} (error {})", err.code);
         }
-        ErrorClass::Other => return format!("Could not {action} (error {})", err.code),
+        // Slice msg-richtext-ai-tools: AI errors never reach the sessions
+        // screen, so AiComposeFloodPremium shares the generic code-based
+        // line (kept as an explicit arm: the match must stay exhaustive).
+        ErrorClass::AiComposeFloodPremium | ErrorClass::Other => {
+            return format!("Could not {action} (error {})", err.code);
+        }
     };
     format!("Could not {action}: {detail}")
 }
@@ -171,13 +182,17 @@ pub(crate) fn error_reason(err: &TdError) -> String {
     match err.class {
         ErrorClass::NotFound => "not found".to_string(),
         ErrorClass::Unauthorized => "not authorized".to_string(),
-        ErrorClass::Flood => "too many requests — try again later".to_string(),
+        ErrorClass::Flood => err.flood_line("too many requests — try again later"),
         ErrorClass::Invalid => "invalid request".to_string(),
         // S14: classified story-restriction errors keep the exact text
         // the code-based class produced before (400 → Invalid,
         // 403 → Other), so non-story flows render byte-identical text.
         ErrorClass::StoryChatDisabled => "invalid request".to_string(),
         ErrorClass::StoryUserRestricted => format!("error {}", err.code),
+        // Slice msg-richtext-ai-tools: the documented AI flood error —
+        // the AI arm in `apply_error` phrases this for the user; this
+        // is the fallback for any generic path.
+        ErrorClass::AiComposeFloodPremium => "AI request limit reached".to_string(),
         ErrorClass::Other => format!("error {}", err.code),
     }
 }
@@ -188,10 +203,28 @@ pub(crate) fn error_reason(err: &TdError) -> String {
 pub struct AuthRequestError {
     pub purpose: RequestPurpose,
     pub class: ErrorClass,
+    /// Slice parity:platform-flood-errors — retry-after seconds from
+    /// `TdError::flood_wait_secs`, so auth flood errors get the same
+    /// countdown as other surfaces.
+    pub flood_wait_secs: Option<u64>,
 }
 
 impl AuthRequestError {
-    pub fn user_message(self) -> &'static str {
+    /// Slice parity:platform-flood-errors — the user-facing line. Flood
+    /// errors with a known wait show the real countdown ("… try again in
+    /// N seconds"); everything else is the static classified line.
+    pub fn user_message(self) -> String {
+        let base = self.base_message();
+        match (self.class, self.flood_wait_secs) {
+            (ErrorClass::Flood, Some(secs)) => {
+                let base = base.strip_suffix(" — wait and try again").unwrap_or(base);
+                format!("{base} — try again in {secs} seconds")
+            }
+            _ => base.to_string(),
+        }
+    }
+
+    fn base_message(self) -> &'static str {
         match (self.purpose, self.class) {
             (RequestPurpose::SetPhoneNumber, ErrorClass::Invalid) => "phone not accepted",
             (RequestPurpose::SetPhoneNumber, ErrorClass::Flood) => {

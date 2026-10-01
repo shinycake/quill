@@ -206,6 +206,40 @@ pub fn create_private_chat(extra: RequestId, user_id: i64, force: bool) -> Strin
     .to_string()
 }
 
+/// `parity:platform-deep-links`: `getDeepLinkInfo link:string =
+/// DeepLinkInfo;` (schema 1.8.67, line 16189).
+pub fn get_deep_link_info(extra: RequestId, link: &str) -> String {
+    json!({
+        "@type": "getDeepLinkInfo",
+        "@extra": extra.as_extra(),
+        "link": link,
+    })
+    .to_string()
+}
+
+/// Check an invite without joining (`schema/td_api.tl:14163`).
+pub fn check_chat_invite_link(extra: RequestId, invite_link: &str) -> String {
+    json!({
+        "@type": "checkChatInviteLink",
+        "@extra": extra.as_extra(),
+        "invite_link": invite_link,
+    })
+    .to_string()
+}
+
+/// `parity:platform-deep-links`: `joinChatByInviteLink invite_link:string
+/// = ChatJoinResult;` (schema 1.8.67, line 14166). `invite_link` is the
+/// full `https://t.me/+<hash>` / `tg://join?invite=<hash>` link TDLib
+/// requires.
+pub fn join_chat_by_invite_link(extra: RequestId, invite_link: &str) -> String {
+    json!({
+        "@type": "joinChatByInviteLink",
+        "@extra": extra.as_extra(),
+        "invite_link": invite_link,
+    })
+    .to_string()
+}
+
 /// Typed `topic_id` JSON for TDLib 1.8.67 requests (schema: `MessageTopic`
 /// constructors at `schema/td_api.tl:3001-3010`). `TopicId::None` encodes as
 /// JSON null ("all topics"), matching the existing null-encoding convention.

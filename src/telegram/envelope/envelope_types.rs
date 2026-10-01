@@ -6,6 +6,7 @@ use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusIt
 use crate::telegram::envelope_story::ParsedStoryAlbum;
 use crate::telegram::profile_accent::ProfileAccentColor;
 use crate::telegram::requests::ArchiveChatListSettings;
+use crate::text::TextEntity;
 use serde::Deserialize;
 use serde_json::Value;
 use std::str::FromStr;
@@ -431,6 +432,20 @@ pub enum EnvelopePayload {
     /// partially-received message in history with the full blocks.
     RichMessage {
         rich: RichMessageContent,
+    },
+    /// Slice msg-richtext-ai-tools: `fixedText` (TDLib 1.8.67,
+    /// `schema/td_api.tl:157`) — the `fixTextWithAi` answer. `text` is
+    /// the fixed text the composer applies (`diffText` is not parsed —
+    /// nothing renders it; parsing what you never use is slop).
+    FixedText {
+        text: String,
+    },
+    /// Slice msg-richtext-ai-tools: bare `formattedText` (TDLib 1.8.67,
+    /// `schema/td_api.tl:3046`) — the `composeTextWithAi` answer. The
+    /// composer applies `text` (entities are dropped: the draft is plain
+    /// text, documented in the driver).
+    FormattedText {
+        text: String,
     },
     /// MED4: `webPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:4377`)
     /// — the `getWebPageInstantView` answer. `blocks` are the same
@@ -1003,6 +1018,22 @@ pub enum EnvelopePayload {
     /// `PendingRequest::chat_id`.
     ChatInviteLink {
         link: ParsedChatInviteLink,
+    },
+    /// `checkChatInviteLink` answer (schema 1.8.67, line 2684).
+    ChatInviteLinkInfo {
+        title: String,
+        member_count: i32,
+        creates_join_request: bool,
+        is_channel: bool,
+    },
+    /// `parity:platform-deep-links`: `deepLinkInfo` (schema 1.8.67, line
+    /// 10087) — the `getDeepLinkInfo` answer. The actionable data is in
+    /// `entities`: TDLib marks the resolved action with
+    /// `textEntityTypeTextUrl` entities whose `url` is a `tg://` URL.
+    DeepLinkInfo {
+        text: String,
+        need_update: bool,
+        entities: Vec<TextEntity>,
     },
     /// Phase D3a: `chatInviteLinks` (TDLib 1.8.67, line 2630) — the
     /// response of `getChatInviteLinks` / `revokeChatInviteLink`.

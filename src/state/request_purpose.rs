@@ -110,6 +110,28 @@ pub enum RequestPurpose {
     ResolveInlineBot {
         generation: u64,
     },
+    /// `parity:platform-deep-links`: `getDeepLinkInfo` for a launch-time
+    /// `t.me` / `tg:` link (schema 1.8.67, line 16189). The answer lands
+    /// in `Session::deep_link`; `generation` drops stale answers.
+    DeepLinkInfo {
+        generation: u64,
+    },
+    /// `parity:platform-deep-links`: deep-link follow-up resolving to a
+    /// chat (`searchPublicChat` / `createPrivateChat` / `getChat`). The
+    /// `chat` answer is picked up in `apply_update_new_chat` and opens
+    /// via `ChatReady`.
+    DeepLinkResolve {
+        generation: u64,
+    },
+    /// Check an invite without joining; answer becomes a guarded preview.
+    DeepLinkCheckInvite {
+        generation: u64,
+    },
+    /// `parity:platform-deep-links`: explicitly confirmed `joinChatByInviteLink`
+    /// (schema 1.8.67, line 14166); answer is a `chatJoinResult`.
+    DeepLinkJoin {
+        generation: u64,
+    },
     /// Bots slice: `sendInlineQueryResultMessage` (schema 1.8.67, line
     /// 12226). Response is the sent `message`; failures surface through
     /// the normal message-send failure path.
@@ -936,7 +958,7 @@ pub enum RequestPurpose {
     CreateVideoChat {
         chat_id: i64,
     },
-    /// Phase C3a: `joinVideoChat`. Response is `text` (join payload
+    /// Phase C3a: `joinVideoChat` or `joinLiveStory`. Response is `text` (join payload
     /// for tgcalls) — stored on the tracked call; Phase C2g consumes it
     /// in the driver pump to finish the native group handshake.
     JoinVideoChat {
@@ -1160,6 +1182,26 @@ pub enum RequestPurpose {
     /// 15289). Response is `ok`; same no-local-state treatment as
     /// `DeleteSavedOrderInfo`.
     DeleteSavedCredentials,
+    /// Slice msg-richtext-ai-tools: `fixTextWithAi` (schema 1.8.67,
+    /// :12172). Response is `fixedText`; the fixed text replaces the
+    /// open chat's composer draft.
+    FixTextWithAi,
+    /// Slice msg-richtext-ai-tools: `composeTextWithAi` (schema 1.8.67,
+    /// :12154). Response is `formattedText`; the composed text replaces
+    /// the open chat's composer draft.
+    ComposeTextWithAi,
+    /// Slice msg-richtext-ai-tools: `composeRichMessageWithAi` (schema
+    /// 1.8.67, :12162). Response is `richMessage`; the parsed blocks
+    /// replace the open chat's composer draft as editor markup.
+    ComposeRichMessageWithAi,
+    /// Slice msg-richtext-ai-tools: `createRichMessageWithAi` (schema
+    /// 1.8.67, :12168). Response is `richMessage`; the parsed blocks
+    /// replace the open chat's composer draft as editor markup.
+    CreateRichMessageWithAi,
+    /// Slice msg-richtext-ai-tools: `fixRichMessageWithAi` (schema
+    /// 1.8.67, :12176). Response is `richMessage`; the parsed blocks
+    /// replace the open chat's composer draft as editor markup.
+    FixRichMessageWithAi,
     Close,
     LogOut,
     Other,

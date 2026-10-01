@@ -595,7 +595,7 @@ fn driver_pin_and_unpin_chat_message_then_is_pinned_update() {
 
 /// stories-live-play: `join_live_story` sends `getGroupCall` for the live
 /// story's group call and records the pending join; the ingest pump then
-/// issues `joinVideoChat` once the `groupCall` answer has created the
+/// issues `joinLiveStory` once the `groupCall` answer has created the
 /// unjoined tracker. Gates: unknown story, non-live story, and a second
 /// join while one is pending are all refused.
 #[test]
@@ -635,6 +635,29 @@ fn driver_join_live_story_two_step_and_gates() {
             .unwrap(),
         )
         .unwrap();
+    // An existing tracked call refuses a competing live-story join.
+    driver.session.active_group_call = Some(tracked_group_call(99, false, false));
+    assert_eq!(
+        driver.join_live_story(ChatId(7), 6),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    driver.session.active_group_call = None;
+    // Failed fetch clears the intent so the next tap can retry.
+    let failed = driver.join_live_story(ChatId(7), 6).unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":400,"message":"GROUPCALL_INVALID"}}"#,
+                    failed.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.pending_live_story_join, None);
     let extra = driver.join_live_story(ChatId(7), 6).unwrap();
     let get = sent_request(&recorder, "getGroupCall");
     assert_eq!(get["group_call_id"], 4242);
@@ -653,7 +676,7 @@ fn driver_join_live_story_two_step_and_gates() {
     );
 
     // The `groupCall` answer creates the unjoined tracker; the pump then
-    // issues `joinVideoChat` for the pending live-story join (the no-device
+    // issues `joinLiveStory` for the pending live-story join (the no-device
     // fallback params — no call engine in tests).
     driver
         .ingest(
@@ -676,9 +699,33 @@ fn driver_join_live_story_two_step_and_gates() {
             .unwrap(),
         )
         .unwrap();
-    let join = sent_request(&recorder, "joinVideoChat");
+    let join = sent_request(&recorder, "joinLiveStory");
     assert_eq!(join["group_call_id"], 4242);
     assert_eq!(driver.session.pending_live_story_join, None);
+    assert!(
+        driver
+            .session
+            .active_group_call
+            .as_ref()
+            .unwrap()
+            .is_live_story
+    );
+    // Reconnect uses the same live-story method, not joinVideoChat.
+    driver
+        .session
+        .active_group_call
+        .as_mut()
+        .unwrap()
+        .reconnecting = true;
+    driver.rejoin_group_call(false).unwrap();
+    let retry = sent_request(&recorder, "joinLiveStory");
+    assert_eq!(retry["group_call_id"], 4242);
+    assert!(
+        recorder
+            .snapshot()
+            .iter()
+            .all(|json| !json.contains("joinVideoChat"))
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

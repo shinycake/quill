@@ -51,3 +51,14 @@ jobs:
         run: cargo build --features ui --release --locked
       - name: package smoke
         run: bash scripts/macos-package-smoke.sh
+
+  parity:
+    name: parity-fragments
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: validate parity fragments
+        run: bash scripts/check-parity-fragments.sh ${{ github.event.pull_request.base.sha }}

@@ -32,6 +32,19 @@ pub fn get_chat_history(
     .to_string()
 }
 
+/// `parity:platform-deep-links`: `getChat chat_id:int53 = Chat;`
+/// (schema 1.8.67, line 11519). Resolves a private channel/supergroup
+/// from a `tg://privatepost` deep link; the bare `chat` answer is
+/// picked up by the `DeepLinkResolve` path in `apply_update_new_chat`.
+pub fn get_chat(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "getChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
 /// `openChat` — required before `viewMessages` can mark history as read.
 pub fn open_chat(extra: RequestId, chat_id: ChatId) -> String {
     json!({

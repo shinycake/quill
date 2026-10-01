@@ -4257,7 +4257,7 @@ device list renders honestly.
   group frames (native chat id -> group call id, frame ssrc -> user id,
   `NTG_STREAM_DEVICE_SCREEN` -> `is_screen`) into the driver's group
   slots; P2P routing is untouched.
-- **Built:** driver (`src/connect.rs`). `join_video_chat` /
+- **Built:** driver (`src/connect.rs`). `joinLiveStory` /
   `rejoin_group_call` share `group_join_params`, which resolves the chat
   id through `chat.video_chat.group_call_id` (the schema's `groupCall`
   carries no chat id), creates the native context first, and sends the
@@ -6931,8 +6931,7 @@ name `platform-chat-export` is kept in code/comments.)
 - **Scope:** join (not RTMP-play) live stories. `storyContentLive`
   carries `group_call_id` + `is_rtmp_stream` (`schema/td_api.tl:6662`).
   Joining = the story's group call via the existing C3a group-call
-  machinery (`joinVideoChat` takes the id directly — no `InputGroupCall`
-  needed, unlike `joinGroupCall`).
+  machinery (`joinLiveStory`, the schema’s dedicated live-story join method).
 - **What was built:**
   - `StoryContentView::Live` now carries `{ group_call_id,
     is_rtmp_stream }` (was a unit variant); `LiveStoryCall` rides on
@@ -6941,7 +6940,7 @@ name `platform-chat-export` is kept in code/comments.)
     story cached, live content, no active 1:1/group call, no pending
     join) → `getGroupCall` (existing `fetch_group_call`) + records a
     `LiveStoryJoinIntent { group_call_id, request }`. The ingest pump
-    (`maybe_join_live_story`) issues `join_video_chat` once the
+    (`maybe_join_live_story`) issues `joinLiveStory` once the
     `groupCall` answer has created the unjoined tracker; the intent is
     kept while the `getGroupCall` request is in flight (so an early
     ingest can't lose it) and dropped when the request completes
@@ -6951,17 +6950,30 @@ name `platform-chat-export` is kept in code/comments.)
     + "Join live" button (failures surface via `status_note`); RTMP
     lives keep an honest "not supported yet" note.
   - Tests: envelope parse carries the id/flag; driver test covers the
-    full two-step (getGroupCall shape → updateGroupCall → joinVideoChat
+    full two-step (getGroupCall shape → updateGroupCall → joinLiveStory
     shape, intent cleared) plus all four refusal gates.
   - README box `parity:stories-live-play` checked with the RTMP note.
 - **Key decisions (ponytail):**
-  - Reused `fetch_group_call` + `join_video_chat` + the UpdateGroupCall
+  - Reused `fetch_group_call` + `joinLiveStory` + the UpdateGroupCall
     tracker path — no new request purposes, no parallel join plumbing.
-  - RTMP explicitly out: the schema has no playback URL (`rtmpUrl` is
-    publish-side), so a Join button there would be a lie.
+  - RTMP playback remains outside this slice and has not been verified.
 - **Not verifiable without live Telegram:** a real live story join
   (needs a contact streaming now); the request shapes and pump wiring
   are driver-tested.
 - **Out of this slice:** RTMP live-story playback; live-story viewer
   counts / top donors (`liveStoryDonors`); starting a live story
   (`startLiveStory` is posting-side).
+
+## Parity slice — OS desktop notifications: verify + check (2026-09-30)
+
+- **Scope:** `parity:platform-os-notifications`. The README line claimed "no OS dispatch", but that note was stale — written in the original checklist (#74, 2026-09-27); OS dispatch landed later in "Phase 8.1: desktop notifications for incoming messages" (66440fd) and the checklist was never updated.
+- **Verified (no code changes needed):**
+  - Reducer: `notify::decide_notify` → `coalesce_notification_with_sound` → `session.pending_notifications` (`src/state/session_notifications.rs:62,109`).
+  - Every render: `flush_notifications` (`src/ui/app_render.rs:27`) drains the queue and calls `spawn_os_notification` per notification.
+  - Dispatch: `notify::build_notification_command` (notify-send `--wait --action` on Linux, osascript `display notification` on macOS) + `run_notification_command` on a capped worker-thread pool (`src/ui/notifications.rs:451`).
+  - Click-to-focus: Linux `--wait` action reports "default" → chat id pushed to `notify_clicks` → next `flush_notifications` calls `select_listed_chat`.
+  - Sounds ride the same worker-thread pattern (`spawn_sound_command`).
+  - README box checked with a corrected description.
+- **Key decisions (ponytail):** verified instead of rebuilt — the code was complete and tested (`linux_command_shape`, `macos_command_escapes_quotes`, coalescing tests all pass). No new code was the right diff.
+- **Tests:** existing suite covers it; no new tests needed.
+- **Out of this slice:** none identified.

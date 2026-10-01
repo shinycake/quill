@@ -84,6 +84,19 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInfo)) {
+            self.deep_link_dialog = Some("This link requires a newer version of Telegram. Please update your app to open it.".into());
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInvite)) {
+            self.deep_link_invite = Some(quill::state::DeepLinkState::InvitePreview {
+                hash: "demo_invite".into(),
+                title: "Rust Community".into(),
+                member_count: 1248,
+                creates_join_request: true,
+                is_channel: false,
+                generation: 1,
+            });
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             self.composer.update(cx, |input, cx| {
                 input.set_value("hello from composer", window, cx);
@@ -98,6 +111,12 @@ impl QuillApp {
             self.composer.update(cx, |input, cx| {
                 input.set_value("sending a photo too", window, cx);
             });
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyPasteImage)) {
+            self.composer.update(cx, |input, cx| {
+                input.set_value("pasted from clipboard", window, cx);
+            });
+            self.status_note = "screenshot demo — paste image → composer photo attachment".into();
         }
         // kit Phase 5: these demos documented the attach-row controls
         // (group-media toggles, self-destruct timer picker, Clear), which
@@ -625,7 +644,14 @@ impl QuillApp {
         // in-memory for the demo — `apply_appearance` (end of this fn)
         // picks them up; nothing is persisted.
         if matches!(demo, Some(ScreenshotDemo::ReadyAppearance)) {
-            self.appearance.theme = ThemeChoice::Dark;
+            // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
+            // captures the dialog with the HC theme selected.
+            self.appearance.theme =
+                if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast") {
+                    ThemeChoice::HighContrast
+                } else {
+                    ThemeChoice::Dark
+                };
             self.appearance.accent_rgb = 0x2f81f7;
             self.appearance.wallpaper_rgb = Some(0x0e1621);
             self.appearance.font_size_px = 16;
@@ -1566,6 +1592,39 @@ impl QuillApp {
                 });
             self.rich_editor_open = true;
             self.status_note = "screenshot demo — rich editor".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRichAiTools)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_chat(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.composer.update(cx, |input, cx| {
+                input.set_value(
+                    "Please fix this sentance and rewrite it as a short invite.",
+                    window,
+                    cx,
+                );
+            });
+            self.rich_editor_open = true;
+            self.status_note =
+                "screenshot demo — rich editor AI tools: Fix · Rewrite · Create".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRichPremiumGate)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_chat(session, &self.demo_sink, &self.demo_seq);
+            }
+            // >3 lines so the ⛶ Rich editor button is visible; editor stays
+            // closed and the status note shows the non-Premium refusal.
+            self.composer.update(cx, |input, cx| {
+                input.set_value(
+                    "Line one of a long draft\nLine two\nLine three\nLine four — tap Rich editor",
+                    window,
+                    cx,
+                );
+            });
+            self.rich_editor_open = false;
+            self.status_note = "Rich messages require Telegram Premium".into();
         }
         if matches!(
             demo,

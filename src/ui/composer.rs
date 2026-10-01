@@ -315,6 +315,22 @@ impl QuillApp {
                     .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
             )
         };
+        // Premium gate (`premiumFeatureRichMessages`): the editor can only
+        // be opened by Premium users, but double-check here too — the
+        // server would reject `inputMessageRichMessage` from a non-Premium
+        // user and we never want to fake a successful send.
+        let premium = self
+            .live
+            .as_ref()
+            .expect("live")
+            .driver
+            .session
+            .my_is_premium();
+        if !premium {
+            self.status_note = "Rich messages require Telegram Premium".into();
+            cx.notify();
+            return;
+        }
         let Some(chat_id) = open_chat else {
             self.status_note = "select a chat to send".into();
             cx.notify();
@@ -342,6 +358,22 @@ impl QuillApp {
                 caption: String::new(),
                 local_path: Some(attachment.path.clone()),
             });
+        }
+        // Attached photos/videos become inline media blocks — every one is
+        // converted (photos and videos accumulate, unlike documents), same
+        // local-path rule as above.
+        for attachment in &self.pending_attachments {
+            match attachment.kind {
+                AttachmentKind::Photo => blocks.push(quill::rich::RichBlock::Photo {
+                    caption: String::new(),
+                    local_path: Some(attachment.path.clone()),
+                }),
+                AttachmentKind::Video => blocks.push(quill::rich::RichBlock::Video {
+                    caption: String::new(),
+                    local_path: Some(attachment.path.clone()),
+                }),
+                _ => {}
+            }
         }
         // Rich-text max length (same status-note pattern as the caption
         // limit): refuse over-limit drafts before the emptiness check so
@@ -438,6 +470,59 @@ impl QuillApp {
             }
             None => {
                 self.status_note = "could not attach file".into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Parity slice (platform-paste-image): on Paste, if the composer has
+    /// focus and the clipboard holds an image, attach it as a photo. The kit
+    /// Textarea's own paste runs first on the focused element and only handles
+    /// text (image-only clipboards insert "" — a no-op); this bubbled handler
+    /// then adds the image. No-ops everywhere except the composer so search
+    /// boxes and dialogs keep their plain text paste.
+    pub(super) fn paste_image_from_clipboard(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
+            return;
+        }
+        let Some(item) = cx.read_from_clipboard() else {
+            return;
+        };
+        let image = item.entries.iter().find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(image),
+            _ => None,
+        });
+        let Some(image) = image else {
+            return;
+        };
+        let extension = match image.format {
+            ImageFormat::Png => "png",
+            ImageFormat::Jpeg => "jpg",
+            ImageFormat::Webp => "webp",
+            ImageFormat::Gif => "gif",
+            ImageFormat::Svg => "svg",
+            ImageFormat::Bmp => "bmp",
+            ImageFormat::Tiff => "tiff",
+            ImageFormat::Ico => "ico",
+            ImageFormat::Pnm => "pnm",
+        };
+        match quill::composer::clipboard_image_attachment(&image.bytes, extension) {
+            Some(att) => {
+                let name = att.file_name.clone();
+                let before = self.pending_attachments.len();
+                ComposerAttachment::push_attachment(&mut self.pending_attachments, att);
+                self.status_note = if self.pending_attachments.len() == before {
+                    format!("album is full ({before})")
+                } else {
+                    format!("attached {name}")
+                };
+            }
+            None => {
+                self.status_note = "could not paste image".into();
             }
         }
         cx.notify();
@@ -706,14 +791,26 @@ impl QuillApp {
         // M2: the rich editor opens via ⛶ after typing more than 3 lines
         // (anniversary post). The button hides again while the editor is
         // open (a ✕ close button takes its place in the editor bar).
+        // Premium gate (`premiumFeatureRichMessages`, schema 1.8.67 line
+        // 8160 — "The ability to send rich messages"): non-Premium users
+        // get the button but tapping it explains the requirement instead
+        // of opening the editor.
         if !self.rich_editor_open && self.composer.read(cx).value().lines().count() > 3 {
             row = row.child(
                 Button::new("rich-editor-open")
                     .label("⛶ Rich editor")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.rich_editor_open = true;
-                        this.status_note = "rich editor — markup becomes blocks".into();
+                        let premium = this
+                            .live
+                            .as_ref()
+                            .is_some_and(|live| live.driver.session.my_is_premium());
+                        if premium {
+                            this.rich_editor_open = true;
+                            this.status_note = "rich editor — markup becomes blocks".into();
+                        } else {
+                            this.status_note = "Rich messages require Telegram Premium".into();
+                        }
                         cx.notify();
                     })),
             );
@@ -721,12 +818,47 @@ impl QuillApp {
         row
     }
 
+    /// Slice msg-richtext-ai-tools: run one AI action against the open
+    /// chat's composer draft. `send` issues the driver request; the
+    /// answer (or a TDLib error) lands through the session drain —
+    /// never silent, never fake success.
+    fn run_ai_composer_action(
+        &mut self,
+        cx: &mut Context<Self>,
+        working_note: &str,
+        send: impl FnOnce(
+            &mut quill::connect::LiveConnect,
+            ChatId,
+            &str,
+        ) -> Result<quill::ids::RequestId, quill::connect::ConnectSendError>,
+    ) {
+        let text = self.composer.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            self.status_note = "type something first — the AI works on the draft".into();
+        } else if let Some(live) = self.live.as_mut()
+            && let Some(chat_id) = live.driver.session.open_chat
+        {
+            self.status_note = match send(live, chat_id, &text) {
+                Ok(_) => working_note.into(),
+                Err(_) => "AI tools unavailable here".into(),
+            };
+        } else {
+            self.status_note = "AI tools unavailable here".into();
+        }
+        cx.notify();
+    }
+
     /// M2: rich editor bar — block buttons append markup templates to the
     /// composer text; below them a live preview renders the parsed blocks
     /// with the same block renderer as history. The ✕ button closes the
     /// editor (the text stays, so nothing is lost).
     pub(super) fn rich_editor_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut buttons = div().id("rich-editor-blocks").flex().items_center().gap_1();
+        let mut buttons = div()
+            .id("rich-editor-blocks")
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_1();
         for (id, label, template) in [
             ("rich-block-h1", "H1", "# "),
             ("rich-block-h2", "H2", "## "),
@@ -749,6 +881,76 @@ impl QuillApp {
                 },
             )));
         }
+        // Slice msg-richtext-ai-tools: AI actions on the draft. "Fix"
+        // runs `fixTextWithAi` (replaces the draft with the fixed text);
+        // "Rewrite" runs `composeTextWithAi` with the honest defaults
+        // (no translation, current style, no emoji); "Fix rich" and
+        // "Rewrite rich" parse the draft to blocks with the same markup
+        // parser as the preview and run `fixRichMessageWithAi` /
+        // `composeRichMessageWithAi` on them; "Create" treats the
+        // draft as the prompt for `createRichMessageWithAi` and the
+        // created blocks replace the draft.
+        buttons = buttons.child(Button::new("rich-ai-fix").label("✨ Fix").ghost().on_click(
+            cx.listener(move |this, _, _, cx| {
+                this.run_ai_composer_action(cx, "AI fixing the text…", |live, chat_id, text| {
+                    live.driver.fix_text_with_ai(chat_id, text)
+                });
+            }),
+        ));
+        buttons = buttons.child(
+            Button::new("rich-ai-rewrite")
+                .label("✨ Rewrite")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(cx, "AI rewriting…", |live, chat_id, text| {
+                        live.driver.compose_text_with_ai(chat_id, text)
+                    });
+                })),
+        );
+        buttons = buttons.child(
+            Button::new("rich-ai-create")
+                .label("✨ Create")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(
+                        cx,
+                        "AI creating from the prompt…",
+                        |live, chat_id, text| {
+                            live.driver.create_rich_message_with_ai(chat_id, text)
+                        },
+                    );
+                })),
+        );
+        buttons = buttons.child(
+            Button::new("rich-ai-fix-rich")
+                .label("✨ Fix rich")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(
+                        cx,
+                        "AI fixing the blocks…",
+                        |live, chat_id, text| {
+                            let blocks = quill::rich::preview_blocks(text);
+                            live.driver.fix_rich_message_with_ai(chat_id, &blocks)
+                        },
+                    );
+                })),
+        );
+        buttons = buttons.child(
+            Button::new("rich-ai-rewrite-rich")
+                .label("✨ Rewrite rich")
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(
+                        cx,
+                        "AI rewriting the blocks…",
+                        |live, chat_id, text| {
+                            let blocks = quill::rich::preview_blocks(text);
+                            live.driver.compose_rich_message_with_ai(chat_id, &blocks)
+                        },
+                    );
+                })),
+        );
         buttons = buttons.child(
             Button::new("rich-editor-close")
                 .label("\u{2715}")

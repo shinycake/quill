@@ -692,6 +692,42 @@ pub(super) fn message_rich_block(
     stack.into_any_element()
 }
 
+/// M2: inline photo/video rich block — an emoji tile with the caption,
+/// mirroring the document tile above.
+fn rich_media_tile(
+    row_id: u64,
+    index: usize,
+    kind: &str,
+    emoji: &str,
+    caption: &str,
+) -> AnyElement {
+    // No caption → label the tile with the media kind instead of an empty row.
+    let label = if caption.is_empty() {
+        match kind {
+            "photo" => "Photo",
+            "video" => "Video",
+            _ => kind,
+        }
+        .to_string()
+    } else {
+        caption.to_string()
+    };
+    div()
+        .id(format!("rich-{kind}-{row_id}-{index}"))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().text_sm().child(emoji.to_string()))
+                .child(div().text_sm().font_medium().child(label)),
+        )
+        .into_any_element()
+}
+
 /// M2: one `RichBlock` as an element. `None` for invisible/unsupported
 /// blocks (`pageBlockAnchor`, unknown types) — parsed, never rendered as
 /// fake content.
@@ -827,27 +863,52 @@ pub(super) fn rich_block_element(
             }
             Some(col.into_any_element())
         }
+        // Inline photos/videos mirror the document tile: emoji + caption.
+        // (Thumbnails need `media_roots` plumbing through both render call
+        // sites — future work, not needed for parity here.)
+        RichBlock::Photo { caption, .. } => {
+            Some(rich_media_tile(row_id, index, "photo", "📷", caption))
+        }
+        RichBlock::Video { caption, .. } => {
+            Some(rich_media_tile(row_id, index, "video", "🎬", caption))
+        }
         RichBlock::Table { rows } => {
+            // Compact bordered grid: hairline dividers, tight cell padding,
+            // header row (row 0 — matches rich.rs serialize `is_header`)
+            // in semibold on a muted band.
+            let border = cx.theme().border;
             let mut table = div()
                 .id(format!("rich-table-{row_id}-{index}"))
                 .flex()
                 .flex_col()
-                .gap_1();
+                .border_1()
+                .border_color(border)
+                .rounded_md()
+                .overflow_hidden();
             for (row_index, row) in rows.iter().enumerate() {
                 let mut line = div()
                     .id(format!("rich-table-row-{row_id}-{index}-{row_index}"))
-                    .flex()
-                    .gap_2();
+                    .flex();
+                if row_index > 0 {
+                    line = line.border_t_1().border_color(border);
+                }
                 for (cell_index, cell) in row.iter().enumerate() {
-                    line = line.child(
-                        div()
-                            .id(format!(
-                                "rich-table-cell-{row_id}-{index}-{row_index}-{cell_index}"
-                            ))
-                            .flex_1()
-                            .text_sm()
-                            .child(cell.clone()),
-                    );
+                    let mut cell_div = div()
+                        .id(format!(
+                            "rich-table-cell-{row_id}-{index}-{row_index}-{cell_index}"
+                        ))
+                        .flex_1()
+                        .px_2()
+                        .py_1()
+                        .text_sm()
+                        .child(cell.clone());
+                    if cell_index > 0 {
+                        cell_div = cell_div.border_l_1().border_color(border);
+                    }
+                    if row_index == 0 {
+                        cell_div = cell_div.font_semibold().bg(fill_muted());
+                    }
+                    line = line.child(cell_div);
                 }
                 table = table.child(line);
             }

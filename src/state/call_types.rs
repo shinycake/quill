@@ -113,6 +113,7 @@ pub struct ActiveGroupCall {
     pub id: i32,
     pub title: String,
     pub is_video_chat: bool,
+    pub is_live_story: bool,
     pub is_joined: bool,
     /// `need_rejoin` arrived (kicked by network loss).
     pub need_rejoin: bool,
@@ -214,6 +215,7 @@ impl ActiveGroupCall {
             id,
             title: String::new(),
             is_video_chat: false,
+            is_live_story: false,
             is_joined: false,
             need_rejoin: false,
             reconnecting: false,
