@@ -1,0 +1,9 @@
+# Composer file drops
+
+The ordinary, writable chat composer accepts GPUI's native `ExternalPaths` drop. Existing regular files are canonicalized through `ComposerAttachment::pick` and appended as documents, preserving their original contents. No upload occurs until Send. Missing files, folders, or batches exceeding the existing ten-item limit reject the entire drop without changing pending attachments. Editing, recording, rich editing, and unavailable composers do not register the drop target.
+
+Multiple documents use the existing separate-message send flow, with the caption and reply on the first message. That flow previously handled multiple photos/videos only and otherwise sent the first attachment; both live and demo paths now process all attachments. Dropped images/videos intentionally send as files; automatic media classification and a file-versus-media chooser are outside this slice.
+
+Validation on 2026-10-01: the new core regression exercises empty drops, missing files, folders, capacity rejection, canonical paths, and preservation of an existing photo alongside both dropped documents. All 1,360 core/replay/integration tests pass; strict core clippy, formatting, diff whitespace validation, and Mac UI compilation pass. The UI build retains two pre-existing warnings in keybindings/app_render. Actual OS drag gestures and live Telegram document uploads were not exercised; no synthetic screenshot is presented as live evidence.
+
+Reviewed PR #275 (sticker/GIF permission notices): all four checks passing, mergeable; its parity item is not duplicated here. Dashboard refresh run [36827024906](https://github.com/shinycake/quill-dashboard/actions/runs/36827024906) succeeded. The dashboard remains at 483/525 until completed fragments are merged and reconciled. Browser verification was unavailable because the installed browser runtime's native module failed to load; published JSON is verified directly instead.
