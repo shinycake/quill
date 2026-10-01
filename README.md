@@ -30,8 +30,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Two-step password entry on login <!-- parity:auth-2fa-password --> (auth.rs:52; telegram/requests.rs:81)
 - [x] Log in via QR code: "Sign in with QR code" on the phone screen sends requestQrCodeAuthentication; the link from authorizationStateWaitOtherDeviceConfirmation renders as a real QR bitmap (never logged) <!-- parity:auth-qr-login -->
 - [ ] "Link desktop device": show QR so another device can log in as this account <!-- parity:auth-qr-authorize-other -->
-- [ ] New-user registration: first/last name + terms (partial: explicit UnsupportedHalt — "finish registration in an official client", auth.rs:83) <!-- parity:auth-registration -->
-- [ ] Email-based login flow (partial: explicit UnsupportedHalt, auth.rs:72) <!-- parity:auth-email-login -->
+- [x] New-user registration: first/last name + terms <!-- parity:auth-registration -->
+- [x] Email-based login flow <!-- parity:auth-email-login -->
 - [ ] Premium-purchase-gated login state (partial: explicit UnsupportedHalt, auth.rs:66) <!-- parity:auth-premium-login -->
 - [x] Enable / change / disable the two-step password: "Two-Step Verification" overlay (TGX wording) shows the authoritative getPasswordState; setPassword enable (empty old, optional recovery email in the same call), change, and disable (empty new); no optimistic mutations, one op in flight, passwords zeroized and never logged <!-- parity:auth-2fa-manage -->
 - [x] Set / change recovery email, pending-confirmation state, abort setup: setRecoveryEmailAddress (current password required), pending pattern card (TGX PendingEmailText), resend (resendRecoveryEmailAddressCode, no invented cooldown) and "Abort recovery email setup" (TGX AbortRecoveryEmail verbatim) <!-- parity:auth-recovery-email -->
