@@ -188,6 +188,48 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
+    /// Batch changes report each confirmed result; they are not an atomic TDLib operation.
+    pub fn manage_sticker_sets(
+        &mut self,
+        set_ids: &[i64],
+        installed: bool,
+    ) -> Result<usize, ConnectSendError> {
+        if !self.chats_path_active() || set_ids.is_empty() || set_ids.iter().any(|id| *id <= 0) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.requests.pending.values().any(|p| {
+            matches!(
+                p.purpose,
+                RequestPurpose::ManageStickerSet { .. }
+                    | RequestPurpose::ReorderInstalledStickerSets
+            )
+        }) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let mut seen = std::collections::HashSet::new();
+        let ids: Vec<_> = set_ids
+            .iter()
+            .copied()
+            .filter(|id| seen.insert(*id))
+            .collect();
+        self.session.stickers.batch_total = ids.len();
+        self.session.stickers.batch_completed = 0;
+        self.session.stickers.batch_failed = 0;
+        self.session.stickers.batch_pending = ids.clone();
+        let mut sent = 0;
+        for id in ids {
+            if self
+                .manage_sticker_set(id, installed, false)
+                .is_ok_and(|request| request.is_some())
+            {
+                sent += 1;
+            } else {
+                self.session.finish_sticker_batch_item(id, false);
+            }
+        }
+        Ok(sent)
+    }
+
     pub fn manage_sticker_set(
         &mut self,
         set_id: i64,

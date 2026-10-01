@@ -29,6 +29,10 @@ pub struct StickerPanel {
     pub installed_loaded: bool,
     pub loading_set: bool,
     pub failed: bool,
+    pub batch_total: usize,
+    pub batch_completed: usize,
+    pub batch_failed: usize,
+    pub batch_pending: Vec<i64>,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
     pub trending_total: usize,
