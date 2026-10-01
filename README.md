@@ -613,7 +613,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->
 - [ ] One-click download, install, and restart (replace own binary, relaunch; user confirms — no silent auto-install) <!-- parity:platform-update-install -->
 - [ ] Honest updater states: already up to date, no network, download/install failed with retry (partial: #282 implements release-check states and retry; download/install failure states remain) <!-- parity:platform-update-states -->
-- [ ] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder -->
+- [x] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder --> (merged #294: readable unsupported-message card and official release/download action; expired media has an expiry notice without an update action; native AX proof)
 - [ ] Update changelog display after updates <!-- parity:platform-update-changelog -->
 - [x] Offline connection indicator in UI: slim strip below the title bar driven by `Session::connection` — kit warning banner "Waiting for network…" when offline, presence dot for transitional states (Connecting/Updating/ConnectingToProxy); per-state reconnect labels are parity:platform-reconnect-states <!-- parity:platform-offline-indicator -->
 - [x] Reconnect state labels ("Connecting…", "Waiting for network…", "Updating…", "Connecting to proxy…") <!-- parity:platform-reconnect-states -->
