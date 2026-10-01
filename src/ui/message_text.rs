@@ -595,9 +595,20 @@ pub(super) fn message_text_block(
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Settings → Appearance: message font size.
     font: Pixels,
+    big_emoji: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = msg_key.1;
+    let font = if big_emoji && text.entities.is_empty() && text.link_preview.is_none() {
+        match quill::emoji_catalog::big_emoji_count(&text.text) {
+            Some(1) => font.max(px(40.)),
+            Some(2) => font.max(px(36.)),
+            Some(3) => font.max(px(32.)),
+            _ => font,
+        }
+    } else {
+        font
+    };
     let line = rich_text_line(
         &text.text,
         &text.entities,
