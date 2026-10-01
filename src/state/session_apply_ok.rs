@@ -9,6 +9,12 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        if let Some(pending) = pending
+            && let RequestPurpose::StopPendingMessage { topic_id, draft_id } = pending.purpose
+            && let Some(chat_id) = pending.chat_id
+        {
+            self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
+        }
         // Slice A3: a `terminateSession` /
         // `terminateAllOtherSessions` succeeded — keep the old
         // cache visible and mark it stale so the driver refetches

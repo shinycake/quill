@@ -20,6 +20,17 @@ pub enum ShutdownPhase {
     Closed,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingBotMessage {
+    pub draft_id: i64,
+    pub can_stop: bool,
+    pub keep_on_stop: bool,
+    pub content: MessageContent,
+    pub expires_at_ms: u64,
+    pub stop_failed: bool,
+    pub stopped: bool,
+}
+
 pub struct Session {
     pub account: AccountKey,
     pub account_generation: AccountGeneration,
@@ -419,6 +430,8 @@ pub struct Session {
     /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
     /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
     pub open_topic: Option<i32>,
+    pub pending_bot_messages: HashMap<(i64, i32), PendingBotMessage>,
+    pub pending_bot_period_secs: u64,
     /// Phase 5.1: cached `forumTopics` per forum chat id (first page only).
     pub forum_topics: HashMap<i64, Vec<ForumTopic>>,
     /// Phase 5.1: per-topic histories keyed by `(chat_id, forum_topic_id)`.
@@ -1018,6 +1031,8 @@ impl Session {
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
             open_topic: None,
+            pending_bot_messages: HashMap::new(),
+            pending_bot_period_secs: 30,
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
             view_generation: ViewGeneration(1),

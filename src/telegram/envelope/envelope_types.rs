@@ -38,6 +38,20 @@ pub enum EnvelopePayload {
         name: String,
         value: OptionValue,
     },
+    UpdatePendingMessage {
+        chat_id: ChatId,
+        forum_topic_id: i32,
+        draft_id: i64,
+        can_stop: bool,
+        keep_on_stop: bool,
+        content: MessageContent,
+        files: Vec<ParsedFile>,
+    },
+    UpdateStopMessageDraft {
+        chat_id: ChatId,
+        forum_topic_id: i32,
+        draft_id: i64,
+    },
     UpdateNewMessage(ParsedMessage),
     UpdateMessageSendSucceeded {
         message: ParsedMessage,

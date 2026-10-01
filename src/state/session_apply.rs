@@ -13,6 +13,7 @@ impl Session {
             });
             return;
         }
+        self.expire_pending_bot_messages(unix_ms_now());
         self.last_seq = owned.seq;
         let extra = owned.envelope.extra;
         let pending = extra.and_then(|id| self.requests.take(id));
@@ -45,6 +46,11 @@ impl Session {
             // media-send captions); every other option parses but is
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
+                if name == "pending_text_message_period"
+                    && let OptionValue::Integer(period) = &value
+                {
+                    self.pending_bot_period_secs = u64::try_from(*period).unwrap_or(0);
+                }
                 if name == "animation_search_bot_username" {
                     let username = match &value {
                         OptionValue::String(name) => name.clone(),
@@ -1080,6 +1086,50 @@ impl Session {
                 // the same two timestamps; there is no getter, so updates
                 // are the only source).
                 self.apply_update_story_stealth_mode(active_until_date, cooldown_until_date);
+            }
+            EnvelopePayload::UpdatePendingMessage {
+                chat_id,
+                forum_topic_id,
+                draft_id,
+                can_stop,
+                keep_on_stop,
+                content,
+                files,
+            } => {
+                if chat_id.0 != 0
+                    && draft_id != 0
+                    && forum_topic_id >= 0
+                    && matches!(
+                        content,
+                        MessageContent::Text(_) | MessageContent::RichMessage(_)
+                    )
+                {
+                    let stopped = self
+                        .pending_bot_messages
+                        .get(&(chat_id.0, forum_topic_id))
+                        .is_some_and(|old| old.draft_id == draft_id && old.stopped);
+                    self.remember_files(&files);
+                    self.pending_bot_messages.insert(
+                        (chat_id.0, forum_topic_id),
+                        PendingBotMessage {
+                            draft_id,
+                            can_stop: can_stop && !stopped,
+                            keep_on_stop,
+                            content,
+                            stop_failed: false,
+                            stopped,
+                            expires_at_ms: unix_ms_now()
+                                .saturating_add(self.pending_bot_period_secs.saturating_mul(1000)),
+                        },
+                    );
+                }
+            }
+            EnvelopePayload::UpdateStopMessageDraft {
+                chat_id,
+                forum_topic_id,
+                draft_id,
+            } => {
+                self.finish_pending_bot_stop(chat_id, forum_topic_id, draft_id);
             }
             EnvelopePayload::UpdateNewMessage(message) => {
                 self.apply_update_new_message(message);

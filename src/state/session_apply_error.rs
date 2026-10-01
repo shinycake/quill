@@ -1192,6 +1192,14 @@ impl Session {
         if let Some(RequestPurpose::ManageStickerSet { set_id, .. }) = pending.map(|p| p.purpose) {
             self.finish_sticker_batch_item(set_id, false);
         }
+        if let Some(request) = pending
+            && let RequestPurpose::StopPendingMessage { topic_id, draft_id } = request.purpose
+            && let Some(chat_id) = request.chat_id
+            && let Some(draft) = self.pending_bot_messages.get_mut(&(chat_id.0, topic_id))
+            && draft.draft_id == draft_id
+        {
+            draft.stop_failed = true;
+        }
         if matches!(
             pending.map(|p| p.purpose),
             Some(
