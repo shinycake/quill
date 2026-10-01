@@ -33,10 +33,24 @@ pub enum ErrorClass {
     /// Classified from the raw error message in `parse_error` (the only
     /// place it is still available); the message text itself is dropped.
     AiComposeFloodPremium,
+    StickersForbidden,
+    GifsForbidden,
     Other,
 }
 
 impl TdError {
+    pub fn send_permission_notice(&self) -> Option<&'static str> {
+        match self.class {
+            ErrorClass::StickersForbidden => {
+                Some("You don't have permission to send stickers in this chat.")
+            }
+            ErrorClass::GifsForbidden => {
+                Some("You don't have permission to send GIFs in this chat.")
+            }
+            _ => None,
+        }
+    }
+
     pub fn from_code(code: i32) -> Self {
         let class = match code {
             404 => ErrorClass::NotFound,
@@ -255,7 +269,19 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             flood_wait_secs,
         };
     }
+    let permission = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
+        Some("Not enough rights to send stickers to the chat" | "CHAT_SEND_STICKERS_FORBIDDEN") => {
+            Some(ErrorClass::StickersForbidden)
+        }
+        Some("Not enough rights to send animations to the chat" | "CHAT_SEND_GIFS_FORBIDDEN") => {
+            Some(ErrorClass::GifsForbidden)
+        }
+        _ => None,
+    };
     let mut err = TdError::from_code(code);
+    if let Some(class) = permission {
+        err.class = class;
+    }
     err.flood_wait_secs = flood_wait_secs;
     err
 }

@@ -10,6 +10,19 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(
+                RequestPurpose::SendMessage
+                    | RequestPurpose::SendMessageAlbum
+                    | RequestPurpose::ForwardMessages
+                    | RequestPurpose::SendInlineQueryResult
+                    | RequestPurpose::ResendMessages
+            )
+        ) && let Some(notice) = err.send_permission_notice()
+        {
+            self.send_permission_error = Some(notice.into());
+        }
         // Phase 9.3: a `postStory` / `canPostStory` error — the
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {

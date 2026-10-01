@@ -139,6 +139,7 @@ pub struct Session {
     /// into the `_ => {}` swallower and the user saw "retrying send…"
     /// followed by silence.
     pub resend_error: Option<String>,
+    pub send_permission_error: Option<String>,
     /// Slice G1 fix-up: one-shot; set when an invite-link mutation
     /// (create/edit/revoke/replace-primary) errors. The UI drains it into
     /// the status note — the previously loaded list is kept, not wiped.
@@ -948,6 +949,7 @@ impl Session {
             ai_error: None,
             recognize_speech_error: None,
             resend_error: None,
+            send_permission_error: None,
             invite_link_error: None,
             scheduled_messages: Vec::new(),
             open_chat: None,

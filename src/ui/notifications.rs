@@ -351,6 +351,14 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        if let Some(notice) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.send_permission_error.take())
+        {
+            self.status_note = notice;
+            progressed = true;
+        }
         self.finish_successful_sends(cx);
         // Bots slice: re-run the inline progress check after every batch
         // of session updates — arm the debounced dispatch for the current
