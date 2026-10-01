@@ -629,7 +629,18 @@ fn story_live_and_unsupported_degrade_to_placeholder() {
         let env = parse_envelope(&json).unwrap();
         match env.payload {
             EnvelopePayload::Story { story, .. } => match (&story.content, is_live) {
-                (StoryContentView::Live, true) => {}
+                (
+                    StoryContentView::Live {
+                        group_call_id,
+                        is_rtmp_stream,
+                    },
+                    true,
+                ) => {
+                    // stories-live-play: the group call id rides along for
+                    // the viewer's Join button.
+                    assert_eq!(*group_call_id, 7);
+                    assert!(!is_rtmp_stream);
+                }
                 (StoryContentView::Unsupported, false) => {}
                 (other, _) => panic!("{other:?}"),
             },

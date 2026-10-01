@@ -963,7 +963,7 @@ pub enum RequestPurpose {
     CreateVideoChat {
         chat_id: i64,
     },
-    /// Phase C3a: `joinVideoChat`. Response is `text` (join payload
+    /// Phase C3a: `joinVideoChat` or `joinLiveStory`. Response is `text` (join payload
     /// for tgcalls) — stored on the tracked call; Phase C2g consumes it
     /// in the driver pump to finish the native group handshake.
     JoinVideoChat {

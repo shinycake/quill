@@ -582,6 +582,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C3a: freshly created voice chats get their full
         // `groupCall` via `getGroupCall`.
         let _ = self.maybe_fetch_group_calls();
+        // stories-live-play: the story viewer's pending "Join live"
+        // fires `join_video_chat` once the `getGroupCall` answer has
+        // created the unjoined tracker.
+        let _ = self.maybe_join_live_story();
         // Phase C2f: a dropped group call (`need_rejoin`) auto-rejoins
         // with the C2d attempt discipline (max 3).
         let _ = self.maybe_auto_rejoin_group_call();
