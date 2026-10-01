@@ -803,10 +803,14 @@ pub struct Session {
     /// updates), keyed by `(poster_chat_id, story_id)`. The viewer
     /// prefetches every story in a tray entry before opening.
     pub stories: HashMap<(i64, i32), ParsedStory>,
-    /// Phase 9.2: emoji reactions the story picker can offer — the
+    /// Phase 9.2+: custom-emoji reactions the story picker can offer —
     /// `getStoryAvailableReactions` response (`availableReactions`,
-    /// `schema/td_api.tl:13802`).
+    /// `schema/td_api.tl:13802`). Emoji, custom-emoji, and paid rows.
     pub story_available_reactions: Option<Vec<StoryAvailableReactionView>>,
+    /// Phase 9.2+: sticker visuals for the picker's custom-emoji
+    /// reactions — the `getCustomEmojiStickers` response, keyed by
+    /// sticker id (= custom emoji id).
+    pub story_custom_emoji_stickers: HashMap<i64, StickerItem>,
     /// Phase 9.2: poster chat ids whose active stories the driver should
     /// refresh with `getChatActiveStories`. Filled by the reducer on
     /// `updateStoryPostSucceeded` (a story posted from another client goes
@@ -1133,6 +1137,7 @@ impl Session {
             stories: HashMap::new(),
             stories_active_loaded: false,
             story_available_reactions: None,
+            story_custom_emoji_stickers: HashMap::new(),
             story_tray_refresh: HashSet::new(),
             story_post: StoryPostState::default(),
             story_viewers: None,

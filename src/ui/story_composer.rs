@@ -13,17 +13,18 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{Session, StoryPostOutcome, StoryPostState};
+use quill::state::{RequestPurpose, Session, StoryPostOutcome, StoryPostState};
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::requests::input_story_content;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-/// `ReadyStoryPost` fixture (Phase 9.2): same seed as `ReadyStories`, but
-/// Demo chat A's photo story (id 5) is an *own* story — chosen ❤ reaction,
-/// interaction counts, `can_be_deleted` / `can_be_replied` — and an
-/// `availableReactions` response is injected through the reducer so the
-/// reaction picker has options.
+/// `ReadyStoryPost` fixture (Phase 9.2 / stories-custom-reactions): same
+/// seed as `ReadyStories`, but Demo chat A's photo story (id 5) is an *own*
+/// story — chosen ❤ reaction, interaction counts, `can_be_deleted` /
+/// `can_be_replied` — plus `availableReactions` (emoji + one custom-emoji
+/// Premium tile) and a cached `getCustomEmojiStickers` answer so the picker
+/// renders a real custom-emoji sticker thumb (demo-thumb.png).
 pub(super) fn apply_ready_story_post(
     session: &mut Session,
     sink: &Arc<MemorySink>,
@@ -74,13 +75,26 @@ pub(super) fn apply_ready_story_post(
             r#"{{"@type":"story","id":6,"poster_chat_id":12,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"caption":{}}}"#,
             caption("Demo chat B story."),
         ),
-        // Seeded picker options (`getStoryAvailableReactions` response).
-        r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🎉"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😮"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😢"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😂"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👏"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}"#.to_string(),
+        // Seeded picker options (`getStoryAvailableReactions` response) —
+        // emoji rows plus one custom-emoji Premium option (id 4242).
+        r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🎉"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"4242"},"needs_premium":true},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😮"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😢"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😂"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":true,"are_tags":false,"unavailability_reason":null}"#.to_string(),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
+    }
+    // Phase 9.2+: seed `getCustomEmojiStickers` for custom emoji 4242 with a
+    // completed local thumb so the picker tile renders `img()` (not ✨).
+    let custom_extra = session.request(RequestPurpose::GetStoryCustomEmojiStickers, None);
+    let custom_thumb = demo_file_json(94, &demo_thumb_png_path(), true);
+    let stickers = format!(
+        r#"{{"@type":"stickers","@extra":"{extra}","stickers":[{{"@type":"sticker","id":"4242","set_id":"0","width":100,"height":100,"emoji":"✨","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeCustomEmoji","custom_emoji_id":"4242"}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatPng"}},"width":100,"height":100,"file":{thumb}}},"sticker":{thumb}}}]}}"#,
+        extra = custom_extra.0,
+        thumb = custom_thumb,
+    );
+    if let Some(owned) = copy_and_parse(&stickers, seq, &dyn_sink) {
+        session.apply(owned);
     }
 }
 

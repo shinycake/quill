@@ -155,12 +155,22 @@ impl StoryInteractionInfoView {
     }
 }
 
-/// Phase 9.2: one emoji reaction the story picker can offer —
-/// `availableReaction` (TDLib 1.8.67, `schema/td_api.tl:7321`). Only
-/// `reactionTypeEmoji` entries render; custom-emoji entries are dropped.
+/// Phase 9.2+: one reaction the story picker can offer —
+/// `availableReaction` (TDLib 1.8.67, `schema/td_api.tl:7321`). Emoji and
+/// custom-emoji entries are offered; paid entries ride along (the picker
+/// never offers them — `setStoryReaction` can't set paid, schema comment
+/// `td_api.tl:13809`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoryAvailableReactionKind {
+    Emoji(String),
+    CustomEmoji(i64),
+    Paid,
+}
+
+/// Phase 9.2+: the picker row — kind plus the Premium gate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoryAvailableReactionView {
-    pub emoji: String,
+    pub kind: StoryAvailableReactionKind,
     pub needs_premium: bool,
 }
 
@@ -544,20 +554,27 @@ pub(crate) fn parse_story_interaction_info(
     })
 }
 
-/// Phase 9.2: one `availableReaction` row into the picker shape; drops
-/// non-emoji reactions (custom emoji previews stay out of this slice).
+/// Phase 9.2+: one `availableReaction` row into the picker shape. Keeps
+/// emoji, custom-emoji, and paid kinds (the picker offers the first two;
+/// paid can't be set via `setStoryReaction`).
 pub(crate) fn parse_story_available_reaction(value: &Value) -> Option<StoryAvailableReactionView> {
     let reaction = value.get("type")?;
-    if reaction.get("@type").and_then(Value::as_str) != Some("reactionTypeEmoji") {
-        return None;
-    }
-    let emoji = reaction
-        .get("emoji")
-        .and_then(Value::as_str)
-        .filter(|emoji| !emoji.is_empty())?
-        .to_string();
+    let kind = match reaction.get("@type").and_then(Value::as_str) {
+        Some("reactionTypeEmoji") => StoryAvailableReactionKind::Emoji(
+            reaction
+                .get("emoji")
+                .and_then(Value::as_str)
+                .filter(|emoji| !emoji.is_empty())?
+                .to_string(),
+        ),
+        Some("reactionTypeCustomEmoji") => StoryAvailableReactionKind::CustomEmoji(
+            int64(reaction.get("custom_emoji_id")).filter(|id| *id > 0)?,
+        ),
+        Some("reactionTypePaid") => StoryAvailableReactionKind::Paid,
+        _ => return None,
+    };
     Some(StoryAvailableReactionView {
-        emoji,
+        kind,
         needs_premium: value
             .get("needs_premium")
             .and_then(Value::as_bool)
