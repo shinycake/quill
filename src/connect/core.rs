@@ -133,6 +133,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                         | RequestPurpose::ReorderInstalledStickerSets
                 )
             );
+        let installed_stickers_answer = view_purpose
+            == Some(RequestPurpose::GetInstalledStickerSets)
+            && matches!(owned.envelope.payload, EnvelopePayload::StickerSets { .. });
         let archive_catalog_changed = sticker_set_changed
             && matches!(view_purpose, Some(RequestPurpose::ManageStickerSet { .. }));
         let recent_cleared = matches!(owned.envelope.payload, EnvelopePayload::Ok)
@@ -583,7 +586,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                     Some("message link not available for this message".into());
             }
         }
-        if thumbs_after || self.session.stickers.open || self.session.gifs.open {
+        if installed_stickers_answer && self.session.stickers.suggest_waiting_for_sets {
+            if let Some(emoji) = self.session.stickers.suggest_for.take() {
+                self.update_sticker_suggestions(&emoji)?;
+            }
+        }
+        if thumbs_after
+            || self.session.stickers.open
+            || self.session.gifs.open
+            || !self.session.stickers.suggestions.is_empty()
+        {
             self.maybe_download_open_thumbs()?;
             self.maybe_download_open_chat_media()?;
         }

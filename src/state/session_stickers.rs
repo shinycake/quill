@@ -21,6 +21,7 @@ impl Session {
         self.stickers.loading_sets = false;
         self.stickers.failed = false;
         self.stickers.sets = sets;
+        self.stickers.installed_loaded = true;
         if self.stickers.tab != StickerTab::Installed {
             return;
         }
@@ -91,6 +92,7 @@ impl Session {
     pub fn clear_sticker_suggestions(&mut self) {
         self.stickers.suggestions.clear();
         self.stickers.suggest_for = None;
+        self.stickers.suggest_waiting_for_sets = false;
     }
 
     /// Slice S12: store a `searchStickers` answer issued for the
@@ -120,6 +122,7 @@ impl Session {
     /// cache so the panel refetches the authoritative list instead of
     /// showing a stale order.
     pub fn invalidate_installed_sticker_sets(&mut self) {
+        self.stickers.installed_loaded = false;
         self.stickers.sets.clear();
         self.stickers.selected_set_id = None;
         self.stickers.loaded_set_id = None;

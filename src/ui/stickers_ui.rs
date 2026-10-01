@@ -17,6 +17,137 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 impl QuillApp {
+    pub(super) fn sync_sticker_suggestions(&mut self, text: &str, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.update_sticker_suggestions(text).is_err() {
+                self.status_note = "could not load sticker suggestions".into();
+            }
+        }
+        cx.notify();
+    }
+
+    fn set_sticker_suggest_mode(
+        &mut self,
+        mode: quill::sticker_suggest::StickerSuggestMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_media_pref(|prefs| prefs.sticker_suggest_mode = mode, cx);
+        if let Some(live) = self.live.as_mut() {
+            drop(
+                live.driver
+                    .session
+                    .requests
+                    .take_purpose(RequestPurpose::SuggestStickers),
+            );
+            live.driver.session.clear_sticker_suggestions();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.clear_sticker_suggestions();
+        }
+        let text = self.composer.read(cx).value().to_string();
+        self.sync_sticker_suggestions(&text, cx);
+    }
+
+    pub(super) fn sticker_suggestions_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if session.stickers.suggestions.is_empty() {
+            return None;
+        }
+        let row = div()
+            .id("sticker-suggestions")
+            .flex()
+            .gap_2()
+            .overflow_x_scroll()
+            .children(
+                session
+                    .stickers
+                    .suggestions
+                    .iter()
+                    .map(|sticker| self.sticker_cell(sticker, "suggest", cx)),
+            );
+        Some(row.into_any_element())
+    }
+
+    fn sticker_cell(
+        &self,
+        sticker: &quill::telegram::envelope::StickerItem,
+        prefix: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let roots = self.media_display_roots();
+        let file_id = sticker.file_id;
+        let emoji = sticker.emoji.clone();
+        let width = sticker.width;
+        let height = sticker.height;
+        let thumb = sticker
+            .thumb_file_id
+            .filter(|id| id.0 != 0)
+            .map(|id| (id, sticker.thumb_width, sticker.thumb_height));
+        let display_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
+            (sticker.format == quill::telegram::envelope::StickerFormat::Webp && file_id.0 != 0)
+                .then_some(file_id)
+        });
+        let path = display_id.and_then(|id| {
+            self.session()
+                .map(|s| &s.files)?
+                .get(&id.0)
+                .and_then(|file| file.usable_path())
+                .and_then(|path| sandboxed_display_path(path, &roots))
+        });
+        let label = if emoji.is_empty() {
+            "Sticker".to_string()
+        } else {
+            emoji.clone()
+        };
+        let cell_id = format!("sticker-{prefix}-{}-{}", sticker.set_id, sticker.id);
+        if let Some(path) = path {
+            img(path)
+                .id(SharedString::from(cell_id.clone()))
+                .w(px(72.))
+                .h(px(72.))
+                .rounded_md()
+                .object_fit(ObjectFit::Contain)
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
+                }))
+                .with_fallback({
+                    let label = label.clone();
+                    move || {
+                        div()
+                            .w(px(72.))
+                            .h(px(72.))
+                            .rounded_md()
+                            .bg(fill_muted())
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(label.clone())
+                            .into_any_element()
+                    }
+                })
+                .into_any_element()
+        } else {
+            div()
+                .id(SharedString::from(cell_id))
+                .w(px(72.))
+                .h(px(72.))
+                .rounded_md()
+                .bg(bg_subtle())
+                .border_1()
+                .border_color(text_muted())
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .pressable(cx.theme())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
+                }))
+                .child(label)
+                .into_any_element()
+        }
+    }
+
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
         self.sticker_settings_open = true;
         if let Some(live) = self.live.as_mut() {
@@ -215,11 +346,6 @@ impl QuillApp {
             .session()
             .map(|session| session.stickers.clone())
             .unwrap_or_default();
-        let files = self
-            .session()
-            .map(|session| session.files.clone())
-            .unwrap_or_default();
-        let roots = self.media_display_roots();
         let mut sets = div()
             .id("sticker-set-row")
             .flex()
@@ -253,6 +379,33 @@ impl QuillApp {
                     .label("Clear recent")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.clear_recent_stickers(cx))),
+            );
+        }
+        let mut suggest_modes = div().flex().flex_wrap().gap_1().child("Suggest by emoji:");
+        let mode = self
+            .session()
+            .map(|s| s.media_prefs.sticker_suggest_mode)
+            .unwrap_or_default();
+        use quill::sticker_suggest::StickerSuggestMode;
+        for (value, label) in [
+            (
+                StickerSuggestMode::InstalledAndRecommended,
+                "Installed + recommended",
+            ),
+            (StickerSuggestMode::InstalledOnly, "Only installed"),
+            (StickerSuggestMode::None, "None"),
+        ] {
+            suggest_modes = suggest_modes.child(
+                Button::new(format!("sticker-suggest-{value:?}"))
+                    .label(if mode == value {
+                        format!("{label} · selected")
+                    } else {
+                        label.into()
+                    })
+                    .ghost()
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.set_sticker_suggest_mode(value, cx)),
+                    ),
             );
         }
         let query = panel.search_query.to_lowercase();
@@ -343,76 +496,7 @@ impl QuillApp {
         let mut grid = div().id("sticker-grid").flex().flex_wrap().gap_2();
         for sticker in panel.visible_stickers() {
             let file_id = sticker.file_id;
-            let emoji = sticker.emoji.clone();
-            let width = sticker.width;
-            let height = sticker.height;
-            let thumb = sticker
-                .thumb_file_id
-                .filter(|id| id.0 != 0)
-                .map(|id| (id, sticker.thumb_width, sticker.thumb_height));
-            let display_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
-                (sticker.format == quill::telegram::envelope::StickerFormat::Webp && file_id.0 != 0)
-                    .then_some(file_id)
-            });
-            let path = display_id.and_then(|id| {
-                files
-                    .get(&id.0)
-                    .and_then(|file| file.usable_path())
-                    .and_then(|path| sandboxed_display_path(path, &roots))
-            });
-            let label = if emoji.is_empty() {
-                "Sticker".to_string()
-            } else {
-                emoji.clone()
-            };
-            let cell_id = format!("sticker-pick-{}-{}", sticker.set_id, sticker.id);
-            let cell = if let Some(path) = path {
-                img(path)
-                    .id(SharedString::from(cell_id.clone()))
-                    .w(px(72.))
-                    .h(px(72.))
-                    .rounded_md()
-                    .object_fit(ObjectFit::Contain)
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
-                    }))
-                    .with_fallback({
-                        let label = label.clone();
-                        move || {
-                            div()
-                                .w(px(72.))
-                                .h(px(72.))
-                                .rounded_md()
-                                .bg(fill_muted())
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(label.clone())
-                                .into_any_element()
-                        }
-                    })
-                    .into_any_element()
-            } else {
-                div()
-                    .id(SharedString::from(cell_id))
-                    .w(px(72.))
-                    .h(px(72.))
-                    .rounded_md()
-                    .bg(bg_subtle())
-                    .border_1()
-                    .border_color(text_muted())
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
-                    }))
-                    .child(label)
-                    .into_any_element()
-            };
+            let cell = self.sticker_cell(sticker, "pick", cx);
             let favorite = panel.favorites.iter().any(|item| item.file_id == file_id);
             grid = grid.child(
                 div().flex().flex_col().gap_1().child(cell).child(
@@ -545,6 +629,7 @@ impl QuillApp {
                     .child(status),
             )
             .child(tabs)
+            .child(suggest_modes)
             .when(panel.tab == StickerTab::Search, |body| {
                 body.child(
                     div()

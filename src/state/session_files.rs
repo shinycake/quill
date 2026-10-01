@@ -176,8 +176,13 @@ impl Session {
                 }
             }
         }
-        if self.stickers.open {
-            for sticker in self.stickers.visible_stickers() {
+        {
+            let visible = if self.stickers.open {
+                self.stickers.visible_stickers()
+            } else {
+                &[]
+            };
+            for sticker in visible.iter().chain(self.stickers.suggestions.iter()) {
                 let file_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
                     (sticker.format == StickerFormat::Webp && sticker.file_id.0 != 0)
                         .then_some(sticker.file_id)

@@ -411,6 +411,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.clear_sticker_suggestions();
             return Ok(None);
         };
+        if self.session.media_prefs.sticker_suggest_mode == StickerSuggestMode::InstalledOnly
+            && !self.session.stickers.installed_loaded
+        {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::SuggestStickers),
+            );
+            self.session.stickers.suggestions.clear();
+            self.session.stickers.suggest_for = Some(emoji.to_string());
+            self.session.stickers.suggest_waiting_for_sets = true;
+            return self.refresh_installed_sticker_sets();
+        }
+        self.session.stickers.suggest_waiting_for_sets = false;
         if self.session.stickers.suggest_for.as_deref() == Some(emoji) {
             return Ok(None);
         }

@@ -26,6 +26,7 @@ pub struct StickerPanel {
     pub stickers: Vec<StickerItem>,
     pub loaded_set_id: Option<i64>,
     pub loading_sets: bool,
+    pub installed_loaded: bool,
     pub loading_set: bool,
     pub failed: bool,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
@@ -49,6 +50,7 @@ pub struct StickerPanel {
     /// is the emoji they were requested for.
     pub suggestions: Vec<StickerItem>,
     pub suggest_for: Option<String>,
+    pub suggest_waiting_for_sets: bool,
 }
 
 /// Saved GIFs (`getSavedAnimations`). tdesktop Gifs tab / Unigram animation drawer.

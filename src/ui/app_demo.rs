@@ -1063,6 +1063,7 @@ impl QuillApp {
                         // the draft (suggestions stay cached until the
                         // word set changes).
                         this.sync_spellcheck(&text, cx);
+                        this.sync_sticker_suggestions(&text, cx);
                     }
                 }
                 if let InputEvent::PressEnter { secondary, shift } = event {
