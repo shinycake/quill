@@ -559,7 +559,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Customizable key bindings <!-- parity:platform-custom-keybindings -->
 - [ ] Screen-reader accessible labels/roles on UI elements (no accessibility API usage in src) <!-- parity:platform-screen-reader-labels -->
 - [ ] VoiceOver support (blocked: Linux desktop has no VoiceOver; no accessibility tree backend in the UI layer) <!-- parity:platform-voiceover -->
-- [ ] High-contrast theme/mode <!-- parity:platform-high-contrast -->
+- [x] High-contrast theme/mode <!-- parity:platform-high-contrast -->
 - [x] System tray icon with unread count (src/tray.rs: tray-icon 0.21 crate, programmatic 64x64 RGBA icon + red unread pill capped at "99+", tooltip — no-op on Linux per tray-icon's docs; 1s UI-thread sync from main.rs; silent no-op when the OS has no system tray; badge sums non-archived chats incl. muted — Telegram Desktop's actual default `_includeMutedCounter = true`) <!-- parity:platform-tray-icon -->
 - [ ] Minimize/close-to-tray behavior <!-- parity:platform-minimize-to-tray -->
 - [ ] Tray context menu (open window, quit) <!-- parity:platform-tray-menu -->
