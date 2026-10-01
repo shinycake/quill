@@ -195,7 +195,12 @@ impl Session {
             }
         }
         if self.emoji.open {
-            for sticker in &self.emoji.preview {
+            for sticker in self
+                .emoji
+                .preview
+                .iter()
+                .chain(&self.emoji.custom_emoji_stickers)
+            {
                 let file_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
                     (sticker.format == StickerFormat::Webp && sticker.file_id.0 != 0)
                         .then_some(sticker.file_id)

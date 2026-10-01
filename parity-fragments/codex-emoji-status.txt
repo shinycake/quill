@@ -1,0 +1,2 @@
+parity:emoji-status
+parity:emoji-status-clear-recent

@@ -904,6 +904,11 @@ impl QuillApp {
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
+        let emoji_status_hours_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Custom duration in hours")
+                .auto_grow(1, 1)
+        });
         let emoji_set_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search emoji packs")
@@ -1307,6 +1312,7 @@ impl QuillApp {
             emoji_visible_count: 120,
             emoji_search_input,
             emoji_set_search_input,
+            emoji_status_hours_input,
             gif_search_input,
             registration_first_input,
             registration_last_input,

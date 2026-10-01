@@ -144,3 +144,128 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
     assert!(driver.open_emoji_sets().is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: serde_json::Value| {
+        driver
+            .ingest(copy_and_parse(&payload.to_string(), &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let request_id = |kind| {
+        RequestId(
+            sent_request(&recorder, kind)["@extra"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
+        )
+    };
+    assert!(driver.change_emoji_status(Some(91), 3600).is_err());
+    driver.session.emoji.open = true;
+    driver.load_emoji_status_choices().unwrap();
+    let recent = request_id("getRecentEmojiStatuses");
+    let themed = request_id("getThemedEmojiStatuses");
+    let default = request_id("getDefaultEmojiStatuses");
+    ingest(
+        &mut driver,
+        json!({"@type":"emojiStatuses","@extra":recent.as_extra(),"emoji_statuses":[{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"91"},"expiration_date":0}]}),
+    );
+    let resolve = request_id("getCustomEmojiStickers");
+    assert_eq!(
+        sent_request(&recorder, "getCustomEmojiStickers")["custom_emoji_ids"],
+        json!(["91"])
+    );
+    ingest(
+        &mut driver,
+        json!({"@type":"emojiStatusCustomEmojis","@extra":themed.as_extra(),"custom_emoji_ids":["92","92","0"]}),
+    );
+    ingest(
+        &mut driver,
+        json!({"@type":"emojiStatusCustomEmojis","@extra":default.as_extra(),"custom_emoji_ids":["93"]}),
+    );
+    let sticker = |id: i64, file| json!({"@type":"sticker","full_type":{"@type":"stickerFullTypeCustomEmoji","custom_emoji_id":id.to_string()},"set_id":"1","width":64,"height":64,"emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{"@type":"file","id":file,"size":5,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_completed":false}}});
+    ingest(
+        &mut driver,
+        json!({"@type":"stickers","@extra":resolve.as_extra(),"stickers":[sticker(91,109)]}),
+    );
+    assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 109);
+    assert_eq!(
+        sent_request(&recorder, "getCustomEmojiStickers")["custom_emoji_ids"],
+        json!(["92", "93"])
+    );
+    let resolve = request_id("getCustomEmojiStickers");
+    ingest(
+        &mut driver,
+        json!({"@type":"stickers","@extra":resolve.as_extra(),"stickers":[sticker(92,110),sticker(93,111)]}),
+    );
+    assert_eq!(driver.session.emoji.custom_emoji_stickers.len(), 3); // Sticker.id is absent; distinct custom IDs survive batching.
+    driver.session.my_user_id = Some(7);
+    ingest(
+        &mut driver,
+        json!({"@type":"updateUser","user":{"@type":"user","id":7,"first_name":"Test","last_name":"","phone_number":"","is_premium":true,"type":{"@type":"userTypeRegular"}}}),
+    );
+    assert!(driver.change_emoji_status(Some(0), 0).is_err());
+    assert!(driver.change_emoji_status(Some(91), -1).is_err());
+    assert!(driver.change_emoji_status(Some(91), i32::MAX).is_err());
+    let before = crate::state::unix_ms_now() / 1000;
+    let set = driver.change_emoji_status(Some(91), 3600).unwrap().unwrap();
+    let sent = sent_request(&recorder, "setEmojiStatus");
+    assert_eq!(sent["emoji_status"]["type"]["custom_emoji_id"], "91");
+    let expiry = sent["emoji_status"]["expiration_date"].as_u64().unwrap();
+    assert!(expiry >= before + 3600 && expiry <= crate::state::unix_ms_now() / 1000 + 3600);
+    assert!(driver.clear_recent_emoji_statuses().unwrap().is_none());
+    assert_eq!(driver.session.emoji.recent_statuses.len(), 1);
+    ingest(
+        &mut driver,
+        json!({"@type":"error","@extra":set.as_extra(),"code":400,"message":"PRIVATE_DETAIL"}),
+    );
+    assert_eq!(driver.session.emoji.recent_statuses.len(), 1);
+    assert!(
+        !driver
+            .session
+            .emoji
+            .status_note
+            .as_ref()
+            .unwrap()
+            .contains("PRIVATE_DETAIL")
+    );
+    let set = driver.change_emoji_status(Some(92), 0).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "setEmojiStatus")["emoji_status"]["expiration_date"],
+        0
+    );
+    ingest(&mut driver, json!({"@type":"ok","@extra":set.as_extra()}));
+    assert_eq!(
+        driver.session.emoji.status_note.as_deref(),
+        Some("Emoji status updated.")
+    );
+    let remove = driver.change_emoji_status(None, 3600).unwrap().unwrap();
+    assert!(sent_request(&recorder, "setEmojiStatus")["emoji_status"].is_null());
+    ingest(
+        &mut driver,
+        json!({"@type":"ok","@extra":remove.as_extra()}),
+    );
+    driver.load_emoji_status_choices().unwrap();
+    let stale = request_id("getRecentEmojiStatuses");
+    let clear = driver.clear_recent_emoji_statuses().unwrap().unwrap();
+    ingest(&mut driver, json!({"@type":"ok","@extra":clear.as_extra()}));
+    ingest(
+        &mut driver,
+        json!({"@type":"emojiStatuses","@extra":stale.as_extra(),"emoji_statuses":[{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"91"},"expiration_date":0}]}),
+    );
+    assert!(driver.session.emoji.recent_statuses.is_empty());
+    assert_eq!(
+        driver.session.emoji.status_note.as_deref(),
+        Some("Recent emoji statuses cleared.")
+    );
+    driver.session.auth = AuthorizationState::WaitPhoneNumber;
+    assert!(driver.load_emoji_status_choices().is_err());
+    assert!(driver.clear_recent_emoji_statuses().is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
