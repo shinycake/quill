@@ -190,20 +190,7 @@ fn fixed_bindings() -> Vec<KeyBinding> {
 }
 
 fn default_bindings() -> Vec<KeyBinding> {
-    let mut bindings = fixed_bindings();
-    for ra in REBINDABLE_ACTIONS {
-        push_defaults(ra, &mut bindings);
-    }
-    bindings
-}
-
-/// Push a rebindable action's default key bindings.
-fn push_defaults(ra: &RebindableAction, bindings: &mut Vec<KeyBinding>) {
-    for default in ra.defaults {
-        if let Some(kb) = keybinding_for(ra.id, default) {
-            bindings.push(kb);
-        }
-    }
+    shortcut_rows().into_iter().map(|row| row.binding).collect()
 }
 
 /// The keystrokes reserved by the fixed (window-chrome/app-lifecycle)
@@ -498,7 +485,6 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
 /// reference dialog (what the user sees). `keystroke` is gpui format
 /// (e.g. `"cmd-q"`); the dialog renders it through kit's `Kbd`.
 pub struct ShortcutRow {
-    pub keystroke: &'static str,
     pub label: &'static str,
     pub section: &'static str,
     pub binding: KeyBinding,
@@ -511,7 +497,6 @@ fn row<A: Action>(
     action: A,
 ) -> ShortcutRow {
     ShortcutRow {
-        keystroke,
         label,
         section,
         binding: KeyBinding::new(keystroke, action, None),
@@ -671,6 +656,23 @@ mod tests {
         CustomKeybinding {
             id: id.to_string(),
             keystroke: keystroke.to_string(),
+        }
+    }
+
+    #[test]
+    fn reference_table_matches_resolved_defaults() {
+        let defaults = default_bindings();
+        assert_eq!(defaults.len(), 31);
+        for row in resolve_keybindings(&[]) {
+            for chord in row.live {
+                let binding = keybinding_for(row.id, &chord).unwrap();
+                assert!(defaults.iter().any(|default| default.action().name()
+                    == binding.action().name()
+                    && same_chord(
+                        default.keystrokes()[0].inner(),
+                        binding.keystrokes()[0].inner()
+                    )));
+            }
         }
     }
 
