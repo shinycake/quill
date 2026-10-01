@@ -497,6 +497,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — B2 bot profile actions".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyUnsupportedMessage => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — unsupported message (no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyTextEntities => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

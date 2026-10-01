@@ -219,6 +219,7 @@ pub enum ScreenshotDemo {
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
     ReadyTextEntities,
+    ReadyUnsupportedMessage,
     /// Expandable block quotes (injected, no live Telegram): a short quote
     /// fully visible and a long quote collapsed to 3 lines with a kit ghost
     /// "Show more" affordance (parity:msg-blockquote-expandable).

@@ -1232,6 +1232,24 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — caption position".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyUnsupportedMessage)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                    self.demo_sink.clone();
+                for json in [
+                    r#"{"@type":"updateNewMessage","message":{"id":110,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageFutureFeature"}}}"#,
+                    r#"{"@type":"updateNewMessage","message":{"id":111,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageExpiredPhoto"}}}"#,
+                ] {
+                    if let Some(message) =
+                        quill::telegram::client::copy_and_parse(json, &self.demo_seq, &sink)
+                    {
+                        session.apply(message);
+                    }
+                }
+                session.open_chat(ChatId(11));
+            }
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyTextEntities)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
