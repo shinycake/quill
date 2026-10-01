@@ -323,7 +323,14 @@ fn message_bubble_with_quote(
         .when_some(quote, |this, quote| this.child(quote))
         .when_some(body_el, |this, body_el| this.child(body_el))
         .when(!rich_body && has_body, |this| {
-            this.child(div().text_size(look.font).child(body))
+            this.child(
+                div()
+                    .id("body")
+                    .role(Role::Label)
+                    .aria_label(body.clone())
+                    .text_size(look.font)
+                    .child(body),
+            )
         })
         .when(image_h > px(0.), |this| {
             this.child(
@@ -357,7 +364,14 @@ fn message_bubble_with_quote(
         .content(component::message::MessageContent::new().bubble(bubble));
     if let Some(sender) = sender {
         message = message.header(
-            component::message::MessageHeader::new().child(div().child(sender).into_any_element()),
+            component::message::MessageHeader::new().child(
+                div()
+                    .id("sender")
+                    .role(Role::Label)
+                    .aria_label(sender.clone())
+                    .child(sender)
+                    .into_any_element(),
+            ),
         );
     }
     if let Some(avatar) = avatar {

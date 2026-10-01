@@ -325,12 +325,31 @@ pub(super) fn message_footer(
             OutboxReceipt::None => "",
         }
     };
+    let status = if pending {
+        "sending"
+    } else {
+        match receipt {
+            OutboxReceipt::Read => "read",
+            OutboxReceipt::Sent => "sent",
+            OutboxReceipt::None => "",
+        }
+    };
+    let accessible = format!("{time} {status}");
     let text = if marks.is_empty() {
         time
     } else {
         format!("{time} {marks}")
     };
-    Some(div().text_xs().opacity(0.7).child(text).into_any_element())
+    Some(
+        div()
+            .id("message-time")
+            .role(Role::Label)
+            .aria_label(accessible)
+            .text_xs()
+            .opacity(0.7)
+            .child(text)
+            .into_any_element(),
+    )
 }
 
 /// kit Phase 4: kit `Avatar` — photo when available, otherwise the kit's
@@ -390,6 +409,8 @@ fn paint_text_run(
         let key = (msg_key.0, msg_key.1, index as u64, is_caption);
         return div()
             .id(run_id)
+            .role(Role::Button)
+            .aria_label("Reveal spoiler")
             .bg(fill_muted())
             .rounded_sm()
             .px_1()
@@ -403,7 +424,14 @@ fn paint_text_run(
             .child(run.text.clone())
             .into_any_element();
     }
-    let mut el = div().id(run_id);
+    let mut el = div().id(run_id).when(!run.text.trim().is_empty(), |el| {
+        el.role(if run.href.is_some() {
+            Role::Link
+        } else {
+            Role::Label
+        })
+        .aria_label(run.text.clone())
+    });
     if style.bold {
         el = el.font_weight(FontWeight::BOLD);
     }

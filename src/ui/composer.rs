@@ -735,27 +735,42 @@ impl QuillApp {
             .gap_1()
             .px_1()
             .py_1();
-        for (id, label, action) in [
-            ("fmt-bold", "B", FormatAction::Bold),
-            ("fmt-italic", "I", FormatAction::Italic),
-            ("fmt-underline", "U", FormatAction::Underline),
-            ("fmt-strike", "S", FormatAction::Strikethrough),
-            ("fmt-code", "</>", FormatAction::Code),
-            ("fmt-pre", "{ }", FormatAction::Pre),
-            ("fmt-spoiler", "◼", FormatAction::Spoiler),
-            ("fmt-quote", "❝", FormatAction::BlockQuote),
-            ("fmt-link", "🔗", FormatAction::Link(String::new())),
+        for (id, label, name, action) in [
+            ("fmt-bold", "B", "Bold", FormatAction::Bold),
+            ("fmt-italic", "I", "Italic", FormatAction::Italic),
+            ("fmt-underline", "U", "Underline", FormatAction::Underline),
+            (
+                "fmt-strike",
+                "S",
+                "Strikethrough",
+                FormatAction::Strikethrough,
+            ),
+            ("fmt-code", "</>", "Inline code", FormatAction::Code),
+            ("fmt-pre", "{ }", "Code block", FormatAction::Pre),
+            ("fmt-spoiler", "◼", "Spoiler", FormatAction::Spoiler),
+            ("fmt-quote", "❝", "Block quote", FormatAction::BlockQuote),
+            (
+                "fmt-link",
+                "🔗",
+                "Insert link",
+                FormatAction::Link(String::new()),
+            ),
         ] {
-            row = row.child(Button::new(id).label(label).ghost().on_click(cx.listener(
-                move |this, _, window, cx| {
-                    this.apply_composer_format(action.clone(), window, cx);
-                },
-            )));
+            row = row.child(
+                Button::new(id)
+                    .label(label)
+                    .accessibility_label(name)
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.apply_composer_format(action.clone(), window, cx);
+                    })),
+            );
         }
         row = row
             .child(
                 Button::new("fmt-clear")
                     .label("✕")
+                    .accessibility_label("Clear formatting")
                     .ghost()
                     .tooltip("Clear formatting")
                     .on_click(cx.listener(|this, _, window, cx| {

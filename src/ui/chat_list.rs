@@ -921,6 +921,7 @@ impl QuillApp {
             .suffix(
                 Button::new("folder-manage")
                     .label("⋯")
+                    .accessibility_label("Manage chat folders")
                     .ghost()
                     .on_click(move |_, _, cx| {
                         let _ = manage_weak.update(cx, |this, cx| this.open_folder_manage(cx));
