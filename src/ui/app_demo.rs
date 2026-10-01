@@ -1285,6 +1285,8 @@ impl QuillApp {
         let pending_attachments = demo_pending_attachments(demo);
 
         let mut app = Self {
+            update_state: quill::updater::UpdateState::Idle,
+            update_banner_dismissed: false,
             chat,
             composer,
             // kit Phase 7: in-window menu bar (menus installed by
@@ -1653,6 +1655,9 @@ impl QuillApp {
         // notifies when the effective theme actually changed, so the
         // tick is free when idle.
         app.apply_appearance(cx);
+        if demo.is_none() && app.appearance.check_updates_on_launch {
+            app.check_for_updates(cx);
+        }
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()

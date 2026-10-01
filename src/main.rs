@@ -52,6 +52,14 @@ fn main() {
 
     #[cfg(feature = "ui")]
     {
+        if args.iter().any(|a| a == "--check-updates") {
+            let state = quill::updater::check_latest_release();
+            println!("{}", state.label());
+            std::process::exit(i32::from(matches!(
+                state,
+                quill::updater::UpdateState::Failed(_)
+            )));
+        }
         ui_main(&args);
     }
 

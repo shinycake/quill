@@ -340,6 +340,8 @@ pub struct AppearancePrefs {
     pub chat_list_rich_preview: bool,
     #[serde(default)]
     pub start_in_tray: bool,
+    #[serde(default = "default_true")]
+    pub check_updates_on_launch: bool,
 }
 
 fn default_night_start() -> u16 {
@@ -373,6 +375,7 @@ impl Default for AppearancePrefs {
             chat_list_media_icons: false,
             chat_list_rich_preview: false,
             start_in_tray: false,
+            check_updates_on_launch: true,
         }
     }
 }
@@ -1001,6 +1004,7 @@ mod tests {
             chat_list_media_icons: true,
             chat_list_rich_preview: true,
             start_in_tray: true,
+            check_updates_on_launch: false,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_appearance_prefs(&paths), prefs);

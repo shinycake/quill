@@ -43,6 +43,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::time::Instant;
 pub struct QuillApp {
+    pub(super) update_state: quill::updater::UpdateState,
+    pub(super) update_banner_dismissed: bool,
     pub(super) chat: Entity<SyntheticChat>,
     pub(super) composer: Entity<TextareaState>,
     /// kit Phase 7: the in-window menu bar (Linux/Windows; macOS uses the

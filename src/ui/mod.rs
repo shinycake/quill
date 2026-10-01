@@ -7,6 +7,7 @@ mod force_reply;
 mod privacy;
 mod story_areas;
 mod synthetic;
+mod updates;
 
 pub(crate) use account_lifecycle::*;
 pub(crate) use accounts::*;

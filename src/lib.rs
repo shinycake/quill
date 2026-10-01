@@ -44,6 +44,7 @@ pub mod story_viewer;
 pub mod telegram;
 pub mod text;
 pub mod tray;
+pub mod updater;
 pub mod video;
 pub mod voice;
 

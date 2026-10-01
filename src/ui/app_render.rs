@@ -380,6 +380,11 @@ impl Render for QuillApp {
                 self.chat_search_is_open(),
                 cx,
             ))
+            .when(
+                matches!(self.update_state, quill::updater::UpdateState::Available(_))
+                    && !self.update_banner_dismissed,
+                |this| this.child(self.update_banner(cx)),
+            )
             // Slice parity:platform-offline-indicator — slim connection
             // strip below the title bar. Offline gets the kit warning
             // banner with the "Waiting for network…" label; transitional

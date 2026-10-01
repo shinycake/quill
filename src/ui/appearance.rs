@@ -304,6 +304,7 @@ impl QuillApp {
                 // (the tag TDLib gets in `setTdlibParameters`).
                 body = body.child(this.appearance_language_section(cx));
                 body = body.child(this.general_autostart_section(cx));
+                body = body.child(this.update_settings_section(cx));
                 body = body.child(this.appearance_section(
                     cx, "Start in tray", "Open Quill from its tray menu when needed.",
                     Switch::new("general-start-in-tray").checked(this.appearance.start_in_tray)
