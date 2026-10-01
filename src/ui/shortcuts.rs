@@ -54,7 +54,13 @@ impl QuillApp {
                 groups.push((row.section, row.label, keys));
             }
             drop(bindings);
-            let mut body = div().flex().flex_col().gap_4();
+            let mut body = div()
+                .id("shortcuts-body")
+                .max_h(px(480.))
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .gap_4();
             let mut current_section = "";
             for (section, label, keys) in &groups {
                 if *section != current_section {

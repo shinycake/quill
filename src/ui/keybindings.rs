@@ -626,7 +626,10 @@ fn app_menus() -> Vec<Menu> {
             MenuItem::action("Minimize", MinimizeWindow),
             MenuItem::action("Zoom", ZoomWindow),
         ]),
-        Menu::new("Help").items([MenuItem::action("Quill on GitHub", OpenHelp)]),
+        Menu::new("Help").items([
+            MenuItem::action("Keyboard Shortcuts", OpenShortcuts),
+            MenuItem::action("Quill on GitHub", OpenHelp),
+        ]),
     ]);
     menus
 }
@@ -647,8 +650,8 @@ mod tests {
     use super::{
         Action, KeybindingConflict, Keystroke, Modifiers, QuitApp, REBINDABLE_ACTIONS,
         canonical_event_chord, capture_active, close_appearance_capture, conflict_message,
-        fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict, keybinding_for,
-        resolve_keybindings,
+        default_bindings, fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict,
+        keybinding_for, resolve_keybindings, same_chord,
     };
     use quill::settings::CustomKeybinding;
 
