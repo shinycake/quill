@@ -27,7 +27,7 @@ pub(crate) struct HistoryRowInputs {
     pub(crate) reaction_open: bool,
     pub(crate) seek_bar: Option<SeekBarView>,
     pub(crate) animation_playing: bool,
-    pub(crate) animation_frame: Option<PathBuf>,
+    pub(crate) animation_frame: Option<std::sync::Arc<gpui_kit::RenderImage>>,
     pub(crate) video_playing: bool,
     pub(crate) video_frame: Option<PathBuf>,
     pub(crate) is_secret: bool,

@@ -302,7 +302,7 @@ pub(super) fn demo_seed_for(
             "screenshot demo — caption above vs below".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyGifs => (
+        ScreenshotDemo::ReadyGifs | ScreenshotDemo::ReadyGifPlayback => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — saved GIFs + history playback".into(),
@@ -1498,6 +1498,11 @@ impl QuillApp {
             animation_frames: Vec::new(),
             animation_frame: 0,
             animation_tick: false,
+            animation_fps: 8.0,
+            animation_started_at: None,
+            animation_extract_child: None,
+            animation_extract_cancel: None,
+            animation_extract_epoch: 0,
             animation_cache_file: None,
             pending_gif_play: None,
             playing_video: None,

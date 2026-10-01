@@ -470,9 +470,14 @@ pub struct QuillApp {
     pub(super) playback_positions: HashMap<MessageId, f64>,
     /// History row whose GIF is looping (tdesktop clip / Unigram player).
     pub(super) playing_animation: Option<MessageId>,
-    pub(super) animation_frames: Vec<PathBuf>,
+    pub(super) animation_frames: Vec<Arc<RenderImage>>,
     pub(super) animation_frame: usize,
     pub(super) animation_tick: bool,
+    pub(super) animation_fps: f64,
+    pub(super) animation_started_at: Option<Instant>,
+    pub(super) animation_extract_child: Option<Arc<Mutex<Option<Child>>>>,
+    pub(super) animation_extract_cancel: Option<Arc<AtomicBool>>,
+    pub(super) animation_extract_epoch: u64,
     /// File whose extracted frames should be deleted when playback stops.
     pub(super) animation_cache_file: Option<i32>,
     /// Play was tapped before the clip was local. Resume when `downloadFile` finishes.
@@ -829,5 +834,11 @@ impl QuillApp {
             }
             _ => PaneMode::Connecting,
         }
+    }
+}
+
+impl Drop for QuillApp {
+    fn drop(&mut self) {
+        self.stop_animation_playback();
     }
 }

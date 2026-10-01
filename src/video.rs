@@ -176,7 +176,7 @@ pub fn probe_local_video(path: &Path) -> Result<VideoProbe, String> {
     Err("could not read video duration or size".into())
 }
 
-fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Option<VideoProbe> {
+pub(crate) fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Option<VideoProbe> {
     let output = Command::new("ffprobe")
         .args([
             "-v",
@@ -580,7 +580,7 @@ fn wait_for_cancelable_child(
     }
 }
 
-fn extract_frames(
+pub(crate) fn extract_frames(
     src: &Path,
     cache_dir: &Path,
     start_timestamp: i32,
@@ -604,7 +604,7 @@ fn extract_frames(
         .arg(src)
         .args([
             "-vf",
-            &format!("fps={fps:.2},scale={width}:-1"),
+            &format!("fps={fps:.2},scale={width}:{width}:force_original_aspect_ratio=decrease"),
             "-frames:v",
             &max_frames.to_string(),
         ])

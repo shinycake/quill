@@ -97,6 +97,7 @@ pub enum ScreenshotDemo {
     ReadyCaptionPosition,
     /// Saved-GIF panel + a playing animation in history (injected, no live Telegram).
     ReadyGifs,
+    ReadyGifPlayback,
     /// Video bubble with Play/Pause in history (injected, no live Telegram).
     ReadyVideo,
     /// Slice bots-games: `messageGame` card with an open high-score panel

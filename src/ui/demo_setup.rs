@@ -412,18 +412,26 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — game card + high scores".into();
         }
-        if matches!(demo, Some(ScreenshotDemo::ReadyGifs)) {
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadyGifs | ScreenshotDemo::ReadyGifPlayback)
+        ) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_gifs(session, &self.demo_sink, &self.demo_seq);
+                if demo == Some(ScreenshotDemo::ReadyGifPlayback) {
+                    session.gifs.open = false;
+                    if let Some(history) = session.histories.get_mut(&11) {
+                        history.messages.retain(|id, _| *id == 501);
+                    }
+                }
             }
-            self.playing_animation = Some(MessageId(501));
-            self.animation_frames = vec![
-                demo_media_allowlist().join("demo-gif-1.png"),
-                demo_media_allowlist().join("demo-gif-2.png"),
-            ];
-            self.spawn_animation_tick(cx);
-            self.status_note = "screenshot demo — GIFs · tap to send · playing".into();
+            self.toggle_animation_playback(
+                MessageId(501),
+                quill::ids::FileId(63),
+                "image/gif".into(),
+                cx,
+            );
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideo)) {
             if let Some(session) = self.demo_session.as_mut() {

@@ -306,7 +306,7 @@ pub(super) fn animation_attachment(
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     playing: bool,
-    frame: Option<&std::path::Path>,
+    frame: Option<Arc<RenderImage>>,
     sponsored: Option<(ChatId, i64)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -316,7 +316,7 @@ pub(super) fn animation_attachment(
     let mime = animation.mime_type.clone();
     let play_label = if playing { "Pause" } else { "Play" };
     let visual = if playing {
-        frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
+        frame.map(ImageSource::Render)
     } else {
         None
     };
@@ -329,6 +329,7 @@ pub(super) fn animation_attachment(
                 .get(&id.0)
                 .and_then(|file| file.usable_path())
                 .and_then(|path| sandboxed_display_path(path, media_roots))
+                .map(ImageSource::from)
         })
     });
     let downloading_now = file_is_downloading(play_id, files, downloading)
