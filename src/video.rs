@@ -125,6 +125,12 @@ fn video_note_thumbnail_dir() -> PathBuf {
 /// First frame as JPEG, 240×240. `None` when ffmpeg is missing or the file
 /// cannot be read — the schema says pass null to skip thumbnail uploading.
 pub fn write_video_note_thumbnail(src: &Path) -> Option<VideoNoteThumbnail> {
+    // Same shared `{temp}/quill-media-cache` tree the viewer-cache sweep
+    // test deletes. Hold the lock for the whole write so a parallel sweep
+    // cannot remove the directory mid-ffmpeg or recreate it under the
+    // sweep test's absence check.
+    #[cfg(test)]
+    let _guard = crate::local_path::lock_shared_media_cache();
     let dir = video_note_thumbnail_dir();
     crate::local_path::secure_create_dir(&dir).ok()?;
     let nanos = std::time::SystemTime::now()
@@ -836,6 +842,8 @@ mod tests {
     #[test]
     fn video_frame_cache_passes_display_sandbox_random_temp_does_not() {
         use crate::local_path::sandboxed_display_path;
+        // Creates `{temp}/quill-media-cache/{account}/video-frames`.
+        let _guard = crate::local_path::lock_shared_media_cache();
 
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1023,6 +1031,9 @@ mod tests {
 
     #[test]
     fn sweep_removes_stale_viewer_frame_caches() {
+        // Hold the shared cache lock through the absence asserts. Other
+        // tests recreate the account base as soon as the sweep returns.
+        let _guard = crate::local_path::lock_shared_media_cache();
         let dir = viewer_frame_cache_dir(424242);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("frame-001.png"), b"stale").unwrap();

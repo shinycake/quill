@@ -17,6 +17,10 @@ pub enum ScreenshotDemo {
     /// with `connection` forced to `WaitingForNetwork`, so the offline
     /// banner renders below the title bar (injected, no live Telegram).
     ReadyOffline,
+    /// Slice parity:platform-offline-errors — ReadyOffline fixture plus
+    /// the product offline-send toast ("You're offline — will send when
+    /// you reconnect") so kit notifications proof the note.
+    ReadyOfflineToast,
     /// Slice parity:platform-reconnect-states — the ReadyChats fixture
     /// with `connection` forced to `Updating`, so the transitional strip
     /// renders with its per-state label ("Updating…").
@@ -208,6 +212,10 @@ pub enum ScreenshotDemo {
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
     ReadyTextEntities,
+    /// Expandable block quotes (injected, no live Telegram): a short quote
+    /// fully visible and a long quote collapsed to 3 lines with a kit ghost
+    /// "Show more" affordance (parity:msg-blockquote-expandable).
+    ReadyBlockquoteExpandable,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting
@@ -386,6 +394,15 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Ready chat draft with typos and the ABC badge, panel closed.
+    ReadySpellcheck,
+    /// Same draft with the corrections panel and suggestions visible.
+    ReadySpellcheckPanel,
+    /// Appearance dialog with the Spelling / Check spelling row visible.
+    ReadySpellcheckToggle,
+    /// Slice `parity:platform-custom-keybindings`: the Appearance dialog
+    /// open on the Keyboard shortcuts section (injected, no live Telegram).
+    ReadyKeybindings,
     /// Slice parity:auth-multi-account (UI): the Accounts dialog open
     /// over the ReadyChats fixture (injected, no live Telegram). The
     /// account list reads the real local registry (read-only).
@@ -521,4 +538,8 @@ pub enum ScreenshotDemo {
     /// verdict — intended for a taller capture
     /// (`QUILL_DEMO_WINDOW_SIZE`) so the username section is visible.
     ReadyUsername,
+    /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
+    /// reference dialog open over the demo chat list (injected, no live
+    /// Telegram).
+    ReadyShortcuts,
 }

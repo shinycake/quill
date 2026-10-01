@@ -1,0 +1,12 @@
+## Slice parity/platform-offline-errors (2026-09-30)
+
+**Scope:** `parity:platform-offline-errors`. Builds on merged `parity:platform-offline-indicator` (#218: `Session::connection` → indicator strip).
+
+- **Built:**
+  - State (`state/session.rs`): `Session::is_offline()` — true when connection is neither `Ready` nor `Updating`. `Updating` is live sync (sends/calls work; #218 maps it to Transitioning), so treating it as offline was a false positive.
+  - Composer (`composer.rs`): pure `send_started_note(offline, scheduling, online_note)` helper preserves online copy and makes offline copy scheduling-aware: immediate sends say "You're offline — will send when you reconnect", dated sends say "You're offline — will schedule when you reconnect", and send-when-online says "You're offline — will send when they're online" (the recipient). UI `App::send_started_note(scheduling, online_note)` delegates to it; normal and rich submit use captured send options before resetting the one-shot schedule. Edit/retry pass `ComposerScheduling::None`. Sends still go through: TDLib queues outgoing requests while offline; reconnect submits scheduled requests without promising immediate delivery.
+  - UI (`ui/calls.rs`): `dial_user` / `start_call_for_user` / `call_again` refuse while offline — "You're offline — can't start a call" (a call can't be queued, so it blocks; refuse happens before the confirm-before-call dialog).
+- **Key decisions (ponytail):** no new state — reads the existing `Session::connection` that the indicator slice already maintains; demo scenarios unaffected (they set `connection` explicitly per scenario). Didn't block sends — TDLib queues requests until reconnect and honors their scheduling choices. `Ready | Updating` stay online so mid-sync does not lie about queueing or block dials.
+- **Tests:** `is_offline_follows_connection_state` (state) — covers Ready/Updating online and WaitingForNetwork/Connecting offline. Composer unit tests cover offline wording for all three scheduling choices and preserve provided online notes for each choice under `cargo test --no-default-features`.
+- **Proof:** `docs/screenshots/ready-offline-toast.png` — GPUI `--screenshot-demo ready-offline-toast` (offline banner + kit toast with the product offline-send note; Xvfb+ffmpeg capture).
+- **Out of this slice:** poll send; Connecting* copy nuance (still use the offline note while not Ready/Updating).

@@ -205,6 +205,18 @@ pub struct QuillApp {
     /// paperclip icon button toggles it; the attach options used to be a
     /// permanent labeled-button row).
     pub(super) attach_menu_open: bool,
+    /// parity:platform-spellcheck: the spellcheck engine (wordlist +
+    /// user words, loaded once at startup).
+    pub(super) spellchecker: quill::spellcheck::SpellChecker,
+    /// parity:platform-spellcheck: misspellings in the current draft
+    /// (cheap check_words pass, refreshed on every composer input).
+    pub(super) spell_misspellings: Vec<quill::spellcheck::Misspelling>,
+    /// parity:platform-spellcheck: suggestions parallel to
+    /// `spell_misspellings`, computed when the panel opens (not per
+    /// keystroke — distance-2 generation is too slow for the input path).
+    pub(super) spell_suggestions: Vec<Vec<String>>,
+    /// parity:platform-spellcheck: the corrections panel above the composer.
+    pub(super) spellcheck_open: bool,
     /// M1: the scheduled-messages dialog (view/delete).
     pub(super) scheduled_dialog_open: bool,
     /// M2: the rich editor is open — the composer textarea is interpreted
@@ -269,6 +281,25 @@ pub struct QuillApp {
     pub(super) chat_prefs: ChatPrefs,
     /// Settings → Appearance slice: the dialog is on screen.
     pub(super) appearance_open: bool,
+    /// Parity slice (platform-custom-keybindings): the rebindable action id
+    /// currently capturing a keystroke, if any.
+    pub(super) keybinding_capture: Option<String>,
+    /// Parity slice (platform-custom-keybindings): a capture that was
+    /// refused (fixed chrome or another rebindable action). The shortcuts
+    /// chip keeps showing the chord that is actually bound.
+    pub(super) keybinding_error: Option<(String, String)>,
+    /// Parity slice (platform-custom-keybindings): focus handle for the
+    /// keystroke-capture row.
+    pub(super) keybinding_focus: FocusHandle,
+    /// Parity slice (platform-custom-keybindings): saved shortcut overrides
+    /// applied to the keymap once the live driver is ready.
+    pub(super) keybindings_applied: bool,
+    /// Screenshot proof for the keyboard-shortcuts section. The Appearance
+    /// dialog then shows that section alone so the frame is the rebind UI.
+    pub(super) keybindings_screenshot: bool,
+    /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
+    /// reference dialog is on screen.
+    pub(super) shortcuts_open: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.

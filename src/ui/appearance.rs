@@ -50,6 +50,22 @@ const WALLPAPER_PRESETS: &[(u32, &str)] = &[
 ];
 
 impl QuillApp {
+    pub(super) fn close_appearance(&mut self) {
+        super::keybindings::close_appearance_capture(
+            &mut self.appearance_open,
+            &mut self.keybinding_capture,
+            &mut self.keybinding_error,
+        );
+    }
+
+    pub(super) fn keybinding_capture_active(&mut self) -> bool {
+        super::keybindings::capture_active(
+            self.appearance_open,
+            &mut self.keybinding_capture,
+            &mut self.keybinding_error,
+        )
+    }
+
     /// Account-rooted prefs path. Appearance is a device setting (like
     /// Telegram's locally stored theme choice), so it lives under the
     /// primary account's root rather than per-account data.
@@ -250,38 +266,53 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Appearance, |this, _, cx| {
-                this.appearance_open = false;
+                this.close_appearance();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
             let mut body = div().flex().flex_col().gap_3();
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language and startup. \
-                         Changes apply immediately (language applies after restart) and are saved on this device.",
-                    ),
-            );
-            body = body.child(this.appearance_theme_section(cx));
-            body = body.child(this.appearance_auto_night_section(cx));
-            body = body.child(this.appearance_accent_section(cx));
-            body = body.child(this.appearance_wallpaper_section(cx));
-            body = body.child(this.appearance_font_section(cx));
-            body = body.child(this.appearance_bubble_section(cx));
-            body = body.child(this.appearance_chat_list_section(cx));
-            body = body.child(this.appearance_send_key_section(cx));
-            // Slice parity:settings-language: the app language picker
-            // (the tag TDLib gets in `setTdlibParameters`).
-            body = body.child(this.appearance_language_section(cx));
-            body = body.child(this.general_autostart_section(cx));
+            if this.keybindings_screenshot {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Keyboard shortcuts. Changes apply immediately and are saved on this device.",
+                        ),
+                );
+                body = body.child(this.appearance_keybindings_section(cx));
+            } else {
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language, startup and keyboard shortcuts. \
+                             Changes apply immediately (language applies after restart) and are saved on this device.",
+                        ),
+                );
+                body = body.child(this.appearance_theme_section(cx));
+                body = body.child(this.appearance_spellcheck_section(cx));
+                body = body.child(this.appearance_auto_night_section(cx));
+                body = body.child(this.appearance_accent_section(cx));
+                body = body.child(this.appearance_wallpaper_section(cx));
+                body = body.child(this.appearance_font_section(cx));
+                body = body.child(this.appearance_bubble_section(cx));
+                body = body.child(this.appearance_chat_list_section(cx));
+                body = body.child(this.appearance_send_key_section(cx));
+                // Slice parity:settings-language: the app language picker
+                // (the tag TDLib gets in `setTdlibParameters`).
+                body = body.child(this.appearance_language_section(cx));
+                body = body.child(this.general_autostart_section(cx));
+                // Parity slice (platform-custom-keybindings).
+                body = body.child(this.appearance_keybindings_section(cx));
+            }
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
                     .label("Close")
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.appearance_open = false;
+                        this.close_appearance();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::Appearance, window, cx);
                     })),
@@ -777,6 +808,41 @@ impl QuillApp {
         )
     }
 
+    /// parity:platform-spellcheck: the spellcheck toggle (same row
+    /// pattern as `appearance_switch_row`, but wired to ChatPrefs).
+    fn appearance_spellcheck_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let checked = self.chat_prefs.spellcheck_enabled;
+        let control = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().text_sm().child("Check spelling"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Flag misspelled words in the message composer (English)."),
+                    ),
+            )
+            .child(
+                Switch::new("appearance-spellcheck")
+                    .checked(checked)
+                    .accessibility_label("Check spelling")
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_chat_prefs(cx, |c| c.spellcheck_enabled = on);
+                        let text = this.composer.read(cx).value().to_string();
+                        this.sync_spellcheck(&text, cx);
+                    })),
+            )
+            .into_any_element();
+        self.appearance_section(cx, "Spelling", "", control)
+    }
+
     /// Slice parity:settings-language: the app language picker (the IETF
     /// tag TDLib gets in `setTdlibParameters`; it was hardcoded "en"
     /// before this slice). TDLib reads parameters once at startup, so
@@ -808,5 +874,245 @@ impl QuillApp {
             "The language reported to Telegram. Applies after restart — the app's own text stays English for now.",
             control.into_any_element(),
         )
+    }
+
+    /// Parity slice (platform-custom-keybindings): the shortcuts section.
+    /// Each row shows the action and its current keystroke; "Change" arms
+    /// keystroke capture for that row, and "Reset" restores the default.
+    /// The chip shows only a chord that is actually bound. A press that
+    /// collides with fixed chrome or another rebindable action is refused
+    /// and explained under the row.
+    fn appearance_keybindings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        use super::keybindings::{
+            REBINDABLE_ACTIONS, apply_custom_bindings, conflict_message, resolve_keybindings,
+        };
+        use quill::settings::CustomKeybinding;
+
+        let customs: Vec<CustomKeybinding> = self
+            .live
+            .as_ref()
+            .map(|live| live.driver.load_custom_keybindings())
+            .unwrap_or_default();
+        let resolved = resolve_keybindings(&customs);
+        let capturing = self.keybinding_capture.clone();
+        let rows = REBINDABLE_ACTIONS.iter().map(|ra| {
+            let row_state = resolved.iter().find(|row| row.id == ra.id);
+            let current = row_state
+                .map(|row| row.live.join(" / "))
+                .filter(|live| !live.is_empty())
+                .unwrap_or_else(|| "—".to_string());
+            let id = ra.id.to_string();
+            let label = ra.label.to_string();
+            let is_capturing = capturing.as_deref() == Some(ra.id);
+            let persisted_error = row_state.and_then(|row| {
+                let conflict = row.rejected.as_ref()?;
+                let chord = customs
+                    .iter()
+                    .find(|custom| custom.id == ra.id)
+                    .map(|custom| custom.keystroke.as_str())
+                    .unwrap_or(ra.id);
+                Some(conflict_message(chord, conflict))
+            });
+            let error = if is_capturing {
+                None
+            } else {
+                self.keybinding_error
+                    .as_ref()
+                    .filter(|(err_id, _)| err_id == ra.id)
+                    .map(|(_, message)| message.clone())
+                    .or(persisted_error)
+            };
+            // A joined pair like "cmd-shift-g / ctrl-shift-g" is wider than
+            // the row; stack those so the label does not paint under the chip.
+            let key_lines: Vec<String> = if is_capturing {
+                vec!["press keys…".to_string()]
+            } else if current.chars().count() > 20 {
+                current.split(" / ").map(str::to_string).collect()
+            } else {
+                vec![current]
+            };
+            let row = div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .py_1()
+                .child(div().flex_1().min_w_0().text_sm().child(label))
+                .child(
+                    div()
+                        .flex()
+                        .flex_shrink_0()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_end()
+                                .text_xs()
+                                .font_family(super::message_text::MONO_FONT)
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .bg(cx.theme().muted)
+                                .children(key_lines.into_iter().map(|line| div().child(line))),
+                        )
+                        .child(
+                            Button::new(format!("kb-change-{id}"))
+                                .label(if is_capturing { "Cancel" } else { "Change" })
+                                .small()
+                                .ghost()
+                                .on_click({
+                                    let id = id.clone();
+                                    cx.listener(move |this, _, window, cx| {
+                                        if this.keybinding_capture.as_deref() == Some(id.as_str()) {
+                                            this.keybinding_capture = None;
+                                        } else {
+                                            this.keybinding_capture = Some(id.clone());
+                                            window.focus(&this.keybinding_focus, cx);
+                                        }
+                                        cx.notify();
+                                    })
+                                }),
+                        )
+                        .child(
+                            Button::new(format!("kb-reset-{id}"))
+                                .label("Reset")
+                                .small()
+                                .ghost()
+                                .on_click({
+                                    let id = id.clone();
+                                    cx.listener(move |this, _, _, cx| {
+                                        let custom = CustomKeybinding {
+                                            id: id.clone(),
+                                            keystroke: String::new(),
+                                        };
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ = live.driver.save_custom_keybinding(custom);
+                                            let customs = live.driver.load_custom_keybindings();
+                                            apply_custom_bindings(cx, &customs);
+                                        }
+                                        this.keybinding_capture = None;
+                                        if this
+                                            .keybinding_error
+                                            .as_ref()
+                                            .is_some_and(|(err_id, _)| err_id == &id)
+                                        {
+                                            this.keybinding_error = None;
+                                        }
+                                        cx.notify();
+                                    })
+                                }),
+                        ),
+                );
+            let row = if is_capturing {
+                row.track_focus(&self.keybinding_focus)
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        // Stop the key before it dismisses Appearance or runs
+                        // a global binding. GPUI also matches keybindings
+                        // before this bubble handler; the capture interceptor
+                        // consumes those. Modifier-only presses stay armed.
+                        if this.keybinding_capture_active() {
+                            cx.stop_propagation();
+                            this.handle_keybinding_capture(&event.keystroke, cx);
+                        }
+                    }))
+                    .into_any_element()
+            } else {
+                row.into_any_element()
+            };
+            if let Some(message) = error {
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(row)
+                    .child(div().text_xs().text_color(super::danger()).child(message))
+                    .into_any_element()
+            } else {
+                row
+            }
+        });
+        self.appearance_section(
+            cx,
+            "Keyboard shortcuts",
+            "Rebind the shortcuts below. Changes apply immediately and are saved on this device. Window and app shortcuts (quit, close, …) can't be changed.",
+            div().flex().flex_col().children(rows).into_any_element(),
+        )
+    }
+
+    /// Apply one captured key while a shortcuts row is armed.
+    ///
+    /// Escape cancels. Bare modifiers are ignored so Ctrl+K can finish.
+    /// A chord that collides with fixed chrome or another live shortcut is
+    /// not saved; the active chip stays on the chord that is really bound.
+    pub(super) fn handle_keybinding_capture(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) {
+        use super::keybindings::{
+            apply_custom_bindings, canonical_event_chord, conflict_message, is_modifier_key,
+            keybinding_conflict,
+        };
+        use quill::settings::CustomKeybinding;
+
+        if !self.keybinding_capture_active() {
+            return;
+        }
+        let Some(id) = self.keybinding_capture.clone() else {
+            return;
+        };
+        if is_modifier_key(&keystroke.key) {
+            return;
+        }
+        if keystroke.key == "escape" && !keystroke.modifiers.modified() {
+            self.keybinding_capture = None;
+            cx.notify();
+            return;
+        }
+        let Some(chord) = canonical_event_chord(keystroke) else {
+            return;
+        };
+        let customs = self
+            .live
+            .as_ref()
+            .map(|live| live.driver.load_custom_keybindings())
+            .unwrap_or_default();
+        if let Some(conflict) = keybinding_conflict(&id, &chord, &customs) {
+            self.keybinding_error = Some((id, conflict_message(&chord, &conflict)));
+            self.keybinding_capture = None;
+            cx.notify();
+            return;
+        }
+        let custom = CustomKeybinding {
+            id: id.clone(),
+            keystroke: chord,
+        };
+        let saved = self.live.as_mut().map(|live| {
+            let ok = live.driver.save_custom_keybinding(custom).is_ok();
+            let customs = ok.then(|| live.driver.load_custom_keybindings());
+            (ok, customs)
+        });
+        match saved {
+            Some((true, Some(customs))) => {
+                apply_custom_bindings(cx, &customs);
+                if self
+                    .keybinding_error
+                    .as_ref()
+                    .is_some_and(|(err_id, _)| err_id == &id)
+                {
+                    self.keybinding_error = None;
+                }
+            }
+            Some((false, _)) => {
+                self.keybinding_error = Some((
+                    id,
+                    "Couldn't save that shortcut. The previous one is still active.".into(),
+                ));
+            }
+            _ => {}
+        }
+        self.keybinding_capture = None;
+        cx.notify();
     }
 }

@@ -835,6 +835,11 @@ impl QuillApp {
                         .when_some(self.inline_results_dropdown(cx), |this, panel| {
                             this.child(panel)
                         })
+                        // parity:platform-spellcheck: corrections panel
+                        // above the composer (badge button toggles it).
+                        .when(self.spellcheck_open, |this| {
+                            this.child(self.spellcheck_panel(cx))
+                        })
                         // Phase A1: slow-mode countdown. The composer stays
                         // usable (typing is fine) but sends are blocked
                         // until the wait expires; `ensure_slow_mode_tick`
@@ -925,6 +930,10 @@ impl QuillApp {
                                             .aria_label("Message"),
                                     ),
                                 )
+                                // parity:platform-spellcheck: the "ABC n"
+                                // badge — only while the draft has
+                                // misspellings; opens the corrections panel.
+                                .when_some(self.spellcheck_badge(cx), |row, badge| row.child(badge))
                                 .when(show_attach, |row| {
                                     row.child(
                                         // MED2: click records in the current

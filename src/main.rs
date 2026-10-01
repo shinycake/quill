@@ -196,6 +196,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-deep-link-info" => ScreenshotDemo::ReadyDeepLinkInfo,
                 "ready-deep-link-invite" => ScreenshotDemo::ReadyDeepLinkInvite,
                 "ready-offline" => ScreenshotDemo::ReadyOffline,
+                "ready-offline-toast" => ScreenshotDemo::ReadyOfflineToast,
                 "ready-reconnecting" => ScreenshotDemo::ReadyReconnecting,
                 "ready-chats-composer" => ScreenshotDemo::ReadyChatsComposer,
                 "ready-unread" => ScreenshotDemo::ReadyUnread,
@@ -254,6 +255,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-inline-results" => ScreenshotDemo::ReadyInlineResults,
                 "ready-bot-profile" => ScreenshotDemo::ReadyBotProfile,
                 "ready-text-entities" => ScreenshotDemo::ReadyTextEntities,
+                "ready-blockquote-expandable" => ScreenshotDemo::ReadyBlockquoteExpandable,
                 "ready-poll" => ScreenshotDemo::ReadyPoll,
                 "ready-payments" => ScreenshotDemo::ReadyPayments,
                 "ready-subscriptions" => ScreenshotDemo::ReadySubscriptions,
@@ -284,6 +286,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-secret-bot-alert" => ScreenshotDemo::ReadySecretBotAlert,
                 "ready-storage-usage" => ScreenshotDemo::ReadyStorageUsage,
                 "ready-appearance" => ScreenshotDemo::ReadyAppearance,
+                "ready-spellcheck" => ScreenshotDemo::ReadySpellcheck,
+                "ready-spellcheck-panel" => ScreenshotDemo::ReadySpellcheckPanel,
+                "ready-spellcheck-toggle" => ScreenshotDemo::ReadySpellcheckToggle,
+                "ready-keybindings" => ScreenshotDemo::ReadyKeybindings,
                 "ready-accounts" => ScreenshotDemo::ReadyAccounts,
                 "ready-2fa-manage" => ScreenshotDemo::Ready2faManage,
                 "ready-recovery-email" => ScreenshotDemo::ReadyRecoveryEmail,
@@ -314,9 +320,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-rich-premium-gate" => ScreenshotDemo::ReadyRichPremiumGate,
                 "ready-profile-edit" => ScreenshotDemo::ReadyProfileEdit,
                 "ready-username" => ScreenshotDemo::ReadyUsername,
+                "ready-shortcuts" => ScreenshotDemo::ReadyShortcuts,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-qr|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-paste-image|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-game-card|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-inline-results|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-story-viewers|ready-story-areas|ready-story-composer|ready-story-albums|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-rich-ai-tools|ready-rich-premium-gate|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-appearance|ready-accounts|ready-group-manage|ready-group-info-edit|ready-groups2|ready-community-create|ready-community-hub|ready-community-info|ready-2fa-manage|ready-recovery-email|ready-account|ready-group-call-scheduled)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-qr|ready-chats|ready-chats-composer|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-paste-image|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-game-card|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-inline-results|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-story-viewers|ready-story-areas|ready-story-composer|ready-story-albums|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-rich-ai-tools|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-appearance|ready-spellcheck|ready-spellcheck-panel|ready-spellcheck-toggle|ready-accounts|ready-group-manage|ready-group-info-edit|ready-groups2|ready-community-create|ready-community-hub|ready-community-info|ready-2fa-manage|ready-recovery-email|ready-account|ready-group-call-scheduled|ready-rich-premium-gate|ready-keybindings|ready-blockquote-expandable)"
                     );
                     std::process::exit(2);
                 }
@@ -389,6 +396,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyDeepLinkInvite => ".quill-ready-ready-deep-link-invite",
         ScreenshotDemo::ReadyChats => ".quill-ready-ready-chats",
         ScreenshotDemo::ReadyOffline => ".quill-ready-ready-offline",
+        ScreenshotDemo::ReadyOfflineToast => ".quill-ready-ready-offline-toast",
         ScreenshotDemo::ReadyReconnecting => ".quill-ready-ready-reconnecting",
         ScreenshotDemo::ReadyChatsComposer => ".quill-ready-ready-chats-composer",
         ScreenshotDemo::ReadyUnread => ".quill-ready-ready-unread",
@@ -446,6 +454,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyInlineResults => ".quill-ready-ready-inline-results",
         ScreenshotDemo::ReadyBotProfile => ".quill-ready-ready-bot-profile",
         ScreenshotDemo::ReadyTextEntities => ".quill-ready-ready-text-entities",
+        ScreenshotDemo::ReadyBlockquoteExpandable => ".quill-ready-ready-blockquote-expandable",
         ScreenshotDemo::ReadyPoll => ".quill-ready-ready-poll",
         ScreenshotDemo::ReadyLocation => ".quill-ready-ready-location",
         ScreenshotDemo::ReadyDice => ".quill-ready-ready-dice",
@@ -476,6 +485,10 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySecretBotAlert => ".quill-ready-ready-secret-bot-alert",
         ScreenshotDemo::ReadyStorageUsage => ".quill-ready-ready-storage-usage",
         ScreenshotDemo::ReadyAppearance => ".quill-ready-ready-appearance",
+        ScreenshotDemo::ReadySpellcheck => ".quill-ready-ready-spellcheck",
+        ScreenshotDemo::ReadySpellcheckPanel => ".quill-ready-ready-spellcheck-panel",
+        ScreenshotDemo::ReadySpellcheckToggle => ".quill-ready-ready-spellcheck-toggle",
+        ScreenshotDemo::ReadyKeybindings => ".quill-ready-ready-keybindings",
         ScreenshotDemo::ReadyAccounts => ".quill-ready-ready-accounts",
         ScreenshotDemo::Ready2faManage => ".quill-ready-ready-2fa-manage",
         ScreenshotDemo::ReadyRecoveryEmail => ".quill-ready-ready-recovery-email",
@@ -508,6 +521,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyRichPremiumGate => ".quill-ready-ready-rich-premium-gate",
         ScreenshotDemo::ReadyProfileEdit => ".quill-ready-ready-profile-edit",
         ScreenshotDemo::ReadyUsername => ".quill-ready-ready-username",
+        ScreenshotDemo::ReadyShortcuts => ".quill-ready-ready-shortcuts",
         ScreenshotDemo::ReadyChatPreview => ".quill-ready-ready-chat-preview",
     });
     let _ = std::fs::remove_file(&marker);

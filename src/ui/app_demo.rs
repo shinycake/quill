@@ -82,7 +82,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAccounts => (
+        ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -95,6 +95,14 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_offline_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — offline indicator (injected updates, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        // Slice parity:platform-offline-errors — offline banner + kit toast
+        // with the product offline-send note (status_note → push_status_note).
+        ScreenshotDemo::ReadyOfflineToast => (
+            Some(seed_ready_offline_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "You're offline — will send when you reconnect".into(),
             AuthorizationState::Ready,
         ),
         // Slice parity:platform-reconnect-states — same chat list, but
@@ -456,6 +464,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — edit profile dialog (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        // Slice parity:platform-shortcuts-reference: the shortcuts dialog
+        // opens over the seeded chat list (see demo_setup.rs).
+        ScreenshotDemo::ReadyShortcuts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — keyboard shortcuts reference (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBotCommandMenu => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -472,6 +488,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — text entities in text + caption".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyBlockquoteExpandable => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — expandable block quotes".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyPoll => (
@@ -1032,6 +1054,10 @@ impl QuillApp {
                     _ => {
                         this.sync_command_menu(cx);
                         this.sync_inline_mode(cx);
+                        // parity:platform-spellcheck: cheap re-check of
+                        // the draft (suggestions stay cached until the
+                        // word set changes).
+                        this.sync_spellcheck(&text, cx);
                     }
                 }
                 if let InputEvent::PressEnter { secondary, shift } = event {
@@ -1325,7 +1351,24 @@ impl QuillApp {
             appearance: Self::load_appearance(),
             chat_prefs,
             appearance_open: false,
+            keybinding_capture: None,
+            keybinding_error: None,
+            keybinding_focus: cx.focus_handle(),
+            keybindings_applied: false,
+            keybindings_screenshot: false,
             appearance_applied: None,
+            // parity:platform-spellcheck: engine + persisted user words.
+            spellchecker: {
+                let mut sc = quill::spellcheck::SpellChecker::new();
+                sc.set_custom_words(
+                    quill::settings::load_spellcheck_words(&Self::appearance_paths()).words,
+                );
+                sc
+            },
+            spell_misspellings: Vec::new(),
+            spell_suggestions: Vec::new(),
+            spellcheck_open: false,
+            shortcuts_open: false,
             data_storage_editor: None,
             data_storage_confirm_clear: false,
             sessions_open: false,
@@ -1467,7 +1510,13 @@ impl QuillApp {
 
         let menu_app = cx.weak_entity();
         cx.intercept_keystrokes(move |event, _window, cx| {
-            if event.keystroke.modifiers.modified() {
+            // Shortcut capture owns the key. This interceptor is registered
+            // first so it observes `keybinding_capture` before the capture
+            // handler clears it.
+            let capturing = menu_app
+                .update(cx, |this, _| this.keybinding_capture_active())
+                .unwrap_or(false);
+            if capturing || event.keystroke.modifiers.modified() {
                 return;
             }
             let handled = match event.keystroke.key.as_str() {
@@ -1491,6 +1540,28 @@ impl QuillApp {
             if handled {
                 cx.stop_propagation();
             }
+        })
+        .detach();
+        // GPUI matches keybindings before `on_key_down`. While a shortcut
+        // row is capturing, consume the key here so Escape cannot dismiss
+        // Appearance and quit/close/other chords cannot fire underneath.
+        // The element `on_key_down` also stops propagation for keys that
+        // reach the bubble phase.
+        let capture_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, _window, cx| {
+            let keystroke = event.keystroke.clone();
+            let armed = capture_app
+                .update(cx, |this, _| this.keybinding_capture_active())
+                .unwrap_or(false);
+            if !armed {
+                return;
+            }
+            cx.stop_propagation();
+            capture_app
+                .update(cx, |this, cx| {
+                    this.handle_keybinding_capture(&keystroke, cx);
+                })
+                .ok();
         })
         .detach();
         if app.live.is_some() {

@@ -77,6 +77,16 @@ pub fn media_cache_base() -> PathBuf {
         .join(media_cache_scope())
 }
 
+/// Tests that create or delete `{temp}/quill-media-cache` must hold this for
+/// the whole test. `sweep_removes_stale_viewer_frame_caches` asserts the
+/// account base is gone after the sweep; a parallel test recreating
+/// `video-frames` or `gif-frames` under that base makes the assertion flake.
+#[cfg(test)]
+pub(crate) fn lock_shared_media_cache() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Remove every account's media cache plus the legacy pre-fix layouts
 /// (world-readable). Startup sweep, logout, media expiry. Best-effort; the
 /// directories are regenerable scratch. Sweeps the whole parent without
@@ -268,6 +278,8 @@ mod tests {
 
     #[test]
     fn secure_create_dir_rejects_parent_traversal() {
+        // Shares `{temp}/quill-media-cache` with the viewer-cache sweep test.
+        let _guard = lock_shared_media_cache();
         // `temp/quill-media-cache/../evil` strips to an under-temp path, but
         // `..` must never reach symlink_metadata's resolution.
         let traversal = std::env::temp_dir()

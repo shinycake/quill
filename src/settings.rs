@@ -19,6 +19,19 @@ pub struct Preferences {
     /// Client-side (no TDLib setting exists; `in-app-sounds` is only a
     /// `SettingsSection` deep-link name, schema line 9322).
     pub inapp_sounds_enabled: bool,
+    /// Parity slice (platform-custom-keybindings): user-overridden shortcuts,
+    /// one per rebindable action id.
+    #[serde(default)]
+    pub custom_keybindings: Vec<CustomKeybinding>,
+}
+
+/// Parity slice (platform-custom-keybindings): one user-overridden shortcut.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CustomKeybinding {
+    /// Stable action id from `REBINDABLE_ACTIONS` (e.g. "focus-composer").
+    pub id: String,
+    /// Keystroke string as parsed by `KeyBinding::new` (e.g. "ctrl-shift-l").
+    pub keystroke: String,
 }
 
 impl Default for Preferences {
@@ -28,6 +41,7 @@ impl Default for Preferences {
             account: AccountKey::primary(),
             hide_notification_previews: true,
             inapp_sounds_enabled: true,
+            custom_keybindings: Vec::new(),
         }
     }
 }
@@ -455,10 +469,24 @@ pub fn save_contact_prefs(paths: &AccountPaths, prefs: &ContactPrefs) -> std::io
 /// - `send_key_mode`: which keystroke sends a message
 ///   (`composer::SendKeyMode`; parity:settings-enter-send,
 ///   parity:settings-ctrlenter-send).
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+/// - `spellcheck_enabled`: flag misspelled words in the composer
+///   (parity:platform-spellcheck; English wordlist, client-side only).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatPrefs {
     #[serde(default)]
     pub send_key_mode: crate::composer::SendKeyMode,
+    #[serde(default = "default_true")]
+    pub spellcheck_enabled: bool,
+}
+
+impl Default for ChatPrefs {
+    fn default() -> Self {
+        Self {
+            send_key_mode: crate::composer::SendKeyMode::default(),
+            // Telegram Desktop ships spellcheck on; match that.
+            spellcheck_enabled: true,
+        }
+    }
 }
 
 /// Load chat prefs; missing or corrupt files fall back to defaults
@@ -471,6 +499,27 @@ pub fn load_chat_prefs(paths: &AccountPaths) -> ChatPrefs {
 /// in the status note.
 pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) -> std::io::Result<()> {
     save_json_prefs(paths, "chat_prefs.json", prefs)
+}
+
+/// Slice parity:platform-spellcheck: the user's own words ("Add to
+/// dictionary"), persisted as JSON next to the account root
+/// (`spellcheck_words.json`). A plain sorted Vec on disk; the engine
+/// holds them in a HashSet at runtime.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpellcheckWords {
+    #[serde(default)]
+    pub words: Vec<String>,
+}
+
+/// Load custom words; missing or corrupt files fall back to empty
+/// (never a hard error — prefs must not block startup).
+pub fn load_spellcheck_words(paths: &AccountPaths) -> SpellcheckWords {
+    load_json_prefs(paths, "spellcheck_words.json")
+}
+
+/// Persist custom words; failures are returned to the caller.
+pub fn save_spellcheck_words(paths: &AccountPaths, prefs: &SpellcheckWords) -> std::io::Result<()> {
+    save_json_prefs(paths, "spellcheck_words.json", prefs)
 }
 
 /// Slice parity:settings-language: local-only app language preference,

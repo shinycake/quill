@@ -163,6 +163,21 @@ pub fn join_video_chat(
     .to_string()
 }
 
+/// Join an active live story (TDLib `joinLiveStory`); returns the tgcalls payload.
+pub fn join_live_story(
+    extra: RequestId,
+    group_call_id: i32,
+    params: &GroupCallJoinParams,
+) -> String {
+    json!({
+        "@type": "joinLiveStory",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "join_parameters": params.to_value(),
+    })
+    .to_string()
+}
+
 /// Phase C3a: `joinGroupCall` (TDLib 1.8.67,
 /// `schema/td_api.tl:14285`):
 /// `joinGroupCall input_group_call:InputGroupCall

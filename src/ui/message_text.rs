@@ -17,7 +17,9 @@ use quill::rich::RichBlock;
 use quill::state::{OutboxReceipt, Session, message_time_hhmm};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{MessageContent, MessageInteractionInfo, ParsedFile};
-use quill::text::{TextEntity, styled_runs, utf8_to_utf16_offset};
+use quill::text::{
+    TextEntity, TextRun, collapsed_quote_len, quote_collapses, styled_runs, utf8_to_utf16_offset,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -212,6 +214,53 @@ pub(super) fn apply_ready_text_entities(
     }
 }
 
+pub(super) fn apply_ready_blockquote_expandable(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    // Dedicated chat so the collapsed long quote + Show more affordance are
+    // visible without scrolling past other Ready fixtures.
+    let chat_id = 15;
+    let chat_json = format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo blockquotes","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+    );
+    let position_json = format!(
+        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"49","is_pinned":false}}}}"#
+    );
+    for json in [chat_json, position_json] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+
+    let short = "Short quote stays fully visible.";
+    let long = "Line one of a long block quote.\nLine two of a long block quote.\nLine three of a long block quote.\nLine four — past the collapse threshold.\nLine five — Show more reveals the rest.";
+    let ent = |text: &str, type_name: &str| -> String {
+        let utf16_len = text.encode_utf16().count();
+        format!(
+            r#"{{"@type":"textEntity","offset":0,"length":{utf16_len},"type":{{"@type":"{type_name}"}}}}"#
+        )
+    };
+    let short_json = serde_json::to_string(short).unwrap();
+    let long_json = serde_json::to_string(long).unwrap();
+    let short_msg = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":201,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{short_json},"entities":[{}]}}}}}}}}"#,
+        ent(short, "textEntityTypeBlockQuote")
+    );
+    let long_msg = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":202,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{long_json},"entities":[{}]}}}}}}}}"#,
+        ent(long, "textEntityTypeExpandableBlockQuote")
+    );
+    for json in [short_msg, long_msg] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 pub(super) fn interaction_info_update_json(
     chat_id: ChatId,
     message_id: MessageId,
@@ -320,6 +369,160 @@ pub(super) fn message_chrome(
 /// family resolves through the platform font stack (fontconfig on Linux).
 pub(super) const MONO_FONT: &str = "monospace";
 
+/// Paint one entity run with the Phase 4.1 styles (bold/italic/…, spoiler,
+/// code/pre, links). Shared by plain runs and quote-block runs.
+fn paint_text_run(
+    run: &TextRun,
+    index: usize,
+    msg_key: (i64, u64),
+    is_caption: bool,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let run_id = format!(
+        "msg-run-{}-{}-{}-{index}",
+        msg_key.0, msg_key.1, is_caption as u64
+    );
+    let style = &run.style;
+    let revealed =
+        !style.spoiler || revealed.contains(&(msg_key.0, msg_key.1, index as u64, is_caption));
+    if !revealed {
+        let key = (msg_key.0, msg_key.1, index as u64, is_caption);
+        return div()
+            .id(run_id)
+            .bg(fill_muted())
+            .rounded_sm()
+            .px_1()
+            .text_color(fill_muted())
+            .cursor_pointer()
+            .pressable(cx.theme())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.spoiler_revealed.insert(key);
+                cx.notify();
+            }))
+            .child(run.text.clone())
+            .into_any_element();
+    }
+    let mut el = div().id(run_id);
+    if style.bold {
+        el = el.font_weight(FontWeight::BOLD);
+    }
+    if style.italic {
+        el = el.italic();
+    }
+    if style.underline {
+        el = el.underline();
+    }
+    if style.strikethrough {
+        el = el.line_through();
+    }
+    if style.code || style.pre {
+        el = el.font_family(MONO_FONT);
+    }
+    if style.pre {
+        el = el.w_full().bg(bg_code()).rounded_md().px_2().py_1().my_1();
+    } else if style.code {
+        el = el.bg(fill_muted()).rounded_sm().px_1();
+    }
+    if let Some(href) = run.href.clone() {
+        el = el
+            .text_color(accent_info())
+            .underline()
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_message_url(&href, cx);
+            }));
+    }
+    el.child(run.text.clone()).into_any_element()
+}
+
+/// One blockquote block: quote styling (accent bar, like `reply_quote_strip`)
+/// with long quotes collapsed to `QUOTE_COLLAPSE_LINES` lines and a kit
+/// "Show more"/"Show less" affordance. `start` is the group's first run
+/// index; expansion state shares the spoiler `revealed` set and its key
+/// scheme instead of threading a second set through every history call site.
+fn quote_block(
+    group: &[TextRun],
+    start: usize,
+    msg_key: (i64, u64),
+    is_caption: bool,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let quote_text: String = group.iter().map(|run| run.text.as_str()).collect();
+    // Keep quote expansion separate from spoiler visibility at the same run.
+    let key = (msg_key.0, msg_key.1, (start as u64) | (1 << 63), is_caption);
+    let expanded = revealed.contains(&key);
+    let collapsible = quote_collapses(&quote_text);
+    let mut runs_row = div()
+        .id(format!("msg-quote-runs-{}-{start}", msg_key.1))
+        .flex()
+        .flex_wrap()
+        .gap_0();
+    if collapsible && !expanded {
+        // Truncate to the first QUOTE_COLLAPSE_LINES lines, keeping each
+        // run's own styling on the visible portion.
+        let mut remaining = collapsed_quote_len(&quote_text);
+        for (offset, run) in group.iter().enumerate() {
+            if remaining == 0 {
+                break;
+            }
+            let shown_len = remaining.min(run.text.len());
+            remaining -= shown_len;
+            let mut shown_run = run.clone();
+            shown_run.text.truncate(shown_len);
+            runs_row = runs_row.child(paint_text_run(
+                &shown_run,
+                start + offset,
+                msg_key,
+                is_caption,
+                revealed,
+                cx,
+            ));
+        }
+    } else {
+        for (offset, run) in group.iter().enumerate() {
+            runs_row = runs_row.child(paint_text_run(
+                run,
+                start + offset,
+                msg_key,
+                is_caption,
+                revealed,
+                cx,
+            ));
+        }
+    }
+    let mut block = div()
+        .id(format!("msg-quote-{}-{start}", msg_key.1))
+        .w_full()
+        .mt_1()
+        .mb_1()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .border_l_2()
+        .border_color(accent())
+        .bg(bg_canvas())
+        .child(runs_row);
+    if collapsible {
+        let label = if expanded { "Show less" } else { "Show more" };
+        block = block.child(
+            Button::new(format!("msg-quote-toggle-{}-{start}", msg_key.1))
+                .label(label)
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if this.spoiler_revealed.contains(&key) {
+                        this.spoiler_revealed.remove(&key);
+                    } else {
+                        this.spoiler_revealed.insert(key);
+                    }
+                    cx.notify();
+                })),
+        );
+    }
+    block.into_any_element()
+}
+
 /// Render message text or a caption with text-entity styling (Phase 4.1).
 ///
 /// Runs come from `styled_runs`, so nested entities combine additively
@@ -327,7 +530,8 @@ pub(super) const MONO_FONT: &str = "monospace";
 /// `pre` a full-width monospace block, and spoilers render as opaque blocks
 /// until tapped — reveal state lives on the app, keyed by
 /// `(row_id, run index, is_caption)`. Links keep their existing
-/// accent-color + open-on-click behavior.
+/// accent-color + open-on-click behavior. Consecutive quote runs render as
+/// one blockquote block, collapsing past `QUOTE_COLLAPSE_LINES` lines.
 pub(super) fn rich_text_line(
     text: &str,
     entities: &[TextEntity],
@@ -338,73 +542,43 @@ pub(super) fn rich_text_line(
     font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    let runs = styled_runs(text, entities);
     let mut line = div()
         .id(("msg-rich-text", msg_key.1 * 2 + is_caption as u64))
         .text_size(font)
         .flex()
         .flex_wrap()
         .gap_0();
-    for (index, run) in styled_runs(text, entities).into_iter().enumerate() {
+    let mut index = 0;
+    while index < runs.len() {
+        let run = &runs[index];
         if run.text.is_empty() {
+            index += 1;
             continue;
         }
-        let run_id = format!(
-            "msg-run-{}-{}-{}-{index}",
-            msg_key.0, msg_key.1, is_caption as u64
-        );
-        let style = &run.style;
-        let revealed =
-            !style.spoiler || revealed.contains(&(msg_key.0, msg_key.1, index as u64, is_caption));
-        if !revealed {
-            let key = (msg_key.0, msg_key.1, index as u64, is_caption);
-            line = line.child(
-                div()
-                    .id(run_id)
-                    .bg(fill_muted())
-                    .rounded_sm()
-                    .px_1()
-                    .text_color(fill_muted())
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.spoiler_revealed.insert(key);
-                        cx.notify();
-                    }))
-                    .child(run.text),
-            );
+        if !run.style.quote {
+            line = line.child(paint_text_run(
+                run, index, msg_key, is_caption, revealed, cx,
+            ));
+            index += 1;
             continue;
         }
-        let mut el = div().id(run_id);
-        if style.bold {
-            el = el.font_weight(FontWeight::BOLD);
+        // Consecutive quote runs form one blockquote: nested styles (e.g.
+        // bold inside the quote) split the runs but stay one visual block.
+        let start = index;
+        let mut end = start;
+        while end < runs.len() && runs[end].style.quote {
+            end += 1;
         }
-        if style.italic {
-            el = el.italic();
-        }
-        if style.underline {
-            el = el.underline();
-        }
-        if style.strikethrough {
-            el = el.line_through();
-        }
-        if style.code || style.pre {
-            el = el.font_family(MONO_FONT);
-        }
-        if style.pre {
-            el = el.w_full().bg(bg_code()).rounded_md().px_2().py_1().my_1();
-        } else if style.code {
-            el = el.bg(fill_muted()).rounded_sm().px_1();
-        }
-        if let Some(href) = run.href {
-            el = el
-                .text_color(accent_info())
-                .underline()
-                .cursor_pointer()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_message_url(&href, cx);
-                }));
-        }
-        line = line.child(el.child(run.text));
+        line = line.child(quote_block(
+            &runs[start..end],
+            start,
+            msg_key,
+            is_caption,
+            revealed,
+            cx,
+        ));
+        index = end;
     }
     line.into_any_element()
 }

@@ -182,6 +182,9 @@ pub enum DialogKind {
     CommunityCreate,
     /// Slice G10: communities hub dialog.
     CommunityHub,
+    /// Slice parity:platform-shortcuts-reference: read-only keyboard
+    /// shortcuts reference dialog.
+    Shortcuts,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -253,6 +256,7 @@ impl QuillShell {
             // Slice G10: communities create + hub dialogs.
             DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
             DialogKind::CommunityHub => app.community_ui.hub_open,
+            DialogKind::Shortcuts => app.shortcuts_open,
         }
     }
 
@@ -298,12 +302,13 @@ impl QuillShell {
             // Slice G10: community builders live in dialogs/community.rs.
             DialogKind::CommunityCreate => community::build_create_community_dialog,
             DialogKind::CommunityHub => community::build_community_hub_dialog,
+            DialogKind::Shortcuts => QuillApp::build_shortcuts_dialog,
         }
     }
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 39] = [
+    const KINDS: [DialogKind; 40] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -349,6 +354,9 @@ impl QuillShell {
         // Slice parity:auth-multi-account (UI): accounts sit with the
         // other settings-level dialogs (lowest priority band).
         DialogKind::Accounts,
+        // Slice parity:platform-shortcuts-reference: informational, lowest
+        // priority.
+        DialogKind::Shortcuts,
     ];
 
     /// Keep the single kit dialog in sync with the app-side open flags.

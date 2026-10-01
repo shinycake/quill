@@ -113,6 +113,7 @@ pub struct ActiveGroupCall {
     pub id: i32,
     pub title: String,
     pub is_video_chat: bool,
+    pub is_live_story: bool,
     pub is_joined: bool,
     /// `need_rejoin` arrived (kicked by network loss).
     pub need_rejoin: bool,
@@ -197,6 +198,15 @@ pub struct ActiveGroupCall {
     pub is_video_recorded: bool,
 }
 
+/// stories-live-play: a pending "Join live" from the story viewer — the
+/// group call id plus the `getGroupCall` request behind it, so the pump
+/// can tell "still waiting" from "the fetch failed".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveStoryJoinIntent {
+    pub group_call_id: i32,
+    pub request: RequestId,
+}
+
 impl ActiveGroupCall {
     /// Blank tracked call for a newly seen call id. Participant state
     /// repopulates from updates.
@@ -205,6 +215,7 @@ impl ActiveGroupCall {
             id,
             title: String::new(),
             is_video_chat: false,
+            is_live_story: false,
             is_joined: false,
             need_rejoin: false,
             reconnecting: false,

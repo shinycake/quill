@@ -94,6 +94,8 @@ mod security;
 mod settings_ui;
 mod shared_media;
 mod shell;
+mod shortcuts;
+mod spellcheck_ui;
 mod sponsored;
 mod statistics;
 mod story_albums;

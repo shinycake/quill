@@ -133,6 +133,8 @@ mod tests {
     #[test]
     fn gif_frame_cache_passes_display_sandbox_random_temp_does_not() {
         use crate::local_path::sandboxed_display_path;
+        // Creates `{temp}/quill-media-cache/{account}/gif-frames`.
+        let _guard = crate::local_path::lock_shared_media_cache();
 
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)

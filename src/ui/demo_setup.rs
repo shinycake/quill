@@ -47,8 +47,8 @@ use super::inline_playback::{
 use super::message_games::apply_ready_game_card;
 use super::message_media::{apply_ready_dice, apply_ready_location};
 use super::message_text::{
-    apply_ready_caption_position, apply_ready_link_preview, apply_ready_preview_cards,
-    apply_ready_text_entities,
+    apply_ready_blockquote_expandable, apply_ready_caption_position, apply_ready_link_preview,
+    apply_ready_preview_cards, apply_ready_text_entities,
 };
 use super::notification_settings::apply_ready_notification_sound;
 use super::payments::apply_ready_payments;
@@ -96,6 +96,23 @@ impl QuillApp {
                 is_channel: false,
                 generation: 1,
             });
+        }
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel)
+        ) {
+            self.chat_prefs.spellcheck_enabled = true;
+            // Ignore persisted custom words so this fixture always shows typos.
+            self.spellchecker = quill::spellcheck::SpellChecker::new();
+            self.composer.update(cx, |input, cx| {
+                input.set_value("Teh quick brown fox has a speling error", window, cx);
+            });
+            let text = self.composer.read(cx).value().to_string();
+            self.sync_spellcheck(&text, cx);
+            self.spellcheck_open = matches!(demo, Some(ScreenshotDemo::ReadySpellcheckPanel));
+            if self.spellcheck_open {
+                self.refresh_spell_suggestions();
+            }
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             self.composer.update(cx, |input, cx| {
@@ -384,6 +401,10 @@ impl QuillApp {
             self.status_note =
                 "screenshot demo — recording voice · locked · playing voice note".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyShortcuts)) {
+            self.shortcuts_open = true;
+            self.status_note = "screenshot demo — keyboard shortcuts reference".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyGameCard)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -643,7 +664,17 @@ impl QuillApp {
         // blue accent, dark wallpaper, 16px message text. They are only
         // in-memory for the demo — `apply_appearance` (end of this fn)
         // picks them up; nothing is persisted.
-        if matches!(demo, Some(ScreenshotDemo::ReadyAppearance)) {
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyAppearance
+                    | ScreenshotDemo::ReadySpellcheckToggle
+                    | ScreenshotDemo::ReadyKeybindings
+            )
+        ) {
+            if matches!(demo, Some(ScreenshotDemo::ReadySpellcheckToggle)) {
+                self.chat_prefs.spellcheck_enabled = true;
+            }
             // stories-high-contrast: `QUILL_DEMO_THEME=high-contrast`
             // captures the dialog with the HC theme selected.
             self.appearance.theme =
@@ -656,7 +687,12 @@ impl QuillApp {
             self.appearance.wallpaper_rgb = Some(0x0e1621);
             self.appearance.font_size_px = 16;
             self.appearance_open = true;
-            self.status_note = "screenshot demo — appearance settings".into();
+            self.keybindings_screenshot = matches!(demo, Some(ScreenshotDemo::ReadyKeybindings));
+            self.status_note = if self.keybindings_screenshot {
+                "screenshot demo — keyboard shortcuts".into()
+            } else {
+                "screenshot demo — appearance settings".into()
+            };
         }
         // Slice parity:auth-multi-account (UI): the Accounts dialog open
         // over the ReadyChats fixture (injected, no live Telegram). The
@@ -1170,6 +1206,13 @@ impl QuillApp {
                 apply_ready_text_entities(session, &self.demo_sink, &self.demo_seq);
             }
             self.status_note = "screenshot demo — text entities".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyBlockquoteExpandable)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_blockquote_expandable(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — expandable block quotes".into();
         }
     }
 
