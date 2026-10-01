@@ -36,6 +36,26 @@ impl QuillApp {
         cx.notify();
     }
 
+    pub(super) fn sync_animated_emoji_suggestion(&mut self, text: &str, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.update_animated_emoji_suggestion(text).is_err() {
+                self.status_note = "could not load animated emoji suggestion".into();
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn animated_emoji_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        let sticker = session.emoji.animated_emoji.as_ref()?;
+        let row = div()
+            .id("animated-emoji-suggestion")
+            .flex()
+            .gap_2()
+            .child(self.sticker_cell(sticker, "animated-emoji", cx));
+        Some(row.into_any_element())
+    }
+
     fn set_sticker_suggest_mode(
         &mut self,
         mode: quill::sticker_suggest::StickerSuggestMode,

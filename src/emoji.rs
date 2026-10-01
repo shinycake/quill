@@ -56,6 +56,9 @@ pub struct EmojiPanel {
     /// Slice S10: last `getAnimatedEmoji` answer for the composer's
     /// "suggest animated emoji".
     pub animated_emoji: Option<StickerItem>,
+    /// Suggest-animated-emoji: the emoji the last `getAnimatedEmoji`
+    /// request went out for; dedupes requests across keystrokes.
+    pub animated_emoji_for: Option<String>,
     /// Slice S10: last `getCustomEmojiStickers` answer.
     pub custom_emoji_stickers: Vec<StickerItem>,
     /// Slice S10: `searchEmojis` results for the picker.

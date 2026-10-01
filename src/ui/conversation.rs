@@ -853,6 +853,9 @@ impl QuillApp {
                         .when_some(self.sticker_suggestions_row(cx), |this, row| {
                             this.child(row)
                         })
+                        .when_some(self.animated_emoji_suggestion(cx), |this, row| {
+                            this.child(row)
+                        })
                         // parity:platform-spellcheck: corrections panel
                         // above the composer (badge button toggles it).
                         .when(self.spellcheck_open, |this| {

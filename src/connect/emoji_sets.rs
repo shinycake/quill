@@ -3,9 +3,10 @@ use super::*;
 use crate::emoji::EmojiSetTab;
 use crate::ids::RequestId;
 use crate::state::RequestPurpose;
+use crate::sticker_suggest::suggest_emoji_for;
 use crate::telegram::requests::{change_sticker_set, get_sticker_set, view_trending_sticker_sets};
 use crate::telegram::requests_emoji::{
-    get_installed_emoji_sets, get_trending_emoji_sets, search_emoji_sets,
+    get_animated_emoji, get_installed_emoji_sets, get_trending_emoji_sets, search_emoji_sets,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -368,5 +369,50 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         Ok(())
+    }
+
+    /// Suggest-animated-emoji: refresh the composer's animated emoji
+    /// suggestion for the current composer text. No trailing emoji
+    /// clears the suggestion; an unchanged emoji is not re-requested;
+    /// a stale in-flight `GetAnimatedEmoji` is dropped before the new
+    /// one goes out, so a late answer can never land under a newer
+    /// emoji. Returns the issued `RequestId` when a `getAnimatedEmoji`
+    /// went out. The UI calls this on composer text change.
+    pub fn update_animated_emoji_suggestion(
+        &mut self,
+        text: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(emoji) = suggest_emoji_for(text) else {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetAnimatedEmoji),
+            );
+            self.session.emoji.animated_emoji = None;
+            self.session.emoji.animated_emoji_for = None;
+            return Ok(None);
+        };
+        if self.session.emoji.animated_emoji_for.as_deref() == Some(emoji) {
+            return Ok(None);
+        }
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::GetAnimatedEmoji),
+        );
+        self.session.emoji.animated_emoji = None;
+        self.session.emoji.animated_emoji_for = Some(emoji.to_string());
+        let extra = self.session.request(RequestPurpose::GetAnimatedEmoji, None);
+        match self.sender.send_json(&get_animated_emoji(extra, emoji)) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.emoji.animated_emoji_for = None;
+                Err(err)
+            }
+        }
     }
 }
