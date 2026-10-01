@@ -292,3 +292,85 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.stickers.open = true;
+    let fetch = driver
+        .session
+        .request(RequestPurpose::GetInstalledStickerSets, None);
+    let sets = |extra, ids: &[i64]| {
+        json!({"@type":"stickerSets","@extra":extra,"sets":ids.iter().map(|id| json!({"@type":"stickerSetInfo","id":id.to_string(),"title":"Test","name":"Test","size":0,"is_installed":true})).collect::<Vec<_>>()}).to_string()
+    };
+    driver
+        .ingest(copy_and_parse(&sets(json!(fetch.as_extra()), &[11, 22, 33]), &seq, &sink).unwrap())
+        .unwrap();
+    let current = driver.session.stickers.sets.clone();
+    assert!(driver.reorder_sticker_set(99, 11).is_err());
+    assert_eq!(driver.reorder_sticker_set(11, 11).unwrap(), None);
+    let move_last = driver.reorder_sticker_set(11, 33).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "reorderInstalledStickerSets")["sticker_set_ids"],
+        json!([22, 33, 11])
+    );
+    assert_eq!(driver.session.stickers.sets, current);
+    assert_eq!(driver.reorder_sticker_set(33, 11).unwrap(), None);
+    assert_eq!(driver.manage_sticker_set(11, false, true).unwrap(), None);
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"error","@extra":move_last.as_extra(),"code":500,"message":"test"})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.stickers.sets, current);
+    assert!(driver.session.stickers.failed);
+    let move_first = driver.reorder_sticker_set(33, 11).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "reorderInstalledStickerSets")["sticker_set_ids"],
+        json!([33, 11, 22])
+    );
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":move_first.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let refreshed = sent_request(&recorder, "getInstalledStickerSets")["@extra"].clone();
+    driver
+        .ingest(copy_and_parse(&sets(refreshed, &[33, 11, 22]), &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(
+        driver
+            .session
+            .stickers
+            .sets
+            .iter()
+            .map(|set| set.id)
+            .collect::<Vec<_>>(),
+        vec![33, 11, 22]
+    );
+    driver
+        .session
+        .stickers
+        .sets
+        .push(driver.session.stickers.sets[0].clone());
+    assert!(driver.reorder_sticker_set(11, 33).is_err());
+    driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    assert!(driver.reorder_sticker_set(11, 33).is_err());
+    drop(driver);
+    std::fs::remove_dir_all(dir).unwrap();
+}
