@@ -172,6 +172,7 @@ impl Session {
                 }
             }
             self.stickers.sets.clear();
+            self.stickers.installed_loaded = false;
             self.stickers.archived.clear();
             self.stickers.archived_has_more = false;
             self.stickers.archived_next_offset = 0;

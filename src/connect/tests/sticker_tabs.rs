@@ -501,3 +501,50 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
     drop(driver);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn composer_suggestions_wait_for_installed_sets_and_keep_the_latest_emoji() {
+    use crate::sticker_suggest::StickerSuggestMode;
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
+    let fetch = driver.update_sticker_suggestions("😀").unwrap().unwrap();
+    assert!(driver.session.stickers.suggest_waiting_for_sets);
+    assert_eq!(driver.update_sticker_suggestions("🔥").unwrap(), None);
+    driver.ingest(copy_and_parse(&json!({"@type":"stickerSets","@extra":fetch.as_extra(),"sets":[{"@type":"stickerSetInfo","id":"77","size":1,"is_installed":true}]}).to_string(),&seq,&sink).unwrap()).unwrap();
+    assert!(driver.session.stickers.installed_loaded);
+    assert_eq!(sent_request(&recorder, "searchStickers")["emojis"], "🔥");
+    assert_eq!(driver.update_sticker_suggestions("🔥").unwrap(), None);
+    let old = sent_request(&recorder, "searchStickers")["@extra"].clone();
+    let fresh = driver.update_sticker_suggestions("😀").unwrap().unwrap();
+    let sticker = |id, set_id| json!({"@type":"sticker","id":id,"set_id":set_id,"emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":true},"remote":{"@type":"remoteFile"}}});
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"stickers","@extra":old,"stickers":[sticker(8,"77")]}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.stickers.suggestions.is_empty());
+    driver.ingest(copy_and_parse(&json!({"@type":"stickers","@extra":fresh.as_extra(),"stickers":[sticker(9,"77"),sticker(10,"88")]}).to_string(),&seq,&sink).unwrap()).unwrap();
+    assert_eq!(driver.session.stickers.suggestions.len(), 1);
+    assert_eq!(driver.session.stickers.suggestions[0].file_id, FileId(9));
+    assert!(driver.session.stickers.found_stickers.is_empty());
+    assert!(!driver.session.stickers.open);
+    assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 9);
+    driver.update_sticker_suggestions("plain text").unwrap();
+    assert!(driver.session.stickers.suggestions.is_empty());
+    let pending = driver.update_sticker_suggestions("😀").unwrap().unwrap();
+    driver.session.media_prefs.sticker_suggest_mode = StickerSuggestMode::None;
+    driver.update_sticker_suggestions("😀").unwrap();
+    driver.ingest(copy_and_parse(&json!({"@type":"stickers","@extra":pending.as_extra(),"stickers":[sticker(9,"77")]}).to_string(),&seq,&sink).unwrap()).unwrap();
+    assert!(driver.session.stickers.suggestions.is_empty());
+    assert!(!driver.session.stickers.suggest_waiting_for_sets);
+    let _ = std::fs::remove_dir_all(dir);
+}
