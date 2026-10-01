@@ -1,2 +1,0 @@
-# premium gate for rich-text editor — user.is_premium / premiumFeatureRichMessages
-parity:msg-richtext-premium-gate

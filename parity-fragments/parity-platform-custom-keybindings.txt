@@ -1,2 +1,0 @@
-# platform custom keybindings — shortcuts section in Appearance, persisted and applied
-parity:platform-custom-keybindings
