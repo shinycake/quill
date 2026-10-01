@@ -138,6 +138,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             && matches!(owned.envelope.payload, EnvelopePayload::StickerSets { .. });
         let archive_catalog_changed = sticker_set_changed
             && matches!(view_purpose, Some(RequestPurpose::ManageStickerSet { .. }));
+        let emoji_trending_answer = view_purpose == Some(RequestPurpose::GetTrendingEmojiSets)
+            && matches!(
+                owned.envelope.payload,
+                EnvelopePayload::TrendingStickerSets { .. }
+            )
+            && self.session.emoji.open
+            && self.session.emoji.tab == crate::emoji::EmojiSetTab::Trending;
+        let emoji_catalog_changed = (matches!(owned.envelope.payload, EnvelopePayload::Ok)
+            && view_purpose == Some(RequestPurpose::ChangeEmojiSet))
+            || matches!(
+                owned.envelope.payload,
+                EnvelopePayload::UpdateInstalledStickerSets {
+                    is_regular: false,
+                    ..
+                }
+            );
         let gif_saved_changed = matches!(
             owned.envelope.payload,
             EnvelopePayload::UpdateSavedAnimations { .. }
@@ -608,6 +624,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     Some("message link not available for this message".into());
             }
         }
+        if emoji_trending_answer {
+            self.mark_emoji_packs_viewed()?;
+        }
+        if emoji_catalog_changed {
+            self.refresh_emoji_pack_catalog()?;
+        }
         if gif_bot_changed {
             self.cancel_gif_search_requests();
             self.session.gifs.search_results.clear();
@@ -637,6 +659,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if thumbs_after
             || self.session.stickers.open
             || self.session.gifs.open
+            || self.session.emoji.open
             || !self.session.stickers.suggestions.is_empty()
         {
             self.maybe_download_open_thumbs()?;

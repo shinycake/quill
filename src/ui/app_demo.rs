@@ -904,6 +904,11 @@ impl QuillApp {
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
+        let emoji_set_search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search emoji packs")
+                .auto_grow(1, 1)
+        });
         let emoji_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search emoji")
@@ -1269,6 +1274,7 @@ impl QuillApp {
             emoji_category: 1,
             emoji_visible_count: 120,
             emoji_search_input,
+            emoji_set_search_input,
             gif_search_input,
             phone_input,
             code_input,

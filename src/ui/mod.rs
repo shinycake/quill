@@ -56,6 +56,7 @@ mod demo;
 mod demo_setup;
 mod downloads;
 mod drafts;
+mod emoji_sets;
 mod emoji_ui;
 mod event_log;
 mod folders;

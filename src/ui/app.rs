@@ -94,6 +94,7 @@ pub struct QuillApp {
     pub(super) emoji_picker_open: bool,
     pub(super) emoji_category: usize,
     pub(super) emoji_visible_count: usize,
+    pub(super) emoji_set_search_input: Entity<TextareaState>,
     pub(super) emoji_search_input: Entity<TextareaState>,
     pub(super) gif_search_input: Entity<TextareaState>,
     pub(super) sticker_search_input: Entity<TextareaState>,

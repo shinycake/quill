@@ -661,6 +661,12 @@ impl QuillApp {
                     )
                     .child(div().text_sm().child("Big emoji")),
             )
+            .child(
+                Button::new("open-emoji-sets")
+                    .label("Emoji Sets")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.open_emoji_sets(cx))),
+            )
             // MED3: auto-download settings below the media prefs.
             .child(self.auto_download_settings_section(cx))
     }

@@ -1,0 +1,9 @@
+# Custom emoji pack settings
+
+Settings → Media → Emoji Sets opens a kit dialog with Installed, Trending and Search, pack previews, Install and confirmed Remove. It uses existing custom-emoji typed catalog builders and type-agnostic changeStickerSet/getStickerSet calls. Emoji state, preview requests and thumbnails remain independent from the regular sticker picker. Search input resets on account switch. The dialog list uses a slice so adding a dialog does not require a manually synchronized array length.
+
+New searches and previews discard older tracked requests. Trending advances by the raw page length, deduplicates pack IDs, stops at total/empty pages and acknowledges viewed sets through the existing builder. Successful mutations invalidate old catalog/preview requests and refetch authoritative installed/current-tab data; failures retain entries and a separate mutation-error flag. Catalog replies synchronize installed flags in search/trending lists. Off-tab replies cannot clear the active tab's fetch error.
+
+Preview thumbnails use the shared sandboxed media path and downloader, including without an open chat. The shared download trigger now includes the open emoji screen; this was necessary for the actual getStickerSet→downloadFile path. Static previews only: animated playback, inline custom-emoji rendering, dynamic order and full-pack download status remain separate unchecked work.
+
+Validation: integration regression checks custom-type requests, isolation from regular stickers, old search/preview replies, raw-offset paging/dedup, viewed acknowledgment, actual no-chat thumbnail download, mutation serialization, failure retention, stale-catalog cancellation, installed flags and input/auth guards. Core clippy and UI compilation pass. Live account behavior remains unverified.

@@ -1295,6 +1295,10 @@ impl QuillApp {
                             .manage_sticker_sets(&ids, false)
                             .map(|sent| format!("removing {sent} sticker sets…"))
                     }
+                    GroupConfirmAction::RemoveEmojiSet { set_id } => live
+                        .driver
+                        .set_emoji_pack_installed(set_id, false)
+                        .map(|id| sent_note(id, "removing emoji pack…")),
                     GroupConfirmAction::RemoveStickerSet { set_id } => live
                         .driver
                         .manage_sticker_set(set_id, false, false)
@@ -1674,6 +1678,7 @@ impl QuillApp {
                         format!("Remove all {} installed sticker sets? You can install them again later.",this.session().map(|s|s.stickers.sets.len()).unwrap_or(0)),
                         "Remove all".to_string(),
                     ),
+                    GroupConfirmAction::RemoveEmojiSet { .. } => ("Remove emoji pack".to_string(),"Remove this emoji pack? You can install it again later.".to_string(),"Remove".to_string()),
                     GroupConfirmAction::RemoveStickerSet { .. } => (
                         "Remove sticker set".to_string(),
                         "Remove this sticker set from your installed stickers? You can install it again later.".to_string(),
@@ -1695,6 +1700,7 @@ impl QuillApp {
                     | GroupConfirmAction::RemoveSavedGif { .. }
                     | GroupConfirmAction::RemoveInstalledStickerSets
                     | GroupConfirmAction::RemoveStickerSet { .. }
+                    | GroupConfirmAction::RemoveEmojiSet { .. }
             );
             let body = div()
                 .flex()
