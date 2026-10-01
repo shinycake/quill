@@ -13,6 +13,7 @@ pub struct AuthView {
 pub enum AuthAction {
     ProvideParameters,
     EnterPhone,
+    EnterEmail,
     EnterCode,
     EnterPassword,
     WaitOtherDevice,
@@ -75,12 +76,19 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             },
             blocking: true,
         },
-        AuthorizationState::WaitEmailAddress | AuthorizationState::WaitEmailCode => AuthView {
-            title: "Unsupported sign-in state",
-            body: "Email-based authorization is not implemented yet. Use phone or QR in a later build, or an official client.".into(),
-            action: AuthAction::UnsupportedHalt {
-                reason: "email-auth",
+        AuthorizationState::WaitEmailAddress => AuthView {
+            title: "Login email",
+            body: "Enter the email address to receive your Telegram login code.".into(),
+            action: AuthAction::EnterEmail,
+            blocking: true,
+        },
+        AuthorizationState::WaitEmailCode { email_pattern, code_length } => AuthView {
+            title: "Email verification code",
+            body: match code_length {
+                Some(len) => format!("Enter the {len}-character code sent to {email_pattern}."),
+                None => format!("Enter the code sent to {email_pattern}."),
             },
+            action: AuthAction::EnterCode,
             blocking: true,
         },
         AuthorizationState::WaitRegistration => AuthView {
@@ -148,7 +156,6 @@ mod tests {
     fn premium_and_email_do_not_auto_act() {
         for state in [
             AuthorizationState::WaitPremiumPurchase,
-            AuthorizationState::WaitEmailAddress,
             AuthorizationState::WaitRegistration,
             AuthorizationState::Unknown("authorizationStateWaitSomethingNew".into()),
         ] {

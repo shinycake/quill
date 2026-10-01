@@ -98,6 +98,7 @@ pub struct QuillApp {
     pub(super) emoji_search_input: Entity<TextareaState>,
     pub(super) gif_search_input: Entity<TextareaState>,
     pub(super) sticker_search_input: Entity<TextareaState>,
+    pub(super) email_input: Entity<TextareaState>,
     pub(super) phone_input: Entity<TextareaState>,
     pub(super) code_input: Entity<TextareaState>,
     pub(super) password_input: Entity<TextareaState>,

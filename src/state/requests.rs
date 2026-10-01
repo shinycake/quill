@@ -99,6 +99,8 @@ pub fn is_auth_submit(purpose: RequestPurpose) -> bool {
     matches!(
         purpose,
         RequestPurpose::SetPhoneNumber
+            | RequestPurpose::SetAuthenticationEmail
+            | RequestPurpose::CheckAuthenticationEmailCode
             | RequestPurpose::CheckAuthenticationCode
             | RequestPurpose::CheckAuthenticationPassword
             | RequestPurpose::ResendAuthenticationCode
@@ -230,10 +232,22 @@ impl AuthRequestError {
             (RequestPurpose::SetPhoneNumber, ErrorClass::Flood) => {
                 "too many phone attempts — wait and try again"
             }
-            (RequestPurpose::CheckAuthenticationCode, ErrorClass::Invalid) => "code not accepted",
-            (RequestPurpose::CheckAuthenticationCode, ErrorClass::Flood) => {
-                "too many code attempts — wait and try again"
+            (RequestPurpose::SetAuthenticationEmail, ErrorClass::Invalid) => {
+                "email address not accepted"
             }
+            (RequestPurpose::SetAuthenticationEmail, ErrorClass::Flood) => {
+                "too many email attempts — wait and try again"
+            }
+            (
+                RequestPurpose::CheckAuthenticationCode
+                | RequestPurpose::CheckAuthenticationEmailCode,
+                ErrorClass::Invalid,
+            ) => "code not accepted",
+            (
+                RequestPurpose::CheckAuthenticationCode
+                | RequestPurpose::CheckAuthenticationEmailCode,
+                ErrorClass::Flood,
+            ) => "too many code attempts — wait and try again",
             (RequestPurpose::CheckAuthenticationPassword, ErrorClass::Invalid) => {
                 "password not accepted"
             }
@@ -678,6 +692,11 @@ impl RequestRegistry {
             .find(|(_, req)| req.purpose == purpose)
             .map(|(key, _)| *key)?;
         self.pending.remove(&key)
+    }
+
+    pub(crate) fn invalidate_auth(&mut self) {
+        self.pending
+            .retain(|_, request| !is_auth_submit(request.purpose));
     }
 
     pub fn invalidate_account(&mut self) {

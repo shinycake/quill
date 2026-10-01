@@ -5,11 +5,11 @@ use crate::state::{PasswordOp, RequestPurpose};
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::requests::{
     cancel_recovery_email_address_verification, check_authentication_code,
-    check_authentication_password, check_phone_number_code, get_password_state,
-    recover_authentication_password, request_authentication_password_recovery,
+    check_authentication_email_code, check_authentication_password, check_phone_number_code,
+    get_password_state, recover_authentication_password, request_authentication_password_recovery,
     request_qr_code_authentication, resend_authentication_code, resend_phone_number_code,
-    resend_recovery_email_address_code, send_phone_number_code, set_authentication_phone_number,
-    set_password, set_recovery_email_address,
+    resend_recovery_email_address_code, send_phone_number_code, set_authentication_email_address,
+    set_authentication_phone_number, set_password, set_recovery_email_address,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -124,37 +124,72 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Send `checkAuthenticationCode` when auth is WaitCode.
-    /// The code is never stored on the session or diagnostics.
-    pub fn submit_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
-        if !matches!(self.session.auth, AuthorizationState::WaitCode { .. }) {
+    /// Explicit email submission, only when requested by TDLib.
+    pub fn submit_email(&mut self, email: &str) -> Result<RequestId, ConnectSendError> {
+        if !matches!(self.session.auth, AuthorizationState::WaitEmailAddress) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let code = code.trim();
-        if code.is_empty() {
+        let email = email.trim();
+        let valid = email.split_once('@').is_some_and(|(local, host)| {
+            !local.is_empty() && !host.is_empty() && !host.contains('@')
+        });
+        if !valid || email.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.last_auth_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::CheckAuthenticationCode, None);
-        self.sender
-            .send_json(&check_authentication_code(extra, code))?;
-        Ok(extra)
+        self.login_request(RequestPurpose::SetAuthenticationEmail, |id| {
+            set_authentication_email_address(id, email)
+        })
     }
 
-    /// Send `resendAuthenticationCode` (reason: user request) when auth is
-    /// WaitCode. No local cooldown is invented: a too-early resend fails
-    /// server-side (429) and surfaces through `last_auth_error`.
+    /// Shared phone/email code entry; never retains the submitted code.
+    pub fn submit_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
+        let purpose = match self.session.auth {
+            AuthorizationState::WaitCode { .. } => RequestPurpose::CheckAuthenticationCode,
+            AuthorizationState::WaitEmailCode { .. } => {
+                RequestPurpose::CheckAuthenticationEmailCode
+            }
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let code = code.trim();
+        if code.is_empty() || code.chars().any(char::is_control) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.login_request(purpose, |id| {
+            if purpose == RequestPurpose::CheckAuthenticationEmailCode {
+                check_authentication_email_code(id, code)
+            } else {
+                check_authentication_code(id, code)
+            }
+        })
+    }
+
     pub fn resend_code(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !matches!(self.session.auth, AuthorizationState::WaitCode { .. }) {
+        if !matches!(
+            self.session.auth,
+            AuthorizationState::WaitCode { .. } | AuthorizationState::WaitEmailCode { .. }
+        ) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.login_request(
+            RequestPurpose::ResendAuthenticationCode,
+            resend_authentication_code,
+        )
+    }
+
+    fn login_request(
+        &mut self,
+        purpose: RequestPurpose,
+        build: impl FnOnce(RequestId) -> String,
+    ) -> Result<RequestId, ConnectSendError> {
+        if self.session.requests.has_purpose(purpose) {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.last_auth_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::ResendAuthenticationCode, None);
-        self.sender.send_json(&resend_authentication_code(extra))?;
+        let extra = self.session.request(purpose, None);
+        if let Err(err) = self.sender.send_json(&build(extra)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(extra)
     }
 
