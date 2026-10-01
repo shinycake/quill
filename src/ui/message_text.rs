@@ -214,6 +214,53 @@ pub(super) fn apply_ready_text_entities(
     }
 }
 
+pub(super) fn apply_ready_blockquote_expandable(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    // Dedicated chat so the collapsed long quote + Show more affordance are
+    // visible without scrolling past other Ready fixtures.
+    let chat_id = 15;
+    let chat_json = format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo blockquotes","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+    );
+    let position_json = format!(
+        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"49","is_pinned":false}}}}"#
+    );
+    for json in [chat_json, position_json] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    session.open_chat(ChatId(chat_id));
+
+    let short = "Short quote stays fully visible.";
+    let long = "Line one of a long block quote.\nLine two of a long block quote.\nLine three of a long block quote.\nLine four — past the collapse threshold.\nLine five — Show more reveals the rest.";
+    let ent = |text: &str, type_name: &str| -> String {
+        let utf16_len = text.encode_utf16().count();
+        format!(
+            r#"{{"@type":"textEntity","offset":0,"length":{utf16_len},"type":{{"@type":"{type_name}"}}}}"#
+        )
+    };
+    let short_json = serde_json::to_string(short).unwrap();
+    let long_json = serde_json::to_string(long).unwrap();
+    let short_msg = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":201,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{short_json},"entities":[{}]}}}}}}}}"#,
+        ent(short, "textEntityTypeBlockQuote")
+    );
+    let long_msg = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":202,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{long_json},"entities":[{}]}}}}}}}}"#,
+        ent(long, "textEntityTypeExpandableBlockQuote")
+    );
+    for json in [short_msg, long_msg] {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 pub(super) fn interaction_info_update_json(
     chat_id: ChatId,
     message_id: MessageId,

@@ -208,6 +208,10 @@ pub enum ScreenshotDemo {
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
     ReadyTextEntities,
+    /// Expandable block quotes (injected, no live Telegram): a short quote
+    /// fully visible and a long quote collapsed to 3 lines with a kit ghost
+    /// "Show more" affordance (parity:msg-blockquote-expandable).
+    ReadyBlockquoteExpandable,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting
