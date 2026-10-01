@@ -202,6 +202,7 @@ impl QuillApp {
         self.story_playback.start(Instant::now());
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
+        self.ensure_story_custom_emoji_downloads();
         true
     }
 
@@ -814,6 +815,7 @@ impl QuillApp {
         self.story_playback.start(Instant::now());
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
+        self.ensure_story_custom_emoji_downloads();
         cx.notify();
     }
 
@@ -868,6 +870,9 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut() {
                             let _ = live.driver.maybe_fetch_story_custom_emoji_stickers(&ids);
                         }
+                        // Warm display-file downloads once stickers are
+                        // cached — metadata alone leaves the img() path dead.
+                        this.ensure_story_custom_emoji_downloads();
                         cx.notify();
                         true
                     })
@@ -914,6 +919,44 @@ impl QuillApp {
         });
         if !local && item.download_file_id.0 != 0 {
             self.request_media_download(item.download_file_id, None, cx);
+        }
+    }
+
+    /// Phase 9.2+: warm `downloadFile` for custom-emoji reaction sticker
+    /// display files (picker tiles + chosen badge). Metadata from
+    /// `getCustomEmojiStickers` alone is not enough — `story_custom_emoji_path`
+    /// needs a completed local file. Dedupes active downloads so the viewer
+    /// tick can call this safely every frame.
+    pub(super) fn ensure_story_custom_emoji_downloads(&mut self) {
+        let ids = self.story_custom_emoji_fetch_ids();
+        let file_ids: Vec<_> = {
+            let Some(session) = self.session() else {
+                return;
+            };
+            ids.iter()
+                .filter_map(|id| {
+                    let sticker = session.story_custom_emoji_stickers.get(id)?;
+                    let file_id = sticker.display_file_id()?;
+                    if file_id.0 == 0 {
+                        return None;
+                    }
+                    match session.files.get(&file_id.0) {
+                        Some(file)
+                            if file.usable_path().is_some() || file.local.is_downloading_active =>
+                        {
+                            None
+                        }
+                        _ => Some(file_id),
+                    }
+                })
+                .collect()
+        };
+        for file_id in file_ids {
+            if let Some(live) = self.live.as_mut() {
+                // Display chrome uses one-shot downloadFile, like chat
+                // thumbnails, rather than the user's downloads list.
+                let _ = live.driver.download_file(file_id, 1);
+            }
         }
     }
 
@@ -1020,8 +1063,9 @@ impl QuillApp {
                         .id(("story-custom-emoji-option", index))
                         .cursor_pointer()
                         .pressable(cx.theme())
-                        .w(px(48.))
-                        .h(px(48.))
+                        .w(px(64.))
+                        .h(px(64.))
+                        .flex_shrink_0()
                         .rounded_md()
                         .flex()
                         .flex_col()
@@ -1033,6 +1077,7 @@ impl QuillApp {
                                 .id(("story-custom-emoji-img", id as u64))
                                 .w(px(36.))
                                 .h(px(36.))
+                                .flex_shrink_0()
                                 .object_fit(ObjectFit::Contain)
                                 .with_fallback(|| div().text_2xl().child("✨").into_any_element())
                                 .into_any_element(),
@@ -1041,8 +1086,13 @@ impl QuillApp {
                         cell = cell.child(div().text_2xl().child("✨"));
                     }
                     if reaction.needs_premium {
-                        cell =
-                            cell.child(div().text_xs().text_color(text_muted()).child("Premium"));
+                        cell = cell.child(
+                            div()
+                                .text_xs()
+                                .whitespace_nowrap()
+                                .text_color(text_muted())
+                                .child("Premium"),
+                        );
                     }
                     picker = picker.child(cell.on_click(cx.listener(move |this, _, _, cx| {
                         this.pick_story_custom_emoji_reaction(id, cx);

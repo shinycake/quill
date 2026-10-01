@@ -528,6 +528,69 @@ fn driver_fetch_story_custom_emoji_stickers_dedupes_and_caches() {
     );
     assert_eq!(recorder.snapshot().len(), sent);
 
+    // Cache path: ingest the stickers answer, then the same id is a no-op.
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"stickers","@extra":"{}","stickers":[{{"@type":"sticker","id":"123","set_id":"0","width":100,"height":100,"emoji":"✨","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeCustomEmoji","custom_emoji_id":"123"}},"thumbnail":null,"sticker":{{"@type":"file","id":77,"size":4,"expected_size":4,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":4}}}}}}]}}"#,
+                    extra.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .story_custom_emoji_stickers
+            .contains_key(&123)
+    );
+    assert!(
+        driver
+            .maybe_fetch_story_custom_emoji_stickers(&[123])
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(recorder.snapshot().len(), sent);
+
+    // Cached metadata still needs its display file. The viewer uses the
+    // automatic API, which dedupes before TDLib marks the download active.
+    let display_file = driver.session.story_custom_emoji_stickers[&123]
+        .display_file_id()
+        .unwrap();
+    let download_extra = driver.download_file(display_file, 1).unwrap().unwrap();
+    let requests = recorder.snapshot();
+    let download: Value = serde_json::from_str(requests.last().unwrap()).unwrap();
+    assert_eq!(download["@type"], "downloadFile");
+    assert_eq!(download["file_id"], 77);
+    assert_eq!(download["priority"], 1);
+    assert!(driver.download_file(display_file, 1).unwrap().is_none());
+    assert!(driver.session.user_downloads.is_empty());
+    assert_eq!(recorder.snapshot().len(), sent + 1);
+
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"file","@extra":"{}","id":77,"size":4,"expected_size":4,"local":{{"@type":"localFile","path":"/tmp/custom-emoji.webp","can_be_downloaded":true,"can_be_deleted":true,"is_downloading_active":false,"is_downloading_completed":true,"download_offset":0,"downloaded_prefix_size":4,"downloaded_size":4}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":4}}}}"#,
+                    download_extra.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        driver.session.files[&77].usable_path(),
+        Some("/tmp/custom-emoji.webp")
+    );
+    assert!(driver.download_file(display_file, 1).unwrap().is_none());
+    assert_eq!(recorder.snapshot().len(), sent + 1);
+
     let _ = std::fs::remove_dir_all(&dir);
 }
 
