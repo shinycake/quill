@@ -269,3 +269,50 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
     assert!(driver.clear_recent_emoji_statuses().is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn animated_emoji_suggestion_requests_once_per_emoji_and_clears() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: serde_json::Value| {
+        driver
+            .ingest(copy_and_parse(&payload.to_string(), &seq, &sink).unwrap())
+            .unwrap();
+    };
+    // A trailing emoji sends getAnimatedEmoji once …
+    let first = driver
+        .update_animated_emoji_suggestion("nice 😀")
+        .unwrap()
+        .unwrap();
+    assert_eq!(sent_request(&recorder, "getAnimatedEmoji")["emoji"], "😀");
+    // … the unchanged emoji is not re-requested …
+    assert_eq!(
+        driver.update_animated_emoji_suggestion("nice 😀").unwrap(),
+        None
+    );
+    // … a new emoji replaces the stale in-flight request …
+    let second = driver
+        .update_animated_emoji_suggestion("wow 🔥")
+        .unwrap()
+        .unwrap();
+    assert_ne!(second, first);
+    assert_eq!(sent_request(&recorder, "getAnimatedEmoji")["emoji"], "🔥");
+    // … and a late answer to the dropped request lands nowhere.
+    ingest(
+        &mut driver,
+        json!({"@type":"animatedEmoji","@extra":first.as_extra(),"sticker":null,"sticker_width":0,"sticker_height":0,"fitzpatrick_type":0,"sound":null}),
+    );
+    assert!(driver.session.emoji.animated_emoji.is_none());
+    // No trailing emoji clears the suggestion and the dedupe marker.
+    assert_eq!(
+        driver.update_animated_emoji_suggestion("hello").unwrap(),
+        None
+    );
+    assert!(driver.session.emoji.animated_emoji.is_none());
+    assert!(driver.session.emoji.animated_emoji_for.is_none());
+    drop(driver);
+    let _ = std::fs::remove_dir_all(dir);
+}

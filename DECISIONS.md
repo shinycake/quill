@@ -6955,3 +6955,33 @@ name `platform-chat-export` is kept in code/comments.)
 - **Screenshot:** new `ready-custom-emoji` demo (`seed_ready_custom_emoji_session`) — injected message + resolved sticker fixture + completed download.
 - **Not verifiable without live login:** a real custom emoji from a real `getCustomEmojiStickers` answer (the demo fixture stands in for the server response, exercising the same cache/download/render path).
 - **Out of this slice:** animated custom emoji playback (static WEBP/thumbnail only — same as the status panel); custom emoji in captions (message captions, media-viewer/story-viewer captions, game cards, draft previews — entities now parse but render the span text, today's behavior); emoji-status rendering in message text (already exists in the panel).
+
+## Slice — suggest animated emoji in composer (2026-10-01)
+
+- **Scope:** `parity:emoji-suggest-animated`. `getAnimatedEmoji` was wired
+  (request builder, `GetAnimatedEmoji` purpose, `animatedEmoji` parse into
+  `EmojiPanel.animated_emoji`) but never sent and never rendered.
+- **Design (ponytail):** reuse, don't rebuild —
+  - Trailing-emoji extraction reuses the existing `suggest_emoji_for(text)`
+    from `sticker_suggest.rs` (same rule as the sticker suggestion row).
+  - New `ConnectDriver::update_animated_emoji_suggestion(text)` mirrors
+    `update_sticker_suggestions`: no trailing emoji → drop the in-flight
+    `GetAnimatedEmoji` and clear `animated_emoji`/`animated_emoji_for`;
+    unchanged emoji → no re-request; changed → drop stale in-flight and
+    send `getAnimatedEmoji(emoji)`. Gated on `chats_path_active()`.
+  - `EmojiPanel.animated_emoji_for: Option<String>` tracks the last
+    requested emoji (dedupes requests across keystrokes).
+  - UI: `sync_animated_emoji_suggestion` runs on composer text change next
+    to `sync_sticker_suggestions`; the suggestion row reuses `sticker_cell`
+    (tap → `send_sticker_pick`, same as sticker suggestions).
+- **Tests:** driver test (request sent with the trailing emoji, unchanged
+  emoji not re-requested, cleared when the emoji is deleted); the
+  `animatedEmoji` accept test already exists.
+- **Screenshot:** new `ready-animated-emoji` demo — injected
+  `animated_emoji` fixture + completed download (the composer draft
+  seeding path is untouched; the row renders from session state).
+- **Not verifiable without live login:** a real `getAnimatedEmoji` answer
+  for a typed emoji (the fixture stands in for the server response).
+- **Out of this slice:** animated (TGS) playback of the suggested sticker
+  (static thumbnail/WEBP, same as the sticker row); auto-hiding the
+  sticker suggestion row when the animated suggestion shows.

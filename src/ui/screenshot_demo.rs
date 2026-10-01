@@ -121,6 +121,9 @@ pub enum ScreenshotDemo {
     /// Custom emoji rendered inline in message text (injected
     /// `textEntityTypeCustomEmoji` entity + resolved sticker fixture).
     ReadyCustomEmoji,
+    /// Animated emoji suggestion above the composer (injected
+    /// `animatedEmoji` answer + downloaded sticker fixture).
+    ReadyAnimatedEmoji,
     /// Broadcast channel demo (injected, no live Telegram): the ungated demo
     /// channel (id 13) renders broadcast posts with channel author + view
     /// counts, composer hidden for the non-admin viewer, and the join/leave

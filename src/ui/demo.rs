@@ -95,6 +95,48 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
     session
 }
 
+/// Suggest-animated-emoji fixture — an injected `animatedEmoji` answer
+/// (with its sticker file downloaded) so the composer suggestion row
+/// renders for screenshots without a live Telegram login.
+pub(super) fn seed_ready_animated_emoji_session(sink: Arc<MemorySink>) -> Session {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let mut session = seed_ready_chats_session(sink);
+    // Continue the envelope sequence from the ReadyChats seed: `Session::apply`
+    // ignores out-of-order envelopes, so restarting at 0 would silently drop
+    // every injected update.
+    let seq = AtomicU64::new(session.last_seq);
+    let apply = |session: &mut Session, json: &str| {
+        if let Some(owned) = copy_and_parse(json, &seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    };
+    // The sticker file the animated emoji resolves to (completed download).
+    apply(
+        &mut session,
+        &demo_file_json(61, &demo_thumb_png_path(), true),
+    );
+    session.emoji.animated_emoji = Some(StickerItem {
+        custom_emoji_id: None,
+        id: 9001,
+        set_id: 77,
+        emoji: "🔥".to_string(),
+        width: 512,
+        height: 512,
+        format: StickerFormat::Tgs,
+        file_id: FileId(61),
+        // The static preview: a real `animatedEmoji` answer carries the
+        // sticker thumbnail, which is what renders (TGS itself is not
+        // played — same as the sticker suggestion row).
+        thumb_file_id: Some(FileId(61)),
+        thumb_width: 512,
+        thumb_height: 512,
+        requires_premium: false,
+    });
+    session.emoji.animated_emoji_for = Some("🔥".to_string());
+    session.open_chat(ChatId(11));
+    session
+}
+
 /// Phase C1b: connected-video-call fixture — Zed's incoming video
 /// call goes pending → exchanging keys → ready, so the call overlay
 /// renders the video-stage placeholder grid. Injected, no live
