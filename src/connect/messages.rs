@@ -221,12 +221,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if self.session.sticker_requires_premium(sticker.file_id) && !self.session.my_is_premium() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let supported = self
             .session
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || sticker.file_id.0 == 0 || self.topic_send_is_closed(chat_id) {
+        if !supported || sticker.file_id.0 <= 0 || self.topic_send_is_closed(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self

@@ -109,7 +109,7 @@ impl QuillApp {
             emoji.clone()
         };
         let cell_id = format!("sticker-{prefix}-{}-{}", sticker.set_id, sticker.id);
-        if let Some(path) = path {
+        let cell = if let Some(path) = path {
             img(path)
                 .id(SharedString::from(cell_id.clone()))
                 .w(px(72.))
@@ -155,7 +155,17 @@ impl QuillApp {
                 }))
                 .child(label)
                 .into_any_element()
-        }
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(cell)
+            .when(
+                sticker.requires_premium && !self.session().is_some_and(|s| s.my_is_premium()),
+                |cell| cell.child(div().text_xs().child("Premium")),
+            )
+            .into_any_element()
     }
 
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
