@@ -1,0 +1,2 @@
+# loop1 platform spellcheck — on-device English spellcheck in the composer
+parity:platform-spellcheck

@@ -394,6 +394,12 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Ready chat draft with typos and the ABC badge, panel closed.
+    ReadySpellcheck,
+    /// Same draft with the corrections panel and suggestions visible.
+    ReadySpellcheckPanel,
+    /// Appearance dialog with the Spelling / Check spelling row visible.
+    ReadySpellcheckToggle,
     /// Slice `parity:platform-custom-keybindings`: the Appearance dialog
     /// open on the Keyboard shortcuts section (injected, no live Telegram).
     ReadyKeybindings,

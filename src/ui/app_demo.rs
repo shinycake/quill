@@ -82,13 +82,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyDeepLinkInfo
-        | ScreenshotDemo::ReadyDeepLinkInvite
-        | ScreenshotDemo::ReadyChats
-        | ScreenshotDemo::ReadyChatsComposer
-        | ScreenshotDemo::ReadyAppearance
-        | ScreenshotDemo::ReadyKeybindings
-        | ScreenshotDemo::ReadyAccounts => (
+        ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -1060,6 +1054,10 @@ impl QuillApp {
                     _ => {
                         this.sync_command_menu(cx);
                         this.sync_inline_mode(cx);
+                        // parity:platform-spellcheck: cheap re-check of
+                        // the draft (suggestions stay cached until the
+                        // word set changes).
+                        this.sync_spellcheck(&text, cx);
                     }
                 }
                 if let InputEvent::PressEnter { secondary, shift } = event {
@@ -1359,6 +1357,17 @@ impl QuillApp {
             keybindings_applied: false,
             keybindings_screenshot: false,
             appearance_applied: None,
+            // parity:platform-spellcheck: engine + persisted user words.
+            spellchecker: {
+                let mut sc = quill::spellcheck::SpellChecker::new();
+                sc.set_custom_words(
+                    quill::settings::load_spellcheck_words(&Self::appearance_paths()).words,
+                );
+                sc
+            },
+            spell_misspellings: Vec::new(),
+            spell_suggestions: Vec::new(),
+            spellcheck_open: false,
             shortcuts_open: false,
             data_storage_editor: None,
             data_storage_confirm_clear: false,

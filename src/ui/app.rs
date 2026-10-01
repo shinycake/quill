@@ -205,6 +205,18 @@ pub struct QuillApp {
     /// paperclip icon button toggles it; the attach options used to be a
     /// permanent labeled-button row).
     pub(super) attach_menu_open: bool,
+    /// parity:platform-spellcheck: the spellcheck engine (wordlist +
+    /// user words, loaded once at startup).
+    pub(super) spellchecker: quill::spellcheck::SpellChecker,
+    /// parity:platform-spellcheck: misspellings in the current draft
+    /// (cheap check_words pass, refreshed on every composer input).
+    pub(super) spell_misspellings: Vec<quill::spellcheck::Misspelling>,
+    /// parity:platform-spellcheck: suggestions parallel to
+    /// `spell_misspellings`, computed when the panel opens (not per
+    /// keystroke — distance-2 generation is too slow for the input path).
+    pub(super) spell_suggestions: Vec<Vec<String>>,
+    /// parity:platform-spellcheck: the corrections panel above the composer.
+    pub(super) spellcheck_open: bool,
     /// M1: the scheduled-messages dialog (view/delete).
     pub(super) scheduled_dialog_open: bool,
     /// M2: the rich editor is open — the composer textarea is interpreted
