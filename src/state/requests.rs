@@ -171,7 +171,10 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
         // Slice msg-richtext-ai-tools: AI errors never reach the sessions
         // screen, so AiComposeFloodPremium shares the generic code-based
         // line (kept as an explicit arm: the match must stay exhaustive).
-        ErrorClass::AiComposeFloodPremium | ErrorClass::Other => {
+        ErrorClass::AiComposeFloodPremium
+        | ErrorClass::StickersForbidden
+        | ErrorClass::GifsForbidden
+        | ErrorClass::Other => {
             return format!("Could not {action} (error {})", err.code);
         }
     };
@@ -196,6 +199,9 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         // the AI arm in `apply_error` phrases this for the user; this
         // is the fallback for any generic path.
         ErrorClass::AiComposeFloodPremium => "AI request limit reached".to_string(),
+        ErrorClass::StickersForbidden | ErrorClass::GifsForbidden => {
+            err.send_permission_notice().unwrap().to_string()
+        }
         ErrorClass::Other => format!("error {}", err.code),
     }
 }

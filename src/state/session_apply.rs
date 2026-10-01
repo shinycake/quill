@@ -1158,8 +1158,11 @@ impl Session {
             EnvelopePayload::UpdateMessageSendFailed {
                 message,
                 old_message_id,
-                ..
+                error,
             } => {
+                if let Some(notice) = error.send_permission_notice() {
+                    self.send_permission_error = Some(notice.into());
+                }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
                 self.remember_files(&message.files);

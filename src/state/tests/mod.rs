@@ -13,6 +13,7 @@ mod notifications;
 mod payments;
 mod requests;
 mod search;
+mod send_permissions;
 mod sessions;
 mod shared_media;
 mod stickers;
