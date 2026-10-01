@@ -147,3 +147,15 @@ pub fn click_chat_sponsored_message(
     })
     .to_string()
 }
+
+/// Stop the exact currently streaming bot draft; topic uses the pinned MessageTopic API.
+pub fn stop_pending_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic_id: Option<i32>,
+    draft_id: i64,
+) -> String {
+    json!({"@type":"stopPendingMessage", "@extra":extra.as_extra(), "chat_id":chat_id.0,
+        "topic_id":super::message_topic_value(topic_id), "draft_id":draft_id.to_string()})
+    .to_string()
+}

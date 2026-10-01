@@ -353,6 +353,10 @@ impl Session {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_new_message(&mut self, message: ParsedMessage) {
+        if !message.is_outgoing {
+            self.pending_bot_messages
+                .remove(&(message.chat_id.0, message.topic_id.unwrap_or(0)));
+        }
         // Phase 8.1: decide before upserting; the queue is drained by
         // the UI for OS dispatch. The sound decision is made at the
         // same moment (parity slice: notification sounds).
@@ -381,6 +385,35 @@ impl Session {
         }
         if let Some(notification) = notification {
             self.queue_notification_with_sound(notification, sound);
+        }
+    }
+}
+
+impl Session {
+    pub fn expire_pending_bot_messages(&mut self, now_ms: u64) -> bool {
+        let before = self.pending_bot_messages.len();
+        self.pending_bot_messages
+            .retain(|_, pending| pending.expires_at_ms > now_ms);
+        before != self.pending_bot_messages.len()
+    }
+
+    pub(crate) fn finish_pending_bot_stop(
+        &mut self,
+        chat_id: ChatId,
+        topic_id: i32,
+        draft_id: i64,
+    ) {
+        let key = (chat_id.0, topic_id);
+        if let Some(pending) = self.pending_bot_messages.get_mut(&key)
+            && pending.draft_id == draft_id
+        {
+            if pending.keep_on_stop {
+                pending.can_stop = false;
+                pending.stopped = true;
+                pending.stop_failed = false;
+            } else {
+                self.pending_bot_messages.remove(&key);
+            }
         }
     }
 }

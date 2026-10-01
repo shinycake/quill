@@ -540,3 +540,46 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 }
+
+impl<S: JsonSender> ConnectDriver<S> {
+    pub fn stop_pending_bot_message(
+        &mut self,
+        chat_id: ChatId,
+        topic_id: i32,
+        draft_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || topic_id < 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session
+            .expire_pending_bot_messages(crate::state::unix_ms_now());
+        let Some(draft) = self
+            .session
+            .pending_bot_messages
+            .get(&(chat_id.0, topic_id))
+        else {
+            return Ok(None);
+        };
+        if draft.draft_id != draft_id || !draft.can_stop {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::StopPendingMessage { topic_id, draft_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&crate::telegram::requests::stop_pending_message(
+                extra,
+                chat_id,
+                (topic_id > 0).then_some(topic_id),
+                draft_id,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+}

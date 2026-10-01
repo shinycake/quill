@@ -22,6 +22,31 @@ pub(crate) fn is_block_list_main(block_list: Option<&Value>) -> bool {
 pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseError> {
     let value: Value = serde_json::from_str(json).map_err(|_| ParseError::InvalidJson)?;
     match type_name {
+        "updatePendingMessage" => {
+            let (content, files) = parse_content(value.get("content"));
+            Ok(EnvelopePayload::UpdatePendingMessage {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                forum_topic_id: i32::try_from(int53(value.get("forum_topic_id"))?)
+                    .map_err(|_| ParseError::BadInt)?,
+                draft_id: int53(value.get("draft_id"))?,
+                can_stop: value
+                    .get("can_stop")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                keep_on_stop: value
+                    .get("keep_on_stop")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                content,
+                files,
+            })
+        }
+        "updateStopMessageDraft" => Ok(EnvelopePayload::UpdateStopMessageDraft {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            forum_topic_id: i32::try_from(int53(value.get("forum_topic_id"))?)
+                .map_err(|_| ParseError::BadInt)?,
+            draft_id: int53(value.get("draft_id"))?,
+        }),
         "updateAuthorizationState" => {
             let state = value
                 .get("authorization_state")

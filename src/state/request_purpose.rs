@@ -3,6 +3,10 @@ use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestPurpose {
+    StopPendingMessage {
+        topic_id: i32,
+        draft_id: i64,
+    },
     GetAuthorizationState,
     SetParameters,
     SetPhoneNumber,

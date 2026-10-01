@@ -100,7 +100,10 @@ impl QuillApp {
             return;
         };
         let prev_auth = live.driver.session.auth.clone();
-        let mut progressed = false;
+        let mut progressed = live
+            .driver
+            .session
+            .expire_pending_bot_messages(quill::state::unix_ms_now());
         let mut send_failed = false;
         // Slice auth-logout-warning D1 fix-up: latch `LoggingOut` inside
         // the drain loop. TDLib can queue both `LoggingOut` and `Closed`

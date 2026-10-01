@@ -1118,6 +1118,7 @@ impl QuillApp {
             .when(self.forward_picker_open, |this| {
                 this.child(self.forward_picker_panel(cx))
             })
+            .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))
             .when(self.pending_react.is_some(), |this| {
                 this.child(self.reaction_picker_panel(cx))
             })
