@@ -1,8 +1,46 @@
-# quill
+# Quill
 
-Independent, keyboard-friendly **Telegram desktop client** written in Rust (**GPUI Kit + official TDLib**). Working name **Quill**. Not a ZapFast fork.
+[![CI](https://github.com/shinycake/quill/actions/workflows/ci.yml/badge.svg)](https://github.com/shinycake/quill/actions/workflows/ci.yml)
+![Rust 1.92](https://img.shields.io/badge/rust-1.92-orange)
+![TDLib 1.8.67](https://img.shields.io/badge/TDLib-1.8.67-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-Phase 0–1: synthetic GPUI chat, ordered tdjson bridge, replay reducers, live connect (phone / code / 2FA), and after Ready a main chat list + text send. Live Telegram still needs owner credentials + tdjson.
+An independent, keyboard-first **Telegram desktop client** written in Rust — a GPU-accelerated [GPUI](https://www.gpui.rs) interface on top of the official [TDLib](https://core.telegram.org/tdlib) client library. Your real Telegram account, chats, and contacts, in a native app built to be faster and more delightful than the official clients.
+
+> **Status:** under active development · [live progress dashboard](https://shinycake.github.io/quill-dashboard)
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/ready-chats.png" alt="Quill main window: chat list and conversation"/><br/><sub>Chat list &amp; conversation</sub></td>
+    <td><img src="docs/screenshots/ready-appearance.png" alt="Appearance settings in the dark theme"/><br/><sub>Appearance settings · dark theme</sub></td>
+    <td><img src="docs/screenshots/ready-rich-message.png" alt="Rich message blocks from a bot"/><br/><sub>Rich message blocks</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/ready-channel-stats.png" alt="Channel statistics panel with growth sparklines"/><br/><sub>Channel statistics</sub></td>
+    <td><img src="docs/screenshots/ready-voice.png" alt="Voice message recording bar"/><br/><sub>Voice messages</sub></td>
+    <td><img src="docs/screenshots/ready-call-screenshare-receive.png" alt="Call with incoming screen share"/><br/><sub>Calls &amp; screen sharing</sub></td>
+  </tr>
+</table>
+
+Captured from a real GPUI window using demo fixtures (no live Telegram). The [full gallery](docs/screenshots/README.md) has 120+ captures covering auth, chats, media, calls, bots, settings, and more.
+
+## What is Quill?
+
+Quill is a from-scratch Telegram client for **macOS, Windows, and Linux**. Instead of reimplementing the protocol, it talks to Telegram through the official TDLib library — so you get your real account, chats, and contacts — while the entire interface is a native Rust/GPUI app designed around speed and keyboard flow.
+
+The goal isn't to clone Telegram Desktop. It's to build the client Telegram *should* have: instant, reliable, and a little bit delightful in every interaction.
+
+## Highlights
+
+- **Complete auth** — phone/code login, QR login, 2FA with recovery, multi-account switching, active-session management
+- **Full messaging** — rich-text composer (bold, italic, code, spoilers, quotes, links), replies & quote-replies, forwarding, scheduled & silent sends, cloud drafts, in-chat search, reactions, polls
+- **Media** — photos, videos, albums, GIFs, stickers, voice/video notes with transcription, link previews, downloads manager
+- **Calls** — 1:1 and group audio/video with screen sharing
+- **Groups & channels** — admin tools, invite links, join requests, statistics with growth sparklines, bots with keyboards and games
+- **Appearance** — light/dark themes, auto-night, accent colors, chat wallpapers, text size, bubble/plain chat styles
+- **Privacy** — secret chats, per-session toggles, granular notification and archive controls
 
 ## Build
 
@@ -10,11 +48,13 @@ See [docs/build.md](docs/build.md). Short version:
 
 ```bash
 cargo test --no-default-features
-cargo run --features ui          # synthetic chat; live connect if credentials + tdjson
+cargo run --features ui          # live connect with your Telegram credentials + tdjson
 cargo run --no-default-features -- --connect-smoke   # headless WaitPhoneNumber gate
 ```
 
-Toolchain: Rust **1.98.1**. UI pin: **gpui-kit 0.6.1**. TDLib schema: **1.8.67** (`d1085f9cebc5a62379991ae1652673954f229c1f`).
+To connect a real account, set `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (from [my.telegram.org](https://my.telegram.org)) in the environment or a local `.env` file — see [docs/credentials.md](docs/credentials.md).
+
+Toolchain: Rust **1.92**. UI: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**.
 
 ## Status
 
