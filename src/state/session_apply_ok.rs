@@ -172,6 +172,14 @@ impl Session {
                 }
             }
             self.stickers.sets.clear();
+            self.stickers.archived.clear();
+            self.stickers.archived_has_more = false;
+            self.stickers.archived_next_offset = 0;
+            if self.stickers.tab == StickerTab::Archived {
+                self.stickers.selected_set_id = None;
+                self.stickers.loaded_set_id = None;
+                self.stickers.stickers.clear();
+            }
         }
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
         self.invalidate_emoji_caches(pending.map(|p| p.purpose));

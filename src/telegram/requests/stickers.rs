@@ -13,6 +13,14 @@ pub fn get_installed_sticker_sets(extra: RequestId) -> String {
     .to_string()
 }
 
+/// Regular archived sets, paged after the previous page's last set ID.
+pub fn get_archived_sticker_sets(extra: RequestId, offset: i64) -> String {
+    json!({"@type":"getArchivedStickerSets", "@extra":extra.as_extra(),
+        "sticker_type":{"@type":"stickerTypeRegular"},
+        "offset_sticker_set_id":offset.to_string(),"limit":100})
+    .to_string()
+}
+
 /// `getStickerSet`. `set_id` is int64 — JSON string, not a float.
 pub fn get_sticker_set(extra: RequestId, set_id: i64) -> String {
     json!({

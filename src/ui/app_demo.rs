@@ -1375,6 +1375,7 @@ impl QuillApp {
             spell_suggestions: Vec::new(),
             spellcheck_open: false,
             shortcuts_open: false,
+            sticker_settings_open: false,
             data_storage_editor: None,
             data_storage_confirm_clear: false,
             sessions_open: false,

@@ -147,6 +147,7 @@ pub enum DialogKind {
     DeepLinkInvite,
     PollVoters,
     ArchiveSettings,
+    ArchivedStickers,
     ImportContacts,
     AddContact,
     EditProfile,
@@ -225,6 +226,7 @@ impl QuillShell {
             DialogKind::DeepLinkInfo => app.deep_link_dialog.is_some(),
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
+            DialogKind::ArchivedStickers => app.sticker_settings_open,
             DialogKind::ArchiveSettings => app.session().is_some_and(|s| s.archive_settings_open),
             DialogKind::ImportContacts => app.import_contacts_dialog.is_some(),
             DialogKind::AddContact => app.add_contact_dialog.is_some(),
@@ -272,6 +274,7 @@ impl QuillShell {
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
             DialogKind::ArchiveSettings => QuillApp::build_archive_settings_dialog,
+            DialogKind::ArchivedStickers => QuillApp::build_archived_stickers_dialog,
             DialogKind::ImportContacts => QuillApp::build_import_contacts_dialog,
             DialogKind::AddContact => QuillApp::build_add_contact_dialog,
             DialogKind::EditProfile => QuillApp::build_edit_profile_dialog,
@@ -308,7 +311,7 @@ impl QuillShell {
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
-    const KINDS: [DialogKind; 40] = [
+    const KINDS: [DialogKind; 41] = [
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -338,6 +341,7 @@ impl QuillShell {
         DialogKind::Username,
         DialogKind::Restrict,
         DialogKind::GroupConfirm,
+        DialogKind::ArchivedStickers,
         DialogKind::QuoteReply,
         DialogKind::ForumManage,
         DialogKind::CommentThread,

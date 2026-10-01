@@ -1198,6 +1198,7 @@ impl Session {
                     | RequestPurpose::SearchStickerSets
                     | RequestPurpose::GetFavoriteStickers
                     | RequestPurpose::GetRecentStickers
+                    | RequestPurpose::GetArchivedStickerSets
                     | RequestPurpose::GetTrendingStickerSets
                     | RequestPurpose::ClearRecentStickers
                     | RequestPurpose::AddFavoriteSticker

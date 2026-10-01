@@ -9,6 +9,7 @@ pub enum StickerTab {
     Favorites,
     Trending,
     Search,
+    Archived,
 }
 
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
@@ -17,6 +18,10 @@ pub struct StickerPanel {
     pub open: bool,
     pub tab: StickerTab,
     pub sets: Vec<StickerSetInfo>,
+    pub archived: Vec<StickerSetInfo>,
+    pub archived_offset: i64,
+    pub archived_next_offset: i64,
+    pub archived_has_more: bool,
     pub selected_set_id: Option<i64>,
     pub stickers: Vec<StickerItem>,
     pub loaded_set_id: Option<i64>,
@@ -78,6 +83,8 @@ impl StickerPanel {
     pub fn visible_stickers(&self) -> &[StickerItem] {
         match self.tab {
             StickerTab::Installed | StickerTab::Trending => &self.stickers,
+            StickerTab::Archived if self.selected_set_id.is_some() => &self.stickers,
+            StickerTab::Archived => &[],
             StickerTab::Recent => &self.recent,
             StickerTab::Favorites => &self.favorites,
             StickerTab::Search if self.selected_set_id.is_some() => &self.stickers,
