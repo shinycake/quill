@@ -396,6 +396,9 @@ pub enum ScreenshotDemo {
     ReadySpellcheckPanel,
     /// Appearance dialog with the Spelling / Check spelling row visible.
     ReadySpellcheckToggle,
+    /// Slice `parity:platform-custom-keybindings`: the Appearance dialog
+    /// open on the Keyboard shortcuts section (injected, no live Telegram).
+    ReadyKeybindings,
     /// Slice parity:auth-multi-account (UI): the Accounts dialog open
     /// over the ReadyChats fixture (injected, no live Telegram). The
     /// account list reads the real local registry (read-only).

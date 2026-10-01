@@ -281,6 +281,22 @@ pub struct QuillApp {
     pub(super) chat_prefs: ChatPrefs,
     /// Settings → Appearance slice: the dialog is on screen.
     pub(super) appearance_open: bool,
+    /// Parity slice (platform-custom-keybindings): the rebindable action id
+    /// currently capturing a keystroke, if any.
+    pub(super) keybinding_capture: Option<String>,
+    /// Parity slice (platform-custom-keybindings): a capture that was
+    /// refused (fixed chrome or another rebindable action). The shortcuts
+    /// chip keeps showing the chord that is actually bound.
+    pub(super) keybinding_error: Option<(String, String)>,
+    /// Parity slice (platform-custom-keybindings): focus handle for the
+    /// keystroke-capture row.
+    pub(super) keybinding_focus: FocusHandle,
+    /// Parity slice (platform-custom-keybindings): saved shortcut overrides
+    /// applied to the keymap once the live driver is ready.
+    pub(super) keybindings_applied: bool,
+    /// Screenshot proof for the keyboard-shortcuts section. The Appearance
+    /// dialog then shows that section alone so the frame is the rebind UI.
+    pub(super) keybindings_screenshot: bool,
     /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
     /// reference dialog is on screen.
     pub(super) shortcuts_open: bool,

@@ -666,7 +666,11 @@ impl QuillApp {
         // picks them up; nothing is persisted.
         if matches!(
             demo,
-            Some(ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheckToggle)
+            Some(
+                ScreenshotDemo::ReadyAppearance
+                    | ScreenshotDemo::ReadySpellcheckToggle
+                    | ScreenshotDemo::ReadyKeybindings
+            )
         ) {
             if matches!(demo, Some(ScreenshotDemo::ReadySpellcheckToggle)) {
                 self.chat_prefs.spellcheck_enabled = true;
@@ -683,7 +687,12 @@ impl QuillApp {
             self.appearance.wallpaper_rgb = Some(0x0e1621);
             self.appearance.font_size_px = 16;
             self.appearance_open = true;
-            self.status_note = "screenshot demo — appearance settings".into();
+            self.keybindings_screenshot = matches!(demo, Some(ScreenshotDemo::ReadyKeybindings));
+            self.status_note = if self.keybindings_screenshot {
+                "screenshot demo — keyboard shortcuts".into()
+            } else {
+                "screenshot demo — appearance settings".into()
+            };
         }
         // Slice parity:auth-multi-account (UI): the Accounts dialog open
         // over the ReadyChats fixture (injected, no live Telegram). The
