@@ -162,6 +162,8 @@ pub const AUTO_DOWNLOAD_MAX_BYTES: i64 = 50 * 1024 * 1024;
 ///   own auto-download dialog is the same grid).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MediaPrefs {
+    #[serde(default)]
+    pub recent_emoji: Vec<String>,
     pub remember_media_grouping: bool,
     pub group_media: bool,
     pub hq_round_videos: bool,
@@ -208,6 +210,7 @@ fn auto_download_default() -> u8 {
 impl Default for MediaPrefs {
     fn default() -> Self {
         Self {
+            recent_emoji: Vec::new(),
             remember_media_grouping: false,
             group_media: false,
             hq_round_videos: false,

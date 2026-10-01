@@ -904,6 +904,18 @@ impl QuillApp {
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
+        let emoji_search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search emoji")
+                .auto_grow(1, 1)
+        });
+        cx.subscribe(&emoji_search_input, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.emoji_visible_count = 120;
+                cx.notify();
+            }
+        })
+        .detach();
         let gif_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Search GIFs")
@@ -1253,6 +1265,10 @@ impl QuillApp {
             inline_query_token: 0,
             inline_query_armed: None,
             sticker_search_input,
+            emoji_picker_open: false,
+            emoji_category: 1,
+            emoji_visible_count: 120,
+            emoji_search_input,
             gif_search_input,
             phone_input,
             code_input,
