@@ -456,6 +456,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — edit profile dialog (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        // Slice parity:platform-shortcuts-reference: the shortcuts dialog
+        // opens over the seeded chat list (see demo_setup.rs).
+        ScreenshotDemo::ReadyShortcuts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — keyboard shortcuts reference (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBotCommandMenu => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1326,6 +1334,7 @@ impl QuillApp {
             chat_prefs,
             appearance_open: false,
             appearance_applied: None,
+            shortcuts_open: false,
             data_storage_editor: None,
             data_storage_confirm_clear: false,
             sessions_open: false,
