@@ -57,6 +57,56 @@ pub(super) fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>
     }
 }
 
+pub(super) fn apply_ready_sticker_playback(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let root = super::demo::demo_media_allowlist();
+    session.stickers.stickers.clear();
+    for (id, name, format) in [
+        (44, "demo-sticker.tgs", "stickerFormatTgs"),
+        (45, "demo-sticker.webm", "stickerFormatWebm"),
+    ] {
+        let file = demo_file_json(id, &root.join(name).to_string_lossy(), true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"{id}","set_id":"77","width":128,"height":128,"emoji":"😀","format":{{"@type":"{format}"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{file}}}}}}}}}"#
+        );
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+        session
+            .stickers
+            .stickers
+            .push(quill::telegram::envelope::StickerItem {
+                custom_emoji_id: None,
+                id: i64::from(id),
+                set_id: 77,
+                emoji: "😀".into(),
+                width: 128,
+                height: 128,
+                format: if id == 44 {
+                    quill::telegram::envelope::StickerFormat::Tgs
+                } else {
+                    quill::telegram::envelope::StickerFormat::Webm
+                },
+                file_id: FileId(id),
+                thumb_file_id: None,
+                thumb_width: 0,
+                thumb_height: 0,
+                requires_premium: false,
+            });
+    }
+    for id in [101, 102, 103, 401] {
+        if let Some(history) = session.histories.get_mut(&11) {
+            history.messages.remove(&id);
+        }
+    }
+    session.media_prefs.loop_animated_stickers =
+        std::env::var("QUILL_DEMO_LOOP_STICKERS").as_deref() != Ok("off");
+}
+
 impl QuillApp {
     /// Phase 3.3: the `/` command menu popup above the composer.
     /// Bot-specific commands first, then the global (`getCommands`)

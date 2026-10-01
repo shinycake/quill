@@ -801,9 +801,19 @@ pub(super) fn sticker_attachment(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
+    animated: Option<Arc<RenderImage>>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let display_id = sticker.display_file_id().unwrap_or(FileId(0));
+    if let Some(image) = animated {
+        return img(image)
+            .id(("sticker-animated", row_id))
+            .mt_2()
+            .w(px(128.))
+            .h(px(128.))
+            .object_fit(ObjectFit::Contain)
+            .into_any_element();
+    }
+    let display_id = sticker.display_file_id().unwrap_or(sticker.file_id);
     let fallback_label = sticker_label(sticker);
     if let Some(path) = files
         .get(&display_id.0)

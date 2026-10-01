@@ -39,6 +39,16 @@ if [[ -n "${QUILL_TDJSON_PATH:-}" && -f "${QUILL_TDJSON_PATH}" ]]; then
   fi
 fi
 
+RLOTTIE="${QUILL_RLOTTIE_PATH:-$ROOT/vendor/rlottie/prefix/lib/librlottie.dylib}"
+if [[ -f "$RLOTTIE" ]]; then
+  cp -L "$RLOTTIE" "$DIST/Contents/Frameworks/librlottie.dylib"
+  install_name_tool -id @rpath/librlottie.dylib "$DIST/Contents/Frameworks/librlottie.dylib"
+  if [[ -d "$ROOT/vendor/rlottie/source/licenses" ]]; then
+    mkdir -p "$DIST/Contents/Resources/rlottie-licenses"
+    cp "$ROOT/vendor/rlottie/source/COPYING" "$ROOT/vendor/rlottie/source/licenses/"* "$DIST/Contents/Resources/rlottie-licenses/"
+  fi
+fi
+
 echo "Assembled $DIST"
 if command -v otool >/dev/null; then
   echo "otool -L (must not list /opt/homebrew for tdjson):"

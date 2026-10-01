@@ -667,6 +667,27 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.open_emoji_sets(cx))),
             )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .child(
+                        Switch::new("media-pref-loop-stickers")
+                            .checked(
+                                self.session()
+                                    .is_none_or(|s| s.media_prefs.loop_animated_stickers),
+                            )
+                            .accessibility_label("Loop Animated Stickers")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.stop_sticker_playback();
+                                this.set_media_pref(|prefs| prefs.loop_animated_stickers = on, cx);
+                            })),
+                    )
+                    .child(div().text_sm().child("Loop Animated Stickers")),
+            )
             // MED3: auto-download settings below the media prefs.
             .child(self.auto_download_settings_section(cx))
     }

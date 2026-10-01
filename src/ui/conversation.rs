@@ -1590,6 +1590,12 @@ impl QuillApp {
                     inputs.seek_bar.clone(),
                     inputs.animation_playing,
                     inputs.animation_frame.clone(),
+                    match &message.content {
+                        MessageContent::Sticker(sticker) => {
+                            self.sticker_image(sticker.file_id, sticker.format, cx)
+                        }
+                        _ => None,
+                    },
                     inputs.video_playing,
                     inputs.video_frame.clone(),
                     &self.spoiler_revealed,

@@ -263,6 +263,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-shared-media" => ScreenshotDemo::ReadySharedMedia,
                 "ready-typing" => ScreenshotDemo::ReadyTyping,
                 "ready-stickers" => ScreenshotDemo::ReadyStickers,
+                "ready-sticker-playback" => ScreenshotDemo::ReadyStickerPlayback,
                 "ready-voice" => ScreenshotDemo::ReadyVoice,
                 "ready-game-card" => ScreenshotDemo::ReadyGameCard,
                 "ready-link-preview" => ScreenshotDemo::ReadyLinkPreview,
@@ -467,6 +468,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
         ScreenshotDemo::ReadyStickers => ".quill-ready-ready-stickers",
+        ScreenshotDemo::ReadyStickerPlayback => ".quill-ready-ready-sticker-playback",
         ScreenshotDemo::ReadyVoice => ".quill-ready-ready-voice",
         ScreenshotDemo::ReadyGameCard => ".quill-ready-ready-game-card",
         ScreenshotDemo::ReadyLinkPreview => ".quill-ready-ready-link-preview",
@@ -611,37 +613,55 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {
-                cx.open_window(
-                    WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(Bounds {
-                            origin: point(px(20.), px(20.)),
-                            size: size(px(demo_w), px(demo_h)),
-                        })),
-                        app_id: Some("org.shinycake.quill".into()),
-                        ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
-                            "Quill — Call audio devices"
-                        } else {
-                            "Quill"
-                        })
-                    },
-                    move |window, cx| {
-                        let view =
-                            cx.new(|cx| ui::QuillApp::new_with_demo(window, cx, None, Some(kind)));
-                        // kit Phase 2 (redo): shell mounts the kit dialog +
-                        // notification layers that Root does not mount itself.
-                        let shell = cx.new(|_cx| ui::QuillShell::new(view));
-                        cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
-                    },
-                )
-                .expect("failed to open screenshot demo window");
+                let demo_window = cx
+                    .open_window(
+                        WindowOptions {
+                            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                                origin: point(px(20.), px(20.)),
+                                size: size(px(demo_w), px(demo_h)),
+                            })),
+                            app_id: Some("org.shinycake.quill".into()),
+                            ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
+                                "Quill — Call audio devices"
+                            } else {
+                                "Quill"
+                            })
+                        },
+                        move |window, cx| {
+                            let view = cx.new(|cx| {
+                                ui::QuillApp::new_with_demo(window, cx, None, Some(kind))
+                            });
+                            // kit Phase 2 (redo): shell mounts the kit dialog +
+                            // notification layers that Root does not mount itself.
+                            let shell = cx.new(|_cx| ui::QuillShell::new(view));
+                            cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
+                        },
+                    )
+                    .expect("failed to open screenshot demo window");
+                let _ = demo_window.update(cx, |_, window, cx| {
+                    cx.activate(true);
+                    window.activate_window();
+                });
 
                 // Allow a couple of frames to paint, then signal the capture script.
                 cx.background_executor()
-                    .timer(Duration::from_millis(1500))
+                    .timer(Duration::from_millis(
+                        if kind == ScreenshotDemo::ReadyStickerPlayback {
+                            400
+                        } else {
+                            1500
+                        },
+                    ))
                     .await;
                 let _ = std::fs::write(&marker_for_spawn, b"ready\n");
                 cx.background_executor()
-                    .timer(Duration::from_millis(3500))
+                    .timer(Duration::from_millis(
+                        if kind == ScreenshotDemo::ReadyStickerPlayback {
+                            7500
+                        } else {
+                            3500
+                        },
+                    ))
                     .await;
                 cx.update(|cx| cx.quit());
             })

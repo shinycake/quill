@@ -37,6 +37,7 @@ pub mod rich;
 pub mod settings;
 pub mod spellcheck;
 pub mod state;
+pub mod sticker_playback;
 pub mod sticker_suggest;
 pub mod story_composer;
 pub mod story_page;

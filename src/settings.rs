@@ -164,6 +164,8 @@ pub const AUTO_DOWNLOAD_MAX_BYTES: i64 = 50 * 1024 * 1024;
 pub struct MediaPrefs {
     #[serde(default = "default_true")]
     pub big_emoji: bool,
+    #[serde(default = "default_true")]
+    pub loop_animated_stickers: bool,
     #[serde(default)]
     pub recent_emoji: Vec<String>,
     pub remember_media_grouping: bool,
@@ -213,6 +215,7 @@ impl Default for MediaPrefs {
     fn default() -> Self {
         Self {
             big_emoji: true,
+            loop_animated_stickers: true,
             recent_emoji: Vec::new(),
             remember_media_grouping: false,
             group_media: false,
