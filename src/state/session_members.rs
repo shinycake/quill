@@ -2,6 +2,16 @@
 use super::*;
 
 impl Session {
+    /// Whether the current user has Telegram Premium (`user.is_premium`,
+    /// schema 1.8.67 line 2403) — gates `premiumFeatureRichMessages`
+    /// ("The ability to send rich messages"). False until our own user
+    /// object arrives.
+    pub fn my_is_premium(&self) -> bool {
+        self.my_user_id
+            .and_then(|me| self.users.get(&me))
+            .is_some_and(|user| user.is_premium)
+    }
+
     /// Record own channel membership from `getChatMember` / `updateChatMember`.
     /// The member is only trusted when `member_id` is the current user.
     pub fn accept_own_chat_member(&mut self, chat_id: ChatId, member: ParsedChatMember) {

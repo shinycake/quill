@@ -102,6 +102,10 @@ pub struct ParsedUser {
     /// line 2403) — preserved when `setProfileAccentColor` changes the
     /// color; 0 if none.
     pub profile_background_custom_emoji_id: i64,
+    /// Rich-text premium gate: `user.is_premium` (schema 1.8.67, line
+    /// 2403) — whether the user has Telegram Premium (gates
+    /// `premiumFeatureRichMessages`, "The ability to send rich messages").
+    pub is_premium: bool,
 }
 
 impl ParsedUser {
@@ -267,6 +271,10 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .get("profile_background_custom_emoji_id")
         .and_then(Value::as_i64)
         .unwrap_or(0);
+    let is_premium = value
+        .get("is_premium")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     Some(ParsedUser {
         id,
         first_name,
@@ -283,6 +291,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         photo_small_file_id,
         profile_accent_color_id,
         profile_background_custom_emoji_id,
+        is_premium,
     })
 }
 
