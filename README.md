@@ -456,7 +456,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Clear recent emoji <!-- parity:emoji-clear-recent -->
 - [ ] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order --> (partial: backend wired — reorderInstalledStickerSets with stickerTypeCustomEmoji; the dynamic toggle itself is client-side recency ordering, settings UI pending)
 - [ ] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
-- [ ] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
+- [x] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
 - [ ] Group sticker set management (setSupergroupStickerSet / setSupergroupCustomEmojiStickerSet) <!-- parity:stickers-group-set --> (partial: backend landed — both builders + drivers, `can_set_sticker_set` / `sticker_set_id` / `custom_emoji_sticker_set_id` parsed into cached full info; group settings UI deferred post-Phase-9)
 
 ### Bots, polls & payments
@@ -582,7 +582,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Flood/rate-limit errors with retry countdown (e.g. "Try again in N seconds") <!-- parity:platform-flood-errors -->
 - [x] Unread badge on the app/taskbar icon <!-- parity:platform-app-icon-badge -->
 - [x] OS desktop notifications (in-app toast queue with burst coalescing in src/notify.rs; OS dispatch via notify-send on Linux / osascript on macOS on worker threads, click-to-focus on Linux) <!-- parity:platform-os-notifications -->
-- [ ] Drag-and-drop files into the composer <!-- parity:platform-drag-drop-files -->
+- [x] Drag-and-drop files into the composer <!-- parity:platform-drag-drop-files -->
 - [x] Copy text to clipboard (inline keyboard copy-text button src/ui/mod.rs:3932; invite link src/ui/mod.rs:6357) <!-- parity:platform-copy-clipboard -->
 - [x] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
 - [x] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
