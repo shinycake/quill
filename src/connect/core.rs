@@ -630,6 +630,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if emoji_catalog_changed {
             self.refresh_emoji_pack_catalog()?;
         }
+        self.maybe_resolve_emoji_status_choices()?;
         if gif_bot_changed {
             self.cancel_gif_search_requests();
             self.session.gifs.search_results.clear();

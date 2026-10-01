@@ -449,6 +449,19 @@ impl Session {
                 ));
             }
             Some(
+                RequestPurpose::SetEmojiStatus
+                | RequestPurpose::ClearRecentEmojiStatuses
+                | RequestPurpose::GetRecentEmojiStatuses
+                | RequestPurpose::GetThemedEmojiStatuses
+                | RequestPurpose::GetDefaultEmojiStatuses
+                | RequestPurpose::GetCustomEmojiStickers,
+            ) => {
+                self.emoji.status_note = Some(call_request_error_line(
+                    &err,
+                    "Could not update emoji statuses. Retry the action",
+                ));
+            }
+            Some(
                 RequestPurpose::SetSupergroupStickerSet
                 | RequestPurpose::SetSupergroupCustomEmojiStickerSet,
             ) => {

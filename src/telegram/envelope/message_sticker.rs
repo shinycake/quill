@@ -42,6 +42,7 @@ impl StickerContent {
 /// One sticker inside `stickerSet.stickers` (picker). Same file ids as `sticker`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StickerItem {
+    pub custom_emoji_id: Option<i64>,
     pub id: i64,
     pub set_id: i64,
     pub emoji: String,
@@ -158,6 +159,13 @@ pub(crate) fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>
     };
     (
         Some(StickerItem {
+            custom_emoji_id: value
+                .get("full_type")
+                .filter(|v| {
+                    v.get("@type").and_then(Value::as_str) == Some("stickerFullTypeCustomEmoji")
+                })
+                .and_then(|v| int64(v.get("custom_emoji_id")))
+                .filter(|id| *id > 0),
             id: int64(value.get("id")).unwrap_or(0),
             set_id: int64(value.get("set_id")).unwrap_or(0),
             emoji: value

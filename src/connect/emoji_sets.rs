@@ -9,6 +9,137 @@ use crate::telegram::requests_emoji::{
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
+    pub fn load_emoji_status_choices(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.emoji.status_open = true;
+        self.session.emoji.status_note = None;
+        self.session.emoji.status_resolution_attempted.clear();
+        for (purpose, build) in [
+            (
+                RequestPurpose::GetRecentEmojiStatuses,
+                crate::telegram::requests_emoji::get_recent_emoji_statuses
+                    as fn(RequestId) -> String,
+            ),
+            (
+                RequestPurpose::GetThemedEmojiStatuses,
+                crate::telegram::requests_emoji::get_themed_emoji_statuses
+                    as fn(RequestId) -> String,
+            ),
+            (
+                RequestPurpose::GetDefaultEmojiStatuses,
+                crate::telegram::requests_emoji::get_default_emoji_statuses
+                    as fn(RequestId) -> String,
+            ),
+        ] {
+            self.emoji_set_request(purpose, build)?;
+        }
+        Ok(())
+    }
+
+    pub fn change_emoji_status(
+        &mut self,
+        custom_emoji_id: Option<i64>,
+        duration_secs: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if duration_secs < 0
+            || custom_emoji_id.is_some_and(|id| id <= 0)
+            || !self
+                .session
+                .my_user_id
+                .and_then(|id| self.session.user(id))
+                .is_some_and(|u| u.is_premium)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::SetEmojiStatus)
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::ClearRecentEmojiStatuses)
+        {
+            return Ok(None);
+        }
+        let expiration = if duration_secs == 0 || custom_emoji_id.is_none() {
+            0
+        } else {
+            let now = crate::state::unix_ms_now() / 1000;
+            i32::try_from(
+                now.checked_add(duration_secs as u64)
+                    .ok_or(ConnectSendError::InvalidRequest)?,
+            )
+            .map_err(|_| ConnectSendError::InvalidRequest)?
+        };
+        self.session.emoji.status_note = None;
+        self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
+            crate::telegram::requests_emoji::set_emoji_status(extra, custom_emoji_id, expiration)
+        })
+    }
+
+    pub fn clear_recent_emoji_statuses(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::SetEmojiStatus)
+        {
+            return Ok(None);
+        }
+        self.session.emoji.status_note = None;
+        self.emoji_set_request(
+            RequestPurpose::ClearRecentEmojiStatuses,
+            crate::telegram::requests_emoji::clear_recent_emoji_statuses,
+        )
+    }
+
+    pub(crate) fn maybe_resolve_emoji_status_choices(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active()
+            || !self.session.emoji.open
+            || !self.session.emoji.status_open
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetCustomEmojiStickers)
+        {
+            return Ok(());
+        }
+        let mut ids: Vec<_> = self
+            .session
+            .emoji
+            .recent_statuses
+            .iter()
+            .map(|s| s.custom_emoji_id)
+            .chain(self.session.emoji.themed_status_ids.iter().copied())
+            .chain(self.session.emoji.default_status_ids.iter().copied())
+            .filter(|id| {
+                *id > 0
+                    && !self.session.emoji.status_resolution_attempted.contains(id)
+                    && !self
+                        .session
+                        .emoji
+                        .custom_emoji_stickers
+                        .iter()
+                        .any(|s| s.custom_emoji_id == Some(*id))
+            })
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids.truncate(200);
+        if !ids.is_empty() {
+            self.session
+                .emoji
+                .status_resolution_attempted
+                .extend(ids.iter().copied());
+            self.emoji_set_request(RequestPurpose::GetCustomEmojiStickers, |extra| {
+                crate::telegram::requests_emoji::get_custom_emoji_stickers(extra, &ids)
+            })?;
+        }
+        Ok(())
+    }
+
     fn emoji_set_request(
         &mut self,
         purpose: RequestPurpose,
@@ -27,6 +158,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
             self.session.emoji.failed = true;
+            if matches!(
+                purpose,
+                RequestPurpose::SetEmojiStatus
+                    | RequestPurpose::ClearRecentEmojiStatuses
+                    | RequestPurpose::GetRecentEmojiStatuses
+                    | RequestPurpose::GetThemedEmojiStatuses
+                    | RequestPurpose::GetDefaultEmojiStatuses
+                    | RequestPurpose::GetCustomEmojiStickers
+            ) {
+                self.session.emoji.status_note =
+                    Some("Could not update emoji statuses. Retry the action.".into());
+            }
             return Err(err);
         }
         Ok(Some(extra))

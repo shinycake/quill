@@ -16,6 +16,10 @@ pub enum EmojiSetTab {
 /// two panels must never share a slot.
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
+    pub status_open: bool,
+    pub status_duration_secs: i32,
+    pub status_note: Option<String>,
+    pub status_resolution_attempted: std::collections::HashSet<i64>,
     pub open: bool,
     pub failed: bool,
     pub mutation_failed: bool,
@@ -213,7 +217,14 @@ impl Session {
 
     /// Slice S10: store a `getCustomEmojiStickers` answer in the emoji panel.
     pub fn accept_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
-        self.emoji.custom_emoji_stickers = stickers;
+        // ponytail: linear merge of batches capped at 200; index by custom emoji ID if cache size grows.
+        for sticker in stickers {
+            self.emoji.custom_emoji_stickers.retain(|old| {
+                old.custom_emoji_id != sticker.custom_emoji_id
+                    || (old.custom_emoji_id.is_none() && old.file_id != sticker.file_id)
+            });
+            self.emoji.custom_emoji_stickers.push(sticker);
+        }
     }
 
     /// Slice S10: an emoji-status or emoji-set mutation succeeded — drop the
@@ -227,6 +238,18 @@ impl Session {
             Some(RequestPurpose::SetEmojiStatus | RequestPurpose::ClearRecentEmojiStatuses)
         ) {
             self.emoji.recent_statuses.clear();
+            drop(
+                self.requests
+                    .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
+            );
+            self.emoji.status_note = Some(
+                if purpose == Some(RequestPurpose::SetEmojiStatus) {
+                    "Emoji status updated."
+                } else {
+                    "Recent emoji statuses cleared."
+                }
+                .into(),
+            );
         }
         if matches!(
             purpose,
