@@ -450,6 +450,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — rich editor AI tools".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyRichPremiumGate => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "Rich messages require Telegram Premium".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyProfileEdit | ScreenshotDemo::ReadyUsername => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

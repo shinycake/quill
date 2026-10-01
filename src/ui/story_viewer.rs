@@ -21,7 +21,8 @@ use quill::state::{RequestPurpose, Session, StoryReportStage, event_log_relative
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
-    MessageSender, ParsedFile, ParsedStory, StoryAreaKind, StoryOriginView,
+    MessageSender, ParsedFile, ParsedStory, StoryAreaKind, StoryAvailableReactionKind,
+    StoryChosenExtraReaction, StoryOriginView,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -201,6 +202,7 @@ impl QuillApp {
         self.story_playback.start(Instant::now());
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
+        self.ensure_story_custom_emoji_downloads();
         true
     }
 
@@ -286,6 +288,70 @@ impl QuillApp {
                     Ok(_) => format!("Reacted {emoji}"),
                     Err(_) => "could not set story reaction".into(),
                 };
+        } else if self.demo_session.is_some() {
+            self.status_note = "demo — story reactions run with live TDLib".into();
+        }
+        self.story_reaction_picker_open = false;
+        cx.notify();
+    }
+
+    /// Phase 9.2+: display path for a custom-emoji reaction sticker
+    /// (thumbnail first, else static WEBP — `StickerContent`'s rule) —
+    /// `None` while the file isn't downloaded.
+    fn story_custom_emoji_path(&self, custom_emoji_id: i64) -> Option<std::path::PathBuf> {
+        let session = self.session()?;
+        let sticker = session.story_custom_emoji_stickers.get(&custom_emoji_id)?;
+        let file_id = sticker.display_file_id()?;
+        let path = session.files.get(&file_id.0)?.usable_path()?;
+        sandboxed_display_path(path, &self.media_display_roots())
+    }
+
+    /// Phase 9.2+: custom-emoji ids the viewer still needs stickers for —
+    /// the picker's custom options plus the current story's chosen
+    /// custom-emoji reaction. The viewer tick feeds these to the driver.
+    fn story_custom_emoji_fetch_ids(&self) -> Vec<i64> {
+        let Some(session) = self.session() else {
+            return Vec::new();
+        };
+        let mut ids: Vec<i64> = session
+            .story_available_reactions
+            .iter()
+            .flatten()
+            .filter_map(|reaction| match reaction.kind {
+                StoryAvailableReactionKind::CustomEmoji(id) => Some(id),
+                _ => None,
+            })
+            .collect();
+        if let Some(StoryChosenExtraReaction::CustomEmoji(id)) = self
+            .current_story()
+            .and_then(|story| story.chosen_reaction_extra)
+        {
+            ids.push(id);
+        }
+        ids
+    }
+
+    /// Phase 9.2+: set the current story's reaction to a picker custom
+    /// emoji via `setStoryReaction` with `reactionTypeCustomEmoji`
+    /// (`schema/td_api.tl:13809` — Premium-only, enforced server-side; a
+    /// rejection surfaces as a failed request).
+    pub(super) fn pick_story_custom_emoji_reaction(
+        &mut self,
+        custom_emoji_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(item) = self.story_viewer.current().cloned() else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.set_story_custom_emoji_reaction(
+                item.chat_id,
+                item.story_id,
+                custom_emoji_id,
+            ) {
+                Ok(_) => "Reacted ✨".into(),
+                Err(_) => "could not set story reaction".into(),
+            };
         } else if self.demo_session.is_some() {
             self.status_note = "demo — story reactions run with live TDLib".into();
         }
@@ -749,6 +815,7 @@ impl QuillApp {
         self.story_playback.start(Instant::now());
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
+        self.ensure_story_custom_emoji_downloads();
         cx.notify();
     }
 
@@ -795,6 +862,17 @@ impl QuillApp {
                                 this.advance_story_playback(cx);
                             }
                         }
+                        // Phase 9.2+: keep custom-emoji reaction stickers
+                        // warm while the viewer is open (picker options +
+                        // the chosen-reaction badge). Deduped in the
+                        // driver — a no-op when nothing new is needed.
+                        let ids = this.story_custom_emoji_fetch_ids();
+                        if let Some(live) = this.live.as_mut() {
+                            let _ = live.driver.maybe_fetch_story_custom_emoji_stickers(&ids);
+                        }
+                        // Warm display-file downloads once stickers are
+                        // cached — metadata alone leaves the img() path dead.
+                        this.ensure_story_custom_emoji_downloads();
                         cx.notify();
                         true
                     })
@@ -844,6 +922,44 @@ impl QuillApp {
         }
     }
 
+    /// Phase 9.2+: warm `downloadFile` for custom-emoji reaction sticker
+    /// display files (picker tiles + chosen badge). Metadata from
+    /// `getCustomEmojiStickers` alone is not enough — `story_custom_emoji_path`
+    /// needs a completed local file. Dedupes active downloads so the viewer
+    /// tick can call this safely every frame.
+    pub(super) fn ensure_story_custom_emoji_downloads(&mut self) {
+        let ids = self.story_custom_emoji_fetch_ids();
+        let file_ids: Vec<_> = {
+            let Some(session) = self.session() else {
+                return;
+            };
+            ids.iter()
+                .filter_map(|id| {
+                    let sticker = session.story_custom_emoji_stickers.get(id)?;
+                    let file_id = sticker.display_file_id()?;
+                    if file_id.0 == 0 {
+                        return None;
+                    }
+                    match session.files.get(&file_id.0) {
+                        Some(file)
+                            if file.usable_path().is_some() || file.local.is_downloading_active =>
+                        {
+                            None
+                        }
+                        _ => Some(file_id),
+                    }
+                })
+                .collect()
+        };
+        for file_id in file_ids {
+            if let Some(live) = self.live.as_mut() {
+                // Display chrome uses one-shot downloadFile, like chat
+                // thumbnails, rather than the user's downloads list.
+                let _ = live.driver.download_file(file_id, 1);
+            }
+        }
+    }
+
     /// Phase 9.2: the viewer's own-story interaction counters
     /// (`storyInteractionInfo`, `schema/td_api.tl:6712`) — only rendered
     /// when TDLib populated them (`story.can_get_interactions`) and at
@@ -889,9 +1005,14 @@ impl QuillApp {
         (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
-    /// Phase 9.2: the emoji picker popover fed by `getStoryAvailableReactions`
-    /// (`availableReactions`, `schema/td_api.tl:13802`). One tap sets the
-    /// reaction via `setStoryReaction` (`schema/td_api.tl:13809`).
+    /// Phase 9.2+: the reaction picker popover fed by
+    /// `getStoryAvailableReactions` (`availableReactions`,
+    /// `schema/td_api.tl:13802`). Emoji taps set the reaction via
+    /// `setStoryReaction`; custom-emoji taps use
+    /// `set_story_custom_emoji_reaction` (Premium enforcement is
+    /// server-side — `needs_premium` rows carry a badge). Paid reactions
+    /// are never offered (`setStoryReaction` can't set them, schema
+    /// comment `td_api.tl:13809`).
     pub(super) fn story_reaction_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let reactions = self
             .session()
@@ -919,19 +1040,66 @@ impl QuillApp {
             );
         }
         for (index, reaction) in reactions.iter().enumerate() {
-            let emoji = reaction.emoji.clone();
-            picker = picker.child(
-                div()
-                    .id(("story-reaction-option", index))
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .text_2xl()
-                    .p_1()
-                    .child(emoji.clone())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.pick_story_reaction(&emoji, cx);
-                    })),
-            );
+            match &reaction.kind {
+                StoryAvailableReactionKind::Emoji(emoji) => {
+                    let emoji = emoji.clone();
+                    picker = picker.child(
+                        div()
+                            .id(("story-reaction-option", index))
+                            .cursor_pointer()
+                            .pressable(cx.theme())
+                            .text_2xl()
+                            .p_1()
+                            .child(emoji.clone())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.pick_story_reaction(&emoji, cx);
+                            })),
+                    );
+                }
+                StoryAvailableReactionKind::CustomEmoji(id) => {
+                    let id = *id;
+                    let path = self.story_custom_emoji_path(id);
+                    let mut cell = div()
+                        .id(("story-custom-emoji-option", index))
+                        .cursor_pointer()
+                        .pressable(cx.theme())
+                        .w(px(64.))
+                        .h(px(64.))
+                        .flex_shrink_0()
+                        .rounded_md()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center();
+                    if let Some(path) = path {
+                        cell = cell.child(
+                            img(path)
+                                .id(("story-custom-emoji-img", id as u64))
+                                .w(px(36.))
+                                .h(px(36.))
+                                .flex_shrink_0()
+                                .object_fit(ObjectFit::Contain)
+                                .with_fallback(|| div().text_2xl().child("✨").into_any_element())
+                                .into_any_element(),
+                        );
+                    } else {
+                        cell = cell.child(div().text_2xl().child("✨"));
+                    }
+                    if reaction.needs_premium {
+                        cell = cell.child(
+                            div()
+                                .text_xs()
+                                .whitespace_nowrap()
+                                .text_color(text_muted())
+                                .child("Premium"),
+                        );
+                    }
+                    picker = picker.child(cell.on_click(cx.listener(move |this, _, _, cx| {
+                        this.pick_story_custom_emoji_reaction(id, cx);
+                    })));
+                }
+                StoryAvailableReactionKind::Paid => {}
+            }
         }
         picker.into_any_element()
     }
@@ -987,6 +1155,28 @@ impl QuillApp {
                     this.quick_react_story(cx);
                 })),
         );
+        // Phase 9.2+: the viewer's chosen custom-emoji / paid reaction.
+        // Emoji chosen state already shows on the quick-react button;
+        // custom emoji renders its sticker (✨ fallback while loading),
+        // paid renders ⭐.
+        if let Some(extra) = story.as_ref().and_then(|story| story.chosen_reaction_extra) {
+            let badge: AnyElement = match extra {
+                StoryChosenExtraReaction::CustomEmoji(id) => {
+                    match self.story_custom_emoji_path(id) {
+                        Some(path) => img(path)
+                            .id(("story-chosen-custom-emoji", id as u64))
+                            .w(px(28.))
+                            .h(px(28.))
+                            .object_fit(ObjectFit::Contain)
+                            .with_fallback(|| div().text_xl().child("✨").into_any_element())
+                            .into_any_element(),
+                        None => div().text_xl().child("✨").into_any_element(),
+                    }
+                }
+                StoryChosenExtraReaction::Paid => div().text_xl().child("⭐").into_any_element(),
+            };
+            row = row.child(badge);
+        }
         // Phase 9.7: entry point to the chat story page (albums, chat-page
         // stories, archive) for the current story's chat.
         row = row.child(

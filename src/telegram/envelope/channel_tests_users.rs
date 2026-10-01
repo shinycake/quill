@@ -255,3 +255,16 @@ fn user_full_info_photo_parsed_from_chat_photo() {
         other => panic!("{other:?}"),
     }
 }
+
+// Rich-text premium gate: `user.is_premium` (schema 1.8.67 line 2403)
+// parses through — `Session::my_is_premium` gates
+// `premiumFeatureRichMessages` on it.
+#[test]
+fn update_user_parses_is_premium() {
+    let json = r#"{"@type":"updateUser","user":{"@type":"user","id":31,"first_name":"Ada","last_name":"","usernames":null,"phone_number":"","status":null,"profile_photo":null,"accent_color_id":0,"background_custom_emoji_id":0,"upgraded_gift_colors":null,"profile_accent_color_id":-1,"profile_background_custom_emoji_id":0,"emoji_status":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"verification_status":null,"is_premium":true,"is_support":false,"restriction_info":null,"active_story_state":null,"restricts_new_chats":false,"paid_message_star_count":0,"have_access":true,"type":{"@type":"userTypeRegular"},"language_code":"en","added_to_attachment_menu":false}}"#;
+    let env = parse_envelope(json).unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateUser { user, .. } => assert!(user.is_premium),
+        other => panic!("{other:?}"),
+    }
+}

@@ -105,6 +105,14 @@ impl Session {
         self.story_viewers = None;
     }
 
+    /// Phase 9.2+: store `getCustomEmojiStickers` answers for the story
+    /// reaction picker — keyed by sticker id (= custom emoji id).
+    pub fn accept_story_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
+        for sticker in stickers {
+            self.story_custom_emoji_stickers.insert(sticker.id, sticker);
+        }
+    }
+
     /// Phase 9.5: accumulate one `storyInteractions` page into the
     /// viewers panel. A page for a different story (stale response after
     /// the viewer moved on) is dropped.
