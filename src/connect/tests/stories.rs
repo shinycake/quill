@@ -636,7 +636,7 @@ fn driver_join_live_story_two_step_and_gates() {
         )
         .unwrap();
     // An existing tracked call refuses a competing live-story join.
-    driver.session.active_group_call = Some(tracked_group_call(99, false, false));
+    driver.session.active_group_call = Some(tracked_group_call(false, false, false));
     assert_eq!(
         driver.join_live_story(ChatId(7), 6),
         Err(ConnectSendError::InvalidRequest)

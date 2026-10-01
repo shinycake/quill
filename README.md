@@ -312,7 +312,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Viewer Prev / Next / Close; Escape closes viewer before other overlays (DECISIONS.md Phase 9.1) <!-- parity:stories-viewer-nav -->
 - [x] Segmented progress bar with auto-advance to next story (src/story_viewer.rs StoryPlayback: 5s photos per Telegram Desktop kPhotoDuration, video uses its own storyVideo.duration; src/ui/mod.rs story_progress_bar + 100ms tick; DECISIONS.md Phase 9.8) <!-- parity:stories-progress-bar -->
 - [x] Live/unsupported story content degrades to a placeholder in the item list (src/story_viewer.rs:11-13) <!-- parity:stories-live-placeholder -->
-- [x] Join or play live stories (storyContentLive / startLiveStory in schema) — viewer Join button: getGroupCall then joinLiveStory via the existing group-call machinery; RTMP live stories show an honest not-supported note (RTMP playback remains unverified) <!-- parity:stories-live-play -->
+- [ ] Join or play live stories (storyContentLive / startLiveStory in schema) <!-- parity:stories-live-play -->
 - [x] openStory/closeStory mark stories viewed; read state from max_read_story_id (telegram/requests.rs:2519,2531) <!-- parity:stories-read-state -->
 - [x] Quick-react ❤️ toggle on viewer, chosen state shown (ui/mod.rs:5505-5566) <!-- parity:stories-quick-react -->
 - [x] Reaction picker fed by getStoryAvailableReactions (ui/mod.rs:5532 toggle_story_reaction_picker) <!-- parity:stories-reaction-picker -->
