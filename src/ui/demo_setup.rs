@@ -47,8 +47,8 @@ use super::inline_playback::{
 use super::message_games::apply_ready_game_card;
 use super::message_media::{apply_ready_dice, apply_ready_location};
 use super::message_text::{
-    apply_ready_caption_position, apply_ready_link_preview, apply_ready_preview_cards,
-    apply_ready_text_entities,
+    apply_ready_blockquote_expandable, apply_ready_caption_position, apply_ready_link_preview,
+    apply_ready_preview_cards, apply_ready_text_entities,
 };
 use super::notification_settings::apply_ready_notification_sound;
 use super::payments::apply_ready_payments;
@@ -1182,6 +1182,13 @@ impl QuillApp {
                 apply_ready_text_entities(session, &self.demo_sink, &self.demo_seq);
             }
             self.status_note = "screenshot demo — text entities".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyBlockquoteExpandable)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_blockquote_expandable(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — expandable block quotes".into();
         }
     }
 

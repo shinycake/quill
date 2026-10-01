@@ -33,6 +33,16 @@ pub(super) fn apply_ready_reply(session: &mut Session, sink: &Arc<MemorySink>, s
 }
 
 impl QuillApp {
+    /// Slice parity:platform-offline-errors — use the submitted schedule,
+    /// before the composer resets its one-shot scheduling choice.
+    fn send_started_note(&self, scheduling: ComposerScheduling, online_note: &str) -> String {
+        let offline = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.is_offline());
+        quill::composer::send_started_note(offline, scheduling, online_note).into()
+    }
+
     pub(super) fn submit_composer(
         &mut self,
         text: String,
@@ -181,6 +191,7 @@ impl QuillApp {
                         }
                         result = self.live.as_mut().expect("live").driver.send_snapshot(snap);
                     }
+                    let scheduling = snaps[0].send_options.scheduling;
                     match result {
                         Ok(_) => {
                             self.pending_attachments.clear();
@@ -202,7 +213,7 @@ impl QuillApp {
                             self.composer
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             self.forget_local_draft(chat_id);
-                            self.status_note = "sending…".into();
+                            self.status_note = self.send_started_note(scheduling, "sending…");
                         }
                         Err(quill::connect::ConnectSendError::CaptionTooLong { limit }) => {
                             // MED4: runtime `message_caption_length_max`
@@ -415,7 +426,7 @@ impl QuillApp {
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
-                self.status_note = "sending\u{2026}".into();
+                self.status_note = self.send_started_note(options.scheduling, "sending…");
             }
             Err(_) => {
                 self.status_note = "could not send rich message".into();
@@ -1174,7 +1185,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.resend_failed_message(chat_id, message_id) {
-                Ok(_) => "retrying send…".into(),
+                Ok(_) => self.send_started_note(ComposerScheduling::None, "retrying send…"),
                 Err(_) => "could not retry".into(),
             };
         } else {
@@ -1441,7 +1452,8 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.finish_edit_restore_draft(window, cx);
-                    self.status_note = "saving edit…".into();
+                    self.status_note =
+                        self.send_started_note(ComposerScheduling::None, "saving edit…");
                 }
                 Err(_) => {
                     self.status_note = "could not edit message".into();
