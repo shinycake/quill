@@ -1,3 +1,0 @@
-parity:emoji-picker
-parity:emoji-insert
-parity:emoji-clear-recent

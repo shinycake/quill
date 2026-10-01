@@ -445,15 +445,15 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] "Autoplay GIFs" setting <!-- parity:gifs-autoplay-setting -->
 - [ ] GIF loop playback in history (partial: static frame cache only, ui/mod.rs:3015) <!-- parity:gifs-history-playback -->
 - [x] Apply updateAnimationSearchParameters to GIF search (search still rides the animation_search_bot_username inline-bot path) <!-- parity:gifs-search-parameters -->
-- [ ] Emoji picker in composer with categories (Smileys & People, etc.) and search <!-- parity:emoji-picker --> (partial: backend wired — getEmojiCategories + searchEmojis parsed into EmojiPanel; picker UI pending)
-- [ ] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
-- [ ] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
+- [x] Emoji picker in composer with categories (Smileys & People, etc.) and search <!-- parity:emoji-picker -->
+- [x] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
+- [x] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
 - [ ] Custom emoji packs (browse/install/remove, "Emoji Sets" settings screen) <!-- parity:emoji-custom-packs --> (partial: backend wired — getInstalledStickerSets/getArchivedStickerSets/getTrendingStickerSets/searchStickerSets with stickerTypeCustomEmoji + changeStickerSet reuse + reorderInstalledStickerSets; "Emoji Sets" screen pending)
 - [ ] Render custom emoji inside message text <!-- parity:emoji-custom-render --> (partial: backend wired — getCustomEmojiStickers resolves ids to stickers in EmojiPanel; render in text pending)
 - [ ] Suggest animated emoji in composer <!-- parity:emoji-suggest-animated --> (partial: backend wired — getAnimatedEmoji + animatedEmoji parse into EmojiPanel; composer suggestion UI pending)
 - [ ] Emoji status: select/set status, timed status (1h/2h/8h/2d/custom), trending statuses <!-- parity:emoji-status --> (partial: backend wired — setEmojiStatus incl. null-clear, getRecent/getThemed/getDefault/getUpgradedGiftEmojiStatuses parsed into EmojiPanel; status picker UI pending)
 - [ ] Clear recent emoji statuses <!-- parity:emoji-status-clear-recent --> (partial: backend wired — clearRecentEmojiStatuses + cache invalidation; UI affordance pending)
-- [ ] Clear recent emoji <!-- parity:emoji-clear-recent --> (partial: no TDLib API — recent plain emoji are client-side state in every official client; the picker slice owns local storage)
+- [x] Clear recent emoji <!-- parity:emoji-clear-recent -->
 - [ ] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order --> (partial: backend wired — reorderInstalledStickerSets with stickerTypeCustomEmoji; the dynamic toggle itself is client-side recency ordering, settings UI pending)
 - [ ] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
 - [ ] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
