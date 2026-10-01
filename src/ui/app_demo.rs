@@ -527,6 +527,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — ⭐ subscriptions (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyMarketplaceGift => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — collectible gift quote (no purchase)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyLocation => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1330,6 +1336,18 @@ impl QuillApp {
             emoji_set_search_input,
             emoji_status_hours_input,
             gif_search_input,
+            marketplace_open: false,
+            marketplace_name_input: cx.new(|cx| {
+                TextareaState::new(window, cx)
+                    .placeholder("Collectible gift name, e.g. PlushPepe-123")
+            }),
+            marketplace_comment_input: cx.new(|cx| {
+                TextareaState::new(window, cx)
+                    .placeholder("Personal comment")
+                    .submit_on_enter(false)
+            }),
+            marketplace_private: true,
+            marketplace_error: None,
             registration_first_input,
             registration_last_input,
             accepted_registration_terms: None,

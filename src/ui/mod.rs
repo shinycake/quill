@@ -77,6 +77,7 @@ mod groups_welcome;
 mod history;
 mod inline_mode;
 mod inline_playback;
+mod marketplace;
 mod media_viewer;
 mod message_actions;
 mod message_games;

@@ -388,6 +388,9 @@ impl QuillApp {
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
     fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
+        self.marketplace_open = false;
+        self.marketplace_error = None;
+        self.marketplace_private = true;
         let old = self.live.take();
         drop(old);
         // D2 fix-up: the warning promises "Downloaded media will be

@@ -1186,6 +1186,9 @@ pub enum EnvelopePayload {
     /// Slice P1: `paymentForm` — the `getPaymentForm` answer after a Buy
     /// button press (schema/td_api.tl:4734).
     PaymentForm(PaymentFormData),
+    MarketplaceGift(Option<crate::marketplace::GiftQuote>),
+    GiftTextLimit(i64),
+    GiftPurchaseResult(crate::marketplace::GiftPurchaseResult),
     /// Slice P1: `validatedOrderInfo` — the `validateOrderInfo` answer
     /// (schema/td_api.tl:4737).
     ValidatedOrderInfo(ValidatedOrderInfoData),

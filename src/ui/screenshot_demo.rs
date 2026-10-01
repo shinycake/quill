@@ -378,6 +378,7 @@ pub enum ScreenshotDemo {
     /// (active channel, canceled bot, expired channel rows), dialog open
     /// (injected, no live Telegram).
     ReadySubscriptions,
+    ReadyMarketplaceGift,
     /// Phase B2: key verification UI (injected, no live Telegram) — the
     /// same Ready secret chat as `ReadySecretChat` but with a real
     /// 36-byte `key_hash` (deterministic fixture), and the partner's

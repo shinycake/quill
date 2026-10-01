@@ -840,6 +840,25 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         )),
         // Slice P1: payment answers (TDLib 1.8.67, `schema/td_api.tl:4734` /
         // `:4737` / `:4740` / `:4765`).
+        "upgradedGift" => Ok(EnvelopePayload::MarketplaceGift(
+            crate::marketplace::GiftQuote::parse(&value),
+        )),
+        "optionValueInteger" => Ok(EnvelopePayload::GiftTextLimit(int53_or_zero(
+            value.get("value"),
+        ))),
+        "giftResaleResultOk" => Ok(EnvelopePayload::GiftPurchaseResult(
+            crate::marketplace::GiftPurchaseResult::Sent(json_field_str(
+                &value,
+                "received_gift_id",
+            )),
+        )),
+        "giftResaleResultPriceIncreased" => Ok(EnvelopePayload::GiftPurchaseResult(
+            crate::marketplace::GiftPurchaseResult::PriceIncreased(
+                value
+                    .get("price")
+                    .and_then(crate::marketplace::GiftPrice::parse),
+            ),
+        )),
         "paymentForm" => parse_payment_form(&value)
             .map(EnvelopePayload::PaymentForm)
             .ok_or(ParseError::MissingField),
