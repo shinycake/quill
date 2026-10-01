@@ -585,7 +585,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Drag-and-drop files into the composer <!-- parity:platform-drag-drop-files -->
 - [x] Copy text to clipboard (inline keyboard copy-text button src/ui/mod.rs:3932; invite link src/ui/mod.rs:6357) <!-- parity:platform-copy-clipboard -->
 - [x] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
-- [ ] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
+- [x] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
 
 Decisions, pins, and blockers: [DECISIONS.md](DECISIONS.md).  
 What credentials are needed next: [docs/credentials.md](docs/credentials.md).  
