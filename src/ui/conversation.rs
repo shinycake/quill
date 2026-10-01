@@ -1115,9 +1115,10 @@ impl QuillApp {
             .when(self.gif_panel_open(), |this| {
                 this.child(self.gif_picker_panel(cx))
             })
-            .when(self.sticker_panel_open(), |this| {
-                this.child(self.sticker_picker_panel(cx))
-            })
+            .when(
+                self.sticker_panel_open() && !self.sticker_settings_open,
+                |this| this.child(self.sticker_picker_panel(cx)),
+            )
             .when(chat_search_open, |this| {
                 this.child(self.chat_search_bar(cx))
             })

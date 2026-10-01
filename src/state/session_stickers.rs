@@ -2,6 +2,21 @@
 use super::*;
 
 impl Session {
+    pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
+        let next = sets.last().map(|set| set.id).unwrap_or(0);
+        self.stickers.archived_has_more =
+            sets.len() == 100 && next > 0 && next != self.stickers.archived_offset;
+        self.stickers.archived_next_offset = next;
+        if self.stickers.archived_offset == 0 {
+            self.stickers.archived.clear();
+        }
+        let mut ids: HashSet<_> = self.stickers.archived.iter().map(|set| set.id).collect();
+        self.stickers
+            .archived
+            .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
+        self.stickers.failed = false;
+    }
+
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.stickers.loading_sets = false;
         self.stickers.failed = false;

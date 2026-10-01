@@ -1481,6 +1481,9 @@ impl Session {
             EnvelopePayload::StickerSets { sets, .. } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
                     self.accept_installed_sticker_sets(sets);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchivedStickerSets)
+                {
+                    self.accept_archived_sticker_sets(sets);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchStickerSets) {
                     // Slice S8: `searchStickerSets` answers with `stickerSets`.
                     self.accept_found_sticker_sets(sets);

@@ -1421,6 +1421,13 @@ impl QuillApp {
                                 this.open_community_hub(cx);
                             })),
                     );
+                    list = list.child(
+                        Button::new("archived-stickers-settings")
+                            .label("Archived stickers")
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.open_archived_stickers(cx)),
+                            ),
+                    );
                     // Slice S4: Data & Storage dialog entry (TGX Settings →
                     // Data and Storage). Quill has no settings screen, so
                     // it sits next to the secret-chat entry; it fetches

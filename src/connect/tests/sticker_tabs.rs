@@ -372,5 +372,115 @@ fn sticker_reordering_preserves_order_on_failure_and_refetches_on_success() {
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.reorder_sticker_set(11, 33).is_err());
     drop(driver);
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.stickers.open = true;
+    let first = driver
+        .select_sticker_tab(StickerTab::Archived)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        sent_request(&recorder, "getArchivedStickerSets")["sticker_type"]["@type"],
+        "stickerTypeRegular"
+    );
+    assert_eq!(driver.fetch_archived_stickers(true).unwrap(), None);
+    let sets = |extra, ids: Vec<i64>| {
+        json!({"@type":"stickerSets","@extra":extra,"sets":ids.iter().map(|id| json!({"@type":"stickerSetInfo","id":id.to_string(),"title":"Archived","name":"Archived","size":0,"is_installed":false,"is_archived":true})).collect::<Vec<_>>()}).to_string()
+    };
+    driver
+        .ingest(
+            copy_and_parse(
+                &sets(json!(first.as_extra()), (1..=100).collect()),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.stickers.archived_has_more);
+    let more = driver.fetch_archived_stickers(true).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "getArchivedStickerSets")["offset_sticker_set_id"],
+        "100"
+    );
+    driver
+        .ingest(copy_and_parse(&sets(json!(more.as_extra()), vec![100, 101]), &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.stickers.archived.len(), 101);
+    assert!(!driver.session.stickers.archived_has_more);
+    assert_eq!(driver.fetch_archived_stickers(true).unwrap(), None);
+    let before = driver.session.stickers.archived.clone();
+    let restore = driver.manage_sticker_set(1, true, false).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "changeStickerSet")["is_archived"],
+        false
+    );
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"error","@extra":restore.as_extra(),"code":500,"message":"test"})
+                    .to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.stickers.archived, before);
+    let old = driver.fetch_archived_stickers(false).unwrap().unwrap();
+    driver.session.stickers.selected_set_id = Some(1);
+    let restore = driver.manage_sticker_set(1, true, false).unwrap().unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":restore.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.stickers.archived.is_empty());
+    assert_eq!(driver.session.stickers.selected_set_id, None);
+    let fresh = sent_request(&recorder, "getArchivedStickerSets")["@extra"].clone();
+    assert_ne!(fresh, json!(old.as_extra()));
+    driver
+        .ingest(copy_and_parse(&sets(json!(old.as_extra()), vec![1]), &seq, &sink).unwrap())
+        .unwrap();
+    assert!(driver.session.stickers.archived.is_empty());
+    driver
+        .ingest(copy_and_parse(&sets(fresh, vec![2]), &seq, &sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.stickers.archived[0].id, 2);
+    let archive = driver.manage_sticker_set(2, false, true).unwrap().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "changeStickerSet")["is_installed"],
+        false
+    );
+    assert_eq!(
+        sent_request(&recorder, "changeStickerSet")["is_archived"],
+        true
+    );
+    driver.session.stickers.close();
+    driver
+        .ingest(
+            copy_and_parse(
+                &json!({"@type":"ok","@extra":archive.as_extra()}).to_string(),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.stickers.archived.is_empty());
+    drop(driver);
+    let _ = std::fs::remove_dir_all(dir);
 }

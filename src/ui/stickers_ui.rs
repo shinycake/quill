@@ -3,7 +3,9 @@ use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::pressable::PressableDiv;
 use super::*;
+use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -11,8 +13,69 @@ use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{RequestPurpose, StickerTab};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 impl QuillApp {
+    pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
+        self.sticker_settings_open = true;
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.stickers.open = true;
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.stickers.open = true;
+        }
+        self.select_sticker_tab(StickerTab::Archived, cx);
+    }
+
+    pub(super) fn build_archived_stickers_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::ArchivedStickers, |this, _, cx| {
+                this.close_sticker_panel(cx)
+            });
+        app.update(cx, |this, cx| {
+            let body = Rc::new(RefCell::new(Some(
+                this.sticker_picker_panel(cx).into_any_element(),
+            )));
+            dialog
+                .overlay(true)
+                .title("Archived stickers")
+                .content(move |content, _, _| {
+                    content.child(
+                        body.borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element()),
+                    )
+                })
+                .on_close(on_close)
+        })
+    }
+
+    fn more_archived_stickers(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.fetch_archived_stickers(true) {
+                Ok(_) => "loading archived stickers…".into(),
+                Err(_) => "could not load archived stickers".into(),
+            };
+        }
+        cx.notify();
+    }
+
+    fn archive_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.manage_sticker_set(set_id, false, true) {
+                Ok(Some(_)) => "archiving sticker set…".into(),
+                Ok(None) => "sticker set update already pending".into(),
+                Err(_) => "could not archive sticker set".into(),
+            };
+        }
+        cx.notify();
+    }
+
     fn select_sticker_tab(&mut self, tab: StickerTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.select_sticker_tab(tab) {
@@ -133,7 +196,16 @@ impl QuillApp {
                 }))
         } else {
             button
-                .label(if pending { "Installing…" } else { "Install" })
+                .label(if pending {
+                    "Installing…"
+                } else if self
+                    .session()
+                    .is_some_and(|s| s.stickers.archived.iter().any(|set| set.id == set_id))
+                {
+                    "Restore"
+                } else {
+                    "Install"
+                })
                 .on_click(cx.listener(move |this, _, _, cx| this.install_sticker_set(set_id, cx)))
         }
     }
@@ -162,6 +234,7 @@ impl QuillApp {
             (StickerTab::Favorites, "Favorites"),
             (StickerTab::Trending, "Trending"),
             (StickerTab::Search, "Search"),
+            (StickerTab::Archived, "Archived"),
         ] {
             tabs = tabs.child(
                 Button::new(format!("sticker-tab-{tab:?}"))
@@ -187,6 +260,7 @@ impl QuillApp {
         let visible_sets: Vec<_> = match panel.tab {
             StickerTab::Installed => panel.sets.iter().collect(),
             StickerTab::Trending => panel.trending.iter().collect(),
+            StickerTab::Archived => panel.archived.iter().collect(),
             StickerTab::Search => panel
                 .found_sets
                 .iter()
@@ -225,6 +299,16 @@ impl QuillApp {
                         ),
                 )
                 .child(self.sticker_set_action(set, "row", cx))
+                .when(set.is_installed, |row| {
+                    row.child(
+                        Button::new(format!("archive-set-{set_id}"))
+                            .label("Archive")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.archive_sticker_set(set_id, cx)
+                            })),
+                    )
+                })
                 .when(panel.tab == StickerTab::Installed, |row| {
                     row.cursor_move()
                         .on_drag(
@@ -246,6 +330,14 @@ impl QuillApp {
                     .label("More trending sets")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.more_trending_stickers(cx))),
+            );
+        }
+        if panel.tab == StickerTab::Archived && panel.archived_has_more {
+            sets = sets.child(
+                Button::new("more-archived-stickers")
+                    .label("More archived sets")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.more_archived_stickers(cx))),
             );
         }
         let mut grid = div().id("sticker-grid").flex().flex_wrap().gap_2();
@@ -376,6 +468,7 @@ impl QuillApp {
                 StickerTab::Recent => RequestPurpose::GetRecentStickers,
                 StickerTab::Favorites => RequestPurpose::GetFavoriteStickers,
                 StickerTab::Trending => RequestPurpose::GetTrendingStickerSets,
+                StickerTab::Archived => RequestPurpose::GetArchivedStickerSets,
                 StickerTab::Search => RequestPurpose::SearchStickerSets,
             };
             session.requests.has_purpose(purpose)
@@ -395,6 +488,10 @@ impl QuillApp {
                     "{} sets installed · Drag sets to reorder. Tap a sticker to send it.",
                     panel.sets.len()
                 ),
+                StickerTab::Archived if panel.archived.is_empty() => {
+                    "No archived sticker sets.".into()
+                }
+                StickerTab::Archived => "Restore a set to use it again.".into(),
                 StickerTab::Recent if panel.recent.is_empty() => "No recent stickers.".into(),
                 StickerTab::Favorites if panel.favorites.is_empty() => {
                     "No favorite stickers. Add one from an installed set.".into()

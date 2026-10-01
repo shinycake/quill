@@ -133,6 +133,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                         | RequestPurpose::ReorderInstalledStickerSets
                 )
             );
+        let archive_catalog_changed = sticker_set_changed
+            && matches!(view_purpose, Some(RequestPurpose::ManageStickerSet { .. }));
         let recent_cleared = matches!(owned.envelope.payload, EnvelopePayload::Ok)
             && view_purpose == Some(RequestPurpose::ClearRecentStickers);
         let trending_answer = matches!(
@@ -608,6 +610,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C2f: a dropped group call (`need_rejoin`) auto-rejoins
         // with the C2d attempt discipline (max 3).
         let _ = self.maybe_auto_rejoin_group_call();
+        if archive_catalog_changed {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetArchivedStickerSets),
+            );
+            if self.session.stickers.open
+                && self.session.stickers.tab == crate::state::StickerTab::Archived
+            {
+                drop(
+                    self.session
+                        .requests
+                        .take_purpose(RequestPurpose::GetStickerSet),
+                );
+                self.session.stickers.loading_set = false;
+                self.fetch_archived_stickers(false)?;
+            }
+        }
         if sticker_set_changed {
             drop(
                 self.session

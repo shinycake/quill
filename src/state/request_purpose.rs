@@ -249,6 +249,7 @@ pub enum RequestPurpose {
     RecognizeSpeech,
     /// `getInstalledStickerSets` (`stickerTypeRegular`). Response is `stickerSets`.
     GetInstalledStickerSets,
+    GetArchivedStickerSets,
     /// `getStickerSet`. Response is `stickerSet`.
     GetStickerSet,
     /// Slice S8: `getTrendingStickerSets` (regular). Response is

@@ -301,6 +301,7 @@ pub struct QuillApp {
     /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
     /// reference dialog is on screen.
     pub(super) shortcuts_open: bool,
+    pub(super) sticker_settings_open: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
