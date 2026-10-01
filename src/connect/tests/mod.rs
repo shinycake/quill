@@ -14,6 +14,7 @@ mod messaging;
 mod payments;
 mod search;
 mod settings;
+mod sticker_tabs;
 mod stories;
 mod support;
 

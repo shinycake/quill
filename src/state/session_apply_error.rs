@@ -1189,6 +1189,19 @@ impl Session {
             self.stickers.loading_set = false;
             self.stickers.failed = true;
         }
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(
+                RequestPurpose::GetFavoriteStickers
+                    | RequestPurpose::GetRecentStickers
+                    | RequestPurpose::GetTrendingStickerSets
+                    | RequestPurpose::ClearRecentStickers
+                    | RequestPurpose::AddFavoriteSticker
+                    | RequestPurpose::RemoveFavoriteSticker
+            )
+        ) {
+            self.stickers.failed = true;
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
             self.gifs.loading = false;
             self.gifs.failed = true;

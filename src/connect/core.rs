@@ -120,6 +120,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => false,
         };
+        let sticker_mutation_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
+            && matches!(
+                view_purpose,
+                Some(RequestPurpose::AddFavoriteSticker | RequestPurpose::RemoveFavoriteSticker)
+            );
+        let recent_cleared = matches!(owned.envelope.payload, EnvelopePayload::Ok)
+            && view_purpose == Some(RequestPurpose::ClearRecentStickers);
+        let trending_answer = matches!(
+            owned.envelope.payload,
+            EnvelopePayload::TrendingStickerSets { .. }
+        ) && view_purpose == Some(RequestPurpose::GetTrendingStickerSets);
         let thumbs_after = matches!(
             owned.envelope.payload,
             EnvelopePayload::Messages(_)
@@ -589,6 +600,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C2f: a dropped group call (`need_rejoin`) auto-rejoins
         // with the C2d attempt discipline (max 3).
         let _ = self.maybe_auto_rejoin_group_call();
+        if sticker_mutation_ok {
+            // An older fetch can answer after the mutation with stale contents.
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetFavoriteStickers),
+            );
+            if self.session.stickers.open {
+                self.sticker_request_favorites()?;
+            }
+        }
+        if recent_cleared {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetRecentStickers),
+            );
+        }
+        if trending_answer {
+            self.mark_trending_stickers_viewed()?;
+        }
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
         if chat_search_hits {
