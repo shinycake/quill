@@ -457,7 +457,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order --> (partial: backend wired — reorderInstalledStickerSets with stickerTypeCustomEmoji; the dynamic toggle itself is client-side recency ordering, settings UI pending)
 - [ ] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
 - [x] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
-- [ ] Group sticker set management (setSupergroupStickerSet / setSupergroupCustomEmojiStickerSet) <!-- parity:stickers-group-set --> (partial: backend landed — both builders + drivers, `can_set_sticker_set` / `sticker_set_id` / `custom_emoji_sticker_set_id` parsed into cached full info; group settings UI deferred post-Phase-9)
+- [x] Group sticker/custom emoji pack selection and removal for eligible supergroups; current confirmed pack, installed choices, safe refusal and retry; live changes unverified <!-- parity:stickers-group-set -->
 
 ### Bots, polls & payments
 
@@ -562,8 +562,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] High-contrast theme/mode <!-- parity:platform-high-contrast -->
 - [x] System tray icon with unread count (src/tray.rs: tray-icon 0.21 crate, programmatic 64x64 RGBA icon + red unread pill capped at "99+", tooltip — no-op on Linux per tray-icon's docs; 1s UI-thread sync from main.rs; silent no-op when the OS has no system tray; badge sums non-archived chats incl. muted — Telegram Desktop's actual default `_includeMutedCounter = true`) <!-- parity:platform-tray-icon -->
 - [ ] Minimize/close-to-tray behavior <!-- parity:platform-minimize-to-tray -->
-- [ ] Tray context menu (open window, quit) <!-- parity:platform-tray-menu -->
-- [ ] Start minimized to tray <!-- parity:platform-start-minimized -->
+- [x] System tray menu with Open Quill and Quit Quill, native Mac hide/reopen/quit smoke verified; other hosts compile only <!-- parity:platform-tray-menu -->
+- [x] Start minimized to tray via persisted General setting or --start-minimized; reveal-window fallback when no tray is available; native hidden-start smoke verified <!-- parity:platform-start-minimized -->
 - [x] Autostart on login (OS-level; schema `autostart` is bot-start-only, no TDLib involvement) — Linux XDG Autostart `.desktop` + macOS LaunchAgents plist; Windows unsupported (registry Run key needs a Windows setup to verify; explicit follow-up) <!-- parity:platform-autostart -->
 - [x] Spellcheck in composer (on-device English dictionary, corrections panel and custom words) <!-- parity:platform-spellcheck -->
 - [x] Chat history export to file (JSON export of the full history to Downloads, via client-side `getChatHistory` paging — no exportHistory constructor in schema; per-message sender names absent by design, Quill plumbs no sender identity) <!-- parity:platform-history-export -->
