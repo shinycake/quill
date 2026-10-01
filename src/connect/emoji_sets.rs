@@ -76,9 +76,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map_err(|_| ConnectSendError::InvalidRequest)?
         };
         self.session.emoji.status_note = None;
-        self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
+        let request = self.emoji_set_request(RequestPurpose::SetEmojiStatus, |extra| {
             crate::telegram::requests_emoji::set_emoji_status(extra, custom_emoji_id, expiration)
-        })
+        })?;
+        if request.is_some() {
+            self.session.emoji.pending_status_emoji = custom_emoji_id;
+        }
+        Ok(request)
     }
 
     pub fn clear_recent_emoji_statuses(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
@@ -154,7 +158,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(());
         }
-        let ids = self.session.message_custom_emoji_ids_to_resolve();
+        let mut ids = self.session.message_custom_emoji_ids_to_resolve();
+        ids.extend(
+            self.session
+                .media_prefs
+                .recent_custom_emoji_ids
+                .iter()
+                .copied()
+                .filter(|id| {
+                    !self.session.emoji.status_resolution_attempted.contains(id)
+                        && !self
+                            .session
+                            .emoji
+                            .custom_emoji_stickers
+                            .iter()
+                            .any(|item| item.custom_emoji_id == Some(*id))
+                }),
+        );
+        ids.sort_unstable();
+        ids.dedup();
+        ids.truncate(200);
         if !ids.is_empty() {
             self.session
                 .emoji
@@ -334,9 +357,30 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.emoji.mutation_failed = false;
-        self.emoji_set_request(RequestPurpose::ChangeEmojiSet, |id| {
+        let request = self.emoji_set_request(RequestPurpose::ChangeEmojiSet, |id| {
             change_sticker_set(id, set_id, installed, false)
-        })
+        })?;
+        if request.is_some() {
+            self.session.emoji.mutating_set = Some((set_id, installed));
+        }
+        Ok(request)
+    }
+
+    pub fn download_emoji_pack(&mut self, set_id: i64) -> Result<(), ConnectSendError> {
+        if self.session.emoji.outdated_packs.contains(&set_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let ids = self
+            .session
+            .emoji
+            .pack_files
+            .get(&set_id)
+            .cloned()
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        for id in ids {
+            self.download_file(id, THUMB_DOWNLOAD_PRIORITY)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn refresh_emoji_pack_catalog(&mut self) -> Result<(), ConnectSendError> {

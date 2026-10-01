@@ -281,6 +281,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-sponsored" => ScreenshotDemo::ReadySponsored,
                 "ready-custom-emoji" => ScreenshotDemo::ReadyCustomEmoji,
                 "ready-animated-emoji" => ScreenshotDemo::ReadyAnimatedEmoji,
+                "ready-emoji-packs" => ScreenshotDemo::ReadyEmojiPacks,
                 "ready-channels" => ScreenshotDemo::ReadyChannels,
                 "ready-channels-admin" => ScreenshotDemo::ReadyChannelsAdmin,
                 "ready-channel-stats" => ScreenshotDemo::ReadyChannelStats,
@@ -485,6 +486,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySponsored => ".quill-ready-ready-sponsored",
         ScreenshotDemo::ReadyCustomEmoji => ".quill-ready-ready-custom-emoji",
         ScreenshotDemo::ReadyAnimatedEmoji => ".quill-ready-ready-animated-emoji",
+        ScreenshotDemo::ReadyEmojiPacks => ".quill-ready-ready-emoji-packs",
         ScreenshotDemo::ReadyChannels => ".quill-ready-ready-channels",
         ScreenshotDemo::ReadyChannelsAdmin => ".quill-ready-ready-channels-admin",
         ScreenshotDemo::ReadyChannelStats => ".quill-ready-ready-channel-stats",
@@ -611,29 +613,35 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {
-                cx.open_window(
-                    WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(Bounds {
-                            origin: point(px(20.), px(20.)),
-                            size: size(px(demo_w), px(demo_h)),
-                        })),
-                        app_id: Some("org.shinycake.quill".into()),
-                        ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
-                            "Quill — Call audio devices"
-                        } else {
-                            "Quill"
-                        })
-                    },
-                    move |window, cx| {
-                        let view =
-                            cx.new(|cx| ui::QuillApp::new_with_demo(window, cx, None, Some(kind)));
-                        // kit Phase 2 (redo): shell mounts the kit dialog +
-                        // notification layers that Root does not mount itself.
-                        let shell = cx.new(|_cx| ui::QuillShell::new(view));
-                        cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
-                    },
-                )
-                .expect("failed to open screenshot demo window");
+                let demo_window = cx
+                    .open_window(
+                        WindowOptions {
+                            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                                origin: point(px(20.), px(20.)),
+                                size: size(px(demo_w), px(demo_h)),
+                            })),
+                            app_id: Some("org.shinycake.quill".into()),
+                            ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
+                                "Quill — Call audio devices"
+                            } else {
+                                "Quill"
+                            })
+                        },
+                        move |window, cx| {
+                            let view = cx.new(|cx| {
+                                ui::QuillApp::new_with_demo(window, cx, None, Some(kind))
+                            });
+                            // kit Phase 2 (redo): shell mounts the kit dialog +
+                            // notification layers that Root does not mount itself.
+                            let shell = cx.new(|_cx| ui::QuillShell::new(view));
+                            cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
+                        },
+                    )
+                    .expect("failed to open screenshot demo window");
+                let _ = demo_window.update(cx, |_, window, cx| {
+                    cx.activate(true);
+                    window.activate_window();
+                });
 
                 // Allow a couple of frames to paint, then signal the capture script.
                 cx.background_executor()

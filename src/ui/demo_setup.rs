@@ -433,6 +433,43 @@ impl QuillApp {
                 cx,
             );
         }
+        if demo == Some(ScreenshotDemo::ReadyEmojiPacks) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_gifs(session, &self.demo_sink, &self.demo_seq);
+                session.gifs.open = false;
+                session.emoji.open = true;
+                session.emoji.installed_sets = [
+                    "Downloaded pack",
+                    "Downloading pack",
+                    "Updated pack",
+                    "Installing pack",
+                ]
+                .iter()
+                .enumerate()
+                .map(|(index, title)| quill::telegram::envelope::StickerSetInfo {
+                    id: index as i64 + 1,
+                    title: (*title).into(),
+                    name: (*title).into(),
+                    size: 1,
+                    is_installed: true,
+                    is_official: false,
+                })
+                .collect();
+                session
+                    .emoji
+                    .pack_files
+                    .insert(1, vec![quill::ids::FileId(63)]);
+                session
+                    .emoji
+                    .pack_files
+                    .insert(2, vec![quill::ids::FileId(62)]);
+                session.downloading.insert(62);
+                session.emoji.outdated_packs.insert(3);
+                session.emoji.mutating_set = Some((4, true));
+                session.media_prefs.recent_emoji_packs = vec![2, 1];
+            }
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideo)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

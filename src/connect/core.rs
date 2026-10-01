@@ -448,7 +448,38 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.purpose(id)
                     == Some(RequestPurpose::RemoveAllFilesFromDownloads)
             });
+        let used_emoji: Vec<_> = match &owned.envelope.payload {
+            EnvelopePayload::UpdateMessageSendSucceeded { message, .. } if message.is_outgoing => {
+                if let crate::telegram::envelope::MessageContent::Text(text) = &message.content {
+                    text.entities
+                        .iter()
+                        .filter_map(|entity| match entity.kind {
+                            crate::text::TextEntityKind::CustomEmoji { custom_emoji_id } => {
+                                Some(custom_emoji_id)
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
+        };
+        let recent_packs = self.session.media_prefs.recent_emoji_packs.clone();
+        let recent_emoji = self.session.media_prefs.recent_custom_emoji_ids.clone();
+        let previous_seq = self.session.last_seq;
         self.session.apply(owned);
+        if self.session.last_seq != previous_seq {
+            self.session.remember_emoji_pack_usage(&used_emoji);
+        }
+        if (recent_packs != self.session.media_prefs.recent_emoji_packs
+            || recent_emoji != self.session.media_prefs.recent_custom_emoji_ids)
+            && self.save_media_prefs().is_err()
+        {
+            self.session.chat_action_error =
+                Some("Could not save emoji pack order. Retry in settings.".into());
+        }
         // Slice S4: persist per-network settings seeded from
         // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
         // filesystem, so it marks them dirty instead).
