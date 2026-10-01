@@ -583,6 +583,18 @@ pub enum ComposerScheduling {
     SendWhenOnline,
 }
 
+/// Send-started copy reflects both connectivity and the submitted schedule.
+pub fn send_started_note(offline: bool, scheduling: ComposerScheduling, online_note: &str) -> &str {
+    if !offline {
+        return online_note;
+    }
+    match scheduling {
+        ComposerScheduling::None => "You're offline — will send when you reconnect",
+        ComposerScheduling::SendAtDate(_) => "You're offline — will schedule when you reconnect",
+        ComposerScheduling::SendWhenOnline => "You're offline — will send when they're online",
+    }
+}
+
 /// M1: composer text formatting. The composer stays plain text; formatting
 /// is authored as lightweight markup (Telegram X `InputView` format menu /
 /// tdesktop markdown behavior) and converted to TDLib `textEntities` on
@@ -1364,6 +1376,42 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn offline_send_started_notes_follow_scheduling() {
+        for (scheduling, expected) in [
+            (
+                ComposerScheduling::None,
+                "You're offline — will send when you reconnect",
+            ),
+            (
+                ComposerScheduling::SendAtDate(1_800_000_000),
+                "You're offline — will schedule when you reconnect",
+            ),
+            (
+                ComposerScheduling::SendWhenOnline,
+                "You're offline — will send when they're online",
+            ),
+        ] {
+            assert_eq!(send_started_note(true, scheduling, "sending…"), expected);
+        }
+    }
+
+    #[test]
+    fn online_send_started_notes_preserve_provided_copy() {
+        for scheduling in [
+            ComposerScheduling::None,
+            ComposerScheduling::SendAtDate(1_800_000_000),
+            ComposerScheduling::SendWhenOnline,
+        ] {
+            for online_note in ["sending…", "saving edit…", "retrying send…"] {
+                assert_eq!(
+                    send_started_note(false, scheduling, online_note),
+                    online_note
+                );
+            }
+        }
+    }
 
     /// Parity slice (platform-paste-image): pasted bytes persist to a temp
     /// file and come back as a Photo attachment with a png suffix.

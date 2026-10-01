@@ -401,6 +401,10 @@ impl QuillApp {
             self.status_note =
                 "screenshot demo — recording voice · locked · playing voice note".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyShortcuts)) {
+            self.shortcuts_open = true;
+            self.status_note = "screenshot demo — keyboard shortcuts reference".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyGameCard)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -1311,11 +1315,12 @@ impl QuillApp {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_story_post(session, &self.demo_sink, &self.demo_seq);
             }
-            // Phase 9.2: viewer opens on the seeded own photo story with
-            // the reaction picker and the reply row visible, seeded
-            // `availableReactions`, and a chosen ❤ reaction. The composer
-            // isn't opened here — it has its own `ReadyStoryComposer`
-            // demo (Phase 9.3).
+            // Phase 9.2 / stories-custom-reactions: viewer opens on the
+            // seeded own photo story with the reaction picker and the
+            // reply row visible, seeded `availableReactions` (emoji +
+            // custom-emoji Premium tile with a local sticker thumb), and
+            // a chosen ❤ reaction. The composer isn't opened here — it
+            // has its own `ReadyStoryComposer` demo (Phase 9.3).
             self.open_story_viewer(ChatId(11), 5, cx);
             self.story_reaction_picker_open = true;
             self.story_reply_open = true;

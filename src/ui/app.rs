@@ -281,6 +281,9 @@ pub struct QuillApp {
     pub(super) chat_prefs: ChatPrefs,
     /// Settings → Appearance slice: the dialog is on screen.
     pub(super) appearance_open: bool,
+    /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
+    /// reference dialog is on screen.
+    pub(super) shortcuts_open: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.

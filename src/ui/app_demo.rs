@@ -97,6 +97,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — offline indicator (injected updates, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        // Slice parity:platform-offline-errors — offline banner + kit toast
+        // with the product offline-send note (status_note → push_status_note).
+        ScreenshotDemo::ReadyOfflineToast => (
+            Some(seed_ready_offline_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "You're offline — will send when you reconnect".into(),
+            AuthorizationState::Ready,
+        ),
         // Slice parity:platform-reconnect-states — same chat list, but
         // the fixture reports Updating so the transitional strip renders
         // with its per-state label.
@@ -454,6 +462,14 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — edit profile dialog (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        // Slice parity:platform-shortcuts-reference: the shortcuts dialog
+        // opens over the seeded chat list (see demo_setup.rs).
+        ScreenshotDemo::ReadyShortcuts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — keyboard shortcuts reference (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyBotCommandMenu => (
@@ -1341,6 +1357,7 @@ impl QuillApp {
             spell_misspellings: Vec::new(),
             spell_suggestions: Vec::new(),
             spellcheck_open: false,
+            shortcuts_open: false,
             data_storage_editor: None,
             data_storage_confirm_clear: false,
             sessions_open: false,

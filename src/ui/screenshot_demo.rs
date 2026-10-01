@@ -17,6 +17,10 @@ pub enum ScreenshotDemo {
     /// with `connection` forced to `WaitingForNetwork`, so the offline
     /// banner renders below the title bar (injected, no live Telegram).
     ReadyOffline,
+    /// Slice parity:platform-offline-errors — ReadyOffline fixture plus
+    /// the product offline-send toast ("You're offline — will send when
+    /// you reconnect") so kit notifications proof the note.
+    ReadyOfflineToast,
     /// Slice parity:platform-reconnect-states — the ReadyChats fixture
     /// with `connection` forced to `Updating`, so the transitional strip
     /// renders with its per-state label ("Updating…").
@@ -239,13 +243,15 @@ pub enum ScreenshotDemo {
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).
     ReadyStories,
-    /// Story posting slice demo (injected, no live Telegram): same seed as
-    /// `ReadyStories`, but Demo chat A's photo story carries a chosen ❤
-    /// reaction, interaction counts, and deletable/repliable flags; the
-    /// viewer opens with the **reaction picker** and **reply row** visible,
-    /// plus a seeded `availableReactions` response (Phase 9.2). The demo
-    /// keeps its viewer-only shape — the posting composer is the
-    /// `ReadyStoryComposer` demo (Phase 9.3).
+    /// Story posting / custom-reaction slice demo (injected, no live
+    /// Telegram): same seed as `ReadyStories`, but Demo chat A's photo
+    /// story carries a chosen ❤ reaction, interaction counts, and
+    /// deletable/repliable flags; the viewer opens with the **reaction
+    /// picker** and **reply row** visible, plus seeded `availableReactions`
+    /// (emoji + custom-emoji Premium tile with a local sticker thumb —
+    /// Phase 9.2 / `parity:stories-custom-reactions`). The demo keeps its
+    /// viewer-only shape — the posting composer is the `ReadyStoryComposer`
+    /// demo (Phase 9.3).
     ReadyStoryPost,
     /// Phase 9.3: story posting composer (injected, no live Telegram) —
     /// the `ReadyStories` fixture plus the composer overlay open: a
@@ -525,4 +531,8 @@ pub enum ScreenshotDemo {
     /// verdict — intended for a taller capture
     /// (`QUILL_DEMO_WINDOW_SIZE`) so the username section is visible.
     ReadyUsername,
+    /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
+    /// reference dialog open over the demo chat list (injected, no live
+    /// Telegram).
+    ReadyShortcuts,
 }
