@@ -413,3 +413,12 @@ pub fn check_phone_number_code(extra: RequestId, code: &str) -> String {
     })
     .to_string()
 }
+
+/// TDLib email login; values ride request JSON only.
+pub fn set_authentication_email_address(extra: RequestId, email: &str) -> String {
+    json!({"@type":"setAuthenticationEmailAddress","@extra":extra.as_extra(),"email_address":email})
+        .to_string()
+}
+pub fn check_authentication_email_code(extra: RequestId, code: &str) -> String {
+    json!({"@type":"checkAuthenticationEmailCode","@extra":extra.as_extra(),"code":{"@type":"emailAddressAuthenticationCode","code":code}}).to_string()
+}

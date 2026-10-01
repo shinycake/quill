@@ -1,0 +1,5 @@
+# Email login
+
+TDLib WaitEmailAddress now offers explicit email submission; WaitEmailCode presents the server-masked address and expected code length, reusing code entry and resend. Both requests use the pinned emailAddressAuthenticationCode API. Submitted values are cleared after sends and local copies zeroized; input resets on account switch. Invalid/duplicate submissions are rejected; transport failure removes the tracked request so retry works. Classified errors and server flood waits use the shared auth error surface.
+
+Auth transitions invalidate old auth requests in the shared reducer, preventing a late previous-phase error from replacing the current screen. Premium purchase stays unsupported. Native Apple/Google token alternatives and email-reset account recovery are not implemented; standard email code login is supported. Regression exercises parsed states, validation, duplicate/error/retry, raw request shapes, late phase errors, resend, phone-code compatibility, and transport rollback. Live account login remains unverified.

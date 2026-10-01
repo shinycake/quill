@@ -122,6 +122,10 @@ impl QuillApp {
             return;
         };
         self.close_accounts(window, cx);
+        self.email_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.code_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.emoji_picker_open = false;

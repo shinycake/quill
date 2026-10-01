@@ -26,6 +26,7 @@ pub(super) fn auth_action_note(
     let label = match &auth.action {
         AuthAction::UnsupportedHalt { reason } => format!("Blocked: {reason}"),
         AuthAction::Ready => format!("Ready ({gate})"),
+        AuthAction::EnterEmail => format!("Email entry ({gate})"),
         AuthAction::EnterPhone => format!("Phone entry ({gate})"),
         AuthAction::EnterCode => format!("Code entry ({gate})"),
         AuthAction::EnterPassword => format!("Password entry ({gate})"),
@@ -51,6 +52,24 @@ impl QuillApp {
             AuthorizationState::WaitPremiumPurchase => AuthorizationState::Ready,
             AuthorizationState::Ready => AuthorizationState::WaitPhoneNumber,
             other => other.clone(),
+        };
+        cx.notify();
+    }
+
+    pub(super) fn submit_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let mut email = self.email_input.read(cx).value().to_string();
+        let result = live.driver.submit_email(&email);
+        email.zeroize();
+        self.status_note = match result {
+            Ok(_) => {
+                self.email_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                "email submitted — waiting for Telegram".into()
+            }
+            Err(_) => "could not submit email".into(),
         };
         cx.notify();
     }
@@ -85,7 +104,7 @@ impl QuillApp {
         };
         if !matches!(
             live.driver.session.auth,
-            AuthorizationState::WaitCode { .. }
+            AuthorizationState::WaitCode { .. } | AuthorizationState::WaitEmailCode { .. }
         ) {
             return;
         }
@@ -139,7 +158,7 @@ impl QuillApp {
         };
         if !matches!(
             live.driver.session.auth,
-            AuthorizationState::WaitCode { .. }
+            AuthorizationState::WaitCode { .. } | AuthorizationState::WaitEmailCode { .. }
         ) {
             return;
         }

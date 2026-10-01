@@ -932,6 +932,12 @@ impl QuillApp {
                 .placeholder("Search stickers and sets")
                 .auto_grow(1, 1)
         });
+        let email_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Email address")
+                .auto_grow(1, 1)
+                .submit_on_enter(true)
+        });
         let phone_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Phone (+country code)")
@@ -1131,6 +1137,22 @@ impl QuillApp {
         )
         .detach();
         cx.subscribe_in(
+            &email_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { secondary, shift } = event {
+                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                    if should_send_on_enter(
+                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                        quill::composer::SendKeyMode::Enter,
+                    ) {
+                        this.submit_email(window, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+        cx.subscribe_in(
             &phone_input,
             window,
             |this, state, event: &InputEvent, window, cx| {
@@ -1276,6 +1298,7 @@ impl QuillApp {
             emoji_search_input,
             emoji_set_search_input,
             gif_search_input,
+            email_input,
             phone_input,
             code_input,
             password_input,

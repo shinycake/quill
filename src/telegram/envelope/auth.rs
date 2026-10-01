@@ -70,11 +70,20 @@ pub enum AuthorizationState {
     WaitPhoneNumber,
     WaitPremiumPurchase,
     WaitEmailAddress,
-    WaitEmailCode,
-    WaitCode { code_length: Option<i32> },
-    WaitOtherDeviceConfirmation { link: String },
+    WaitEmailCode {
+        email_pattern: String,
+        code_length: Option<i32>,
+    },
+    WaitCode {
+        code_length: Option<i32>,
+    },
+    WaitOtherDeviceConfirmation {
+        link: String,
+    },
     WaitRegistration,
-    WaitPassword { has_recovery_email: bool },
+    WaitPassword {
+        has_recovery_email: bool,
+    },
     Ready,
     LoggingOut,
     Closing,
@@ -123,7 +132,18 @@ pub(crate) fn parse_auth(value: &Value) -> AuthorizationState {
         "authorizationStateWaitPhoneNumber" => AuthorizationState::WaitPhoneNumber,
         "authorizationStateWaitPremiumPurchase" => AuthorizationState::WaitPremiumPurchase,
         "authorizationStateWaitEmailAddress" => AuthorizationState::WaitEmailAddress,
-        "authorizationStateWaitEmailCode" => AuthorizationState::WaitEmailCode,
+        "authorizationStateWaitEmailCode" => AuthorizationState::WaitEmailCode {
+            email_pattern: value
+                .get("code_info")
+                .map(|info| json_field_str(info, "email_address_pattern"))
+                .unwrap_or_default(),
+            code_length: value
+                .get("code_info")
+                .and_then(|info| info.get("length"))
+                .and_then(Value::as_i64)
+                .and_then(|n| i32::try_from(n).ok())
+                .filter(|n| *n > 0),
+        },
         "authorizationStateWaitCode" => AuthorizationState::WaitCode {
             code_length: value
                 .get("code_info")

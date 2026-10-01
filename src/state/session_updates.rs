@@ -3,6 +3,9 @@ use super::*;
 
 impl Session {
     pub(crate) fn set_auth(&mut self, state: AuthorizationState) {
+        if self.auth != state {
+            self.requests.invalidate_auth();
+        }
         if matches!(state, AuthorizationState::Closed) {
             self.shutdown = ShutdownPhase::Closed;
             self.requests.invalidate_account();

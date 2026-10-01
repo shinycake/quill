@@ -1859,7 +1859,20 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(self.status_note.clone()),
             );
-        list.when(show_phone, |this| {
+        list.when(
+            matches!(auth.action, quill::auth::AuthAction::EnterEmail) && self.live.is_some(),
+            |this| {
+                this.child(Textarea::new(&self.email_input).h(px(40.)))
+                    .child(
+                        Button::new("submit-login-email")
+                            .label("Submit email")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.submit_email(window, cx)),
+                            ),
+                    )
+            },
+        )
+        .when(show_phone, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Phone"))
                 .child(Textarea::new(&self.phone_input).h(px(40.)))
                 .child(
