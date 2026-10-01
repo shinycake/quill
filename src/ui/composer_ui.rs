@@ -359,6 +359,13 @@ impl QuillApp {
         thumb: Option<(FileId, i32, i32)>,
         cx: &mut Context<Self>,
     ) {
+        if self.session().is_some_and(|session| {
+            session.sticker_requires_premium(file_id) && !session.my_is_premium()
+        }) {
+            self.status_note = "Sending this sticker requires Telegram Premium".into();
+            cx.notify();
+            return;
+        }
         let chat_id = self.session().and_then(|session| session.open_chat);
         let Some(chat_id) = chat_id else {
             return;

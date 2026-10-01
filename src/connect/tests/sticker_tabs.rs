@@ -624,3 +624,41 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn premium_sticker_send_uses_full_type_and_current_account_entitlement() {
+    use crate::ids::ChatId;
+    use crate::telegram::requests::StickerSend;
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.ingest(copy_and_parse(&json!({"@type":"updateNewChat","chat":{"id":7,"title":"Test","type":{"@type":"chatTypePrivate","user_id":7}}}).to_string(),&seq,&sink).unwrap()).unwrap();
+    let fetch = driver.session.request(RequestPurpose::GetStickerSet, None);
+    let sticker = |id, premium| json!({"@type":"sticker","id":id,"set_id":"77","emoji":"😀","format":{"@type":"stickerFormatWebp"},"full_type":{"@type":"stickerFullTypeRegular","premium_animation":premium},"sticker":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":false},"remote":{"@type":"remoteFile"}}});
+    driver.ingest(copy_and_parse(&json!({"@type":"stickerSet","@extra":fetch.as_extra(),"id":"77","stickers":[sticker(9,json!({"@type":"file","id":90})),sticker(10,json!(null))]}).to_string(),&seq,&sink).unwrap()).unwrap();
+    assert!(driver.session.sticker_requires_premium(FileId(9)));
+    assert!(!driver.session.sticker_requires_premium(FileId(10)));
+    let send = |id| StickerSend {
+        file_id: FileId(id),
+        emoji: "😀",
+        width: 100,
+        height: 100,
+        thumb: None,
+        reply_to: None,
+        topic_id: None,
+    };
+    assert!(driver.send_sticker(ChatId(7), send(9)).is_err());
+    assert!(driver.send_sticker(ChatId(7), send(10)).is_ok());
+    driver.session.my_user_id = Some(7);
+    driver.ingest(copy_and_parse(&json!({"@type":"updateUser","user":{"@type":"user","id":7,"first_name":"Test","is_premium":true,"type":{"@type":"userTypeRegular"}}}).to_string(),&seq,&sink).unwrap()).unwrap();
+    assert!(driver.send_sticker(ChatId(7), send(9)).is_ok());
+    // History metadata remains sufficient after picker/search caches have changed.
+    driver.ingest(copy_and_parse(&json!({"@type":"updateNewMessage","message":{"id":1,"chat_id":7,"content":{"@type":"messageSticker","is_premium":false,"sticker":sticker(9,json!({"@type":"file","id":90}))}}}).to_string(),&seq,&sink).unwrap()).unwrap();
+    driver.session.stickers.stickers.clear();
+    driver.session.users.get_mut(&7).unwrap().is_premium = false;
+    assert!(driver.session.sticker_requires_premium(FileId(9)));
+    assert!(driver.send_sticker(ChatId(7), send(9)).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}

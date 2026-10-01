@@ -23,6 +23,7 @@ pub struct StickerContent {
     pub thumb_width: i32,
     pub thumb_height: i32,
     pub is_premium: bool,
+    pub requires_premium: bool,
 }
 
 impl StickerContent {
@@ -51,6 +52,7 @@ pub struct StickerItem {
     pub thumb_file_id: Option<FileId>,
     pub thumb_width: i32,
     pub thumb_height: i32,
+    pub requires_premium: bool,
 }
 
 impl StickerItem {
@@ -98,6 +100,7 @@ pub(crate) fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<Parse
             thumb_file_id: item.thumb_file_id,
             thumb_width: item.thumb_width,
             thumb_height: item.thumb_height,
+            requires_premium: item.requires_premium,
             is_premium: value
                 .get("is_premium")
                 .and_then(Value::as_bool)
@@ -169,6 +172,12 @@ pub(crate) fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>
             thumb_file_id,
             thumb_width,
             thumb_height,
+            requires_premium: value.get("full_type").is_some_and(|full_type| {
+                full_type.get("@type").and_then(Value::as_str) == Some("stickerFullTypeRegular")
+                    && full_type
+                        .get("premium_animation")
+                        .is_some_and(|animation| !animation.is_null())
+            }),
         }),
         files,
     )
