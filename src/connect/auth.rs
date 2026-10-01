@@ -176,6 +176,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         )
     }
 
+    /// User-triggered registration; acceptance must match the current terms exactly.
+    pub fn register_user(
+        &mut self,
+        first: &str,
+        last: &str,
+        accepted_terms: Option<&crate::telegram::envelope::RegistrationTerms>,
+        notify_contacts: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        let AuthorizationState::WaitRegistration { terms } = &self.session.auth else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if terms.as_ref() != accepted_terms {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let first = first.trim();
+        let last = last.trim();
+        if first.is_empty()
+            || first.chars().count() > 64
+            || last.chars().count() > 64
+            || first.chars().chain(last.chars()).any(char::is_control)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.login_request(RequestPurpose::RegisterUser, |id| {
+            crate::telegram::requests::register_user(id, first, last, !notify_contacts)
+        })
+    }
+
     fn login_request(
         &mut self,
         purpose: RequestPurpose,

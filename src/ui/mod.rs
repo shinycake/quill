@@ -36,6 +36,7 @@ mod app;
 mod app_demo;
 mod app_render;
 mod audio_playback;
+mod auth_registration;
 mod auth_ui;
 mod bot_pending;
 mod bots;

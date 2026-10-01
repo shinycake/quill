@@ -1,0 +1,5 @@
+# Explicit account registration
+
+WaitRegistration displays first/optional last name, the server terms text and explicit unchecked terms/age acceptance. Create account is a deliberate button action, never automatic. Notify contacts defaults off and maps to registerUser.disable_notification. Names obey the pinned 1–64 / 0–64 character limits; requests require acceptance matching current terms. Null terms are valid per pinned TermsOfService.cpp; malformed non-null terms halt authorization rather than bypass consent.
+
+Consent resets on terms/phase change, account switch, and successful submission. Duplicate/transport/error handling reuses the shared login request path and classified auth errors; late previous-phase replies are discarded. No terms are accepted on the user's behalf. Regression checks parsing, explicit acceptance, changed/malformed/null terms, names, duplicate/error/retry, notification inversion, and auth gating. Core tests/clippy and UI compilation pass; live new-account registration is unverified.

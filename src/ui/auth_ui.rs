@@ -26,6 +26,7 @@ pub(super) fn auth_action_note(
     let label = match &auth.action {
         AuthAction::UnsupportedHalt { reason } => format!("Blocked: {reason}"),
         AuthAction::Ready => format!("Ready ({gate})"),
+        AuthAction::Register => "Review registration and terms".into(),
         AuthAction::EnterEmail => format!("Email entry ({gate})"),
         AuthAction::EnterPhone => format!("Phone entry ({gate})"),
         AuthAction::EnterCode => format!("Code entry ({gate})"),

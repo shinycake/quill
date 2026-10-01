@@ -1859,6 +1859,10 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(self.status_note.clone()),
             );
+        list = list.when(
+            matches!(auth.action, quill::auth::AuthAction::Register) && self.live.is_some(),
+            |this| this.child(self.registration_form(cx)),
+        );
         list.when(
             matches!(auth.action, quill::auth::AuthAction::EnterEmail) && self.live.is_some(),
             |this| {

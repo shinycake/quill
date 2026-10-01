@@ -99,6 +99,7 @@ pub fn is_auth_submit(purpose: RequestPurpose) -> bool {
     matches!(
         purpose,
         RequestPurpose::SetPhoneNumber
+            | RequestPurpose::RegisterUser
             | RequestPurpose::SetAuthenticationEmail
             | RequestPurpose::CheckAuthenticationEmailCode
             | RequestPurpose::CheckAuthenticationCode
@@ -228,6 +229,12 @@ impl AuthRequestError {
 
     fn base_message(self) -> &'static str {
         match (self.purpose, self.class) {
+            (RequestPurpose::RegisterUser, ErrorClass::Invalid) => {
+                "registration not accepted — check your name"
+            }
+            (RequestPurpose::RegisterUser, ErrorClass::Flood) => {
+                "too many registration attempts — wait and try again"
+            }
             (RequestPurpose::SetPhoneNumber, ErrorClass::Invalid) => "phone not accepted",
             (RequestPurpose::SetPhoneNumber, ErrorClass::Flood) => {
                 "too many phone attempts — wait and try again"

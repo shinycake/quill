@@ -71,7 +71,7 @@ pub fn classify_smoke_auth(auth: &AuthorizationState) -> Option<SmokeOutcome> {
         AuthorizationState::WaitPremiumPurchase
         | AuthorizationState::WaitEmailAddress
         | AuthorizationState::WaitEmailCode { .. }
-        | AuthorizationState::WaitRegistration
+        | AuthorizationState::WaitRegistration { .. }
         | AuthorizationState::Unknown(_) => Some(SmokeOutcome::BlockedUnsupported),
         AuthorizationState::Closing | AuthorizationState::Closed => {
             Some(SmokeOutcome::BlockedClosed)
