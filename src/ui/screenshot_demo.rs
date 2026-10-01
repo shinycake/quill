@@ -17,6 +17,10 @@ pub enum ScreenshotDemo {
     /// with `connection` forced to `WaitingForNetwork`, so the offline
     /// banner renders below the title bar (injected, no live Telegram).
     ReadyOffline,
+    /// Slice parity:platform-offline-errors — ReadyOffline fixture plus
+    /// the product offline-send toast ("You're offline — will send when
+    /// you reconnect") so kit notifications proof the note.
+    ReadyOfflineToast,
     /// Slice parity:platform-reconnect-states — the ReadyChats fixture
     /// with `connection` forced to `Updating`, so the transitional strip
     /// renders with its per-state label ("Updating…").
