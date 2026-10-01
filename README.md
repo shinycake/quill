@@ -420,31 +420,31 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] GIF picker refreshes when updateSavedAnimations arrives (state.rs:4397-4398) <!-- parity:gifs-saved-refresh -->
 - [x] Emoji reactions picker (emoji-only) + reaction chips on messages (ui/mod.rs:631, state.rs:1298-1308) <!-- parity:emoji-reactions -->
 - [x] Sticker thumbnails shown in picker and history (state.rs:5215, ui/mod.rs:14067) <!-- parity:stickers-thumbnails -->
-- [x] Trending sticker sets tab (partial: backend wired — getTrendingStickerSets/viewTrendingStickerSets + state; tab UI pending) <!-- parity:stickers-trending -->
-- [x] Search sticker sets / stickers (searchStickerSets/searchStickers) <!-- parity:stickers-search --> (partial: backend wired — searchStickerSets/searchStickers + state; picker UI pending)
-- [x] Favorites sticker tab (getFavoriteStickers/addFavoriteSticker/removeFavoriteSticker) <!-- parity:stickers-favorites --> (partial: backend wired — get/add/removeFavoriteSticker + state; tab UI pending)
-- [x] Recent stickers tab + clear recent stickers (getRecentStickers/clearRecentStickers) <!-- parity:stickers-recent --> (partial: backend wired — getRecentStickers/clearRecentStickers + state; tab UI pending)
-- [x] Install sticker set (changeStickerSet install) <!-- parity:stickers-install --> (partial: backend wired — changeStickerSet install + cache invalidation; UI affordance pending)
-- [x] Remove sticker set with confirm dialog (partial: backend wired — changeStickerSet remove + cache invalidation; UI confirm dialog pending) <!-- parity:stickers-remove -->
-- [x] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive --> (partial: backend wired — changeStickerSet archive; Archived view UI pending)
-- [x] Reorder installed sticker sets (partial: backend wired — reorderInstalledStickerSets + cache invalidation; drag-reorder UI pending) <!-- parity:stickers-reorder -->
+- [x] Trending sticker sets tab <!-- parity:stickers-trending -->
+- [x] Search sticker sets / stickers (searchStickerSets/searchStickers) <!-- parity:stickers-search -->
+- [x] Favorites sticker tab (getFavoriteStickers/addFavoriteSticker/removeFavoriteSticker) <!-- parity:stickers-favorites -->
+- [x] Recent stickers tab + clear recent stickers (getRecentStickers/clearRecentStickers) <!-- parity:stickers-recent -->
+- [x] Install sticker set (changeStickerSet install) <!-- parity:stickers-install -->
+- [x] Remove sticker set with confirm dialog <!-- parity:stickers-remove -->
+- [x] Archive sticker set + Archived view in settings (restore path) <!-- parity:stickers-archive -->
+- [x] Reorder installed sticker sets <!-- parity:stickers-reorder -->
 - [x] Dynamic set order (auto-place recently used sets above others) <!-- parity:stickers-dynamic-order --> (backend + state: sticker sends pass update_order_of_installed_sticker_sets, updateInstalledStickerSets reorders the cached sets in place; picker already lists stored order, no UI change)
 - [x] Open sticker set preview screen (title, stickers grid, install/remove from preview) <!-- parity:stickers-set-preview -->
 - [x] "No sticker sets installed" empty state <!-- parity:stickers-empty-state -->
-- [x] "X sets installed" counts and batch install/remove feedback <!-- parity:stickers-install-counts --> (partial: backend wired — changeStickerSet install + cache invalidation; UI affordance pending)
-- [x] Sticker suggestions by emoji in composer (Installed + recommended / Only installed / None) <!-- parity:stickers-suggest-by-emoji --> (partial: backend wired — `StickerSuggestMode` in `src/sticker_suggest.rs` (persisted in `MediaPrefs`, serde-defaulted), trailing-emoji detection, `RequestPurpose::SuggestStickers` + `searchStickers` dispatch into `StickerPanel::suggestions` (never the search slot), `InstalledOnly` filters to installed set ids, `update_sticker_suggestions` driver dedupes repeats and drops stale in-flight suggests; composer suggestion-row UI pending)
+- [x] "X sets installed" counts and batch install/remove feedback <!-- parity:stickers-install-counts -->
+- [x] Sticker suggestions by emoji in composer (Installed + recommended / Only installed / None) <!-- parity:stickers-suggest-by-emoji -->
 - [ ] Animated sticker (TGS) playback in picker and history (partial: format parsed, only thumbnails rendered) <!-- parity:stickers-animated-playback -->
 - [ ] Video sticker (WebM) playback (partial: format parsed, static thumb only) <!-- parity:stickers-video-playback -->
 - [ ] "Loop Animated Stickers" setting <!-- parity:stickers-loop-setting -->
-- [ ] Premium sticker gating ("Sending this sticker requires Telegram Premium") <!-- parity:stickers-premium-gate -->
+- [x] Premium sticker gating ("Sending this sticker requires Telegram Premium") <!-- parity:stickers-premium-gate -->
 - [x] Show "choosing a sticker" chat action of others <!-- parity:stickers-typing-action --> (S17: `chatActionChoosingSticker` parsed to `ChatAction::ChoosingSticker`, per-sender tracking in `ChatSummary`, "choosing a sticker…" label in header + sidebar preview, winning over "typing…")
-- [ ] GIF search + trending GIFs (inline bot path searchInlineBots/getInlineQueryResults) <!-- parity:gifs-search-trending --> (partial: backend wired — getInlineQueryResults search + AnimationItem results + next_offset paging + updateAnimationSearchParameters state; search UI pending. Note: `searchInlineBots` does not exist in TDLib 1.8.67 — the bot resolves via the `animation_search_bot_username` option, see DECISIONS.md S9)
-- [ ] Save GIF to media keyboard (addSavedAnimation) <!-- parity:gifs-save --> (partial: backend wired — addSavedAnimation + cache invalidation; picker UI pending)
-- [ ] Delete saved GIF (removeSavedAnimation + confirm) <!-- parity:gifs-delete --> (partial: backend wired — removeSavedAnimation + cache invalidation; confirm dialog pending)
+- [x] GIF search + trending GIFs (animation_search_bot_username → searchPublicChat/getInlineQueryResults) <!-- parity:gifs-search-trending -->
+- [x] Save GIF to media keyboard (addSavedAnimation) <!-- parity:gifs-save -->
+- [x] Delete saved GIF (removeSavedAnimation + confirm) <!-- parity:gifs-delete -->
 - [x] "No GIFs" empty state <!-- parity:gifs-empty-state -->
 - [ ] "Autoplay GIFs" setting <!-- parity:gifs-autoplay-setting -->
 - [ ] GIF loop playback in history (partial: static frame cache only, ui/mod.rs:3015) <!-- parity:gifs-history-playback -->
-- [ ] Apply updateAnimationSearchParameters to GIF search (search still rides the animation_search_bot_username inline-bot path) <!-- parity:gifs-search-parameters --> (partial: backend wired — update parsed + provider/emojis stored in state; search UI pending)
+- [x] Apply updateAnimationSearchParameters to GIF search (search still rides the animation_search_bot_username inline-bot path) <!-- parity:gifs-search-parameters -->
 - [ ] Emoji picker in composer with categories (Smileys & People, etc.) and search <!-- parity:emoji-picker --> (partial: backend wired — getEmojiCategories + searchEmojis parsed into EmojiPanel; picker UI pending)
 - [ ] Insert emoji at cursor in composer text <!-- parity:emoji-insert -->
 - [ ] Big emoji rendering for emoji-only messages (Big Emoji setting) <!-- parity:emoji-big -->
