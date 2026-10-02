@@ -99,6 +99,9 @@ impl Rlottie {
         {
             candidates.push(dir.join(name));
             candidates.push(dir.join("../Frameworks").join(name));
+            for ancestor in dir.ancestors() {
+                candidates.push(ancestor.join("vendor/rlottie/prefix/lib").join(name));
+            }
         }
         for path in candidates {
             // SAFETY: only explicit owner-configured or bundled native libraries are loaded.
