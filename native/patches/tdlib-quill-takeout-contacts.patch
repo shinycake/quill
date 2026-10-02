@@ -1,8 +1,8 @@
 diff --git a/td/generate/scheme/td_api.tl b/td/generate/scheme/td_api.tl
-index 1671294..e848127 100644
+index 1671294..7cfab56 100644
 --- a/td/generate/scheme/td_api.tl
 +++ b/td/generate/scheme/td_api.tl
-@@ -11281,8 +11281,17 @@ testVectorString value:vector<string> = TestVectorString;
+@@ -11281,7 +11281,28 @@ testVectorString value:vector<string> = TestVectorString;
  //@description A simple object containing a vector of objects that hold a string; for testing only @value Vector of objects
  testVectorStringObject value:vector<testString> = TestVectorStringObject;
  
@@ -12,14 +12,25 @@ index 1671294..e848127 100644
 +//@description Saved phone contacts returned by the Quill takeout extension @contacts Saved contacts
 +quillSavedContacts contacts:vector<quillSavedContact> = QuillSavedContacts;
 +
- ---functions---
- 
++---functions---
++
 +//@description Exports saved phone contacts through a contacts-only takeout session and finishes that session before returning; for users only. Telegram may require a takeout initialization delay
 +getQuillSavedContacts = QuillSavedContacts;
 +
++---types---
++//@description A server-selected range for exporting account messages @min_id Minimum server message identifier @max_id Maximum server message identifier
++quillTakeoutMessageRange min_id:int32 max_id:int32 = QuillTakeoutMessageRange;
++
++//@description Server-selected ranges for exporting account messages @ranges The ranges
++quillTakeoutMessageRanges ranges:vector<quillTakeoutMessageRange> = QuillTakeoutMessageRanges;
++
+ ---functions---
++//@description Returns Telegram takeout message ranges; finishes the read-only session before responding. Available only to users
++getQuillTakeoutMessageRanges = QuillTakeoutMessageRanges;
++
+ 
  //@description Returns the current authorization state. This is an offline method. For informational purposes only. Use updateAuthorizationState instead to maintain the current authorization state. Can be called before initialization
  getAuthorizationState = AuthorizationState;
- 
 diff --git a/td/generate/scheme/telegram_api.tl b/td/generate/scheme/telegram_api.tl
 index ef214f4..5c4cc0c 100644
 --- a/td/generate/scheme/telegram_api.tl
@@ -33,10 +44,10 @@ index ef214f4..5c4cc0c 100644
  invokeWithGooglePlayIntegrityPrefix#1df92984 nonce:string token:string = Error;
  invokeWithApnsSecretPrefix#0dae54f8 nonce:string secret:string = Error;
 diff --git a/td/telegram/Requests.cpp b/td/telegram/Requests.cpp
-index 9a7b730..02552e9 100644
+index 9a7b730..4c70c81 100644
 --- a/td/telegram/Requests.cpp
 +++ b/td/telegram/Requests.cpp
-@@ -6644,6 +6644,12 @@ void Requests::on_request(uint64 id, const td_api::removeContacts &request) {
+@@ -6644,6 +6644,18 @@ void Requests::on_request(uint64 id, const td_api::removeContacts &request) {
    CREATE_REQUEST(RemoveContactsRequest, UserId::get_user_ids(request.user_ids_));
  }
  
@@ -46,39 +57,48 @@ index 9a7b730..02552e9 100644
 +  td_->user_manager_->get_quill_saved_contacts(std::move(promise));
 +}
 +
++void Requests::on_request(uint64 id, const td_api::getQuillTakeoutMessageRanges &request) {
++  CHECK_IS_USER();
++  CREATE_REQUEST_PROMISE();
++  td_->user_manager_->get_quill_takeout_message_ranges(std::move(promise));
++}
++
  void Requests::on_request(uint64 id, const td_api::getImportedContactCount &request) {
    CHECK_IS_USER();
    CREATE_COUNT_REQUEST_PROMISE();
 diff --git a/td/telegram/Requests.h b/td/telegram/Requests.h
-index 1eee0b2..4f763b0 100644
+index 1eee0b2..23726b6 100644
 --- a/td/telegram/Requests.h
 +++ b/td/telegram/Requests.h
-@@ -1314,6 +1314,8 @@ class Requests {
+@@ -1314,6 +1314,10 @@ class Requests {
  
    void on_request(uint64 id, const td_api::removeContacts &request);
  
 +  void on_request(uint64 id, const td_api::getQuillSavedContacts &request);
 +
++  void on_request(uint64 id, const td_api::getQuillTakeoutMessageRanges &request);
++
    void on_request(uint64 id, const td_api::getImportedContactCount &request);
  
    void on_request(uint64 id, td_api::changeImportedContacts &request);
 diff --git a/td/telegram/UserManager.cpp b/td/telegram/UserManager.cpp
-index 57d2065..58fee4a 100644
+index 57d2065..d4d0b51 100644
 --- a/td/telegram/UserManager.cpp
 +++ b/td/telegram/UserManager.cpp
-@@ -114,6 +114,98 @@
+@@ -114,6 +114,154 @@
  
  namespace td {
  
-+// Quill extension: only contacts are requested, and every initialized session is
-+// finished before responding. Each stage owns a separate one-shot ResultHandler.
-+class FinishQuillContactsTakeoutQuery final : public Td::ResultHandler {
-+  Promise<td_api::object_ptr<td_api::quillSavedContacts>> promise_;
-+  Result<td_api::object_ptr<td_api::quillSavedContacts>> result_;
++// Quill export extensions finish every initialized session before responding.
++// Each stage owns a separate one-shot ResultHandler.
++template <class ResultType>
++class FinishQuillTakeoutQuery final : public Td::ResultHandler {
++  Promise<td_api::object_ptr<ResultType>> promise_;
++  Result<td_api::object_ptr<ResultType>> result_;
 +
 + public:
-+  FinishQuillContactsTakeoutQuery(Promise<td_api::object_ptr<td_api::quillSavedContacts>> &&promise,
-+                                  Result<td_api::object_ptr<td_api::quillSavedContacts>> &&result)
++  FinishQuillTakeoutQuery(Promise<td_api::object_ptr<ResultType>> &&promise,
++                         Result<td_api::object_ptr<ResultType>> &&result)
 +      : promise_(std::move(promise)), result_(std::move(result)) {
 +  }
 +  void send(int64 takeout_id) {
@@ -131,11 +151,11 @@ index 57d2065..58fee4a 100644
 +      contacts.push_back(td_api::make_object<td_api::quillSavedContact>(
 +          std::move(contact->phone_), std::move(contact->first_name_), std::move(contact->last_name_), contact->date_));
 +    }
-+    td_->create_handler<FinishQuillContactsTakeoutQuery>(
++    td_->create_handler<FinishQuillTakeoutQuery<td_api::quillSavedContacts>>(
 +        std::move(promise_), td_api::make_object<td_api::quillSavedContacts>(std::move(contacts)))->send(takeout_id_);
 +  }
 +  void on_error(Status status) final {
-+    td_->create_handler<FinishQuillContactsTakeoutQuery>(std::move(promise_), std::move(status))->send(takeout_id_);
++    td_->create_handler<FinishQuillTakeoutQuery<td_api::quillSavedContacts>>(std::move(promise_), std::move(status))->send(takeout_id_);
 +  }
 +};
 +
@@ -162,10 +182,65 @@ index 57d2065..58fee4a 100644
 +  }
 +};
 +
++class GetQuillTakeoutRangesQuery final : public Td::ResultHandler {
++  Promise<td_api::object_ptr<td_api::quillTakeoutMessageRanges>> promise_;
++  int64 takeout_id_ = 0;
++
++ public:
++  explicit GetQuillTakeoutRangesQuery(Promise<td_api::object_ptr<td_api::quillTakeoutMessageRanges>> &&promise)
++      : promise_(std::move(promise)) {
++  }
++  void send(int64 takeout_id) {
++    takeout_id_ = takeout_id;
++    telegram_api::object_ptr<telegram_api::Function> prefix =
++        telegram_api::make_object<telegram_api::invokeWithTakeoutPrefix>(takeout_id);
++    send_query(G()->net_query_creator().create_with_prefix(prefix, telegram_api::messages_getSplitRanges(), DcId::main()));
++  }
++  void on_result(BufferSlice packet) final {
++    auto result = fetch_result<telegram_api::messages_getSplitRanges>(packet);
++    if (result.is_error()) {
++      return on_error(result.move_as_error());
++    }
++    vector<td_api::object_ptr<td_api::quillTakeoutMessageRange>> ranges;
++    for (auto &range : result.move_as_ok()) {
++      ranges.push_back(td_api::make_object<td_api::quillTakeoutMessageRange>(range->min_id_, range->max_id_));
++    }
++    td_->create_handler<FinishQuillTakeoutQuery<td_api::quillTakeoutMessageRanges>>(
++        std::move(promise_), td_api::make_object<td_api::quillTakeoutMessageRanges>(std::move(ranges)))->send(takeout_id_);
++  }
++  void on_error(Status status) final {
++    td_->create_handler<FinishQuillTakeoutQuery<td_api::quillTakeoutMessageRanges>>(
++        std::move(promise_), std::move(status))->send(takeout_id_);
++  }
++};
++
++class InitQuillRangesTakeoutQuery final : public Td::ResultHandler {
++  Promise<td_api::object_ptr<td_api::quillTakeoutMessageRanges>> promise_;
++
++ public:
++  explicit InitQuillRangesTakeoutQuery(Promise<td_api::object_ptr<td_api::quillTakeoutMessageRanges>> &&promise)
++      : promise_(std::move(promise)) {
++  }
++  void send() {
++    send_query(G()->net_query_creator().create(
++        telegram_api::account_initTakeoutSession(30, false, true, true, true, true, false, 0)));
++  }
++  void on_result(BufferSlice packet) final {
++    auto result = fetch_result<telegram_api::account_initTakeoutSession>(packet);
++    if (result.is_error()) {
++      return on_error(result.move_as_error());
++    }
++    td_->create_handler<GetQuillTakeoutRangesQuery>(std::move(promise_))->send(result.move_as_ok()->id_);
++  }
++  void on_error(Status status) final {
++    promise_.set_error(std::move(status));
++  }
++};
++
  class GetContactsQuery final : public Td::ResultHandler {
   public:
    void send(int64 hash) {
-@@ -8385,6 +8477,11 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
+@@ -8385,6 +8533,16 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
    }
  }
  
@@ -174,18 +249,25 @@ index 57d2065..58fee4a 100644
 +  td_->create_handler<InitQuillContactsTakeoutQuery>(std::move(promise))->send();
 +}
 +
++void UserManager::get_quill_takeout_message_ranges(
++    Promise<td_api::object_ptr<td_api::quillTakeoutMessageRanges>> &&promise) {
++  td_->create_handler<InitQuillRangesTakeoutQuery>(std::move(promise))->send();
++}
++
  void UserManager::get_imported_contact_count(Promise<int32> &&promise) {
    TRY_STATUS_PROMISE(promise, G()->close_status());
  
 diff --git a/td/telegram/UserManager.h b/td/telegram/UserManager.h
-index 67e62df..e2f0c03 100644
+index 67e62df..757c71b 100644
 --- a/td/telegram/UserManager.h
 +++ b/td/telegram/UserManager.h
-@@ -524,6 +524,8 @@ class UserManager final : public Actor {
+@@ -524,6 +524,10 @@ class UserManager final : public Actor {
  
    void on_deleted_contacts(const vector<UserId> &deleted_contact_user_ids);
  
 +  void get_quill_saved_contacts(Promise<td_api::object_ptr<td_api::quillSavedContacts>> &&promise);
++
++  void get_quill_takeout_message_ranges(Promise<td_api::object_ptr<td_api::quillTakeoutMessageRanges>> &&promise);
 +
    void get_imported_contact_count(Promise<int32> &&promise);
  

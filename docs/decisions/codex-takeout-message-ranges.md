@@ -1,0 +1,9 @@
+# Telegram takeout message ranges
+
+The pinned MTProto schema contains messages.getSplitRanges at line 2605. The public TDLib API does not expose it. getQuillTakeoutMessageRanges now starts a read-only message takeout session (users, basic groups, supergroups and channels; no files or contacts), requests the server-selected ranges under invokeWithTakeout, and finishes before returning. Initialization, query and finish use separate one-shot handlers. The shared typed finish handler preserves the query error if cleanup also fails; a successful response requires successful cleanup. No range identifiers or session identifiers enter logs.
+
+Account export retains the raw response in private message-ranges.json, including unknown fields or takeout-delay errors. The manifest still reports incomplete range-scoped histories and left-channel histories. This inventory is a prerequisite, not evidence that all range histories were exported. Contacts and range inventories currently use separate scoped sessions; the full history backend should own one message session across its range queries.
+
+The official schema snapshot and upstream source pin remain unchanged; the versioned native patch is the only accepted tracked modification. Server acceptance remains unverified. Sources: [messages.getSplitRanges](https://core.telegram.org/method/messages.getSplitRanges), [takeout procedure](https://core.telegram.org/api/takeout).
+
+Validation: the compiled native library recognizes both contact and range requests offline, while the previous packaged runtime rejects the new range method. The patch exactly reproduces all six pinned source changes and reverses cleanly. The streaming regression preserves returned range fields and takeout-delay errors; all 1,276 tests and replay/integration checks pass, and strict core Clippy passes.
