@@ -207,8 +207,8 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title("Archive settings")
-                .content({
+                .title(crate::ui::shell::dialog_title("Archive settings"))
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -219,7 +219,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -666,6 +666,48 @@ impl QuillApp {
                     .label("Emoji Sets")
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.open_emoji_sets(cx))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .child(
+                        Switch::new("media-pref-autoplay-gifs")
+                            .checked(self.session().is_none_or(|s| s.media_prefs.autoplay_gifs))
+                            .accessibility_label("Autoplay GIFs")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
+                                if !on {
+                                    this.stop_animation_playback();
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(div().text_sm().child("Autoplay GIFs")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .child(
+                        Switch::new("media-pref-loop-stickers")
+                            .checked(
+                                self.session()
+                                    .is_none_or(|s| s.media_prefs.loop_animated_stickers),
+                            )
+                            .accessibility_label("Loop Animated Stickers")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.stop_sticker_playback();
+                                this.set_media_pref(|prefs| prefs.loop_animated_stickers = on, cx);
+                            })),
+                    )
+                    .child(div().text_sm().child("Loop Animated Stickers")),
             )
             // MED3: auto-download settings below the media prefs.
             .child(self.auto_download_settings_section(cx))

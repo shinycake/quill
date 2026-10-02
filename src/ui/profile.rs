@@ -64,7 +64,9 @@ impl QuillApp {
                 this.close_edit_profile_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Edit profile");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Edit profile"));
             let Some(body) = this.edit_profile_dialog_body(cx) else {
                 return dialog.on_close(on_close);
             };
@@ -77,7 +79,7 @@ impl QuillApp {
                     })),
             );
             dialog
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -88,7 +90,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -544,13 +546,7 @@ impl QuillApp {
         }
         // kit Phase 2 (redo): plain form content — the kit `Dialog`
         // provides the title, padding, and chrome via `.title()`.
-        let mut panel = div()
-            .id("edit-profile-panel")
-            .flex()
-            .flex_col()
-            .gap_3()
-            .max_h(px(600.))
-            .overflow_y_scroll();
+        let mut panel = div().id("edit-profile-panel").flex().flex_col().gap_3();
         if let Some(error) = error {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
@@ -561,7 +557,11 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section("Photo"))
-                    .child(Textarea::new(&dialog.photo_path_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.photo_path_input)
+                            .aria_label("Profile photo file path")
+                            .h(px(40.)),
+                    )
                     .child(
                         div()
                             .flex()
@@ -595,8 +595,16 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section("Name"))
-                    .child(Textarea::new(&dialog.first_name_input).h(px(40.)))
-                    .child(Textarea::new(&dialog.last_name_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.first_name_input)
+                            .aria_label("First name")
+                            .h(px(40.)),
+                    )
+                    .child(
+                        Textarea::new(&dialog.last_name_input)
+                            .aria_label("Last name")
+                            .h(px(40.)),
+                    )
                     .child(
                         div().flex().gap_2().child(
                             Button::new("edit-profile-save-name")
@@ -613,7 +621,11 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section("Username"))
-                    .child(Textarea::new(&dialog.username_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.username_input)
+                            .aria_label("Public username")
+                            .h(px(40.)),
+                    )
                     .child(verdict_line)
                     .child(
                         div()
@@ -643,7 +655,11 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section("Bio"))
-                    .child(Textarea::new(&dialog.bio_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.bio_input)
+                            .aria_label("Bio")
+                            .h(px(40.)),
+                    )
                     .child(
                         div().flex().gap_2().child(
                             Button::new("edit-profile-save-bio")

@@ -251,6 +251,9 @@ pub(super) fn album_tile(
         .w(px(part.width as f32))
         .h(px(part.height as f32))
         .overflow_hidden()
+        .role(gpui_kit::Role::Button)
+        .aria_label("Open album media")
+        .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
             this.open_media_viewer(chat_id, message_id, cx);
@@ -387,6 +390,7 @@ pub(super) fn session_history_row(
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
     animation_frame: Option<Arc<RenderImage>>,
+    sticker_frame: Option<Arc<RenderImage>>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
@@ -734,6 +738,9 @@ pub(super) fn session_history_row(
                     .py_1()
                     .rounded_md()
                     .text_xs()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(label.clone())
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .when(chosen, |this| {
@@ -822,6 +829,7 @@ pub(super) fn session_history_row(
             files,
             downloading,
             media_roots,
+            sticker_frame,
             cx,
         )),
         MessageContent::VoiceNote(note) => Some(voice_note_row(
@@ -1011,6 +1019,7 @@ pub(super) fn session_history_row(
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(reply_btn)
                     .when_some(react_btn, |this, btn| this.child(btn))

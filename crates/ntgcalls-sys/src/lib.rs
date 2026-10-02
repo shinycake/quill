@@ -24,6 +24,15 @@ use std::ffi::{OsStr, c_char, c_int, c_void};
 use std::fmt;
 use std::path::PathBuf;
 
+/// Native sidecar name, using Rust's platform library naming convention.
+pub fn library_filename() -> String {
+    format!(
+        "{}ntgcalls{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_SUFFIX
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Enums (bindgen-style: c_int aliases + constants, matching the C header)
 // ---------------------------------------------------------------------------
@@ -688,7 +697,7 @@ impl fmt::Display for LoadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LoadError::LibraryMissing { searched } => {
-                write!(f, "libntgcalls.so not found; searched: ")?;
+                write!(f, "native call media library not found; searched: ")?;
                 let mut first = true;
                 for path in searched {
                     if !first {
@@ -704,7 +713,7 @@ impl fmt::Display for LoadError {
             }
             LoadError::SymbolMissing { symbol } => write!(
                 f,
-                "libntgcalls.so does not export symbol `{symbol}`; \
+                "native call media library does not export symbol `{symbol}`; \
                  the vendored library may be older than these bindings expect"
             ),
         }
@@ -1464,9 +1473,9 @@ impl Loader {
     /// Search the standard locations for the sidecar library and load it.
     ///
     /// Order: `QUILL_NTGCALLS_LIB` env var, then
-    /// `vendor/ntgcalls/lib/libntgcalls.so` under any ancestor of the current
+    /// The native library under `vendor/ntgcalls/lib` at any ancestor of the current
     /// executable (covers `cargo run` from the repo), then the bare
-    /// `libntgcalls.so` system search path.
+    /// native library filename on the system search path.
     pub fn load_default() -> Result<Self, LoadError> {
         let mut searched: Vec<PathBuf> = Vec::new();
 
@@ -1478,24 +1487,25 @@ impl Loader {
             }
         }
 
-        let mut vendor_candidate: Option<PathBuf> = None;
         if let Ok(exe) = std::env::current_exe() {
-            let mut ancestors = exe.as_path().ancestors();
-            ancestors.next(); // skip the exe itself
-            for ancestor in ancestors {
-                let candidate = ancestor.join("vendor/ntgcalls/lib/libntgcalls.so");
-                if candidate.exists() {
-                    vendor_candidate = Some(candidate);
-                    break;
+            for ancestor in exe
+                .parent()
+                .into_iter()
+                .flat_map(std::path::Path::ancestors)
+            {
+                for directory in [
+                    ancestor.join("Frameworks"),
+                    ancestor.join("vendor/ntgcalls/lib"),
+                ] {
+                    let candidate = directory.join(library_filename());
+                    if candidate.exists() {
+                        return Self::load(&candidate);
+                    }
                 }
             }
         }
-        if let Some(candidate) = &vendor_candidate {
-            searched.push(candidate.clone());
-            return Self::load(candidate);
-        }
 
-        let system = PathBuf::from("libntgcalls.so");
+        let system = PathBuf::from(library_filename());
         searched.push(system.clone());
         Self::load(&system).map_err(|_| LoadError::LibraryMissing { searched })
     }

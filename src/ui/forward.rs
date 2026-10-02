@@ -65,6 +65,9 @@ fn forward_dest_row(id: ChatId, title: String, cx: &mut Context<QuillApp>) -> im
         .px_2()
         .py_2()
         .rounded_md()
+        .role(gpui_kit::Role::Button)
+        .aria_label(format!("Forward to {title}"))
+        .tab_index(0)
         .cursor_pointer()
         .pressable(cx.theme())
         .bg(cx.theme().sidebar)
@@ -400,7 +403,11 @@ impl QuillApp {
                     ),
             )
             .child(div().text_xs().text_color(text_primary()).child(heading))
-            .child(Textarea::new(&self.forward_search_input).h(px(36.)))
+            .child(
+                Textarea::new(&self.forward_search_input)
+                    .aria_label("Search forwarding destinations")
+                    .h(px(36.)),
+            )
             // M1: `forwardMessages.send_copy` ("Hide sender name", TGX)
             // and `forwardMessages.remove_caption` (only applies to
             // send_copy copies — the checkbox disables itself otherwise).

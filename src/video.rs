@@ -428,7 +428,7 @@ pub fn playback_frames(
     if !is_playable_video(mime, src) {
         return Err("unsupported video".into());
     }
-    let frames = extract_frames(src, cache_dir, start_timestamp, 8.0, 240, 12, None)?;
+    let frames = extract_frames(src, cache_dir, start_timestamp, 8.0, 240, 12, None, None)?;
     if frames.is_empty() {
         return Err("ffmpeg produced no frames".into());
     }
@@ -475,6 +475,7 @@ pub fn viewer_playback_frames(
         VIEWER_FRAME_WIDTH,
         VIEWER_MAX_FRAMES,
         None,
+        None,
     )?;
     if frames.is_empty() {
         return Err("ffmpeg produced no frames".into());
@@ -511,6 +512,7 @@ pub fn viewer_playback_frames_cancelable(
         VIEWER_FRAME_WIDTH,
         VIEWER_MAX_FRAMES,
         Some((child_slot, cancelled)),
+        None,
     )?;
     if frames.is_empty() {
         return Err("ffmpeg produced no frames".into());
@@ -580,6 +582,7 @@ fn wait_for_cancelable_child(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn extract_frames(
     src: &Path,
     cache_dir: &Path,
@@ -591,6 +594,7 @@ pub(crate) fn extract_frames(
         &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
         &std::sync::atomic::AtomicBool,
     )>,
+    input_decoder: Option<&str>,
 ) -> Result<Vec<PathBuf>, String> {
     crate::local_path::secure_create_dir(cache_dir).map_err(|err| err.to_string())?;
     let pattern = cache_dir.join("frame-%03d.png");
@@ -598,6 +602,9 @@ pub(crate) fn extract_frames(
     command.args(["-y", "-hide_banner", "-loglevel", "error"]);
     if start_timestamp > 0 {
         command.arg("-ss").arg(start_timestamp.to_string());
+    }
+    if let Some(decoder) = input_decoder {
+        command.args(["-c:v", decoder]);
     }
     command
         .arg("-i")
@@ -1038,7 +1045,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("frame-001.png"), b"stale").unwrap();
         // Legacy pre-fix world-readable layout must be migrated away too.
-        let legacy = std::env::temp_dir().join("quill-gif-frames");
+        let legacy = crate::local_path::cache_temp_dir().join("quill-gif-frames");
         std::fs::create_dir_all(&legacy).unwrap();
         crate::local_path::sweep_media_caches();
         assert!(

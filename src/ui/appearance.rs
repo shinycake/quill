@@ -50,6 +50,10 @@ const WALLPAPER_PRESETS: &[(u32, &str)] = &[
 ];
 
 impl QuillApp {
+    #[cfg(target_os = "macos")]
+    pub(crate) fn minimize_to_tray(&self) -> bool {
+        self.appearance.minimize_to_tray
+    }
     pub(super) fn close_appearance(&mut self) {
         super::keybindings::close_appearance_capture(
             &mut self.appearance_open,
@@ -313,6 +317,14 @@ impl QuillApp {
                         .into_any_element(),
                 ));
                 // Parity slice (platform-custom-keybindings).
+                if cfg!(target_os = "macos") {
+                    body = body.child(this.appearance_section(
+                        cx, "Minimize to tray", "Use the tray menu to reopen Quill.",
+                        Switch::new("general-minimize-to-tray").checked(this.appearance.minimize_to_tray)
+                            .accessibility_label("Minimize Quill to the system tray")
+                            .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.minimize_to_tray = on))).into_any_element()
+                    ));
+                }
                 body = body.child(this.appearance_keybindings_section(cx));
             }
             let footer = div().flex().justify_end().child(
@@ -327,8 +339,8 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title("Appearance")
-                .content({
+                .title(crate::ui::shell::dialog_title("Appearance"))
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -339,7 +351,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -378,6 +390,7 @@ impl QuillApp {
         on_click: impl Fn(&mut QuillApp, &mut Context<QuillApp>) + 'static,
     ) -> AnyElement {
         let theme = cx.theme();
+        let label = label.into();
         div()
             .id(id.into())
             .px_3()
@@ -386,9 +399,12 @@ impl QuillApp {
             .border_1()
             .border_color(if selected { theme.accent } else { theme.border })
             .when(selected, |this| this.bg(theme.accent.opacity(0.15)))
+            .role(gpui_kit::Role::Button)
+            .aria_label(label.clone())
+            .tab_index(0)
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
-            .child(div().text_sm().child(label.into()))
+            .child(div().text_sm().child(label))
             .into_any_element()
     }
 
@@ -409,6 +425,12 @@ impl QuillApp {
             .flex_col()
             .items_center()
             .gap_1()
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!(
+                "{name}{}",
+                if selected { ", selected" } else { "" }
+            ))
+            .tab_index(0)
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
             .child(

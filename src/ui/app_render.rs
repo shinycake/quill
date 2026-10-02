@@ -3,8 +3,9 @@
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
     FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
-    OpenSearch, OpenShortcuts, QuitApp, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen,
-    ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    OpenSearch, OpenSettings, OpenShortcuts, QuitApp, SubmitCode, SubmitPassword, SubmitPhone,
+    ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut,
+    ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -26,9 +27,6 @@ impl Render for QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
-        // kit Phase 2 (redo): hand-rolled toast pill replaced by kit
-        // notifications; new status notes are consumed here.
-        self.push_status_note(window, cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in
@@ -213,6 +211,9 @@ impl Render for QuillApp {
             .size_full()
             .relative()
             .bg(cx.theme().background)
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                this.navigate(super::navigation::NavigationAction::Settings, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
                 let _ = this;
                 window.remove_window();
@@ -233,8 +234,13 @@ impl Render for QuillApp {
                 #[cfg(not(target_os = "macos"))]
                 cx.quit();
             }))
-            .on_action(cx.listener(|this, _: &MinimizeWindow, window, _| {
-                let _ = this;
+            .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
+                #[cfg(target_os = "macos")]
+                if this.appearance.minimize_to_tray && quill::tray::tray_available() {
+                    cx.hide();
+                    return;
+                }
+                let _ = (this, cx);
                 window.minimize_window();
             }))
             .on_action(cx.listener(|this, _: &ZoomWindow, window, _| {
@@ -381,8 +387,11 @@ impl Render for QuillApp {
                 cx,
             ))
             .when(
-                matches!(self.update_state, quill::updater::UpdateState::Available(_))
-                    && !self.update_banner_dismissed,
+                matches!(
+                    self.update_state,
+                    quill::updater::UpdateState::Available(_)
+                        | quill::updater::UpdateState::Installed(_)
+                ) && !self.update_banner_dismissed,
                 |this| this.child(self.update_banner(cx)),
             )
             // Slice parity:platform-offline-indicator — slim connection
@@ -433,9 +442,24 @@ impl Render for QuillApp {
                     // Slice media-shared-gallery: shared-media gallery panel.
                     .when_some(self.shared_media_panel(cx), |this, panel| this.child(panel)),
             )
-            .when(self.media_viewer.is_open(), |this| {
-                this.child(self.media_viewer_overlay(window, cx))
+            .when(!self.status_note.is_empty(), |this| {
+                this.child(
+                    div()
+                        .id("status-line")
+                        .flex_none()
+                        .min_h(px(24.))
+                        .px_3()
+                        .role(Role::Label)
+                        .aria_label(self.status_note.clone())
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(self.status_note.clone()),
+                )
             })
+            .when(
+                self.media_viewer.is_open() && self.pip_window.is_none(),
+                |this| this.child(self.media_viewer_overlay(window, cx)),
+            )
             // Phase 9.1: story viewer overlay above the media viewer.
             .when(self.story_viewer.is_open(), |this| {
                 this.child(self.story_viewer_overlay(cx))

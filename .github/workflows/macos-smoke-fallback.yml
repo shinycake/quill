@@ -15,7 +15,7 @@ permissions:
   contents: read
 jobs:
   macos-smoke:
-    name: macos-compile-smoke
+    name: macos-ui-build
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
@@ -30,5 +30,7 @@ jobs:
         run: cargo build --features ui --locked
       - name: compile release ui
         run: cargo build --features ui --release --locked
+      - name: build bundled TGS renderer
+        run: bash scripts/build-rlottie.sh
       - name: package smoke
         run: bash scripts/macos-package-smoke.sh

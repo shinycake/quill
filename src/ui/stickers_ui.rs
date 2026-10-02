@@ -129,13 +129,20 @@ impl QuillApp {
             emoji.clone()
         };
         let cell_id = format!("sticker-{prefix}-{}-{}", sticker.set_id, sticker.id);
-        let cell = if let Some(path) = path {
-            img(path)
+        let animated = self.sticker_image(file_id, sticker.format, cx);
+        let source = animated
+            .map(ImageSource::Render)
+            .or_else(|| path.map(ImageSource::from));
+        let cell = if let Some(source) = source {
+            img(source)
                 .id(SharedString::from(cell_id.clone()))
                 .w(px(72.))
                 .h(px(72.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
+                .role(gpui_kit::Role::Button)
+                .aria_label(format!("Send {emoji} sticker"))
+                .tab_index(0)
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
@@ -168,6 +175,9 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_center()
+                .role(gpui_kit::Role::Button)
+                .aria_label(format!("Send {emoji} sticker"))
+                .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -214,14 +224,16 @@ impl QuillApp {
             )));
             dialog
                 .overlay(true)
-                .title("Archived stickers")
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .title(crate::ui::shell::dialog_title("Archived stickers"))
+                .content(crate::ui::shell::scrollable_dialog_content(
+                    move |content, _, _| {
+                        content.child(
+                            body.borrow_mut()
+                                .take()
+                                .unwrap_or_else(|| div().into_any_element()),
+                        )
+                    },
+                ))
                 .on_close(on_close)
         })
     }
@@ -717,10 +729,11 @@ impl QuillApp {
                         .items_center()
                         .gap_2()
                         .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(Textarea::new(&self.sticker_search_input).h(px(36.))),
+                            div().flex_1().min_w_0().child(
+                                Textarea::new(&self.sticker_search_input)
+                                    .aria_label("Search stickers")
+                                    .h(px(36.)),
+                            ),
                         )
                         .child(
                             Button::new("sticker-search-submit")

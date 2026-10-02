@@ -19,6 +19,10 @@ pub enum EmojiSetTab {
 /// two panels must never share a slot.
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
+    pub mutating_set: Option<(i64, bool)>,
+    pub pending_status_emoji: Option<i64>,
+    pub pack_files: std::collections::HashMap<i64, Vec<crate::ids::FileId>>,
+    pub outdated_packs: std::collections::HashSet<i64>,
     pub status_open: bool,
     pub status_duration_secs: i32,
     pub status_note: Option<String>,
@@ -68,6 +72,91 @@ pub struct EmojiPanel {
 }
 
 impl Session {
+    pub fn remember_emoji_pack_usage(&mut self, custom_emoji_ids: &[i64]) -> bool {
+        for id in custom_emoji_ids.iter().filter(|id| **id > 0) {
+            self.media_prefs
+                .recent_custom_emoji_ids
+                .retain(|old| old != id);
+            self.media_prefs.recent_custom_emoji_ids.insert(0, *id);
+            self.media_prefs.recent_custom_emoji_ids.truncate(128);
+        }
+        let mut packs = Vec::new();
+        // ponytail: 128 recents; stable vector scans, index the cache if this limit grows.
+        for id in &self.media_prefs.recent_custom_emoji_ids {
+            if let Some(set_id) = self
+                .emoji
+                .custom_emoji_stickers
+                .iter()
+                .find(|item| item.custom_emoji_id == Some(*id))
+                .map(|item| item.set_id)
+                .filter(|id| *id > 0)
+                && !packs.contains(&set_id)
+            {
+                packs.push(set_id);
+            }
+        }
+        for id in &self.media_prefs.recent_emoji_packs {
+            if !packs.contains(id) {
+                packs.push(*id);
+            }
+        }
+        packs.truncate(128);
+        let changed = packs != self.media_prefs.recent_emoji_packs;
+        self.media_prefs.recent_emoji_packs = packs;
+        changed
+    }
+
+    pub fn ordered_emoji_packs(&self) -> Vec<&StickerSetInfo> {
+        let mut sets: Vec<_> = self.emoji.installed_sets.iter().collect();
+        if self.media_prefs.dynamic_emoji_pack_order {
+            sets.sort_by_key(|set| {
+                self.media_prefs
+                    .recent_emoji_packs
+                    .iter()
+                    .position(|id| *id == set.id)
+                    .unwrap_or(usize::MAX)
+            });
+        }
+        sets
+    }
+
+    pub fn emoji_pack_download_state(&self, id: i64) -> &'static str {
+        if let Some((set_id, installed)) = self.emoji.mutating_set
+            && set_id == id
+        {
+            return if installed {
+                "Installing…"
+            } else {
+                "Removing…"
+            };
+        }
+        if self.emoji.outdated_packs.contains(&id) {
+            return "Update needed";
+        }
+        let Some(ids) = self.emoji.pack_files.get(&id) else {
+            return "Not downloaded";
+        };
+        if !ids.is_empty()
+            && ids.iter().all(|id| {
+                self.files
+                    .get(&id.0)
+                    .and_then(|file| file.usable_path())
+                    .is_some()
+            })
+        {
+            return "Downloaded";
+        }
+        if ids.iter().any(|id| {
+            self.downloading.contains(&id.0)
+                || self
+                    .files
+                    .get(&id.0)
+                    .is_some_and(|file| file.local.is_downloading_active)
+        }) {
+            return "Downloading…";
+        }
+        "Not downloaded"
+    }
     /// Slice S10: store the installed emoji sets.
     pub fn accept_installed_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
         let installed: std::collections::HashSet<_> = sets.iter().map(|set| set.id).collect();
@@ -277,11 +366,17 @@ impl Session {
     pub fn invalidate_emoji_caches(&mut self, purpose: Option<RequestPurpose>) {
         if purpose == Some(RequestPurpose::ChangeEmojiSet) {
             self.emoji.mutation_failed = false;
+            self.emoji.mutating_set = None;
         }
         if matches!(
             purpose,
             Some(RequestPurpose::SetEmojiStatus | RequestPurpose::ClearRecentEmojiStatuses)
         ) {
+            if purpose == Some(RequestPurpose::SetEmojiStatus)
+                && let Some(id) = self.emoji.pending_status_emoji.take()
+            {
+                self.remember_emoji_pack_usage(&[id]);
+            }
             self.emoji.recent_statuses.clear();
             drop(
                 self.requests
@@ -313,6 +408,61 @@ mod tests {
     use crate::telegram::client::copy_and_parse;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
+
+    #[test]
+    fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
+        let (mut session, _) = session();
+        let sticker = |id, set_id| StickerItem {
+            custom_emoji_id: Some(id),
+            id,
+            set_id,
+            emoji: "😀".into(),
+            width: 64,
+            height: 64,
+            format: crate::telegram::envelope::StickerFormat::Webp,
+            file_id: crate::ids::FileId(1),
+            thumb_file_id: None,
+            thumb_width: 0,
+            thumb_height: 0,
+            requires_premium: false,
+        };
+        let pack = |id| StickerSetInfo {
+            id,
+            title: id.to_string(),
+            name: id.to_string(),
+            size: 1,
+            is_installed: true,
+            is_official: false,
+        };
+        session.emoji.installed_sets = vec![pack(1), pack(2), pack(3)];
+        session.remember_emoji_pack_usage(&[10]);
+        session.emoji.custom_emoji_stickers.push(sticker(20, 2));
+        session.remember_emoji_pack_usage(&[20]);
+        assert_eq!(session.media_prefs.recent_emoji_packs, vec![2]);
+        session.emoji.custom_emoji_stickers.push(sticker(10, 1));
+        session.remember_emoji_pack_usage(&[]);
+        assert_eq!(
+            session
+                .ordered_emoji_packs()
+                .iter()
+                .map(|set| set.id)
+                .collect::<Vec<_>>(),
+            vec![2, 1, 3]
+        );
+        session.media_prefs.dynamic_emoji_pack_order = false;
+        assert_eq!(
+            session
+                .ordered_emoji_packs()
+                .iter()
+                .map(|set| set.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        session.media_prefs.dynamic_emoji_pack_order = true;
+        session.remember_emoji_pack_usage(&[10, 10, -1]);
+        assert_eq!(session.media_prefs.recent_emoji_packs, vec![1, 2]);
+        assert_eq!(session.media_prefs.recent_custom_emoji_ids, vec![10, 20]);
+    }
 
     fn session() -> (Session, Arc<MemorySink>) {
         let sink = Arc::new(MemorySink::new());

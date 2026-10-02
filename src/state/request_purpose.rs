@@ -43,6 +43,7 @@ pub enum RequestPurpose {
     /// history export. The `messages` answer appends to
     /// `Session::chat_export` instead of merging into view history.
     ExportChatHistory,
+    ExportAccount,
     /// Any `sendMessage` (text / photo / document). Response `message` is pending.
     SendMessage,
     /// M2: `getFullRichMessage`. Response `richMessage` replaces the

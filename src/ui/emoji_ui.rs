@@ -144,7 +144,7 @@ impl QuillApp {
                         }),
                     )),
             )
-            .child(Textarea::new(&self.emoji_search_input))
+            .child(Textarea::new(&self.emoji_search_input).aria_label("Search emoji"))
             .child(tabs)
             .child(
                 div()

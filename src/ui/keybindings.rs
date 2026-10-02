@@ -1,8 +1,8 @@
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
     FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
-    OpenSearch, OpenShortcuts, QuitApp, ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev,
-    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    OpenSearch, OpenSettings, OpenShortcuts, QuitApp, ToggleFullscreen, ToggleTheme, ViewerNext,
+    ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -180,6 +180,8 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-q", QuitApp, None),
         // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
         // minimize; F11 / Cmd+Ctrl+F fullscreen).
+        KeyBinding::new("cmd-,", OpenSettings, None),
+        KeyBinding::new("ctrl-,", OpenSettings, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("ctrl-w", CloseWindow, None),
         KeyBinding::new("cmd-m", MinimizeWindow, None),
@@ -601,7 +603,11 @@ fn app_menus() -> Vec<Menu> {
     let mut menus = Vec::new();
     // HIG: on macOS Quit lives in the app menu, not File.
     #[cfg(target_os = "macos")]
-    menus.push(Menu::new("Quill").items([MenuItem::action("Quit Quill", QuitApp)]));
+    menus.push(Menu::new("Quill").items([
+        MenuItem::action("Settings…", OpenSettings),
+        MenuItem::separator(),
+        MenuItem::action("Quit Quill", QuitApp),
+    ]));
     menus.extend([
         Menu::new("File").items(file_items),
         Menu::new("Edit").items([

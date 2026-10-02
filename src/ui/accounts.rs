@@ -81,15 +81,14 @@ impl QuillApp {
     }
 
     /// Slice parity:auth-multi-account: switch failure → the
-    /// status-note/kit-notification path.
+    /// status line.
     fn fail_account_switch(
         &mut self,
         message: impl Into<String>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.status_note = message.into();
-        self.push_status_note(window, cx);
         cx.notify();
     }
 
@@ -97,7 +96,7 @@ impl QuillApp {
     /// shutdown the current client, persist the new active account, start
     /// a fresh connect for it. The dialog closes first so the main UI
     /// (then the auth UI for the new account) is what the user sees;
-    /// errors surface via the status-note/kit-notification path.
+    /// errors surface via the status line.
     pub(crate) fn switch_account(
         &mut self,
         key: &AccountKey,
@@ -151,6 +150,7 @@ impl QuillApp {
         self.sticker_settings_open = false;
         self.sticker_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.stop_sticker_playback();
         if let Some(mut live) = self.live.take() {
             live.shutdown(CLIENT_CLOSE_TIMEOUT);
         }
@@ -180,7 +180,6 @@ impl QuillApp {
                 );
             }
         }
-        self.push_status_note(window, cx);
         cx.notify();
     }
 
@@ -393,7 +392,11 @@ impl QuillApp {
                         .child("Switching restarts the connection under the other account."),
                 )
                 .child(div().font_semibold().text_sm().child("Add another account"))
-                .child(Textarea::new(&this.accounts_ui.add_name).h(px(40.)))
+                .child(
+                    Textarea::new(&this.accounts_ui.add_name)
+                        .aria_label("Account display name")
+                        .h(px(40.)),
+                )
                 .child(
                     Button::new("accounts-add")
                         .label("Add account")
@@ -412,8 +415,8 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title("Accounts")
-                .content({
+                .title(crate::ui::shell::dialog_title("Accounts"))
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -424,7 +427,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })

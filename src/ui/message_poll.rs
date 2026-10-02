@@ -183,6 +183,9 @@ pub(super) fn poll_option_row(
         );
     if votable {
         row = row
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!("Vote for option {}", index + 1))
+            .tab_index(0)
             .cursor_pointer()
             .pressable(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| {

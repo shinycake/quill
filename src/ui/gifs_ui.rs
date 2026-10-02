@@ -85,6 +85,9 @@ impl QuillApp {
                     .h(px(72.))
                     .rounded_md()
                     .object_fit(ObjectFit::Cover)
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Send GIF {}", index + 1))
+                    .tab_index(0)
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.send_gif_pick(file_id, duration, width, height, cx);
@@ -117,6 +120,9 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_center()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Send GIF {}", index + 1))
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -222,7 +228,12 @@ impl QuillApp {
                 div()
                     .flex()
                     .gap_2()
-                    .child(Textarea::new(&self.gif_search_input).flex_1().min_w_0())
+                    .child(
+                        Textarea::new(&self.gif_search_input)
+                            .aria_label("Search GIFs")
+                            .flex_1()
+                            .min_w_0(),
+                    )
                     .child(
                         Button::new("gif-search-submit")
                             .label("Search")

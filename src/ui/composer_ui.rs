@@ -57,6 +57,56 @@ pub(super) fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>
     }
 }
 
+pub(super) fn apply_ready_sticker_playback(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let root = super::demo::demo_media_allowlist();
+    session.stickers.stickers.clear();
+    for (id, name, format) in [
+        (44, "demo-sticker.tgs", "stickerFormatTgs"),
+        (45, "demo-sticker.webm", "stickerFormatWebm"),
+    ] {
+        let file = demo_file_json(id, &root.join(name).to_string_lossy(), true);
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"{id}","set_id":"77","width":128,"height":128,"emoji":"😀","format":{{"@type":"{format}"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{file}}}}}}}}}"#
+        );
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+        session
+            .stickers
+            .stickers
+            .push(quill::telegram::envelope::StickerItem {
+                custom_emoji_id: None,
+                id: i64::from(id),
+                set_id: 77,
+                emoji: "😀".into(),
+                width: 128,
+                height: 128,
+                format: if id == 44 {
+                    quill::telegram::envelope::StickerFormat::Tgs
+                } else {
+                    quill::telegram::envelope::StickerFormat::Webm
+                },
+                file_id: FileId(id),
+                thumb_file_id: None,
+                thumb_width: 0,
+                thumb_height: 0,
+                requires_premium: false,
+            });
+    }
+    for id in [101, 102, 103, 401] {
+        if let Some(history) = session.histories.get_mut(&11) {
+            history.messages.remove(&id);
+        }
+    }
+    session.media_prefs.loop_animated_stickers =
+        std::env::var("QUILL_DEMO_LOOP_STICKERS").as_deref() != Ok("off");
+}
+
 impl QuillApp {
     /// Phase 3.3: the `/` command menu popup above the composer.
     /// Bot-specific commands first, then the global (`getCommands`)
@@ -112,6 +162,9 @@ impl QuillApp {
                 .px_3()
                 .py_2()
                 .rounded_md()
+                .role(gpui_kit::Role::Button)
+                .aria_label(label.clone())
+                .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .when(highlighted, |this| this.bg(cx.theme().selection))
@@ -429,7 +482,9 @@ impl QuillApp {
                 this.close_quote_reply_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Quote part of message");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Quote part of message"));
             let Some(dialog_state) = this.quote_reply_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -444,9 +499,11 @@ impl QuillApp {
                         .child("Trim the text below to the part you want to quote"),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog_state.input).h(px(120.))),
+                    div().flex_1().child(
+                        Textarea::new(&dialog_state.input)
+                            .aria_label("Quoted message text")
+                            .h(px(120.)),
+                    ),
                 )
                 .into_any_element();
             let footer = div()
@@ -471,7 +528,7 @@ impl QuillApp {
                         })),
                 );
             dialog
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -482,7 +539,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })

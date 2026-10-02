@@ -81,7 +81,7 @@ impl QuillApp {
                     }
                 }
             }
-            dialog.overlay(true).title("Marketplace collectible gift").child(body).on_close(close)
+            dialog.overlay(true).title(crate::ui::shell::dialog_title("Marketplace collectible gift")).child(body).on_close(close)
         })
     }
 }

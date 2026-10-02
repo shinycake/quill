@@ -478,9 +478,11 @@ impl QuillApp {
             .items_center()
             .w(px(360.))
             .child(
-                div()
-                    .flex_1()
-                    .child(Textarea::new(&self.story_cover_input).h(px(32.))),
+                div().flex_1().child(
+                    Textarea::new(&self.story_cover_input)
+                        .aria_label("Story cover file path")
+                        .h(px(32.)),
+                ),
             )
             .child(
                 Button::new("story-cover-set")
@@ -653,7 +655,11 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(Textarea::new(&self.story_privacy_user_search).h(px(32.)))
+                    .child(
+                        Textarea::new(&self.story_privacy_user_search)
+                            .aria_label("Search story privacy exceptions")
+                            .h(px(32.)),
+                    )
                     .child(list),
             );
         }
@@ -864,7 +870,12 @@ impl QuillApp {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(Textarea::new(&rename_input).h(px(36.)).flex_1())
+                        .child(
+                            Textarea::new(&rename_input)
+                                .aria_label("Story album name")
+                                .h(px(36.))
+                                .flex_1(),
+                        )
                         .child(Button::new("story-page-rename").label("Rename").on_click(
                             cx.listener(|this, _, _, cx| {
                                 this.rename_story_album(cx);
@@ -925,7 +936,12 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(Textarea::new(&add_story_ids).h(px(36.)).flex_1())
+                    .child(
+                        Textarea::new(&add_story_ids)
+                            .aria_label("Story identifiers to add")
+                            .h(px(36.))
+                            .flex_1(),
+                    )
                     .child(Button::new("story-page-add-stories").label("Add").on_click(
                         cx.listener(|this, _, _, cx| {
                             this.add_stories_to_album(cx);
@@ -1008,8 +1024,16 @@ impl QuillApp {
                     .flex_col()
                     .gap_2()
                     .child(div().text_sm().text_color(rgb(0x9aa0a6)).child("New album"))
-                    .child(Textarea::new(&new_album_name).h(px(36.)))
-                    .child(Textarea::new(&new_album_story_ids).h(px(36.)))
+                    .child(
+                        Textarea::new(&new_album_name)
+                            .aria_label("New story album name")
+                            .h(px(36.)),
+                    )
+                    .child(
+                        Textarea::new(&new_album_story_ids)
+                            .aria_label("Story identifiers for new album")
+                            .h(px(36.)),
+                    )
                     .child(
                         Button::new("story-page-create")
                             .label("Create album")

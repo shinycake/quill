@@ -43,8 +43,14 @@ fn format_storage_bytes(n: i64) -> String {
     }
 }
 
-fn section_header(title: &'static str) -> Div {
-    div().text_xs().font_semibold().child(title)
+fn section_header(title: &'static str) -> impl IntoElement {
+    div()
+        .id(format!("storage-heading-{title}"))
+        .role(Role::Heading)
+        .aria_label(title)
+        .text_xs()
+        .font_semibold()
+        .child(title)
 }
 
 impl QuillApp {
@@ -64,6 +70,35 @@ impl QuillApp {
             demo.cache_cleared = false;
         }
         cx.notify();
+    }
+
+    fn choose_account_export_folder(&mut self, media: bool, cx: &mut Context<Self>) {
+        let account = self
+            .live
+            .as_ref()
+            .map(|live| live.driver.session.account.clone());
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Export Telegram data here".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let result = picker.await;
+            let _ = this.update(cx, |this, cx| {
+                if let Ok(Ok(Some(paths))) = result
+                    && let Some(folder) = paths.first()
+                    && let Some(live) = this.live.as_mut()
+                    && Some(&live.driver.session.account) == account.as_ref()
+                {
+                    if let Err(error) = live.driver.start_account_export(folder, media) {
+                        live.driver.session.data_storage_error = Some(error.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Slice S4: the Data & Storage dialog — the per-network editor when
@@ -154,8 +189,8 @@ impl QuillApp {
             }
             dialog
                 .overlay(true)
-                .title(title)
-                .content({
+                .title(crate::ui::shell::dialog_title(title))
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -166,7 +201,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -186,6 +221,66 @@ impl QuillApp {
                     .text_color(danger())
                     .child(format!("Error: {err}")),
             );
+        }
+        body = body.child(section_header("Export Telegram data"))
+            .child(div().text_xs().child("Profile, contacts, sessions and all accessible main and archived chat histories. Choose a folder; media is optional."));
+        if let Some(export) = session.as_ref().and_then(|s| s.account_export.as_ref()) {
+            let label = export.label();
+            let folder = export.folder.clone();
+            let finished = export.finished.load(std::sync::atomic::Ordering::Acquire);
+            body = body
+                .child(
+                    div()
+                        .id("account-export-status")
+                        .role(Role::Label)
+                        .aria_label(label.clone())
+                        .text_sm()
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            Button::new("account-export-open")
+                                .label("Show export folder")
+                                .on_click(move |_, _, cx| cx.reveal_path(&folder)),
+                        )
+                        .child(
+                            Button::new("account-export-cancel")
+                                .label(if finished {
+                                    "Dismiss export"
+                                } else {
+                                    "Cancel export"
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(live) = this.live.as_mut() {
+                                        live.driver.session.account_export = None;
+                                    }
+                                    cx.notify();
+                                })),
+                        ),
+                );
+        } else {
+            for media in [false, true] {
+                body = body.child(
+                    Button::new(if media {
+                        "account-export-media"
+                    } else {
+                        "account-export-json"
+                    })
+                    .label(if media {
+                        "Export with media…"
+                    } else {
+                        "Export JSON…"
+                    })
+                    .disabled(self.live.is_none())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.choose_account_export_folder(media, cx)
+                    })),
+                );
+            }
         }
         // --- Automatic downloads ---
         body = body.child(section_header("Automatic downloads"));
@@ -308,7 +403,13 @@ impl QuillApp {
                             ),
                     );
                 }
-                body = body.child(Table::new().w_full().child(table_body));
+                body = body.child(
+                    Table::new()
+                        .with_ix(0)
+                        .accessibility_label("Storage by file type")
+                        .w_full()
+                        .child(table_body),
+                );
                 // Per-chat breakdown (largest first).
                 let chat_rows: Vec<(i64, i64, i32)> = stats
                     .by_chat
@@ -353,7 +454,13 @@ impl QuillApp {
                                 ),
                         );
                     }
-                    body = body.child(Table::new().w_full().child(chat_body));
+                    body = body.child(
+                        Table::new()
+                            .with_ix(1)
+                            .accessibility_label("Storage by chat")
+                            .w_full()
+                            .child(chat_body),
+                    );
                 }
                 body = body.child(self.data_storage_clear_cache_row(cx));
             }
@@ -374,6 +481,9 @@ impl QuillApp {
                 "data-storage-net-{}",
                 network.label().replace(' ', "-")
             ))
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!("{} automatic download settings", network.label()))
+            .tab_index(0)
             .cursor_pointer()
             .flex()
             .items_center()

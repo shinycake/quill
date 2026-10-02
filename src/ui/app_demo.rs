@@ -12,7 +12,7 @@ use super::history::HistoryShared;
 use super::screenshot_demo::ScreenshotDemo;
 use super::synthetic::SyntheticChat;
 use super::*;
-use gpui_kit::component::input::{InputEvent, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::component::*;
@@ -83,7 +83,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -99,7 +99,7 @@ pub(super) fn demo_seed_for(
             AuthorizationState::Ready,
         ),
         // Slice parity:platform-offline-errors — offline banner + kit toast
-        // with the product offline-send note (status_note → push_status_note).
+        // with the product offline-send note (status line).
         ScreenshotDemo::ReadyOfflineToast => (
             Some(seed_ready_offline_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -261,7 +261,7 @@ pub(super) fn demo_seed_for(
             "screenshot demo — peer typing (injected updateChatAction)".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyStickers => (
+        ScreenshotDemo::ReadyStickers | ScreenshotDemo::ReadyStickerPlayback => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — sticker panel + sticker in history".into(),
@@ -357,7 +357,7 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sponsored / recommended channel rows".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyCustomEmoji => (
+        ScreenshotDemo::ReadyEmojiPacks | ScreenshotDemo::ReadyCustomEmoji => (
             Some(seed_ready_custom_emoji_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — custom emoji rendered inline in message text".into(),
@@ -557,7 +557,7 @@ pub(super) fn demo_seed_for(
             "screenshot demo — fullscreen media viewer".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVideoPlayback => (
+        ScreenshotDemo::ReadyVideoPlayback | ScreenshotDemo::ReadyVideoPip => (
             Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — in-viewer video playback".into(),
@@ -991,9 +991,9 @@ impl QuillApp {
                 .submit_on_enter(true)
         });
         let password_input = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            InputState::new(window, cx)
+                .masked(true)
                 .placeholder("Two-step password")
-                .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
         let recovery_code_input = cx.new(|cx| {
@@ -1006,15 +1006,15 @@ impl QuillApp {
         // here only and are cleared on submit/close — never on the
         // session.
         let twofa_current_password = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            InputState::new(window, cx)
+                .masked(true)
                 .placeholder("Current password")
-                .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let twofa_new_password = cx.new(|cx| {
-            TextareaState::new(window, cx)
+            InputState::new(window, cx)
+                .masked(true)
                 .placeholder("New password")
-                .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let twofa_hint = cx.new(|cx| {
@@ -1311,7 +1311,11 @@ impl QuillApp {
         let pending_attachments = demo_pending_attachments(demo);
 
         let mut app = Self {
-            update_state: quill::updater::UpdateState::Idle,
+            update_state: if demo.is_none() {
+                quill::update_install::startup_state()
+            } else {
+                quill::updater::UpdateState::Idle
+            },
             update_banner_dismissed: false,
             chat,
             composer,
@@ -1470,6 +1474,8 @@ impl QuillApp {
             appearance: Self::load_appearance(),
             chat_prefs,
             appearance_open: false,
+            settings_open: false,
+            settings_page: None,
             keybinding_capture: None,
             keybinding_error: None,
             keybinding_focus: cx.focus_handle(),
@@ -1532,8 +1538,10 @@ impl QuillApp {
             seek_preview_secs: None,
             playback_tick: false,
             playback_positions: HashMap::new(),
+            sticker_playback: Default::default(),
             playing_animation: None,
             animation_frames: Vec::new(),
+            autoplayed_gifs: Default::default(),
             animation_frame: 0,
             animation_tick: false,
             animation_fps: 8.0,
@@ -1574,6 +1582,7 @@ impl QuillApp {
             viewer_zoom: ViewerZoom::new(),
             viewer_drag: None,
             viewer_video: None,
+            pip_window: None,
             viewer_video_path: None,
             viewer_player: None,
             viewer_clock: None,
@@ -1620,6 +1629,46 @@ impl QuillApp {
             import_contacts_dialog: None,
         };
 
+        if demo == Some(ScreenshotDemo::ReadyTrayBehavior) {
+            app.appearance.minimize_to_tray = true;
+        }
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyUpdateInstall
+                    | ScreenshotDemo::ReadyUpdateChangelog
+                    | ScreenshotDemo::ReadyUpdateFailure
+            )
+        ) {
+            let release = quill::updater::ReleaseInfo {
+                version: "0.2.0".into(),
+                notes: "Update complete: improved navigation, video playback and accessibility."
+                    .into(),
+                url: format!("{}/tag/v0.2.0", quill::updater::RELEASES_URL),
+                asset: Some(quill::updater::ReleaseAsset {
+                    url: format!(
+                        "{}/download/v0.2.0/{}",
+                        quill::updater::RELEASES_URL,
+                        quill::updater::binary_asset_name()
+                    ),
+                    size: 120,
+                    sha256: "a".repeat(64),
+                }),
+            };
+            app.update_state = match demo {
+                Some(ScreenshotDemo::ReadyUpdateChangelog) => {
+                    quill::updater::UpdateState::Installed(release)
+                }
+                Some(ScreenshotDemo::ReadyUpdateFailure) => {
+                    quill::updater::UpdateState::DownloadFailed(
+                        release,
+                        "Download interrupted. Retry the update.",
+                    )
+                }
+                _ => quill::updater::UpdateState::Available(release),
+            };
+            app.appearance_open = true;
+        }
         app.demo_setup_composer(demo, window, cx);
         app.demo_setup_messages(demo, window, cx);
         app.demo_setup_chat_list(demo, window, cx);
@@ -1698,7 +1747,10 @@ impl QuillApp {
         // notifies when the effective theme actually changed, so the
         // tick is free when idle.
         app.apply_appearance(cx);
-        if demo.is_none() && app.appearance.check_updates_on_launch {
+        if demo.is_none()
+            && app.appearance.check_updates_on_launch
+            && app.update_state == quill::updater::UpdateState::Idle
+        {
             app.check_for_updates(cx);
         }
         cx.spawn(async move |this, cx| {

@@ -979,6 +979,9 @@ impl QuillApp {
                     .flex_col()
                     .min_w_0()
                     .flex_1()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label("Go to pinned message")
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, _, cx| {

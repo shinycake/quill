@@ -151,6 +151,7 @@ impl QuillApp {
                     .child(div().font_semibold().child("Downloads"))
                     .child(
                         Button::new("downloads-panel-close")
+                            .accessibility_label("Close downloads")
                             .icon(IconName::X)
                             .ghost()
                             .tooltip("Close downloads")
@@ -291,6 +292,9 @@ impl QuillApp {
                 .child(
                     div()
                         .id(("download-pause", file_id as u64))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label("Pause or resume download")
+                        .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
                         .text_xs()
@@ -307,6 +311,9 @@ impl QuillApp {
                 .child(
                     div()
                         .id(("download-cancel", file_id as u64))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label("Cancel download")
+                        .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
                         .text_xs()
@@ -320,6 +327,9 @@ impl QuillApp {
             div().flex().gap_2().child(
                 div()
                     .id(("download-retry", file_id as u64))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label("Retry download")
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .text_xs()
@@ -336,6 +346,9 @@ impl QuillApp {
                 .child(
                     div()
                         .id(("download-open", file_id as u64))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label("Open downloaded file")
+                        .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
                         .text_xs()
@@ -348,6 +361,9 @@ impl QuillApp {
                 .child(
                     div()
                         .id(("download-reveal", file_id as u64))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label("Show downloaded file in Finder")
+                        .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
                         .text_xs()

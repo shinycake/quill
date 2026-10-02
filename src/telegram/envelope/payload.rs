@@ -1177,6 +1177,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
         "stickerSets" => Ok(parse_sticker_sets(&value)),
         "stickerSet" => Ok(parse_sticker_set(&value)),
+        "updateStickerSet" => Ok(EnvelopePayload::UpdateStickerSet {
+            id: int64(value.get("sticker_set").and_then(|set| set.get("id"))).unwrap_or(0),
+            is_custom_emoji: value
+                .pointer("/sticker_set/sticker_type/@type")
+                .and_then(Value::as_str)
+                == Some("stickerTypeCustomEmoji"),
+        }),
         "trendingStickerSets" => Ok(parse_trending_sticker_sets(&value)),
         "stickers" => Ok(parse_stickers(&value)),
         // Slice S10: emoji backend payloads (parsers live in envelope_emoji).

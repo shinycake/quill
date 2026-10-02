@@ -40,6 +40,14 @@ impl Session {
         seq: u64,
     ) {
         match payload {
+            EnvelopePayload::AccountExport(value) => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::ExportAccount
+                    && let Some(export) = self.account_export.as_mut()
+                {
+                    export.reply(pending.id, value);
+                }
+            }
             EnvelopePayload::UpdateAuthorizationState(state) => self.set_auth(state),
             // MED4: `updateOption` (schema:10926). Only
             // `message_caption_length_max` is consumed (caption edits /
@@ -1626,6 +1634,17 @@ impl Session {
             | EnvelopePayload::EmojiCategories { .. }) => {
                 self.dispatch_emoji_payload(pending.map(|p| p.purpose), payload);
             }
+            EnvelopePayload::UpdateStickerSet {
+                id,
+                is_custom_emoji,
+            } => {
+                if is_custom_emoji && id > 0 {
+                    self.emoji.outdated_packs.insert(id);
+                    if self.emoji.selected_set_id == Some(id) {
+                        drop(self.requests.take_purpose(RequestPurpose::GetEmojiSet));
+                    }
+                }
+            }
             EnvelopePayload::StickerSet {
                 id,
                 stickers,
@@ -1639,6 +1658,10 @@ impl Session {
                     self.remember_files(&files);
                     self.emoji.failed = false;
                     self.emoji.preview_title = title;
+                    self.emoji
+                        .pack_files
+                        .insert(id, stickers.iter().map(|item| item.file_id).collect());
+                    self.emoji.outdated_packs.remove(&id);
                     self.emoji.preview = stickers;
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
                     self.remember_files(&files);

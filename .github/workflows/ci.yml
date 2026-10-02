@@ -36,7 +36,7 @@ jobs:
           config-path: .gitleaks.toml
 
   macos:
-    name: macos-compile-smoke
+    name: macos-ui-build
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +49,8 @@ jobs:
         run: cargo build --features ui --locked
       - name: compile release ui
         run: cargo build --features ui --release --locked
+      - name: build bundled TGS renderer
+        run: bash scripts/build-rlottie.sh
       - name: package smoke
         run: bash scripts/macos-package-smoke.sh
 

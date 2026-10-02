@@ -1,16 +1,28 @@
-//! Read-only GitHub release checks. Downloads and installation are separate.
+//! Bounded GitHub release checks and explicit installation states.
 use semver::Version;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const RELEASES_URL: &str = "https://github.com/shinycake/quill/releases";
 pub const LATEST_API_URL: &str = "https://api.github.com/repos/shinycake/quill/releases/latest";
 const MAX_RESPONSE_BYTES: u64 = 1_048_576;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseInfo {
     pub version: String,
     pub notes: String,
     pub url: String,
+    pub asset: Option<ReleaseAsset>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseAsset {
+    pub url: String,
+    pub size: u64,
+    pub sha256: String,
+}
+
+pub fn binary_asset_name() -> String {
+    format!("quill-{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -19,6 +31,11 @@ pub enum UpdateState {
     Idle,
     Checking,
     Available(ReleaseInfo),
+    Downloading(ReleaseInfo),
+    Installing(ReleaseInfo),
+    DownloadFailed(ReleaseInfo, &'static str),
+    InstallFailed(ReleaseInfo, &'static str),
+    Installed(ReleaseInfo),
     UpToDate,
     NoRelease,
     Failed(&'static str),
@@ -30,6 +47,10 @@ impl UpdateState {
             Self::Idle => format!("Quill {}", env!("CARGO_PKG_VERSION")),
             Self::Checking => "Checking for updates…".into(),
             Self::Available(release) => format!("Quill {} is available", release.version),
+            Self::Downloading(_) => "Downloading and verifying update…".into(),
+            Self::Installing(_) => "Installing update and restarting…".into(),
+            Self::DownloadFailed(_, message) | Self::InstallFailed(_, message) => (*message).into(),
+            Self::Installed(release) => format!("Updated to Quill {}", release.version),
             Self::UpToDate => "Quill is up to date.".into(),
             Self::NoRelease => "No published Quill release is available yet.".into(),
             Self::Failed(message) => (*message).into(),
@@ -44,6 +65,23 @@ struct GithubRelease {
     body: Option<String>,
     draft: bool,
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+    size: u64,
+    digest: Option<String>,
+}
+
+pub fn valid_asset(asset: &ReleaseAsset, tag: &str) -> bool {
+    asset.url == format!("{RELEASES_URL}/download/{tag}/{}", binary_asset_name())
+        && (1..=536_870_912).contains(&asset.size)
+        && asset.sha256.len() == 64
+        && asset.sha256.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 pub fn interpret_release(status: u16, body: &[u8], current: &str) -> UpdateState {
@@ -82,10 +120,22 @@ pub fn interpret_release(status: u16, body: &[u8], current: &str) -> UpdateState
     {
         return UpdateState::Failed("Invalid release link. Retry the check.");
     }
+    let asset = release.assets.into_iter().find_map(|a| {
+        if a.name != binary_asset_name() {
+            return None;
+        }
+        let asset = ReleaseAsset {
+            url: a.browser_download_url,
+            size: a.size,
+            sha256: a.digest?.strip_prefix("sha256:")?.to_ascii_lowercase(),
+        };
+        valid_asset(&asset, &release.tag_name).then_some(asset)
+    });
     UpdateState::Available(ReleaseInfo {
         version: version.to_string(),
         notes: release.body.unwrap_or_default(),
         url: release.html_url,
+        asset,
     })
 }
 
@@ -140,6 +190,36 @@ mod tests {
         };
         assert_eq!(info.version, "0.10.0");
         assert_eq!(info.notes, "Changes 😀\nSecond line");
+        assert!(info.asset.is_none());
+        let asset = json!({"name": binary_asset_name(), "browser_download_url": format!("{RELEASES_URL}/download/v0.2.0/{}", binary_asset_name()), "size": 120, "digest": format!("sha256:{}", "a".repeat(64))});
+        let mut downloadable = json!({"tag_name":"v0.2.0", "html_url":format!("{RELEASES_URL}/tag/v0.2.0"), "body":"Release notes", "draft":false,"prerelease":false,"assets":[asset]});
+        let UpdateState::Available(info) =
+            interpret_release(200, downloadable.to_string().as_bytes(), "0.1.0")
+        else {
+            panic!("new release absent")
+        };
+        assert_eq!(info.asset.unwrap().size, 120);
+        for (field, value) in [
+            ("digest", json!(null)),
+            ("size", json!(0)),
+            ("browser_download_url", json!("https://evil.invalid/update")),
+        ] {
+            let mut invalid = downloadable.clone();
+            invalid["assets"][0][field] = value;
+            let UpdateState::Available(info) =
+                interpret_release(200, invalid.to_string().as_bytes(), "0.1.0")
+            else {
+                panic!("release absent")
+            };
+            assert!(info.asset.is_none());
+        }
+        downloadable["assets"][0]["name"] = json!("quill-other-platform");
+        let UpdateState::Available(info) =
+            interpret_release(200, downloadable.to_string().as_bytes(), "0.1.0")
+        else {
+            panic!("release absent")
+        };
+        assert!(info.asset.is_none());
         assert_eq!(
             interpret_release(200, &release("v0.10.0"), "0.10.0"),
             UpdateState::UpToDate

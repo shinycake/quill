@@ -329,7 +329,9 @@ impl QuillApp {
                 this.close_forum_manage_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Manage topics");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Manage topics"));
             let Some(dialog_state) = this.forum_manage_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -346,9 +348,11 @@ impl QuillApp {
                         .items_center()
                         .gap_1()
                         .child(
-                            div()
-                                .flex_1()
-                                .child(Textarea::new(&dialog_state.new_topic_input).h(px(36.))),
+                            div().flex_1().child(
+                                Textarea::new(&dialog_state.new_topic_input)
+                                    .aria_label("New topic name")
+                                    .h(px(36.)),
+                            ),
                         )
                         .child(Button::new("g2-topic-create").label("Create").on_click(
                             cx.listener(|this, _, window, cx| {
@@ -370,7 +374,7 @@ impl QuillApp {
             body = body.child(list);
             let body = body.into_any_element();
             dialog
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -381,7 +385,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .on_close(on_close)
         })
     }
@@ -399,7 +403,9 @@ impl QuillApp {
                 this.close_comment_thread_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Comments");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Comments"));
             let Some((chat_id, message_id)) = this
                 .comment_thread_dialog
                 .as_ref()
@@ -501,7 +507,7 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -512,7 +518,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .on_close(on_close)
         })
     }
@@ -564,7 +570,11 @@ impl QuillApp {
                 .map(|dialog| dialog.edit_input.clone());
             let mut edit_row = div().flex().items_center().gap_1();
             if let Some(input) = edit_input {
-                edit_row = edit_row.child(div().flex_1().child(Textarea::new(&input).h(px(32.))));
+                edit_row = edit_row.child(
+                    div()
+                        .flex_1()
+                        .child(Textarea::new(&input).aria_label("Topic name").h(px(32.))),
+                );
             }
             edit_row = edit_row
                 .child(
@@ -773,6 +783,9 @@ impl QuillApp {
                     .px_3()
                     .py_2()
                     .rounded_md()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(name.clone())
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .bg(cx.theme().sidebar)

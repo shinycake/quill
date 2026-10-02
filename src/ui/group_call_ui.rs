@@ -293,7 +293,8 @@ impl QuillApp {
             .gap_3()
             .p_6()
             .w(px(600.))
-            .max_h(px(720.))
+            .max_w(relative(0.9))
+            .max_h(relative(0.85))
             .overflow_y_scroll()
             .rounded_lg()
             .border_1()
@@ -873,7 +874,11 @@ impl QuillApp {
                     .border_1()
                     .border_color(cx.theme().border)
                     .child(div().text_sm().font_semibold().child("Rename voice chat"))
-                    .child(Textarea::new(&dialog.title_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.title_input)
+                            .aria_label("Voice chat title")
+                            .h(px(40.)),
+                    )
                     .child(
                         div()
                             .flex()
@@ -956,7 +961,11 @@ impl QuillApp {
         }
         if call.are_messages_allowed && call.can_send_messages {
             section = section
-                .child(Textarea::new(&self.group_call_composer).h(px(40.)))
+                .child(
+                    Textarea::new(&self.group_call_composer)
+                        .aria_label("Voice chat message")
+                        .h(px(40.)),
+                )
                 .child(
                     Button::new("group-call-message-send")
                         .label("Send")

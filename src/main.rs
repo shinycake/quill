@@ -46,6 +46,29 @@ impl gpui_kit::gpui::AssetSource for QuillAssets {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|a| a == "--version") {
+        println!("Quill {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if args.get(1).is_some_and(|a| a == "--release-asset-name") {
+        println!("{}", quill::updater::binary_asset_name());
+        return;
+    }
+    if args.get(1).is_some_and(|a| a == "--build-info") {
+        println!("{}", if cfg!(feature = "ui") { "ui" } else { "core" });
+        return;
+    }
+    if args.get(1).is_some_and(|a| a == "--apply-update") {
+        let result = args
+            .get(2)
+            .ok_or_else(|| std::io::Error::other("Missing update plan"))
+            .and_then(|p| quill::update_install::apply_update(std::path::Path::new(p)));
+        if let Err(error) = result {
+            eprintln!("Update failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.iter().skip(1).any(|a| a == "--connect-smoke") {
         std::process::exit(quill::connect_smoke::cli_exit_code());
     }
@@ -74,15 +97,13 @@ fn main() {
 fn ui_main(args: &[String]) {
     use gpui_kit::*;
 
-    // Sweep private media caches (GIF/video/viewer frames, video-note
-    // thumbnails) plus legacy pre-fix layouts: abandoned extractions and
-    // unclean exits must not leave decrypted frames behind.
-    quill::local_path::sweep_media_caches();
-
     if let Some(demo) = parse_screenshot_demo(args) {
         run_screenshot_demo(demo);
         return;
     }
+
+    // Demo windows can run beside the live app without touching its private caches.
+    quill::local_path::sweep_media_caches();
 
     // `parity:platform-deep-links`: a `t.me` / `tg:` launch argument is
     // stashed on the app and resolved via `getDeepLinkInfo` once auth is
@@ -123,63 +144,15 @@ fn ui_main(args: &[String]) {
                         ..quill_window_options("Quill")
                     },
                     move |window, cx| {
-                        #[cfg(target_os = "macos")]
-                        window.on_window_should_close(cx, |_, cx| {
-                            if quill::tray::tray_available() {
-                                cx.hide();
-                                false
-                            } else {
-                                true
-                            }
-                        });
                         let view = cx.new(|cx| {
                             let mut app = ui::QuillApp::new(window, cx, credentials.clone());
                             app.pending_deep_link = pending_deep_link.clone();
                             app
                         });
-                        // parity:platform-tray-icon — system tray icon with
-                        // unread count, synced on a 1s UI-thread timer. The
-                        // tray module no-ops when the count is unchanged or
-                        // the OS exposes no system tray.
-                        cx.spawn({
-                            let tray_view = view.downgrade();
-                            let tray_window = window.window_handle();
-                            async move |cx| {
-                                loop {
-                                    cx.background_executor()
-                                        .timer(std::time::Duration::from_secs(1))
-                                        .await;
-                                    let alive = tray_view
-                                        .update(cx, |this, _| {
-                                            quill::tray::sync_tray(this.session());
-                                            // parity:platform-app-icon-badge — unread
-                                            // badge on the app/taskbar icon
-                                            // (Linux LauncherEntry D-Bus
-                                            // signal; no-op elsewhere).
-                                            quill::icon_badge::sync_icon_badge(this.session())
-                                        })
-                                        .is_ok();
-                                    if !alive {
-                                        break;
-                                    }
-                                    for action in quill::tray::take_tray_actions() {
-                                        let _ =
-                                            tray_window.update(cx, |_, window, cx| match action {
-                                                quill::tray::TrayAction::Open => {
-                                                    cx.activate(true);
-                                                    window.activate_window();
-                                                }
-                                                quill::tray::TrayAction::Quit => cx.quit(),
-                                            });
-                                    }
-                                }
-                            }
-                        })
-                        .detach();
+                        install_main_window_tray(window, cx, &view);
                         if window.focused(cx).is_none() {
                             window.focus(&view.focus_handle(cx), cx);
                         }
-                        view.update(cx, |this, _| quill::tray::sync_tray(this.session()));
                         if start_in_tray && !quill::tray::tray_available() {
                             // No tray host must never leave the only window inaccessible.
                             cx.activate(true);
@@ -195,6 +168,99 @@ fn ui_main(args: &[String]) {
             })
             .detach();
         });
+}
+
+#[cfg(feature = "ui")]
+fn install_main_window_tray(
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::App,
+    view: &gpui_kit::Entity<ui::QuillApp>,
+) {
+    #[cfg(target_os = "macos")]
+    window.on_window_should_close(cx, |_, cx| {
+        if quill::tray::tray_available() {
+            cx.hide();
+            false
+        } else {
+            true
+        }
+    });
+    // parity:platform-tray-icon — system tray icon with
+    // unread count, synced on a 1s UI-thread timer. The
+    // tray module no-ops when the count is unchanged or
+    // the OS exposes no system tray.
+    cx.spawn({
+        let tray_view = view.downgrade();
+        let tray_window = window.window_handle();
+        async move |cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(1))
+                    .await;
+                let alive = tray_view
+                    .update(cx, |this, _| {
+                        quill::tray::sync_tray(this.session());
+                        // parity:platform-app-icon-badge — unread
+                        // badge on the app/taskbar icon
+                        // (Linux LauncherEntry D-Bus
+                        // signal; no-op elsewhere).
+                        quill::icon_badge::sync_icon_badge(this.session())
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+                #[cfg(target_os = "macos")]
+                let _ = tray_window.update(cx, |_, window, cx| {
+                    let enabled = tray_view
+                        .update(cx, |this, _| this.minimize_to_tray())
+                        .unwrap_or(false);
+                    if enabled && quill::tray::tray_available() {
+                        use objc2_app_kit::NSView;
+                        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                        if let Ok(handle) = HasWindowHandle::window_handle(window)
+                            && let RawWindowHandle::AppKit(handle) = handle.as_raw()
+                        {
+                            // GPUI owns this live NSView for the lifetime of the window.
+                            let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+                            if let Some(native) = view.window()
+                                && native.isMiniaturized()
+                            {
+                                // Keep it minimized while hidden. Deminiaturizing
+                                // here would finish its animation by unhiding the app.
+                                cx.hide();
+                            }
+                        }
+                    }
+                });
+                for action in quill::tray::take_tray_actions() {
+                    let _ = tray_window.update(cx, |_, window, cx| match action {
+                        quill::tray::TrayAction::Open => {
+                            #[cfg(target_os = "macos")]
+                            {
+                                use objc2_app_kit::NSView;
+                                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                                if let Ok(handle) = HasWindowHandle::window_handle(window)
+                                    && let RawWindowHandle::AppKit(handle) = handle.as_raw()
+                                {
+                                    // GPUI retains this native view while the window lives.
+                                    let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+                                    if let Some(native) = view.window() {
+                                        native.deminiaturize(None);
+                                    }
+                                }
+                            }
+                            cx.activate(true);
+                            window.activate_window();
+                        }
+                        quill::tray::TrayAction::Quit => cx.quit(),
+                    });
+                }
+            }
+        }
+    })
+    .detach();
+    view.update(cx, |this, _| quill::tray::sync_tray(this.session()));
 }
 
 /// kit Phase 7: window options compatible with kit's `TitleBar` — the title
@@ -234,6 +300,10 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "wait-password" => ScreenshotDemo::WaitPassword,
                 "wait-qr" => ScreenshotDemo::WaitQr,
                 "ready-chats" => ScreenshotDemo::ReadyChats,
+                "ready-tray-behavior" => ScreenshotDemo::ReadyTrayBehavior,
+                "ready-update-install" => ScreenshotDemo::ReadyUpdateInstall,
+                "ready-update-changelog" => ScreenshotDemo::ReadyUpdateChangelog,
+                "ready-update-failure" => ScreenshotDemo::ReadyUpdateFailure,
                 "ready-deep-link-info" => ScreenshotDemo::ReadyDeepLinkInfo,
                 "ready-deep-link-invite" => ScreenshotDemo::ReadyDeepLinkInvite,
                 "ready-offline" => ScreenshotDemo::ReadyOffline,
@@ -263,6 +333,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-shared-media" => ScreenshotDemo::ReadySharedMedia,
                 "ready-typing" => ScreenshotDemo::ReadyTyping,
                 "ready-stickers" => ScreenshotDemo::ReadyStickers,
+                "ready-sticker-playback" => ScreenshotDemo::ReadyStickerPlayback,
                 "ready-voice" => ScreenshotDemo::ReadyVoice,
                 "ready-game-card" => ScreenshotDemo::ReadyGameCard,
                 "ready-link-preview" => ScreenshotDemo::ReadyLinkPreview,
@@ -281,6 +352,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-sponsored" => ScreenshotDemo::ReadySponsored,
                 "ready-custom-emoji" => ScreenshotDemo::ReadyCustomEmoji,
                 "ready-animated-emoji" => ScreenshotDemo::ReadyAnimatedEmoji,
+                "ready-emoji-packs" => ScreenshotDemo::ReadyEmojiPacks,
                 "ready-channels" => ScreenshotDemo::ReadyChannels,
                 "ready-channels-admin" => ScreenshotDemo::ReadyChannelsAdmin,
                 "ready-channel-stats" => ScreenshotDemo::ReadyChannelStats,
@@ -309,6 +381,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-dice" => ScreenshotDemo::ReadyDice,
                 "ready-media-viewer" => ScreenshotDemo::ReadyMediaViewer,
                 "ready-video-playback" => ScreenshotDemo::ReadyVideoPlayback,
+                "ready-video-pip" => ScreenshotDemo::ReadyVideoPip,
                 "ready-stories" => ScreenshotDemo::ReadyStories,
                 "ready-story-post" => ScreenshotDemo::ReadyStoryPost,
                 "ready-story-composer" => ScreenshotDemo::ReadyStoryComposer,
@@ -441,6 +514,10 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyDeepLinkInfo => ".quill-ready-ready-deep-link-info",
         ScreenshotDemo::ReadyDeepLinkInvite => ".quill-ready-ready-deep-link-invite",
         ScreenshotDemo::ReadyChats => ".quill-ready-ready-chats",
+        ScreenshotDemo::ReadyTrayBehavior => ".quill-ready-ready-tray-behavior",
+        ScreenshotDemo::ReadyUpdateInstall => ".quill-ready-ready-update-install",
+        ScreenshotDemo::ReadyUpdateChangelog => ".quill-ready-ready-update-changelog",
+        ScreenshotDemo::ReadyUpdateFailure => ".quill-ready-ready-update-failure",
         ScreenshotDemo::ReadyOffline => ".quill-ready-ready-offline",
         ScreenshotDemo::ReadyOfflineToast => ".quill-ready-ready-offline-toast",
         ScreenshotDemo::ReadyReconnecting => ".quill-ready-ready-reconnecting",
@@ -467,6 +544,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
         ScreenshotDemo::ReadyStickers => ".quill-ready-ready-stickers",
+        ScreenshotDemo::ReadyStickerPlayback => ".quill-ready-ready-sticker-playback",
         ScreenshotDemo::ReadyVoice => ".quill-ready-ready-voice",
         ScreenshotDemo::ReadyGameCard => ".quill-ready-ready-game-card",
         ScreenshotDemo::ReadyLinkPreview => ".quill-ready-ready-link-preview",
@@ -485,6 +563,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySponsored => ".quill-ready-ready-sponsored",
         ScreenshotDemo::ReadyCustomEmoji => ".quill-ready-ready-custom-emoji",
         ScreenshotDemo::ReadyAnimatedEmoji => ".quill-ready-ready-animated-emoji",
+        ScreenshotDemo::ReadyEmojiPacks => ".quill-ready-ready-emoji-packs",
         ScreenshotDemo::ReadyChannels => ".quill-ready-ready-channels",
         ScreenshotDemo::ReadyChannelsAdmin => ".quill-ready-ready-channels-admin",
         ScreenshotDemo::ReadyChannelStats => ".quill-ready-ready-channel-stats",
@@ -510,6 +589,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyDice => ".quill-ready-ready-dice",
         ScreenshotDemo::ReadyMediaViewer => ".quill-ready-ready-media-viewer",
         ScreenshotDemo::ReadyVideoPlayback => ".quill-ready-ready-video-playback",
+        ScreenshotDemo::ReadyVideoPip => ".quill-ready-ready-video-pip",
         ScreenshotDemo::ReadyStories => ".quill-ready-ready-stories",
         ScreenshotDemo::ReadyStoryPost => ".quill-ready-ready-story-post",
         ScreenshotDemo::ReadyStoryComposer => ".quill-ready-ready-story-composer",
@@ -611,37 +691,65 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {
-                cx.open_window(
-                    WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(Bounds {
-                            origin: point(px(20.), px(20.)),
-                            size: size(px(demo_w), px(demo_h)),
-                        })),
-                        app_id: Some("org.shinycake.quill".into()),
-                        ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
-                            "Quill — Call audio devices"
-                        } else {
-                            "Quill"
-                        })
-                    },
-                    move |window, cx| {
-                        let view =
-                            cx.new(|cx| ui::QuillApp::new_with_demo(window, cx, None, Some(kind)));
-                        // kit Phase 2 (redo): shell mounts the kit dialog +
-                        // notification layers that Root does not mount itself.
-                        let shell = cx.new(|_cx| ui::QuillShell::new(view));
-                        cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
-                    },
-                )
-                .expect("failed to open screenshot demo window");
+                let demo_window = cx
+                    .open_window(
+                        WindowOptions {
+                            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                                origin: point(px(20.), px(20.)),
+                                size: size(px(demo_w), px(demo_h)),
+                            })),
+                            app_id: Some("org.shinycake.quill".into()),
+                            ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
+                                "Quill — Call audio devices"
+                            } else {
+                                "Quill"
+                            })
+                        },
+                        move |window, cx| {
+                            let view = cx.new(|cx| {
+                                ui::QuillApp::new_with_demo(window, cx, None, Some(kind))
+                            });
+                            if kind == ScreenshotDemo::ReadyTrayBehavior {
+                                install_main_window_tray(window, cx, &view);
+                                let focus = view.focus_handle(cx);
+                                window.defer(cx, move |window, cx| window.focus(&focus, cx));
+                            }
+                            // kit Phase 2 (redo): shell mounts the kit dialog +
+                            // notification layers that Root does not mount itself.
+                            let shell = cx.new(|_cx| ui::QuillShell::new(view));
+                            cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
+                        },
+                    )
+                    .expect("failed to open screenshot demo window");
+
+                let _ = demo_window.update(cx, |_, window, cx| {
+                    cx.activate(true);
+                    window.activate_window();
+                });
 
                 // Allow a couple of frames to paint, then signal the capture script.
                 cx.background_executor()
-                    .timer(Duration::from_millis(1500))
+                    .timer(Duration::from_millis(
+                        if kind == ScreenshotDemo::ReadyStickerPlayback {
+                            400
+                        } else {
+                            1500
+                        },
+                    ))
                     .await;
                 let _ = std::fs::write(&marker_for_spawn, b"ready\n");
                 cx.background_executor()
-                    .timer(Duration::from_millis(3500))
+                    .timer(Duration::from_millis(
+                        std::env::var("QUILL_DEMO_LINGER_MS")
+                            .ok()
+                            .and_then(|v| v.parse::<u64>().ok())
+                            .unwrap_or(if kind == ScreenshotDemo::ReadyStickerPlayback {
+                                7500
+                            } else {
+                                3500
+                            })
+                            .clamp(3500, 60000),
+                    ))
                     .await;
                 cx.update(|cx| cx.quit());
             })

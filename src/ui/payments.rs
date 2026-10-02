@@ -265,32 +265,46 @@ impl QuillApp {
             );
         }
         // Order info — only the fields the invoice needs (schema:4655).
-        let field = |input: &Entity<TextareaState>| div().child(Textarea::new(input).h(px(36.)));
+        let field = |input: &Entity<TextareaState>, label: &'static str| {
+            div().child(Textarea::new(input).aria_label(label).h(px(36.)))
+        };
         if invoice.need_name {
-            body = body.child(field(&dialog.name_input));
+            body = body.child(field(&dialog.name_input, "Full name"));
         }
         if invoice.need_phone_number {
-            body = body.child(field(&dialog.phone_input));
+            body = body.child(field(&dialog.phone_input, "Phone number"));
         }
         if invoice.need_email_address {
-            body = body.child(field(&dialog.email_input));
+            body = body.child(field(&dialog.email_input, "Email address"));
         }
         if invoice.need_shipping_address {
-            body = body.child(field(&dialog.street1_input));
-            body = body.child(field(&dialog.street2_input));
+            body = body.child(field(&dialog.street1_input, "Street address"));
+            body = body.child(field(&dialog.street2_input, "Apartment or unit"));
             body = body.child(
                 div()
                     .flex()
                     .gap_2()
-                    .child(div().flex_1().child(field(&dialog.city_input)))
-                    .child(div().flex_1().child(field(&dialog.state_input))),
+                    .child(div().flex_1().child(field(&dialog.city_input, "City")))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(field(&dialog.state_input, "State or region")),
+                    ),
             );
             body = body.child(
                 div()
                     .flex()
                     .gap_2()
-                    .child(div().flex_1().child(field(&dialog.country_input)))
-                    .child(div().flex_1().child(field(&dialog.postal_input))),
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(field(&dialog.country_input, "Country code")),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(field(&dialog.postal_input, "Postal code")),
+                    ),
             );
         }
         let needs_order = invoice.need_name
@@ -409,7 +423,13 @@ impl QuillApp {
             );
         let use_token = dialog.credential_choice == PaymentCredentialChoice::NewToken;
         if use_token {
-            creds = creds.child(div().child(Textarea::new(&dialog.token_input).h(px(36.))));
+            creds = creds.child(
+                div().child(
+                    Textarea::new(&dialog.token_input)
+                        .aria_label("Payment token")
+                        .h(px(36.)),
+                ),
+            );
             if can_save_credentials {
                 let checked = dialog.allow_save_credentials;
                 let caption = if need_password {
@@ -690,7 +710,7 @@ impl QuillApp {
                 this.close_payment_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Checkout");
+            let dialog = dialog.overlay(true).title(crate::ui::shell::dialog_title("Checkout"));
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close.clone());
             };
@@ -715,7 +735,7 @@ impl QuillApp {
             let Some(form) = session.payment_form.as_ref() else {
                 let body = body.into_any_element();
                 return dialog
-                    .content({
+                    .content(crate::ui::shell::scrollable_dialog_content({
                         // `content` needs an `Fn` closure, but the body is built once
                         // per dialog render — hand it over through a one-shot cell.
                         let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -723,7 +743,7 @@ impl QuillApp {
                             let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
                             content.child(body)
                         }
-                    })
+                    }))
                     .on_close(on_close);
             };
             match &form.form_type {
@@ -763,7 +783,7 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -771,7 +791,7 @@ impl QuillApp {
                         let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .on_close(on_close)
         })
     }
@@ -789,7 +809,9 @@ impl QuillApp {
                 this.close_payment_receipt(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Payment receipt");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Payment receipt"));
             let session = this.session();
             let receipt = session.as_ref().and_then(|s| s.payment_receipt.as_ref());
             let Some(receipt) = receipt else {
@@ -849,7 +871,7 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -860,7 +882,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .on_close(on_close)
         })
     }
@@ -882,7 +904,9 @@ impl QuillApp {
                 this.close_subscriptions(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("⭐ Subscriptions");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("⭐ Subscriptions"));
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
@@ -967,7 +991,7 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
@@ -976,7 +1000,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .on_close(on_close)
         })
     }

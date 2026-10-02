@@ -1,6 +1,7 @@
 //! Quill core: ordered TDLib envelopes, reducers, and synthetic UI helpers.
 //! The GPUI binary lives in `src/main.rs` and is compiled with `--features ui`.
 
+pub mod account_export;
 pub mod album;
 pub mod animation;
 pub mod auth;
@@ -37,6 +38,7 @@ pub mod rich;
 pub mod settings;
 pub mod spellcheck;
 pub mod state;
+pub mod sticker_playback;
 pub mod sticker_suggest;
 pub mod story_composer;
 pub mod story_page;
@@ -45,6 +47,7 @@ pub mod story_viewer;
 pub mod telegram;
 pub mod text;
 pub mod tray;
+pub mod update_install;
 pub mod updater;
 pub mod video;
 pub mod voice;

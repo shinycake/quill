@@ -1,0 +1,1 @@
+parity:platform-screen-reader-labels

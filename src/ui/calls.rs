@@ -913,7 +913,7 @@ impl QuillApp {
             let Some((user_id, is_video)) = this.call_confirm else {
                 return dialog
                     .overlay(true)
-                    .title("Confirm call")
+                    .title(crate::ui::shell::dialog_title("Confirm call"))
                     .on_close(on_close.clone());
             };
             let name = this
@@ -956,8 +956,10 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(format!("Start {kind} with {name}?"))
-                .content({
+                .title(crate::ui::shell::dialog_title(format!(
+                    "Start {kind} with {name}?"
+                )))
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
@@ -966,7 +968,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -1049,7 +1051,7 @@ impl QuillApp {
             else {
                 return dialog
                     .overlay(true)
-                    .title("Incoming call")
+                    .title(crate::ui::shell::dialog_title("Incoming call"))
                     .on_close(on_close.clone());
             };
             let name = this
@@ -1092,8 +1094,8 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(format!("{name} is calling ({kind})"))
-                .content({
+                .title(crate::ui::shell::dialog_title(format!("{name} is calling ({kind})")))
+                .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
                         let body = body
@@ -1102,7 +1104,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -1232,7 +1234,7 @@ impl QuillApp {
         self.dial_user(user_id, is_video, cx);
     }
 
-    /// Phase C2i: Recent-calls list + call settings for the Calls tab.
+    /// Recent calls; preferences live in Settings.
     pub(super) fn calls_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut list = div().id("calls-list").flex().flex_col().gap_1().px_1();
         list = list.child(div().text_sm().font_semibold().px_1().child("Recent calls"));
@@ -1302,8 +1304,6 @@ impl QuillApp {
                 );
             }
         }
-        list = list.child(self.call_settings_section(cx));
-        list = list.child(self.media_settings_section(cx));
         list
     }
 

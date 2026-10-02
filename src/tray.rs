@@ -210,8 +210,16 @@ pub struct Tray {
 #[cfg(feature = "ui")]
 impl Tray {
     fn new() -> Option<Self> {
+        #[cfg(target_os = "macos")]
+        use tray_icon::menu::ContextMenu;
         use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
         let menu = Menu::new();
+        #[cfg(target_os = "macos")]
+        unsafe {
+            // Tray commands stay enabled even while the app has no active window.
+            let native = &*menu.ns_menu().cast::<objc2_app_kit::NSMenu>();
+            native.setAutoenablesItems(false);
+        }
         menu.append_items(&[
             &MenuItem::with_id("quill-tray-open", "Open Quill", true, None),
             &PredefinedMenuItem::separator(),
@@ -266,6 +274,13 @@ pub fn sync_tray(session: Option<&Session>) {
     let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
+        // AppKit can return a status-item handle before its native window
+        // exists during launch. Retry on the running event loop instead of
+        // treating an invisible handle as a reachable tray.
+        #[cfg(target_os = "macos")]
+        if slot.as_ref().is_some_and(|tray| tray.icon.rect().is_none()) {
+            *slot = None;
+        }
         if slot.is_none() {
             // Retry until it succeeds: a system tray that appears after startup
             // (e.g. the notifier host starting late) is picked up on the next tick.

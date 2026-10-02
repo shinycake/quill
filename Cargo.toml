@@ -14,11 +14,12 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ureq"]
+ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ureq"]
 
 [dependencies]
 base64 = "0.22"
 directories = "6"
+flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 libloading = "0.8"
 libc = "0.2"
@@ -44,6 +45,8 @@ features = ["component", "assets"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSMenu", "NSView", "NSWindow"], optional = true }
+raw-window-handle = { version = "0.6.2", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1"

@@ -381,6 +381,8 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_animation_playback();
+        self.autoplayed_gifs.clear();
+        self.stop_sticker_playback();
         self.stop_video_playback();
         if self.gif_panel_open() {
             if let Some(live) = self.live.as_mut() {
@@ -744,6 +746,9 @@ impl QuillApp {
             .child(
                 div()
                     .id("story-tray-add")
+                    .role(gpui_kit::Role::Button)
+                    .aria_label("Create story")
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .flex()
@@ -792,6 +797,9 @@ impl QuillApp {
             row = row.child(
                 div()
                     .id(("story-tray-item", chat_id as u64))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Open stories for chat {chat_id}"))
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .flex()
@@ -1266,10 +1274,11 @@ impl QuillApp {
         show_password: bool,
         show_qr: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let mode = self.pane_mode();
         let mut list = div()
             .id("sidebar")
+            .when(mode != PaneMode::Ready, |this| this.overflow_y_scroll())
             .track_focus(&self.focus_sidebar)
             .w(px(280.))
             .h_full()
@@ -1280,7 +1289,16 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(self.list_tabs(cx))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .when(mode == PaneMode::Ready, |this| {
+                        this.child(self.main_navigation_menu(cx))
+                    })
+                    .child(self.list_tabs(cx)),
+            )
             .when(!self.contacts_tab_open && !self.calls_tab_open, |this| {
                 this.child(
                     div()
@@ -1310,261 +1328,29 @@ impl QuillApp {
             }
             PaneMode::Ready => {
                 if self.contacts_tab_open {
-                    list = list.child(self.contacts_list(cx));
-                    // Slice A6: contacts settings live at the foot of the
-                    // Contacts tab (Quill has no settings screen; the
-                    // Calls tab does the same with call settings).
-                    list = list.child(self.contacts_settings_section(cx));
+                    list = list.child(
+                        div()
+                            .id("contacts-scroll")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .child(self.contacts_list(cx)),
+                    );
                 } else if self.calls_tab_open {
-                    // Phase C2i: Recent-calls tab — server-side call
-                    // history + call settings.
-                    list = list.child(self.calls_list(cx));
+                    list = list.child(
+                        div()
+                            .id("calls-scroll")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .child(self.calls_list(cx)),
+                    );
                 } else {
                     list = list.child(self.folder_tabs_with_community_banner(cx));
                     list = list.child(self.sidebar_search_field(cx));
-                    // Slice CL2: "Mark all as read" for the main list
-                    // (TGX overflow menu, `readChatList`). Hidden when
-                    // there is nothing unread to mark or the view is
-                    // filtered to the archive.
-                    let main_unread = self
-                        .session()
-                        .is_some_and(|s| s.chats.values().any(|c| c.in_main_list && c.is_unread()));
-                    if self.folder_tab.is_none()
-                        && self.chat_filter != ChatListFilter::Archived
-                        && main_unread
-                    {
-                        list = list.child(
-                            Button::new("mark-all-read")
-                                .label("✓ Mark all read")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.mark_all_chats_as_read(false, cx);
-                                })),
-                        );
-                    }
-                    // Slice CL2: Saved Messages entry (schema 1.8.67, line
-                    // 9590 — `createPrivateChat` with the own id, then open
-                    // the chat).
-                    list = list.child(
-                        Button::new("saved-messages")
-                            .label("💾 Saved Messages")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_saved_messages(window, cx);
-                            })),
-                    );
-                    // Phase S1: "New secret chat" entry (TGX main-menu "New
-                    // Secret Chat") — toggles the contact picker below.
-                    list = list.child(
-                        Button::new("new-secret-chat")
-                            .label("🔒 New secret chat")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.new_secret_picker_open = !this.new_secret_picker_open;
-                                cx.notify();
-                            })),
-                    );
                     if self.new_secret_picker_open {
                         list = list.child(self.new_secret_picker_panel(cx));
                     }
-                    // MED3: downloads manager (TGX side-menu "Downloads") —
-                    // toggles the right-side panel with active/recent downloads.
-                    list = list.child(
-                        Button::new("downloads-panel-toggle")
-                            .label("⬇ Downloads")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(live) = this.live.as_mut() {
-                                    let open = &mut live.driver.session.downloads_panel_open;
-                                    *open = !*open;
-                                } else if let Some(session) = this.demo_session.as_mut() {
-                                    session.downloads_panel_open = !session.downloads_panel_open;
-                                }
-                                cx.notify();
-                            })),
-                    );
-                    // Slice G1: group/supergroup/channel creation
-                    // entries (TGX main-menu "New Group" / "New
-                    // Channel"). Each opens the creation dialog.
-                    list = list.child(Button::new("g1-new-group").label("👥 New group").on_click(
-                        cx.listener(|this, _, window, cx| {
-                            this.open_create_chat_dialog(CreateChatKind::BasicGroup, window, cx);
-                        }),
-                    ));
-                    list = list.child(
-                        Button::new("g1-new-supergroup")
-                            .label("📣 New supergroup")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_create_chat_dialog(
-                                    CreateChatKind::Supergroup,
-                                    window,
-                                    cx,
-                                );
-                            })),
-                    );
-                    list = list.child(
-                        Button::new("g1-new-channel")
-                            .label("📢 New channel")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_create_chat_dialog(CreateChatKind::Channel, window, cx);
-                            })),
-                    );
-                    // Slice G10: communities — create entry + hub entry
-                    // next to the other "New" entries.
-                    list = list.child(
-                        Button::new("g10-new-community")
-                            .label("🏘 New community")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_create_community_dialog(window, cx);
-                            })),
-                    );
-                    list = list.child(
-                        Button::new("g10-communities-hub")
-                            .label("🏘 Communities")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_community_hub(cx);
-                            })),
-                    );
-                    list = list.child(
-                        Button::new("archived-stickers-settings")
-                            .label("Archived stickers")
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.open_archived_stickers(cx)),
-                            ),
-                    );
-                    // Slice S4: Data & Storage dialog entry (TGX Settings →
-                    // Data and Storage). Quill has no settings screen, so
-                    // it sits next to the secret-chat entry; it fetches
-                    // `getStorageStatistics` and the auto-download
-                    // presets on open (both guarded: once per session).
-                    list = list.child(
-                        Button::new("storage-usage")
-                            .label("💾 Data & Storage")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_data_storage(cx);
-                            })),
-                    );
-                    // Slice `parity:bots-payment-recurring`: Subscriptions
-                    // dialog entry (`getStarSubscriptions` — the
-                    // `starSubscriptions` management list). Quill has no
-                    // settings screen, so it sits next to the storage
-                    // entry; the list fetches on open (guarded: once per
-                    // session unless a mutation marks it stale).
-                    list = list.child(
-                        Button::new("star-subscriptions")
-                            .label("⭐ Subscriptions")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_subscriptions(cx);
-                            })),
-                    );
-                    list = list.child(
-                        Button::new("marketplace-gift")
-                            .label("Collectible gift")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if this.session().and_then(|s| s.open_chat).is_some() {
-                                    let busy = this
-                                        .session()
-                                        .and_then(|s| s.marketplace_gift.as_ref())
-                                        .is_some_and(|g| g.loading || g.sending);
-                                    if !busy {
-                                        this.marketplace_name_input.update(cx, |input, cx| {
-                                            input.set_value("", window, cx)
-                                        });
-                                        this.marketplace_comment_input.update(cx, |input, cx| {
-                                            input.set_value("", window, cx)
-                                        });
-                                        this.marketplace_private = true;
-                                        this.marketplace_error = None;
-                                        if let Some(live) = this.live.as_mut() {
-                                            live.driver.session.marketplace_gift = None;
-                                        } else if let Some(session) = this.demo_session.as_mut() {
-                                            session.marketplace_gift = None;
-                                        }
-                                    }
-                                    this.marketplace_open = true;
-                                } else {
-                                    this.status_note =
-                                    "Open a private chat or channel to choose the gift recipient."
-                                        .into();
-                                }
-                                cx.notify();
-                            })),
-                    );
-                    // Settings → Appearance slice: theme, auto-night,
-                    // accent, wallpaper, font size, bubble style
-                    // (client-side only — no TDLib setting exists for
-                    // any of it).
-                    list = list.child(Button::new("appearance").label("🎨 Appearance").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.appearance_open = true;
-                            cx.notify();
-                        }),
-                    ));
-                    // Slice S3: privacy overlay entry (TGX Settings →
-                    // Privacy). Quill has no settings screen, so it sits
-                    // next to the storage entry; it fetches all privacy
-                    // rules, the read-date setting, and the first blocked
-                    // page on open (unguarded: always fresh).
-                    list = list.child(
-                        Button::new("privacy-settings")
-                            .label("🔒 Privacy")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_privacy(cx);
-                            })),
-                    );
-                    // Slice A2: two-step verification overlay entry (TGX
-                    // `TwoStepVerification`). Quill has no settings
-                    // screen, so it sits next to the storage entry; it
-                    // fetches `getPasswordState` on open (guarded: cached
-                    // state reused, in-flight fetch deduped).
-                    list = list.child(
-                        Button::new("twofa")
-                            .label("🔐 Two-step verification")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_twofa(cx);
-                            })),
-                    );
-                    // Slice A3: Active Sessions overlay entry (TGX
-                    // Settings → Devices). Quill has no settings screen,
-                    // so it sits next to the storage entry; it fetches
-                    // `getActiveSessions` on open (guarded: cached state
-                    // reused, in-flight fetch deduped).
-                    list = list.child(
-                        Button::new("active-sessions")
-                            .label("📱 Active sessions")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_sessions(cx);
-                            })),
-                    );
-                    // Slice A4: Connected Websites overlay entry (TGX
-                    // Settings → Privacy → Logged In with Telegram). Sits
-                    // next to the sessions entry; fetches
-                    // `getConnectedWebsites` on open (guarded).
-                    list = list.child(
-                        Button::new("connected-websites")
-                            .label("🌐 Connected websites")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_websites(cx);
-                            })),
-                    );
-                    // Slice A9: account lifecycle — delete account +
-                    // self-destruct TTL (TGX Settings → Privacy). The
-                    // backend shipped in slice A7; this entry opens the
-                    // UI half. Fetches `getAccountTtl` + `getPasswordState`
-                    // on open (guarded: cached state reused, in-flight
-                    // fetches deduped).
-                    list = list.child(
-                        Button::new("account-lifecycle")
-                            .label("🗑️ Account")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_account_lifecycle(cx);
-                            })),
-                    );
-                    // Slice parity:auth-multi-account (UI): multi-account
-                    // switcher — list / switch / add / remove accounts.
-                    // Sits next to the other account entries.
-                    list = list.child(Button::new("accounts").label("👤 Accounts").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.open_accounts(cx);
-                        }),
-                    ));
                     // Phase 9.1/9.3: tdesktop-style active-stories tray above
                     // the chat rows (leading "+" tile opens the story
                     // composer); omitted for the contacts tab.
@@ -1877,6 +1663,9 @@ impl QuillApp {
                 }
             }
         }
+        if mode == PaneMode::Ready {
+            return list.into_any_element();
+        }
         list = list
             .child(div().mt_4().font_semibold().child("Authorization"))
             .child(div().text_sm().child(auth.title))
@@ -1886,13 +1675,7 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(auth.body.clone()),
             )
-            .child(auth_action_note(auth, &self.connect_status))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.status_note.clone()),
-            );
+            .child(auth_action_note(auth, &self.connect_status));
         list = list.when(
             matches!(auth.action, quill::auth::AuthAction::Register) && self.live.is_some(),
             |this| this.child(self.registration_form(cx)),
@@ -1900,19 +1683,25 @@ impl QuillApp {
         list.when(
             matches!(auth.action, quill::auth::AuthAction::EnterEmail) && self.live.is_some(),
             |this| {
-                this.child(Textarea::new(&self.email_input).h(px(40.)))
-                    .child(
-                        Button::new("submit-login-email")
-                            .label("Submit email")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.submit_email(window, cx)),
-                            ),
-                    )
+                this.child(
+                    Textarea::new(&self.email_input)
+                        .aria_label("Email address")
+                        .h(px(40.)),
+                )
+                .child(
+                    Button::new("submit-login-email")
+                        .label("Submit email")
+                        .on_click(cx.listener(|this, _, window, cx| this.submit_email(window, cx))),
+                )
             },
         )
         .when(show_phone, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Phone"))
-                .child(Textarea::new(&self.phone_input).h(px(40.)))
+                .child(
+                    Textarea::new(&self.phone_input)
+                        .aria_label("Phone number")
+                        .h(px(40.)),
+                )
                 .child(
                     Button::new("submit-phone")
                         .label("Submit phone")
@@ -1932,7 +1721,11 @@ impl QuillApp {
         })
         .when(show_code, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Code"))
-                .child(Textarea::new(&self.code_input).h(px(40.)))
+                .child(
+                    Textarea::new(&self.code_input)
+                        .aria_label("Sign-in code")
+                        .h(px(40.)),
+                )
                 .child(
                     div()
                         .flex()
@@ -1992,5 +1785,6 @@ impl QuillApp {
                         ),
                 )
         })
+        .into_any_element()
     }
 }

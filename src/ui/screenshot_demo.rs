@@ -11,6 +11,10 @@ pub enum ScreenshotDemo {
     /// with a fake link, rendered as a real QR (no live Telegram).
     WaitQr,
     ReadyChats,
+    ReadyTrayBehavior,
+    ReadyUpdateInstall,
+    ReadyUpdateChangelog,
+    ReadyUpdateFailure,
     ReadyDeepLinkInfo,
     ReadyDeepLinkInvite,
     /// Slice parity:platform-offline-indicator — the ReadyChats fixture
@@ -82,6 +86,7 @@ pub enum ScreenshotDemo {
     ReadyTyping,
     /// Sticker panel + sticker in history (injected, no live Telegram).
     ReadyStickers,
+    ReadyStickerPlayback,
     /// Voice record bar + history playback (injected, no live Telegram).
     ReadyVoice,
     /// Link entities + web page (`linkPreview`) card (injected, no live Telegram).
@@ -124,6 +129,7 @@ pub enum ScreenshotDemo {
     /// Animated emoji suggestion above the composer (injected
     /// `animatedEmoji` answer + downloaded sticker fixture).
     ReadyAnimatedEmoji,
+    ReadyEmojiPacks,
     /// Broadcast channel demo (injected, no live Telegram): the ungated demo
     /// channel (id 13) renders broadcast posts with channel author + view
     /// counts, composer hidden for the non-admin viewer, and the join/leave
@@ -251,6 +257,7 @@ pub enum ScreenshotDemo {
     /// 12 s duration is fixture data for the screenshot.
     /// (Parity slice 5.)
     ReadyVideoPlayback,
+    ReadyVideoPip,
     /// Story viewer demo (injected, no live Telegram): the story tray above
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).

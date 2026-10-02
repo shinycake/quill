@@ -137,9 +137,9 @@ impl QuillApp {
                     .bg(cx.theme().sidebar)
                     .border_1()
                     .border_color(cx.theme().border)
-                    .min_w(px(380.))
-                    .max_w(px(520.))
-                    .max_h(px(600.))
+                    .w(px(520.))
+                    .max_w(relative(0.9))
+                    .max_h(relative(0.85))
                     .overflow_y_scroll()
                     .child(
                         div()
@@ -234,6 +234,9 @@ impl QuillApp {
         let target = PrivacyEditorTarget::Rule(key);
         div()
             .id(format!("privacy-rule-{}", key.td_type()))
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!("{} · {}", target.label(), value))
+            .tab_index(0)
             .cursor_pointer()
             .flex()
             .items_center()
@@ -311,6 +314,9 @@ impl QuillApp {
         }
         div()
             .id(format!("privacy-calls-{id}"))
+            .role(gpui_kit::Role::Button)
+            .aria_label(label)
+            .tab_index(0)
             .cursor_pointer()
             .px_2()
             .py_1()
@@ -500,6 +506,9 @@ impl QuillApp {
             body = body.child(
                 div()
                     .id(format!("privacy-block-pick-{user_id}"))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Block {}", row.name))
+                    .tab_index(0)
                     .cursor_pointer()
                     .flex()
                     .items_center()
@@ -633,6 +642,9 @@ impl QuillApp {
                 target.label().replace(' ', "-"),
                 who.label().replace(' ', "-")
             ))
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!("{} · {}", target.label(), who.label()))
+            .tab_index(0)
             .cursor_pointer()
             .flex()
             .items_center()
@@ -716,6 +728,9 @@ impl QuillApp {
     ) -> AnyElement {
         div()
             .id(format!("privacy-exceptions-{kind:?}"))
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!("{} · {} exceptions", target.label(), kind.label()))
+            .tab_index(0)
             .cursor_pointer()
             .flex()
             .items_center()
@@ -753,6 +768,9 @@ impl QuillApp {
         let loading = self.session().is_some_and(|s| s.read_date_loading);
         div()
             .id("privacy-hide-read-time")
+            .role(gpui_kit::Role::Button)
+            .aria_label("Hide read time")
+            .tab_index(0)
             .cursor_pointer()
             .flex()
             .items_center()
@@ -916,6 +934,9 @@ impl QuillApp {
             body = body.child(
                 div()
                     .id(format!("privacy-picker-user-{user_id}"))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Add {} to privacy exceptions", row.name))
+                    .tab_index(0)
                     .cursor_pointer()
                     .flex()
                     .items_center()

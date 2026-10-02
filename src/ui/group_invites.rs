@@ -395,9 +395,21 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .child(div().text_sm().font_semibold().child("New invite link"))
-            .child(Textarea::new(&dialog.name_input).h(px(40.)))
-            .child(Textarea::new(&dialog.expiration_days_input).h(px(40.)))
-            .child(Textarea::new(&dialog.member_limit_input).h(px(40.)))
+            .child(
+                Textarea::new(&dialog.name_input)
+                    .aria_label("Invite link name")
+                    .h(px(40.)),
+            )
+            .child(
+                Textarea::new(&dialog.expiration_days_input)
+                    .aria_label("Invite link duration in days")
+                    .h(px(40.)),
+            )
+            .child(
+                Textarea::new(&dialog.member_limit_input)
+                    .aria_label("Invite link member limit")
+                    .h(px(40.)),
+            )
             .child(
                 // Phase 6: kit Checkbox (was: ghost button with a ☑/☐
                 // label). Controlled: writes the requested value.

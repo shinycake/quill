@@ -28,6 +28,9 @@ pub(super) fn search_result_row(
         .px_2()
         .py_2()
         .rounded_md()
+        .role(gpui_kit::Role::Button)
+        .aria_label(format!("{title} · {preview}"))
+        .tab_index(0)
         .cursor_pointer()
         .pressable(cx.theme())
         .on_click(cx.listener(move |this, _, window, cx| on_pick(this, window, cx)))
@@ -547,10 +550,11 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .child(
-                        div()
-                            .id("chat-search-field")
-                            .flex_1()
-                            .child(Textarea::new(&self.chat_search_input).h(px(36.))),
+                        div().id("chat-search-field").flex_1().child(
+                            Textarea::new(&self.chat_search_input)
+                                .aria_label("Search this conversation")
+                                .h(px(36.)),
+                        ),
                     )
                     .child(
                         Button::new("chat-search-close")
@@ -783,7 +787,11 @@ impl QuillApp {
                             this.open_search_ui(window, cx);
                         }
                     }))
-                    .child(Textarea::new(&self.search_input).h(px(40.))),
+                    .child(
+                        Textarea::new(&self.search_input)
+                            .aria_label("Search")
+                            .h(px(40.)),
+                    ),
             )
             .when(self.search_is_open(), |this| {
                 this.child(Button::new("search-clear").label("Clear").ghost().on_click(

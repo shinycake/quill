@@ -6,6 +6,14 @@ impl Session {
         if self.auth != state {
             self.requests.invalidate_auth();
         }
+        if matches!(
+            state,
+            AuthorizationState::LoggingOut
+                | AuthorizationState::Closing
+                | AuthorizationState::Closed
+        ) {
+            self.account_export = None;
+        }
         if matches!(state, AuthorizationState::Closed) {
             self.shutdown = ShutdownPhase::Closed;
             self.requests.invalidate_account();

@@ -149,7 +149,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.member_dialog.as_ref() else {
-                return dialog.title("Manage members").on_close(on_close);
+                return dialog
+                    .title(crate::ui::shell::dialog_title("Manage members"))
+                    .on_close(on_close);
             };
             let chat_id = dialog_state.chat_id;
             let is_basic_group = dialog_state.is_basic_group;
@@ -238,9 +240,11 @@ impl QuillApp {
                         .items_center()
                         .gap_2()
                         .child(
-                            div()
-                                .flex_1()
-                                .child(Textarea::new(&dialog_state.search_input).h(px(40.))),
+                            div().flex_1().child(
+                                Textarea::new(&dialog_state.search_input)
+                                    .aria_label("Search members")
+                                    .h(px(40.)),
+                            ),
                         )
                         .child(
                             Button::new("g1-member-search")
@@ -372,9 +376,11 @@ impl QuillApp {
                             );
                     }
                     body = body.child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(&dialog_state.add_search).h(px(40.))),
+                        div().flex_1().child(
+                            Textarea::new(&dialog_state.add_search)
+                                .aria_label("Search people to add")
+                                .h(px(40.)),
+                        ),
                     );
                     let mut add_list = div()
                         .id("g1-add-contacts")
@@ -411,12 +417,12 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .title(if is_basic_group {
+                .title(crate::ui::shell::dialog_title(if is_basic_group {
                     "Group members"
                 } else {
                     "Manage members"
-                })
-                .content({
+                }))
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -427,7 +433,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .on_close(on_close)
         })
     }

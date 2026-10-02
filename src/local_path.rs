@@ -72,9 +72,21 @@ fn media_cache_scope() -> &'static str {
 /// video-note thumbnails): `{temp}/quill-media-cache/{account}`. Create with
 /// [`secure_create_dir`] — never world-readable, never through a symlink.
 pub fn media_cache_base() -> PathBuf {
-    std::env::temp_dir()
+    cache_temp_dir()
         .join("quill-media-cache")
         .join(media_cache_scope())
+}
+
+// Unit-test sweeps must not remove media owned by a live app or UI demo.
+pub(crate) fn cache_temp_dir() -> PathBuf {
+    #[cfg(test)]
+    {
+        std::env::temp_dir().join(format!("quill-test-cache-{}", std::process::id()))
+    }
+    #[cfg(not(test))]
+    {
+        std::env::temp_dir()
+    }
 }
 
 /// Tests that create or delete `{temp}/quill-media-cache` must hold this for
@@ -92,14 +104,14 @@ pub(crate) fn lock_shared_media_cache() -> std::sync::MutexGuard<'static, ()> {
 /// directories are regenerable scratch. Sweeps the whole parent without
 /// reading the account scope, so a startup sweep can never poison it.
 pub fn sweep_media_caches() {
-    let _ = std::fs::remove_dir_all(std::env::temp_dir().join("quill-media-cache"));
+    let _ = std::fs::remove_dir_all(cache_temp_dir().join("quill-media-cache"));
     for legacy in [
         "quill-gif-frames",
         "quill-video-frames",
         "quill-viewer-frames",
         "quill-video-note-thumbs",
     ] {
-        let _ = std::fs::remove_dir_all(std::env::temp_dir().join(legacy));
+        let _ = std::fs::remove_dir_all(cache_temp_dir().join(legacy));
     }
 }
 

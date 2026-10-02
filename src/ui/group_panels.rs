@@ -110,6 +110,9 @@ impl QuillApp {
                     .px_2()
                     .py_2()
                     .rounded_md()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Start secret chat with {name}"))
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .bg(cx.theme().sidebar)
@@ -358,6 +361,7 @@ impl QuillApp {
                         .child(div().font_semibold().child(title))
                         .child(
                             Button::new("info-panel-close")
+                                .accessibility_label("Close information panel")
                                 .icon(IconName::X)
                                 .ghost()
                                 .tooltip("Close panel")
@@ -373,6 +377,7 @@ impl QuillApp {
                     div()
                         .id("info-panel-body")
                         .flex_1()
+                        .min_h_0()
                         .overflow_y_scroll()
                         .child(content),
                 )

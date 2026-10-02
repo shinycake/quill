@@ -377,10 +377,20 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if matches!(demo, Some(ScreenshotDemo::ReadyStickers)) {
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadyStickers | ScreenshotDemo::ReadyStickerPlayback)
+        ) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_stickers(session, &self.demo_sink, &self.demo_seq);
+                if demo == Some(ScreenshotDemo::ReadyStickerPlayback) {
+                    super::composer_ui::apply_ready_sticker_playback(
+                        session,
+                        &self.demo_sink,
+                        &self.demo_seq,
+                    );
+                }
             }
             self.status_note = "screenshot demo — stickers · tap to send".into();
         }
@@ -426,12 +436,51 @@ impl QuillApp {
                     }
                 }
             }
-            self.toggle_animation_playback(
-                MessageId(501),
-                quill::ids::FileId(63),
-                "image/gif".into(),
-                cx,
-            );
+            if demo == Some(ScreenshotDemo::ReadyGifs) {
+                self.toggle_animation_playback(
+                    MessageId(501),
+                    quill::ids::FileId(63),
+                    "image/gif".into(),
+                    cx,
+                );
+            }
+        }
+        if demo == Some(ScreenshotDemo::ReadyEmojiPacks) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_gifs(session, &self.demo_sink, &self.demo_seq);
+                session.gifs.open = false;
+                session.emoji.open = true;
+                session.emoji.installed_sets = [
+                    "Downloaded pack",
+                    "Downloading pack",
+                    "Updated pack",
+                    "Installing pack",
+                ]
+                .iter()
+                .enumerate()
+                .map(|(index, title)| quill::telegram::envelope::StickerSetInfo {
+                    id: index as i64 + 1,
+                    title: (*title).into(),
+                    name: (*title).into(),
+                    size: 1,
+                    is_installed: true,
+                    is_official: false,
+                })
+                .collect();
+                session
+                    .emoji
+                    .pack_files
+                    .insert(1, vec![quill::ids::FileId(63)]);
+                session
+                    .emoji
+                    .pack_files
+                    .insert(2, vec![quill::ids::FileId(62)]);
+                session.downloading.insert(62);
+                session.emoji.outdated_packs.insert(3);
+                session.emoji.mutating_set = Some((4, true));
+                session.media_prefs.recent_emoji_packs = vec![2, 1];
+            }
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideo)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -1311,7 +1360,10 @@ impl QuillApp {
             self.open_media_viewer(ChatId(11), MessageId(201), cx);
             self.status_note = "screenshot demo — fullscreen media viewer".into();
         }
-        if matches!(demo, Some(ScreenshotDemo::ReadyVideoPlayback)) {
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadyVideoPlayback | ScreenshotDemo::ReadyVideoPip)
+        ) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_video_viewer(session, &self.demo_sink, &self.demo_seq);
@@ -1329,7 +1381,8 @@ impl QuillApp {
             if let Some(item) = self.media_viewer.current().cloned()
                 && let Some(path) = self.viewer_clip_path(&item)
             {
-                let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
+                // Demo caches use negative IDs, outside TDLib’s live file-ID range.
+                let file_id = -item.play_file_id.map(|id| id.0).unwrap_or(0);
                 let cache = quill::video::viewer_frame_cache_dir(file_id);
                 let mime = item.mime_type.clone().unwrap_or_default();
                 let duration = item.duration_secs.unwrap_or(0);
@@ -1354,6 +1407,15 @@ impl QuillApp {
             // Keep `viewer_demo_sync_frames` true so no background extraction
             // races the synchronously decoded frames.
             self.status_note = "screenshot demo — in-viewer video playback".into();
+            if demo == Some(ScreenshotDemo::ReadyVideoPip) {
+                if let Some(clock) = self.viewer_clock.as_mut() {
+                    clock.seek(0.0);
+                }
+                let weak = cx.entity().downgrade();
+                cx.defer(move |cx| {
+                    let _ = weak.update(cx, |this, cx| this.open_video_pip(cx));
+                });
+            }
         }
     }
 

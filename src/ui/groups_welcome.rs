@@ -132,7 +132,9 @@ impl QuillApp {
             this.close_welcome_dialog(cx);
         });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Welcome message");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Welcome message"));
             let Some(dialog_state) = this.welcome_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -151,9 +153,11 @@ impl QuillApp {
                     .items_center()
                     .gap_1()
                     .child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(&dialog_state.new_input).h(px(64.))),
+                        div().flex_1().child(
+                            Textarea::new(&dialog_state.new_input)
+                                .aria_label("New welcome message")
+                                .h(px(64.)),
+                        ),
                     )
                     .child(
                         Button::new("g2-welcome-add")
@@ -228,7 +232,7 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .content({
+                .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -239,7 +243,7 @@ impl QuillApp {
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
-                })
+                }))
                 .on_close(on_close)
         })
     }
@@ -269,7 +273,13 @@ impl QuillApp {
                 .map(|dialog| dialog.edit_input.clone());
             let mut edit_row = div().flex().items_center().gap_1();
             if let Some(input) = edit_input {
-                edit_row = edit_row.child(div().flex_1().child(Textarea::new(&input).h(px(56.))));
+                edit_row = edit_row.child(
+                    div().flex_1().child(
+                        Textarea::new(&input)
+                            .aria_label("Welcome message")
+                            .h(px(56.)),
+                    ),
+                );
             }
             edit_row = edit_row
                 .child(

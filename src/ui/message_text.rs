@@ -924,6 +924,9 @@ pub(super) fn link_preview_card(
     let preview_for_tap = preview.clone();
     div()
         .id(("link-preview", row_id))
+        .role(Role::Link)
+        .aria_label("Open link preview")
+        .tab_index(0)
         .mt_2()
         .px_2()
         .py_1()
@@ -1354,6 +1357,9 @@ pub(super) fn reply_quote_strip(
 ) -> AnyElement {
     div()
         .id(("reply-quote", row_id.0 as u64))
+        .role(Role::Button)
+        .aria_label(format!("Go to replied message: {preview}"))
+        .tab_index(0)
         .mt_1()
         .mb_1()
         .px_2()

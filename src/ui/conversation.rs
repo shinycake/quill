@@ -134,6 +134,9 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .min_w_0()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label("Open conversation information")
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -202,6 +205,9 @@ impl QuillApp {
                     div()
                         .id("conversation-title")
                         .font_semibold()
+                        .role(gpui_kit::Role::Button)
+                        .aria_label("Open conversation information")
+                        .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -332,6 +338,7 @@ impl QuillApp {
                     div()
                         .flex()
                         .gap_1()
+                        .child(self.chat_navigation_menu(cx))
                         .when(voice_ok, |this| {
                             this.child(
                                 Button::new("chat-voice-chat")
@@ -1518,6 +1525,10 @@ impl QuillApp {
             })
             .child(
                 MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
+                    let gif_view = weak.clone();
+                    cx.defer(move |cx| {
+                        let _ = gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
+                    });
                     if ix == 0 {
                         let weak = weak.clone();
                         cx.defer(move |cx| {
@@ -1590,6 +1601,12 @@ impl QuillApp {
                     inputs.seek_bar.clone(),
                     inputs.animation_playing,
                     inputs.animation_frame.clone(),
+                    match &message.content {
+                        MessageContent::Sticker(sticker) => {
+                            self.sticker_image(sticker.file_id, sticker.format, cx)
+                        }
+                        _ => None,
+                    },
                     inputs.video_playing,
                     inputs.video_frame.clone(),
                     &self.spoiler_revealed,

@@ -1,12 +1,10 @@
-//! poll loop, OS notification threads, push_status_note.
+//! Poll loop and OS notification threads.
 
 use super::app::QuillApp;
 use super::connect_ui::{bootstrap_connect, live_status_for};
 use super::notification_settings::{
     MAX_OS_NOTIFICATION_SOUND_THREADS, MAX_OS_NOTIFICATION_THREADS,
 };
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::connect::SoundResolution;
 use quill::ids::ChatId;
@@ -35,20 +33,6 @@ pub(super) fn notification_settings_json(settings: &ChatNotificationSettings) ->
         settings.use_default_disable_mention_notifications,
         settings.disable_mention_notifications
     )
-}
-
-impl QuillApp {
-    /// kit Phase 2 (redo): the hand-rolled toast pill is gone — new
-    /// `status_note`s go to the kit notification layer (auto-dismiss,
-    /// stacking, theme from `cx.theme()`). Call sites keep writing
-    /// `status_note`; render consumes it here.
-    pub(super) fn push_status_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.status_note.is_empty() {
-            return;
-        }
-        let note = std::mem::take(&mut self.status_note);
-        window.push_notification(Notification::info(note), cx);
-    }
 }
 
 impl QuillApp {
@@ -146,8 +130,6 @@ impl QuillApp {
         if !matches!(new_auth, AuthorizationState::WaitPassword { .. }) {
             self.recovery_mode = false;
         }
-        let chat_count = live.driver.session.ordered_chats().len();
-        let chats_exhausted = live.driver.session.chats_exhausted;
         if send_failed {
             self.status_note = "failed to send TDLib request".into();
         } else if progressed {
@@ -155,12 +137,6 @@ impl QuillApp {
                 self.status_note = err.user_message().into();
             } else if new_auth != prev_auth {
                 self.status_note = live_status_for(&new_auth);
-            } else if matches!(new_auth, AuthorizationState::Ready) {
-                self.status_note = if chats_exhausted {
-                    format!("signed in — {chat_count} chats")
-                } else {
-                    format!("signed in — loading chats ({chat_count})")
-                };
             }
         }
         if let Some(result) = self
@@ -175,6 +151,16 @@ impl QuillApp {
         // the result (file path or error) as a status note, then clear it.
         if let Some(live) = self.live.as_mut() {
             live.driver.pump_chat_export();
+            live.driver.pump_account_export();
+            if live
+                .driver
+                .session
+                .account_export
+                .as_ref()
+                .is_some_and(|e| !e.finished.load(std::sync::atomic::Ordering::Acquire))
+            {
+                progressed = true;
+            }
             let note = live
                 .driver
                 .session

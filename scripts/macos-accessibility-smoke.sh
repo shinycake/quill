@@ -6,9 +6,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY="${1:-$ROOT/target/debug/quill}"
 OUT="${2:-$(mktemp -d /tmp/quill-ax-evidence.XXXXXX)}"
 DEMO="${3:-ready-text-entities}"
-case "$DEMO" in ready-text-entities|ready-marketplace-gift|ready-unsupported-message) ;; *) exit 2 ;; esac
+case "$DEMO" in ready-text-entities|ready-marketplace-gift|ready-unsupported-message|ready-emoji-packs) ;; *) exit 2 ;; esac
 [[ "$(uname -s)" == Darwin ]]
-if pgrep -x quill >/dev/null; then echo 'Close the existing Quill process before this isolated smoke check.' >&2; exit 2; fi
+# Every accessibility read, action and screenshot targets the owned demo PID.
 mkdir -p "$OUT"
 TMP="$(mktemp -d /tmp/quill-ax-smoke.XXXXXX)"
 APP_PID=''
@@ -32,13 +32,20 @@ func name(_ element: AXUIElement) -> String {
     [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute].compactMap { attribute(element, $0) as? String }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
 }
 let app = AXUIElementCreateApplication(pid_t(Int(CommandLine.arguments[1])!))
+_ = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+Thread.sleep(forTimeInterval: 0.2)
 let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
+if windows.isEmpty {
+    print("APP_CHILDREN: \((attribute(app, kAXChildrenAttribute) as? [AXUIElement] ?? []).map { role($0) })")
+    fflush(stdout)
+}
 precondition(!windows.isEmpty, "Demo has no accessible window")
 // AccessKit returns its initial root immediately and fills children on the next frame.
 for window in windows { _ = attribute(window, kAXChildrenAttribute) }
 Thread.sleep(forTimeInterval: 0.4)
 let before = windows.flatMap { nodes($0) }
 for element in before { print("\(role(element)) \(name(element))") }
+fflush(stdout)
 if CommandLine.arguments[2] == "ready-marketplace-gift" {
     precondition(before.contains { role($0) == "AXStaticText" && name($0) == "Plush Pepe — PlushPepe-123" }, "Gift quote absent")
     let buy = before.first { role($0) == "AXButton" && name($0) == "Buy for 25 Stars and send to Demo chat A" }!
@@ -57,7 +64,10 @@ if CommandLine.arguments[2] == "ready-marketplace-gift" {
     let close = windows.flatMap { nodes($0) }.first { role($0) == "AXButton" && name($0) == "Close" }!
     precondition(AXUIElementPerformAction(close, kAXPressAction as CFString) == .success)
     Thread.sleep(forTimeInterval:0.3)
-    let open = windows.flatMap { nodes($0) }.first { role($0) == "AXButton" && name($0) == "Collectible gift" }!
+    let menu = windows.flatMap { nodes($0) }.first { role($0) == "AXButton" && name($0) == "Chat actions" }!
+    precondition(AXUIElementPerformAction(menu, kAXPressAction as CFString) == .success)
+    Thread.sleep(forTimeInterval:0.3)
+    let open = windows.flatMap { nodes($0) }.first { role($0) == "AXMenuItem" && name($0) == "Send collectible gift" }!
     precondition(AXUIElementPerformAction(open, kAXPressAction as CFString) == .success)
     Thread.sleep(forTimeInterval:0.3)
     let fresh = windows.flatMap { nodes($0) }
@@ -71,6 +81,19 @@ if CommandLine.arguments[2] == "ready-marketplace-gift" {
     precondition(before.contains { role($0) == "AXStaticText" && name($0) == "This message has expired." }, "Expired-media notice absent")
     precondition(!before.contains { name($0).contains("messageFutureFeature") }, "Raw API constructor shown to user")
     print("PASS: unsupported card, accessible release action, expiry notice without update action and no raw API constructor")
+} else if CommandLine.arguments[2] == "ready-emoji-packs" {
+    for label in ["Downloaded", "Downloading…", "Update needed", "Installing…"] {
+        precondition(before.contains { role($0) == "AXStaticText" && name($0) == label }, "Missing pack state: \(label)")
+    }
+    func packOrder(_ elements: [AXUIElement]) -> [String] {
+        elements.filter { role($0) == "AXButton" && ["Downloaded pack", "Downloading pack"].contains(name($0)) }.map { name($0) }
+    }
+    precondition(packOrder(before) == ["Downloading pack", "Downloaded pack"], "Recent pack not first")
+    let toggle = before.first { name($0) == "Dynamic emoji pack order" && role($0) != "AXStaticText" }!
+    precondition(AXUIElementPerformAction(toggle, kAXPressAction as CFString) == .success, "Cannot toggle dynamic order")
+    Thread.sleep(forTimeInterval: 0.3)
+    precondition(packOrder(windows.flatMap { nodes($0) }) == ["Downloaded pack", "Downloading pack"], "Toggle did not restore server order")
+    print("PASS: native pack states and dynamic order toggle restore authoritative order")
 } else {
 precondition(before.contains { role($0) == "AXStaticText" && name($0) == "Bold" }, "Message text absent")
 precondition(before.contains { role($0) == "AXButton" && name($0) == "Bold" }, "Formatting label absent")
@@ -96,7 +119,7 @@ SWIFT
 swiftc "$TMP/check.swift" -o "$TMP/check"
 rm -f "$OUT/.quill-ready-$DEMO"
 cd "$ROOT"
-"$BINARY" --screenshot-demo "$DEMO" "$OUT" > "$OUT/app.log" 2>&1 &
+QUILL_DEMO_LINGER_MS=10000 "$BINARY" --screenshot-demo "$DEMO" "$OUT" > "$OUT/app.log" 2>&1 &
 APP_PID=$!
 for _ in {1..40}; do [[ -f "$OUT/.quill-ready-$DEMO" ]] && break; sleep 0.1; done
 [[ -f "$OUT/.quill-ready-$DEMO" ]]

@@ -731,6 +731,7 @@ impl QuillApp {
         let mut row = div()
             .id("format-toolbar")
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_1()
             .px_1()
