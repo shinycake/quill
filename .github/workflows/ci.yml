@@ -36,7 +36,7 @@ jobs:
           config-path: .gitleaks.toml
 
   macos:
-    name: macos-compile-smoke
+    name: macos-ui-build
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

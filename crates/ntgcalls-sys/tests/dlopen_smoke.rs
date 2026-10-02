@@ -9,8 +9,9 @@ use std::path::PathBuf;
 fn vendored_lib() -> Option<PathBuf> {
     let path = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../vendor/ntgcalls/lib/libntgcalls.so"
-    ));
+        "/../../vendor/ntgcalls/lib"
+    ))
+    .join(ntgcalls_sys::library_filename());
     path.exists().then_some(path)
 }
 
@@ -103,5 +104,46 @@ fn missing_library_errors_clearly() {
     assert!(
         message.contains("vendor-ntgcalls.sh"),
         "diagnostic should point at the vendor script: {message}"
+    );
+}
+
+/// Exercise actual executable-relative loading from an app bundle, without an
+/// environment override or the development checkout's vendor directory.
+#[cfg(target_os = "macos")]
+#[test]
+fn packaged_sidecar_loads() {
+    if std::env::var_os("QUILL_BUNDLED_CALL_PROBE").is_some() {
+        let loader = ntgcalls_sys::Loader::load_default().expect("Bundled sidecar must load");
+        assert!(!unsafe { (loader.ntg_get_version)() }.is_null());
+        return;
+    }
+    let Some(library) = vendored_lib() else {
+        return;
+    };
+    let root =
+        std::env::temp_dir().join(format!("quill-bundled-call-proof-{}", std::process::id()));
+    let contents = root.join("Proof.app/Contents");
+    std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+    std::fs::create_dir_all(contents.join("Frameworks")).unwrap();
+    let executable = contents.join("MacOS/probe");
+    std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    std::fs::copy(
+        library,
+        contents
+            .join("Frameworks")
+            .join(ntgcalls_sys::library_filename()),
+    )
+    .unwrap();
+    let result = std::process::Command::new(executable)
+        .args(["--exact", "packaged_sidecar_loads", "--nocapture"])
+        .env("QUILL_BUNDLED_CALL_PROBE", "1")
+        .env_remove("QUILL_NTGCALLS_LIB")
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
     );
 }

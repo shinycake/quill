@@ -15,7 +15,7 @@ permissions:
   contents: read
 jobs:
   macos-smoke:
-    name: macos-compile-smoke
+    name: macos-ui-build
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
