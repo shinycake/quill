@@ -113,6 +113,7 @@ pub struct RtcServer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectParams {
     pub encryption_key: Vec<u8>,
+    pub custom_parameters: String,
     pub is_outgoing: bool,
     pub servers: Vec<RtcServer>,
     pub library_versions: Vec<String>,

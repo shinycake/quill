@@ -286,7 +286,7 @@ fn call_engine_ignores_signaling_for_untracked_call() {
 
 /// Phase C2c: Ready `updateCall` carrying transport material
 /// (reflector + WebRTC servers, base64 key, `allow_p2p`).
-pub(crate) const READY_CALL_JSON: &str = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":92,"max_layer":92,"library_versions":["13.0.0"]},"servers":[{"@type":"callServer","id":"7","ip_address":"149.154.167.40","ipv6_address":"2001:b28:f23d:f001::a","port":443,"type":{"@type":"callServerTypeTelegramReflector","peer_tag":"AAEC","is_tcp":true}},{"@type":"callServer","id":"8","ip_address":"203.0.113.1","ipv6_address":"","port":3478,"type":{"@type":"callServerTypeWebrtc","username":"alice","password":"secret","supports_turn":true,"supports_stun":false}}],"config":"{}","encryption_key":"AQIDBA==","emojis":[],"allow_p2p":true}}}"#;
+pub(crate) const READY_CALL_JSON: &str = r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateReady","protocol":{"@type":"callProtocol","udp_p2p":true,"udp_reflector":true,"min_layer":92,"max_layer":92,"library_versions":["13.0.0"]},"servers":[{"@type":"callServer","id":"7","ip_address":"149.154.167.40","ipv6_address":"2001:b28:f23d:f001::a","port":443,"type":{"@type":"callServerTypeTelegramReflector","peer_tag":"AAEC","is_tcp":true}},{"@type":"callServer","id":"8","ip_address":"203.0.113.1","ipv6_address":"","port":3478,"type":{"@type":"callServerTypeWebrtc","username":"alice","password":"secret","supports_turn":true,"supports_stun":false}}],"config":"{}","custom_parameters":"{\"audio_codec\":\"opus\"}","encryption_key":"AQIDBA==","emojis":[],"allow_p2p":true}}}"#;
 
 #[test]
 fn call_ready_connects_transport_once_with_mapped_params() {
@@ -304,10 +304,8 @@ fn call_ready_connects_transport_once_with_mapped_params() {
     assert_eq!(params.encryption_key, vec![1, 2, 3, 4]);
     assert!(params.is_outgoing);
     assert!(params.p2p_allowed);
-    assert_eq!(
-        params.library_versions,
-        vec!["8.0.0", "9.0.0", "12.0.0", "13.0.0"]
-    );
+    assert_eq!(params.library_versions, vec!["13.0.0"]);
+    assert_eq!(params.custom_parameters, "{\"audio_codec\":\"opus\"}");
     assert_eq!(params.mic_input.as_deref(), Some("mic-a"));
     assert_eq!(params.speaker_input.as_deref(), Some("spk-a"));
     assert_eq!(params.servers.len(), 2);

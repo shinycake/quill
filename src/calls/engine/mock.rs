@@ -662,6 +662,7 @@ mod tests {
         engine.start_call(77, 41, false).unwrap();
         engine.accept_call(77).unwrap();
         let params = ConnectParams {
+            custom_parameters: String::new(),
             encryption_key: vec![1; 256],
             is_outgoing: false,
             servers: vec![RtcServer {
@@ -796,6 +797,7 @@ mod tests {
     fn mock_engine_connect_and_device_selection_need_known_call() {
         let mut engine = MockEngine::new();
         let params = ConnectParams {
+            custom_parameters: String::new(),
             encryption_key: vec![1; 256],
             is_outgoing: true,
             servers: Vec::new(),
@@ -940,6 +942,7 @@ mod tests {
     #[test]
     fn retained_call_media_preserves_screen_share_across_reconnect() {
         let params = ConnectParams {
+            custom_parameters: String::new(),
             encryption_key: vec![1; 256],
             is_outgoing: false,
             servers: Vec::new(),
