@@ -11,6 +11,10 @@ pub enum ScreenshotDemo {
     /// with a fake link, rendered as a real QR (no live Telegram).
     WaitQr,
     ReadyChats,
+    ReadyTrayBehavior,
+    ReadyUpdateInstall,
+    ReadyUpdateChangelog,
+    ReadyUpdateFailure,
     ReadyDeepLinkInfo,
     ReadyDeepLinkInvite,
     /// Slice parity:platform-offline-indicator — the ReadyChats fixture

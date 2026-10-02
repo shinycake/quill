@@ -234,8 +234,13 @@ impl Render for QuillApp {
                 #[cfg(not(target_os = "macos"))]
                 cx.quit();
             }))
-            .on_action(cx.listener(|this, _: &MinimizeWindow, window, _| {
-                let _ = this;
+            .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
+                #[cfg(target_os = "macos")]
+                if this.appearance.minimize_to_tray && quill::tray::tray_available() {
+                    cx.hide();
+                    return;
+                }
+                let _ = (this, cx);
                 window.minimize_window();
             }))
             .on_action(cx.listener(|this, _: &ZoomWindow, window, _| {
@@ -382,8 +387,11 @@ impl Render for QuillApp {
                 cx,
             ))
             .when(
-                matches!(self.update_state, quill::updater::UpdateState::Available(_))
-                    && !self.update_banner_dismissed,
+                matches!(
+                    self.update_state,
+                    quill::updater::UpdateState::Available(_)
+                        | quill::updater::UpdateState::Installed(_)
+                ) && !self.update_banner_dismissed,
                 |this| this.child(self.update_banner(cx)),
             )
             // Slice parity:platform-offline-indicator — slim connection

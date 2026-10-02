@@ -44,7 +44,7 @@ features = ["component", "assets"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSView", "NSWindow"], optional = true }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSMenu", "NSView", "NSWindow"], optional = true }
 raw-window-handle = { version = "0.6.2", optional = true }
 
 [dev-dependencies]

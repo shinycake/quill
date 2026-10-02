@@ -50,6 +50,10 @@ const WALLPAPER_PRESETS: &[(u32, &str)] = &[
 ];
 
 impl QuillApp {
+    #[cfg(target_os = "macos")]
+    pub(crate) fn minimize_to_tray(&self) -> bool {
+        self.appearance.minimize_to_tray
+    }
     pub(super) fn close_appearance(&mut self) {
         super::keybindings::close_appearance_capture(
             &mut self.appearance_open,
@@ -313,6 +317,14 @@ impl QuillApp {
                         .into_any_element(),
                 ));
                 // Parity slice (platform-custom-keybindings).
+                if cfg!(target_os = "macos") {
+                    body = body.child(this.appearance_section(
+                        cx, "Minimize to tray", "Use the tray menu to reopen Quill.",
+                        Switch::new("general-minimize-to-tray").checked(this.appearance.minimize_to_tray)
+                            .accessibility_label("Minimize Quill to the system tray")
+                            .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.minimize_to_tray = on))).into_any_element()
+                    ));
+                }
                 body = body.child(this.appearance_keybindings_section(cx));
             }
             let footer = div().flex().justify_end().child(

@@ -1,0 +1,4 @@
+parity:platform-minimize-to-tray
+parity:platform-update-install
+parity:platform-update-states
+parity:platform-update-changelog
