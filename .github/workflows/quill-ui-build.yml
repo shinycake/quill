@@ -20,7 +20,8 @@ permissions:
   contents: read
 jobs:
   ui-build:
-    runs-on: [self-hosted, quill-ui-build]
+    name: macos-ui-build
+    runs-on: [self-hosted, macOS, ARM64, quill-ui-build]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
@@ -33,5 +34,11 @@ jobs:
             echo "ref mismatch: checked out $BUILT, requested ${{ inputs.ref }}" >&2
             exit 1
           fi
-      - name: UI build (compile gate)
+      - name: compile ui
         run: cargo build --features ui --locked
+      - name: compile release ui
+        run: cargo build --features ui --release --locked
+      - name: build bundled TGS renderer
+        run: bash scripts/build-rlottie.sh
+      - name: package smoke
+        run: bash scripts/macos-package-smoke.sh
