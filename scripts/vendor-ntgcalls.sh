@@ -38,7 +38,8 @@ need() {
 }
 need curl
 need unzip
-need shasum
+if command -v sha256sum >/dev/null 2>&1; then CHECKSUM=(sha256sum); else CHECKSUM=(shasum -a 256); fi
+need "${CHECKSUM[0]}"
 
 mkdir -p "$STAGE_DIR"
 ZIP="$STAGE_DIR/$ASSET"
@@ -51,7 +52,7 @@ else
 fi
 
 echo "vendor-ntgcalls: verifying SHA256"
-ACTUAL="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+ACTUAL="$("${CHECKSUM[@]}" "$ZIP" | awk '{print $1}')"
 if [ "$ACTUAL" != "$NTGCALLS_SHA256" ]; then
     echo "vendor-ntgcalls: CHECKSUM MISMATCH" >&2
     echo "  expected: $NTGCALLS_SHA256" >&2
