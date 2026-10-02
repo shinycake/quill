@@ -60,14 +60,14 @@ impl AccountExport {
                 protected: 0,
             };
             let result = worker.run();
-            let complete = result.is_ok();
-            let manifest = json!({"format":"Quill raw TDLib JSONL", "complete":complete,
+            let finished = result.is_ok();
+            let manifest = json!({"format":"Quill raw TDLib JSONL", "complete":false,"finished":finished,
                 "messages":worker.messages,"unavailable_media":worker.unavailable,
                 "include_media":media,"protected_items_skipped":worker.protected,"limitations":["TDLib exposes imported non-user contact count, not their records"],"error":result.err().map(|e|e.to_string())});
             let saved = worker.write("manifest.json", &manifest);
-            let note = if complete && saved.is_ok() {
+            let note = if finished && saved.is_ok() {
                 format!(
-                    "Export complete: {} messages, {} unavailable media files",
+                    "Export finished with limitations: {} messages, {} unavailable media files. Imported non-user contacts are not included; see manifest.json.",
                     worker.messages, worker.unavailable
                 )
             } else {
@@ -476,7 +476,14 @@ mod tests {
         let folder = export.folder.clone();
         let manifest: Value =
             serde_json::from_slice(&std::fs::read(folder.join("manifest.json")).unwrap()).unwrap();
-        assert_eq!(manifest["complete"], true);
+        assert_eq!(manifest["complete"], false);
+        assert_eq!(manifest["finished"], true);
+        assert!(!manifest["limitations"].as_array().unwrap().is_empty());
+        assert!(
+            export
+                .label()
+                .starts_with("Export finished with limitations:")
+        );
         assert_eq!(manifest["messages"], 2);
         assert_eq!(manifest["protected_items_skipped"], 2);
         for name in ["chat-1.jsonl", "chat--2.jsonl"] {

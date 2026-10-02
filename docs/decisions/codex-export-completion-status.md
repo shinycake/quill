@@ -1,0 +1,7 @@
+# Distinguish a finished export from full account export
+
+The accessible-data exporter previously wrote complete:true and displayed “Export complete” whenever its worker succeeded, although it always listed omitted imported non-user contacts. Keep complete:false until the full export scope is supported. A separate finished field indicates a successful worker run; the UI says the export finished with limitations and identifies the omitted records. Error/cancellation output remains partial and retained.
+
+The existing worker regression now verifies the incomplete manifest, successful finished state, nonempty limitations, and the corresponding UI status while retaining history/media/privacy checks. No full-export completion is declared.
+
+Research confirms that contacts.getSaved requires a Telegram takeout session. Public TDLib exposes neither this method nor the takeout initialization/wrapper/finalization lifecycle. A single contact-getter extension would therefore not be a complete fix. Full Telegram export also includes split message ranges, left channels, archived stories and other account data beyond the current accessible-data worker. Sources: [contacts.getSaved](https://core.telegram.org/method/contacts.getSaved), [takeout procedure](https://core.telegram.org/api/takeout), pinned native/td/td/generate/scheme/telegram_api.tl:2310, :2386–2387, :2497. The pinned native source was not modified.
