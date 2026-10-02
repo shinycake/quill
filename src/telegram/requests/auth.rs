@@ -431,3 +431,9 @@ pub fn register_user(
 ) -> String {
     json!({"@type":"registerUser","@extra":extra.as_extra(),"first_name":first,"last_name":last,"disable_notification":disable_notification}).to_string()
 }
+
+/// The caller must obtain explicit confirmation after scanning the login QR.
+pub fn confirm_qr_code_authentication(extra: RequestId, link: &str) -> String {
+    json!({"@type":"confirmQrCodeAuthentication", "@extra":extra.as_extra(), "link":link})
+        .to_string()
+}

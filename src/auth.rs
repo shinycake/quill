@@ -1,3 +1,30 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceLoginResult {
+    Linked,
+    PasswordRequired,
+    Failed,
+}
+
+/// Accept only Telegram's login-token URI. Decode both padded and unpadded
+/// base64url; never accept extra parameters, other schemes or empty tokens.
+pub fn is_device_login_qr(link: &str) -> bool {
+    use base64::{
+        Engine,
+        engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
+    };
+    let Some(token) = link.strip_prefix("tg://login?token=") else {
+        return false;
+    };
+    if token.is_empty() || token.len() > 1400 {
+        return false;
+    }
+    URL_SAFE_NO_PAD
+        .decode(token)
+        .or_else(|_| URL_SAFE.decode(token))
+        .map(zeroize::Zeroizing::new)
+        .is_ok_and(|bytes| !bytes.is_empty() && bytes.len() <= 1024)
+}
+
 use crate::telegram::envelope::AuthorizationState;
 
 /// Screen + permitted actions derived from `updateAuthorizationState`, not from the last click.
@@ -268,5 +295,31 @@ mod tests {
         assert!(json.contains("\"recovery_code\":\"unit-test-code\""));
         assert!(json.contains("\"new_password\":\"\""));
         assert!(json.contains("\"new_hint\":\"\""));
+    }
+}
+
+#[cfg(test)]
+mod device_login_qr_tests {
+    #[test]
+    fn login_qr_requires_a_bounded_base64url_token() {
+        use super::is_device_login_qr;
+        assert!(is_device_login_qr("tg://login?token=AQID"));
+        assert!(is_device_login_qr("tg://login?token=AQ=="));
+        for bad in [
+            "",
+            "tg://login?token=",
+            "https://example.invalid/login?token=AQID",
+            "tg://login?token=AQID&x=1",
+            "tg://login?token=AQID#x",
+            "tg://login?token=+///",
+            "tg://login?token=a",
+            "tg://login?token=%41QID",
+        ] {
+            assert!(!is_device_login_qr(bad));
+        }
+        assert!(!is_device_login_qr(&format!(
+            "tg://login?token={}",
+            "A".repeat(1404)
+        )));
     }
 }

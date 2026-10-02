@@ -833,6 +833,10 @@ impl QuillApp {
                 session.sessions_error = None;
             }
             self.sessions_open = true;
+            if std::env::var_os("QUILL_DEMO_DEVICE_LINK").is_some() {
+                self.device_login_qr =
+                    Some(zeroize::Zeroizing::new("tg://login?token=AQID".into()));
+            }
             self.status_note = "screenshot demo — active sessions".into();
         }
         // Slice A4: session acceptance toggles fixture — the same fixture

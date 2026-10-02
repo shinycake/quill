@@ -574,3 +574,79 @@ fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
     assert!(driver.session.websites_stale);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
+    let (dir, mut driver, recorder, sink, dyn_sink, seq) = sessions_driver();
+    let link = "tg://login?token=AQID";
+    assert!(
+        !recorder
+            .snapshot()
+            .iter()
+            .any(|s| s.contains("confirmQrCodeAuthentication"))
+    );
+    assert!(
+        driver
+            .confirm_device_login("https://example.invalid")
+            .is_err()
+    );
+    let request = driver.confirm_device_login(link).unwrap();
+    assert!(driver.confirm_device_login(link).is_err());
+    let sent = recorder.snapshot().len();
+    let response = |id: crate::ids::RequestId, body: serde_json::Value| {
+        let mut body = body;
+        body["@extra"] = serde_json::json!(id.as_extra());
+        copy_and_parse(&body.to_string(), &seq, &dyn_sink).unwrap()
+    };
+    driver
+        .ingest(response(
+            crate::ids::RequestId(request.0 + 10000),
+            serde_json::json!({"@type":"session","id":11}),
+        ))
+        .unwrap();
+    assert!(driver.session.sessions_mutating);
+    assert_eq!(driver.session.device_login_result, None);
+    driver
+        .ingest(response(
+            request,
+            serde_json::json!({"@type":"session","id":11}),
+        ))
+        .unwrap();
+    assert_eq!(
+        driver.session.device_login_result,
+        Some(crate::auth::DeviceLoginResult::Linked)
+    );
+    assert!(!driver.session.sessions_mutating);
+    assert!(
+        recorder.snapshot()[sent..]
+            .iter()
+            .any(|s| s.contains("getActiveSessions"))
+    );
+    for body in [
+        serde_json::json!({"@type":"session","id":0}),
+        serde_json::json!({"@type":"error","code":400,"message":"LOGIN_TOKEN_EXPIRED"}),
+    ] {
+        let request = driver.confirm_device_login(link).unwrap();
+        driver.ingest(response(request, body)).unwrap();
+        assert_eq!(
+            driver.session.device_login_result,
+            Some(crate::auth::DeviceLoginResult::Failed)
+        );
+        assert!(!driver.session.sessions_mutating);
+    }
+    let request = driver.confirm_device_login(link).unwrap();
+    driver
+        .ingest(response(
+            request,
+            serde_json::json!({"@type":"session","id":22,"is_password_pending":true}),
+        ))
+        .unwrap();
+    assert_eq!(
+        driver.session.device_login_result,
+        Some(crate::auth::DeviceLoginResult::PasswordRequired)
+    );
+    driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    assert!(driver.confirm_device_login(link).is_err());
+    assert!(!format!("{:?}", sink.snapshot()).contains(link));
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -2121,6 +2121,19 @@ impl Session {
                     self.password_op_error = None;
                 }
             }
+            EnvelopePayload::DeviceLoginResult { result } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
+                    self.device_login_result = Some(result);
+                    self.sessions_mutating = false;
+                    if result != crate::auth::DeviceLoginResult::Failed {
+                        self.sessions_stale = true;
+                        self.sessions_error = None;
+                    } else {
+                        self.sessions_error =
+                            Some("Telegram returned an invalid device session.".into());
+                    }
+                }
+            }
             EnvelopePayload::Sessions { sessions } => {
                 // Slice A3: `getActiveSessions` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
