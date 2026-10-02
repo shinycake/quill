@@ -116,3 +116,5 @@ mod video_pip;
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;
 pub use shell::{DialogKind, QuillShell};
+
+mod device_qr;

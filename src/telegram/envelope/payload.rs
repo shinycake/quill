@@ -1469,6 +1469,17 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // Slice A3: `sessions` — the `getActiveSessions` answer (schema
         // 1.8.67, lines 9144/9147). Malformed entries are dropped rather
         // than failing the whole list (a session id is required).
+        "session" => Ok(EnvelopePayload::DeviceLoginResult {
+            result: parse_session(&value)
+                .map(|session| {
+                    if session.is_password_pending {
+                        crate::auth::DeviceLoginResult::PasswordRequired
+                    } else {
+                        crate::auth::DeviceLoginResult::Linked
+                    }
+                })
+                .unwrap_or(crate::auth::DeviceLoginResult::Failed),
+        }),
         "sessions" => {
             let sessions = value
                 .get("sessions")

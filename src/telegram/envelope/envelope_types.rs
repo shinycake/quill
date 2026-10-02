@@ -816,6 +816,9 @@ pub enum EnvelopePayload {
     /// Slice A3: `sessions` — `getActiveSessions` response (schema
     /// 1.8.67, lines 9147/15102). Stored in `Session::sessions` when the
     /// pending purpose is `GetActiveSessions`.
+    DeviceLoginResult {
+        result: crate::auth::DeviceLoginResult,
+    },
     Sessions {
         sessions: Vec<ParsedSession>,
     },

@@ -211,6 +211,7 @@ pub enum RequestPurpose {
     /// Slice A3: `getActiveSessions`. Response is `sessions`; the list is
     /// replaced from the authoritative answer (never optimistic).
     GetActiveSessions,
+    ConfirmDeviceLogin,
     /// Slice A3: `terminateSession`. Response is `ok`; the list is
     /// refetched from the authoritative answer (never optimistic).
     TerminateSession {

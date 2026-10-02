@@ -129,6 +129,27 @@ impl QuillApp {
             others.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
 
             let mut body = div().flex().flex_col().gap_2();
+            if let Some(notice) = this.device_link_notice {
+                body = body.child(div().id("device-link-notice").role(Role::Status).aria_label(notice).text_sm().child(notice));
+            }
+            if this.device_login_qr.is_some() {
+                body = body.child(div().flex().flex_col().gap_2()
+                    .child(div().id("device-login-consent").role(Role::Label)
+                        .aria_label("Allow the device displaying this QR code to sign in to your Telegram account? It will have access to your cloud chats.")
+                        .child("Allow the device displaying this QR code to sign in to your Telegram account? It will have access to your cloud chats."))
+                    .child(div().flex().gap_2()
+                        .child(Button::new("confirm-device-login").label("Link device").disabled(mutating)
+                            .on_click(cx.listener(|this, _, _, cx| this.confirm_scanned_device(cx))))
+                        .child(Button::new("cancel-device-login").label("Cancel").ghost()
+                            .on_click(cx.listener(|this, _, _, cx| { this.clear_device_qr(); cx.notify(); })))));
+            } else if this.device_qr_scanner.is_some() {
+                body = body.child(Button::new("cancel-device-scan").label("Cancel camera scan").ghost()
+                    .on_click(cx.listener(|this, _, _, cx| { this.clear_device_qr(); cx.notify(); })));
+            } else if cfg!(target_os = "macos") {
+                body = body.child(Button::new("scan-device-login").label("Link device with camera").disabled(mutating)
+                    .on_click(cx.listener(|this, _, _, cx| this.scan_device_qr(cx))));
+            }
+
             if let Some(line) = error {
                 body = body.child(
                     div()
@@ -546,6 +567,7 @@ impl QuillApp {
     /// Slice A3: close the overlay and drop any pending terminate
     /// confirmation.
     pub(super) fn close_sessions(&mut self, cx: &mut Context<Self>) {
+        self.clear_device_qr();
         self.sessions_open = false;
         self.sessions_confirm = None;
         cx.notify();

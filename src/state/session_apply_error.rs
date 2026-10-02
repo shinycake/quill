@@ -964,6 +964,11 @@ impl Session {
             // so the next ingest does not retry the fetch and
             // flood state worsens; retry is user-driven via the
             // Refresh button. The old cache stays visible.
+            Some(RequestPurpose::ConfirmDeviceLogin) => {
+                self.device_login_result = Some(crate::auth::DeviceLoginResult::Failed);
+                self.sessions_mutating = false;
+                self.sessions_error = Some(sessions_error_line("link the device", &err));
+            }
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;
                 self.sessions_stale = false;

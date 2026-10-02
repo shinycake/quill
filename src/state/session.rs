@@ -232,6 +232,7 @@ pub struct Session {
     /// Slice A3: a `terminateSession` / `terminateAllOtherSessions` round
     /// trip is in flight — terminate buttons stay disabled meanwhile.
     pub sessions_mutating: bool,
+    pub device_login_result: Option<crate::auth::DeviceLoginResult>,
     /// Slice A3: honest one-line failure of the last sessions fetch or
     /// terminate (classified from the TDLib error code, never the native
     /// message). Cleared on the next successful fetch.
@@ -981,6 +982,7 @@ impl Session {
             sessions: None,
             sessions_loading: false,
             sessions_mutating: false,
+            device_login_result: None,
             sessions_error: None,
             sessions_stale: false,
             account_ttl_days: None,

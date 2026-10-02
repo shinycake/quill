@@ -637,6 +637,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         save_data_storage_prefs(&self.paths, &self.session.data_storage)
     }
 
+    /// Authorize only a validated scan after explicit user confirmation.
+    pub fn confirm_device_login(
+        &mut self,
+        scanned_link: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active()
+            || self.session.sessions_mutating
+            || !crate::auth::is_device_login_qr(scanned_link)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let id = self
+            .session
+            .request(RequestPurpose::ConfirmDeviceLogin, None);
+        self.session.device_login_result = None;
+        self.session.sessions_mutating = true;
+        self.session.sessions_error = None;
+        let request = zeroize::Zeroizing::new(
+            crate::telegram::requests::confirm_qr_code_authentication(id, scanned_link),
+        );
+        if let Err(error) = self.sender.send_json(&request) {
+            self.session.requests.take(id);
+            self.session.sessions_mutating = false;
+            return Err(error);
+        }
+        Ok(id)
+    }
+
     /// Slice A3: `getActiveSessions` (schema 1.8.67, line 15102) — once
     /// per session unless the list was marked stale by a terminate or an
     /// explicit refresh (guarded by the cache and the in-flight purpose).

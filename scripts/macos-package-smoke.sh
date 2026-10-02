@@ -23,13 +23,15 @@ cat > "$DIST/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>quill</string>
   <key>NSMicrophoneUsageDescription</key><string>Quill uses your microphone for voice and video calls.</string>
-  <key>NSCameraUsageDescription</key><string>Quill uses your camera for video calls and video messages.</string>
+  <key>NSCameraUsageDescription</key><string>Quill uses your camera for video calls, video messages, and scanning login QR codes to link devices.</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict>
 </plist>
 PLIST
 
 cp "$BIN" "$DIST/Contents/MacOS/quill"
+bash "$ROOT/scripts/build-qr-scanner.sh"
+cp "$ROOT/target/qr-scanner/quill-qr-scanner" "$DIST/Contents/MacOS/quill-qr-scanner"
 
 if [[ -n "${QUILL_TDJSON_PATH:-}" && -f "${QUILL_TDJSON_PATH}" ]]; then
   cp "${QUILL_TDJSON_PATH}" "$DIST/Contents/Frameworks/libtdjson.dylib"

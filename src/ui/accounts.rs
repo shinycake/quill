@@ -120,6 +120,7 @@ impl QuillApp {
             );
             return;
         };
+        self.clear_device_qr();
         self.close_accounts(window, cx);
         self.accepted_registration_terms = None;
         self.registration_notify_contacts = false;

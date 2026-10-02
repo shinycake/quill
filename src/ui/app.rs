@@ -371,6 +371,9 @@ pub struct QuillApp {
     /// Slice A3: Active Sessions overlay (TGX Settings → Devices /
     /// `SettingsSessionsController`).
     pub(super) sessions_open: bool,
+    pub(super) device_qr_scanner: Option<super::device_qr::DeviceQrScanner>,
+    pub(super) device_login_qr: Option<zeroize::Zeroizing<String>>,
+    pub(super) device_link_notice: Option<&'static str>,
     /// Slice A3: pending terminate confirmation on the sessions overlay
     /// (TGX `TerminateSessionQuestion` / `TerminateIncompleteSessionQuestion`
     /// / `AreYouSureSessions`).
