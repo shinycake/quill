@@ -294,8 +294,8 @@ impl NtgcallsEngine {
             .ok_or(EngineError::NoSuchCall(call_id))?;
         let user_id = self.user_id(call_id)?;
         let instance = self.instance.ok_or(EngineError::NullInstance)?;
-        let mic = native_input(config.mic.as_deref())?;
-        let speaker = native_input(config.speaker.as_deref())?;
+        let mic = self.audio_input(config.mic.as_deref(), MediaDeviceKind::Microphone)?;
+        let speaker = self.audio_input(config.speaker.as_deref(), MediaDeviceKind::Speaker)?;
         let camera = native_input(config.camera.as_deref())?;
 
         let mut mic_audio = audio_description(mic.as_ref());
@@ -348,8 +348,10 @@ impl NtgcallsEngine {
 
         let mut speaker_audio = audio_description(speaker.as_ref());
         let playback = ntg_media_description {
-            microphone: null_mut(),
-            speaker: &mut speaker_audio,
+            // P2PCall attaches incoming audio to its Microphone receiver.
+            // The description still identifies an output device.
+            microphone: &mut speaker_audio,
+            speaker: null_mut(),
             camera: null_mut(),
             screen: null_mut(),
         };
@@ -368,6 +370,35 @@ impl NtgcallsEngine {
             });
         }
         Ok(())
+    }
+
+    fn audio_input(
+        &self,
+        selected: Option<&str>,
+        kind: MediaDeviceKind,
+    ) -> Result<Option<CString>, EngineError> {
+        if selected.is_some() {
+            return native_input(selected);
+        }
+        // ntgcalls requires device JSON, even for the system default.
+        // An empty macOS UID leaves AudioQueue on the current default device.
+        #[cfg(target_os = "macos")]
+        let default = serde_json::json!({
+            "is_microphone": kind == MediaDeviceKind::Microphone,
+            "uid": "",
+        })
+        .to_string();
+        #[cfg(not(target_os = "macos"))]
+        let default = self
+            .media_devices()?
+            .into_iter()
+            .find(|device| device.kind == kind)
+            .ok_or(EngineError::Engine {
+                op: "ntg_get_media_devices",
+                code: NTG_ERR_INVALID_PARAMS,
+            })?
+            .id;
+        native_input(Some(&default))
     }
 }
 
@@ -504,6 +535,14 @@ impl CallEngine for NtgcallsEngine {
                 code: rc,
             });
         }
+        // P2P connect enables incoming audio from the already configured
+        // playback sources. Configuring them afterwards leaves it disabled.
+        let config = retained_call_media(params, self.call_media.get(&call_id));
+        self.call_media.insert(call_id, config);
+        if let Err(error) = self.set_media_sources(call_id) {
+            self.call_media.remove(&call_id);
+            return Err(error);
+        }
         let rc = unsafe {
             (self.api.ntg_connect_p2p)(
                 instance.as_ptr(),
@@ -517,27 +556,13 @@ impl CallEngine for NtgcallsEngine {
             )
         };
         if rc != NTG_OK {
+            self.call_media.remove(&call_id);
             return Err(EngineError::Engine {
                 op: "ntg_connect_p2p",
                 code: rc,
             });
         }
-        // Phase C2e: retain the media config before issuing sources so
-        // later toggles and device changes re-issue from the same state.
-        // On failure, drop the retained config so no stale config lingers
-        // until hangup.
-        // Phase C2i: `connect` re-runs on transport reconnect with the
-        // retained params — the previous entry's screen-share intent is
-        // preserved (a fresh connect has no prior entry, so the flag
-        // starts off).
-        let previous = self.call_media.get(&call_id);
-        let config = retained_call_media(params, previous);
-        self.call_media.insert(call_id, config);
-        let result = self.set_media_sources(call_id);
-        if result.is_err() {
-            self.call_media.remove(&call_id);
-        }
-        result
+        Ok(())
     }
 
     fn select_devices(
@@ -1160,5 +1185,33 @@ impl Drop for NtgcallsEngine {
         // SAFETY: callback registration is gone and this is the matching
         // destroy for the constructor used by `ensure_instance`.
         unsafe { (self.api.ntg_instance_destroy)(instance.as_ptr()) };
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+
+    #[test]
+    fn native_default_audio_sources_before_connect() {
+        if std::env::var_os("QUILL_VERIFY_NATIVE_CALLS").is_none() {
+            return;
+        }
+        let mut engine = NtgcallsEngine::load().expect("Native engine");
+        engine.start_call(1, 42, true).expect("Local transport");
+        engine.call_media.insert(
+            1,
+            CallMediaConfig {
+                mic: None,
+                speaker: None,
+                camera: None,
+                camera_enabled: false,
+                screen_share_on: false,
+            },
+        );
+        // Before connect, ntgcalls constructs readers without opening them.
+        // This checks device metadata without recording or making a call.
+        engine.set_media_sources(1).expect("Default audio sources");
+        engine.hangup(1).expect("Teardown");
     }
 }

@@ -31,8 +31,7 @@ pub(crate) fn audio_description(input: Option<&CString>) -> ntg_audio_descriptio
         media_source: NTG_MEDIA_SOURCE_DEVICE,
         sample_rate: 48_000,
         channel_count: 1,
-        // ntgcalls' wrapper convention uses device metadata here; NULL
-        // selects the default (the C header is silent).
+        // Device sources require JSON metadata, including system defaults.
         input: input.map_or(null_mut(), |value| value.as_ptr().cast_mut()),
         keep_open: false,
     }
