@@ -1,3 +1,0 @@
-parity:stickers-animated-playback
-parity:stickers-video-playback
-parity:stickers-loop-setting
