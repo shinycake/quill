@@ -19,7 +19,8 @@ for frag in "$@"; do
     if grep -q -F "<!-- $id -->" README.md; then
       # flip "- [ ] ... <!-- id -->" to "- [x] ..." (only unchecked lines)
       if grep -q -E "^- \[ \] .*<!--[ ]*$id[ ]*-->" README.md; then
-        sed -i -E "s/^- \[ \](.*<!--[ ]*${id}[ ]*-->)/- [x]\1/" README.md
+        sed -E "s/^- \[ \](.*<!--[ ]*${id}[ ]*-->)/- [x]\1/" README.md > README.md.tmp
+        mv README.md.tmp README.md
         checked=$((checked + 1))
       fi
     else
@@ -33,7 +34,8 @@ done
 
 # One-time migration: the old contract sentence becomes stale once fragments land.
 if grep -q "Every merged feature PR checks its boxes in this list\." README.md; then
-  sed -i 's|Every merged feature PR checks its boxes in this list\.|Feature PRs declare completed items in parity-fragments/<slice-id>.txt; the merge pipeline checks the boxes here after each merge (parity may lag a merge by a few minutes).|' README.md
+  sed 's|Every merged feature PR checks its boxes in this list\.|Feature PRs declare completed items in parity-fragments/<slice-id>.txt; the merge pipeline checks the boxes here after each merge (parity may lag a merge by a few minutes).|' README.md > README.md.tmp
+  mv README.md.tmp README.md
   echo "apply: updated README contract sentence (one-time migration)"
 fi
 

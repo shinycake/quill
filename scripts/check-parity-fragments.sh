@@ -15,9 +15,33 @@ fail() { echo "parity-fragments: ERROR: $*" >&2; exit 1; }
 CHANGED="$(git diff --name-only "$BASE"...HEAD --)" \
   || fail "cannot compute diff against base ref '$BASE' (bad ref or incomplete fetch)"
 
-# 1. README.md / DECISIONS.md are pipeline-owned now.
-if printf '%s\n' "$CHANGED" | grep -qx -e 'README\.md' -e 'DECISIONS\.md'; then
+# 1. Pipeline output must exactly match declarations already merged into the base.
+if printf '%s\n' "$CHANGED" | grep -qx 'DECISIONS\.md'; then
   fail "this PR edits README.md or DECISIONS.md — forbidden. Declare completed items in parity-fragments/<slice-id>.txt and slice notes in docs/decisions/<slice-id>.md; the merge pipeline updates README.md after merge."
+fi
+if printf '%s\n' "$CHANGED" | grep -qx 'README\.md'; then
+  printf '%s\n' "$CHANGED" | grep -qvE '^(README\.md|parity-fragments/[^/]+\.txt)$' \
+    && fail "checklist reconciliation must contain only generated README and consumed fragments"
+  MERGE_BASE="$(git merge-base "$BASE" HEAD)"
+  CONSUMED="$(git diff --name-only --diff-filter=D "$MERGE_BASE" HEAD -- 'parity-fragments/*.txt')"
+  [ -n "$CONSUMED" ] || fail "README changed without consuming merged declarations"
+  [ -z "$(git diff --name-only --diff-filter=AM "$MERGE_BASE" HEAD -- 'parity-fragments/*.txt')" ] \
+    || fail "reconciliation cannot add or modify declarations"
+  GENERATED="$(mktemp -d)"
+  trap 'rm -rf "$GENERATED"' EXIT
+  git show "$MERGE_BASE:README.md" > "$GENERATED/README.md"
+  mkdir "$GENERATED/parity-fragments"
+  FRAGMENT_ARGS=()
+  while IFS= read -r frag; do
+    git show "$MERGE_BASE:$frag" > "$GENERATED/$frag"
+    FRAGMENT_ARGS+=("$frag")
+  done <<< "$CONSUMED"
+  HELPER="$(pwd)/scripts/apply-parity-fragment.sh"
+  (cd "$GENERATED" && bash "$HELPER" "${FRAGMENT_ARGS[@]}")
+  cmp -s README.md "$GENERATED/README.md" \
+    || fail "README differs from verified merged-fragment output"
+  echo "parity-fragments: verified generated checklist reconciliation"
+  exit 0
 fi
 
 # Fragments added or modified by this PR.
