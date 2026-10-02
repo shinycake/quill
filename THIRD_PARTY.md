@@ -13,3 +13,5 @@ This file tracks licenses of dependencies Quill links or vendors. It is not a co
 | Rust crates in `Cargo.lock` | various OSI | inspect `cargo license` before a public release |
 
 No source was copied from Paper Plane, Coop, or Mezon (GPL). ZapFast was not forked.
+
+The native TDLib build applies `native/patches/tdlib-quill-takeout-contacts.patch` to the pinned upstream commit. This Quill extension adds a contacts-only takeout request; the official schema snapshot and upstream pin stay intact. Build from source with `scripts/build-tdlib.sh`; `scripts/tdlib-takeout-smoke.py` checks the compiled extension offline. This is a locally modified TDLib build, not an upstream API addition.
