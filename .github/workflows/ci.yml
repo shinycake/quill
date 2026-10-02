@@ -35,24 +35,8 @@ jobs:
         with:
           config-path: .gitleaks.toml
 
-  macos:
-    name: macos-ui-build
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.1
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: compile ui
-        run: cargo build --features ui --locked
-      - name: compile release ui
-        run: cargo build --features ui --release --locked
-      - name: build bundled TGS renderer
-        run: bash scripts/build-rlottie.sh
-      - name: package smoke
-        run: bash scripts/macos-package-smoke.sh
+  # The required macos-ui-build check is dispatched after source review through
+  # quill-ui-build.yml. Public PR workflows must never target the personal Mac.
 
   parity:
     name: parity-fragments

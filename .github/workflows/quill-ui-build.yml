@@ -18,20 +18,54 @@ on:
 run-name: ${{ inputs.run_name || format('{0} (run {1})', inputs.ref, github.run_id) }}
 permissions:
   contents: read
+  statuses: write
 jobs:
   ui-build:
-    runs-on: [self-hosted, quill-ui-build]
+    name: macos-ui-build
+    runs-on: [self-hosted, macOS, ARM64, quill-ui-build]
     timeout-minutes: 120
+    env:
+      BUILDER_REF: ${{ inputs.ref }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
         with:
           ref: ${{ inputs.ref }}
       - name: assert checked-out SHA matches requested ref
         run: |
-          BUILT="$(git rev-parse HEAD)"
-          if [ "$BUILT" != "${{ inputs.ref }}" ]; then
-            echo "ref mismatch: checked out $BUILT, requested ${{ inputs.ref }}" >&2
+          if [[ ! "$BUILDER_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ref must be a full commit SHA" >&2
             exit 1
           fi
-      - name: UI build (compile gate)
+          BUILT="$(git rev-parse HEAD)"
+          if [ "$BUILT" != "$BUILDER_REF" ]; then
+            echo "ref mismatch: checked out $BUILT, requested $BUILDER_REF" >&2
+            exit 1
+          fi
+      - name: mark reviewed build pending
+        run: >-
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$BUILDER_REF"
+          -f state=pending -f context=macos-ui-build
+          -f description="Reviewed release build on idan-m1pro"
+          -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          --silent
+      - name: compile ui
         run: cargo build --features ui --locked
+      - name: compile release ui
+        run: cargo build --features ui --release --locked
+      - name: build bundled TGS renderer
+        run: bash scripts/build-rlottie.sh
+      - name: package smoke
+        run: bash scripts/macos-package-smoke.sh
+      - name: publish actual build result
+        if: always()
+        env:
+          BUILD_RESULT: ${{ job.status }}
+        run: |
+          [[ "$BUILDER_REF" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          RESULT=failure
+          if [ "$BUILD_RESULT" = success ]; then RESULT=success; fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$BUILDER_REF" \
+            -f state="$RESULT" -f context=macos-ui-build \
+            -f description="Reviewed release build on idan-m1pro" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent
