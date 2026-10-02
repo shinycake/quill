@@ -372,6 +372,7 @@ fn call_transport_callback_updates_session() {
 #[test]
 fn call_transport_retries_same_params_three_times_then_stops() {
     let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    driver.set_call_muted(true).unwrap();
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     let original = handle.connects()[0].1.clone();
 
@@ -380,6 +381,7 @@ fn call_transport_retries_same_params_three_times_then_stops() {
         ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
         assert_eq!(handle.connects().len(), expected_connects);
         assert_eq!(handle.connects().last().unwrap().1, original);
+        assert_eq!(handle.mute_changes(), vec![(77, true); expected_connects]);
         assert_eq!(
             driver.session.active_call.as_ref().unwrap().transport,
             Some(TransportState::Reconnecting)
@@ -436,6 +438,15 @@ fn call_transport_reconnect_error_is_reported() {
         Some("call engine operation connect failed with code -1")
     );
     assert_eq!(handle.connects().len(), 2);
+    driver.session.active_call.as_mut().unwrap().muted = true;
+    handle.fail_mute();
+    handle.emit_transport_state(77, TransportState::Failed);
+    handle.emit_transport_state(77, TransportState::Connecting);
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    let call = driver.session.active_call.as_ref().unwrap();
+    assert_eq!(call.transport, Some(TransportState::Failed));
+    assert!(call.transport_error.as_ref().unwrap().contains("set_muted"));
+    assert_eq!(handle.hung_up_calls(), vec![77]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

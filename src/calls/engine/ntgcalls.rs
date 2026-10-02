@@ -546,6 +546,17 @@ impl CallEngine for NtgcallsEngine {
             Some(native_string(&params.custom_parameters)?)
         };
         let version_ptrs: Vec<_> = versions.iter().map(|value| value.as_ptr()).collect();
+        let previous = self.call_media.get(&call_id).cloned();
+        if previous.is_some() {
+            // Native P2P transports cannot connect or exchange keys twice.
+            // Stop the failed transport and restore the same TDLib call mapping.
+            self.hangup(call_id)?;
+            self.start_call(call_id, user_id, params.is_outgoing)?;
+        }
+        // Retain current device/camera/screen choices even after a failed attempt.
+        // Their presence also identifies a subsequent transport retry.
+        let config = previous.unwrap_or_else(|| retained_call_media(params, None));
+        self.call_media.insert(call_id, config);
         let rc = unsafe {
             (self.api.ntg_skip_exchange)(
                 instance.as_ptr(),
@@ -563,12 +574,7 @@ impl CallEngine for NtgcallsEngine {
         }
         // P2P connect enables incoming audio from the already configured
         // playback sources. Configuring them afterwards leaves it disabled.
-        let config = retained_call_media(params, self.call_media.get(&call_id));
-        self.call_media.insert(call_id, config);
-        if let Err(error) = self.set_media_sources(call_id) {
-            self.call_media.remove(&call_id);
-            return Err(error);
-        }
+        self.set_media_sources(call_id)?;
         let rc = unsafe {
             (self.api.ntg_connect_p2p)(
                 instance.as_ptr(),
@@ -584,7 +590,6 @@ impl CallEngine for NtgcallsEngine {
             )
         };
         if rc != NTG_OK {
-            self.call_media.remove(&call_id);
             return Err(EngineError::Engine {
                 op: "ntg_connect_p2p",
                 code: rc,
@@ -1287,6 +1292,21 @@ mod native_tests {
             result, NTG_OK,
             "Native key exchange must find the local call"
         );
+        params.encryption_key = key.to_vec();
+        // Unsupported versions fail before creating a network connection.
+        params.library_versions = vec!["unsupported-offline-test".into()];
+        for _ in 0..2 {
+            assert!(
+                matches!(
+                    engine.connect(1, &params),
+                    Err(EngineError::Engine {
+                        op: "ntg_connect_p2p",
+                        ..
+                    })
+                ),
+                "Retry must replace the previous native key exchange"
+            );
+        }
         engine.hangup(1).expect("Teardown");
     }
 }
