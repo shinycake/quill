@@ -235,17 +235,16 @@ impl NtgcallsEngine {
     }
 
     /// Phase C2i: desktop-capture video description for screen-share
-    /// send (1:1 and group presentation alike). NULL input selects the
-    /// default display; desktop capture itself is ntgcalls' job
+    /// send (1:1 and group presentation alike). The input is enumerated
+    /// display metadata; desktop capture itself is ntgcalls' job
     /// (libwebrtc capturer) — Quill carries no Linux capture code.
-    fn screen_video_description() -> ntg_video_description {
+    fn screen_video_description(input: Option<&CString>) -> ntg_video_description {
         ntg_video_description {
             media_source: NTG_MEDIA_SOURCE_DESKTOP,
             width: 1920,
             height: 1080,
             fps: 15,
-            // NULL input selects the default display.
-            input: null_mut(),
+            input: input.map_or(null_mut(), |value| value.as_ptr().cast_mut()),
             keep_open: false,
         }
     }
@@ -261,7 +260,8 @@ impl NtgcallsEngine {
             .cloned()
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         let instance = self.ensure_instance()?;
-        let mut screen_video = Self::screen_video_description();
+        let screen = self.device_input(None, MediaDeviceKind::Screen)?;
+        let mut screen_video = Self::screen_video_description(screen.as_ref());
         let capture = ntg_media_description {
             microphone: null_mut(),
             speaker: null_mut(),
@@ -295,9 +295,14 @@ impl NtgcallsEngine {
             .ok_or(EngineError::NoSuchCall(call_id))?;
         let user_id = self.user_id(call_id)?;
         let instance = self.instance.ok_or(EngineError::NullInstance)?;
-        let mic = self.audio_input(config.mic.as_deref(), MediaDeviceKind::Microphone)?;
-        let speaker = self.audio_input(config.speaker.as_deref(), MediaDeviceKind::Speaker)?;
+        let mic = self.device_input(config.mic.as_deref(), MediaDeviceKind::Microphone)?;
+        let speaker = self.device_input(config.speaker.as_deref(), MediaDeviceKind::Speaker)?;
         let camera = native_input(config.camera.as_deref())?;
+        let screen = if config.screen_share_on {
+            self.device_input(None, MediaDeviceKind::Screen)?
+        } else {
+            None
+        };
 
         let mut mic_audio = audio_description(mic.as_ref());
         let mut camera_video = ntg_video_description {
@@ -312,7 +317,7 @@ impl NtgcallsEngine {
                 .map_or(null_mut(), |value| value.as_ptr().cast_mut()),
             keep_open: false,
         };
-        let mut screen_video = Self::screen_video_description();
+        let mut screen_video = Self::screen_video_description(screen.as_ref());
         let capture = ntg_media_description {
             microphone: &mut mic_audio,
             speaker: null_mut(),
@@ -357,7 +362,7 @@ impl NtgcallsEngine {
         };
         let mut peer_screen = ntg_video_description {
             media_source: NTG_MEDIA_SOURCE_EXTERNAL,
-            ..Self::screen_video_description()
+            ..Self::screen_video_description(None)
         };
         let playback = ntg_media_description {
             // P2PCall attaches incoming audio to its Microphone receiver.
@@ -384,7 +389,7 @@ impl NtgcallsEngine {
         Ok(())
     }
 
-    fn audio_input(
+    fn device_input(
         &self,
         selected: Option<&str>,
         kind: MediaDeviceKind,
@@ -395,12 +400,15 @@ impl NtgcallsEngine {
         // ntgcalls requires device JSON, even for the system default.
         // An empty macOS UID leaves AudioQueue on the current default device.
         #[cfg(target_os = "macos")]
-        let default = serde_json::json!({
-            "is_microphone": kind == MediaDeviceKind::Microphone,
-            "uid": "",
-        })
-        .to_string();
-        #[cfg(not(target_os = "macos"))]
+        if matches!(kind, MediaDeviceKind::Microphone | MediaDeviceKind::Speaker) {
+            return native_input(Some(
+                &serde_json::json!({
+                    "is_microphone": kind == MediaDeviceKind::Microphone,
+                    "uid": "",
+                })
+                .to_string(),
+            ));
+        }
         let default = self
             .media_devices()?
             .into_iter()
@@ -1219,6 +1227,20 @@ mod native_tests {
         }
         let mut engine = NtgcallsEngine::load().expect("Native engine");
         engine.start_call(1, 42, true).expect("Local transport");
+        let screen = engine
+            .device_input(None, MediaDeviceKind::Screen)
+            .expect("Enumerated screen");
+        let screen = screen.expect("Screen metadata");
+        let metadata: serde_json::Value = serde_json::from_slice(screen.as_bytes()).unwrap();
+        assert!(
+            metadata.get("id").is_some(),
+            "Desktop capturer requires a source ID"
+        );
+        let description = NtgcallsEngine::screen_video_description(Some(&screen));
+        assert_eq!(
+            unsafe { CStr::from_ptr(description.input) },
+            screen.as_c_str()
+        );
         let mut params = ConnectParams {
             encryption_key: Vec::new(),
             custom_parameters: String::new(),
