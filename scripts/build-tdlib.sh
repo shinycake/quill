@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build official TDLib (tdjson) from the pinned commit.
+# Build pinned TDLib (tdjson) with the reviewed Quill export extension.
 # Does not download prebuilt binaries. Does not use Homebrew library paths
 # as the runtime search path for the app.
 set -euo pipefail
@@ -22,6 +22,17 @@ fi
 HEAD="$(git -C "$SRC" rev-parse HEAD)"
 if [[ "$HEAD" != "$PIN_COMMIT" ]]; then
   echo "error: $SRC is $HEAD, expected $PIN_COMMIT" >&2
+  exit 1
+fi
+
+# Keep the upstream schema pin intact in schema/. The native extension is
+# reproducible, and unrelated local TDLib edits must not enter a packaged build.
+PATCH="$ROOT/native/patches/tdlib-quill-takeout-contacts.patch"
+if git -C "$SRC" diff --quiet && git -C "$SRC" diff --cached --quiet; then
+  git -C "$SRC" apply --check "$PATCH"
+  git -C "$SRC" apply "$PATCH"
+elif ! git -C "$SRC" diff | cmp -s - "$PATCH" || ! git -C "$SRC" diff --cached --quiet; then
+  echo "error: $SRC has changes other than the pinned Quill export patch" >&2
   exit 1
 fi
 

@@ -58,16 +58,23 @@ impl AccountExport {
                 messages: 0,
                 unavailable: 0,
                 protected: 0,
+                saved_contacts_exported: false,
             };
             let result = worker.run();
             let finished = result.is_ok();
+            let mut limitations =
+                vec!["Complete takeout message ranges and left-channel histories are not included"];
+            if !worker.saved_contacts_exported {
+                limitations
+                    .push("Saved phone contacts could not be exported; see saved-contacts.json");
+            }
             let manifest = json!({"format":"Quill raw TDLib JSONL", "complete":false,"finished":finished,
                 "messages":worker.messages,"unavailable_media":worker.unavailable,
-                "include_media":media,"protected_items_skipped":worker.protected,"limitations":["Telegram takeout-only saved contacts and left-channel histories are not included"],"error":result.err().map(|e|e.to_string())});
+                "include_media":media,"protected_items_skipped":worker.protected,"limitations":limitations,"error":result.err().map(|e|e.to_string())});
             let saved = worker.write("manifest.json", &manifest);
             let note = if finished && saved.is_ok() {
                 format!(
-                    "Export finished with limitations: {} messages, {} unavailable media files. Takeout-only data is not included; see manifest.json.",
+                    "Export finished with limitations: {} messages, {} unavailable media files. Some takeout data is not included; see manifest.json.",
                     worker.messages, worker.unavailable
                 )
             } else {
@@ -137,6 +144,7 @@ struct Worker {
     messages: usize,
     unavailable: usize,
     protected: usize,
+    saved_contacts_exported: bool,
 }
 impl Worker {
     fn check_cancel(&self) -> io::Result<()> {
@@ -227,7 +235,7 @@ impl Worker {
             "manifest-started.json",
             &json!({"complete":false,"include_media":self.media}),
         )?;
-        self.write("README.json",&json!({"description":"Raw TDLib JSON records, one object per line. Chats include all accessible main and archived histories, newest first. users.jsonl resolves contacts and message sender users. media.jsonl maps TDLib file identifiers to numeric files. Protected, expired and unavailable media is reported rather than bypassed. Partial exports never have complete:true in manifest.json."}))?;
+        self.write("README.json",&json!({"description":"Raw TDLib JSON records, one object per line. Chats include all accessible main and archived histories, newest first. users.jsonl resolves contacts and message sender users. Saved stories and profile music are separate files. media.jsonl maps TDLib file identifiers to numeric files. Protected, expired and unavailable media is reported rather than bypassed. Partial exports never have complete:true in manifest.json."}))?;
         let me = self.query(json!({"@type":"getMe"}))?;
         let user_id = me["id"]
             .as_i64()
@@ -256,6 +264,12 @@ impl Worker {
             self.collect(&value);
             self.write(name, &value)?;
         }
+        // An unextended TDLib or a server takeout delay leaves a recorded gap;
+        // neither is evidence that the account has no saved contacts.
+        let saved_contacts = self.raw(json!({"@type":"getQuillSavedContacts"}))?;
+        self.saved_contacts_exported = saved_contacts["@type"] == "quillSavedContacts"
+            && saved_contacts["contacts"].is_array();
+        self.write("saved-contacts.json", &saved_contacts)?;
         for (method, field, name) in [
             ("getUserProfilePhotos", "photos", "profile-photos.jsonl"),
             ("getUserProfileAudios", "audios", "profile-audios.jsonl"),
@@ -455,163 +469,183 @@ mod tests {
         let files = root.join("files");
         std::fs::create_dir(&files).unwrap();
         std::fs::write(files.join("fixture"), b"media bytes").unwrap();
-        let mut export = AccountExport::start(&root, files.clone(), true).unwrap();
-        let mut methods = Vec::new();
+        for saved_contacts_available in [true, false] {
+            let mut export = AccountExport::start(&root, files.clone(), true).unwrap();
+            let mut methods = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut sequence = 1;
+            while !export.finished.load(Ordering::Acquire) {
+                assert!(Instant::now() < deadline, "{}", export.label());
+                let Some(request) = export.next_request() else {
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                };
+                let method = request["@type"].as_str().unwrap();
+                methods.push(method.to_owned());
+                let value = match method {
+                    "getMe" => json!({"@type":"user","id":1,"future_profile_field":"retained"}),
+                    "getContacts" => json!({"@type":"users","user_ids":[2]}),
+                    "getUser" => {
+                        json!({"@type":"user","id":request["user_id"],"first_name":"Fixture sender"})
+                    }
+                    "getQuillSavedContacts" => {
+                        if saved_contacts_available {
+                            json!({"@type":"quillSavedContacts","contacts":[{"phone_number":"fixture-only","future_contact_field":true}]})
+                        } else {
+                            json!({"@type":"error","code":400,"message":"TAKEOUT_INIT_DELAY_3600"})
+                        }
+                    }
+                    "getUserProfilePhotos" => json!({"@type":"chatPhotos","photos":[]}),
+                    "getUserProfileAudios" => {
+                        if request["offset"] == 0 {
+                            json!({"@type":"audios","audios":[{"@type":"audio","audio":{"@type":"file","id":4}}]})
+                        } else {
+                            assert_eq!(request["offset"], 1);
+                            json!({"@type":"audios","audios":[]})
+                        }
+                    }
+                    "createPrivateChat" => json!({"@type":"chat","id":1}),
+                    "getChatArchivedStories" => {
+                        let from = request["from_story_id"].as_i64().unwrap();
+                        let stories = match from {
+                            0 => vec![
+                                json!({"@type":"story","id":3,"future_story_field":true,"content":{"file":{"@type":"file","id":4}}}),
+                            ],
+                            3 => vec![
+                                json!({"@type":"story","id":3}),
+                                json!({"@type":"story","id":2,"can_be_forwarded":false,"file":{"@type":"file","id":5}}),
+                            ],
+                            2 => vec![json!({"@type":"story","id":1,"future_story_field":true})],
+                            1 => vec![],
+                            _ => panic!("Unexpected story cursor"),
+                        };
+                        json!({"@type":"stories","stories":stories})
+                    }
+                    "loadChats" => json!({"@type":"error","code":404}),
+                    "getChats" => {
+                        if request["chat_list"]["@type"] == "chatListArchive" {
+                            json!({"@type":"chats","chat_ids":[-2]})
+                        } else {
+                            json!({"@type":"chats","chat_ids":[1]})
+                        }
+                    }
+                    "getChat" => json!({"@type":"chat","id":request["chat_id"],"title":"Fixture"}),
+                    "getChatHistory" => {
+                        let from = request["from_message_id"].as_i64().unwrap();
+                        let messages = if from == 0 {
+                            vec![
+                                json!({"@type":"message","id":10,"sender_id":{"@type":"messageSenderUser","user_id":2},"future_content":{"retained":true},"file":{"@type":"file","id":4}}),
+                            ]
+                        } else if from == 10 {
+                            vec![
+                                json!({"@type":"message","id":10}),
+                                json!({"@type":"message","id":9,"has_protected_content":true,"file":{"@type":"file","id":5}}),
+                            ]
+                        } else {
+                            vec![]
+                        };
+                        json!({"@type":"messages","messages":messages})
+                    }
+                    "downloadFile" => {
+                        assert_eq!(request["file_id"], 4);
+                        json!({"@type":"file","id":4,"local":{"path":files.join("fixture"),"is_downloading_completed":true}})
+                    }
+                    _ => json!({"@type":"fixture"}),
+                };
+                let id = RequestId(sequence);
+                sequence += 1;
+                export.pending = Some(id);
+                export.reply(RequestId(id.0 + 10000), json!({"@type":"error","code":500}));
+                assert_eq!(export.pending, Some(id));
+                let encoded=json!({"@type":value["@type"],"@extra":{"quill_account_export":id.as_extra()},"content":value}).to_string();
+                let parsed = crate::telegram::envelope::parse_envelope(&encoded).unwrap();
+                assert_eq!(parsed.extra, Some(id));
+                let crate::telegram::envelope::EnvelopePayload::AccountExport(raw) = parsed.payload
+                else {
+                    panic!("Raw response was projected");
+                };
+                export.reply(id, raw["content"].clone());
+            }
+            let folder = export.folder.clone();
+            let manifest: Value =
+                serde_json::from_slice(&std::fs::read(folder.join("manifest.json")).unwrap())
+                    .unwrap();
+            assert_eq!(manifest["complete"], false);
+            assert_eq!(manifest["finished"], true);
+            assert_eq!(
+                manifest["limitations"].as_array().unwrap().len(),
+                if saved_contacts_available { 1 } else { 2 }
+            );
+            let saved = std::fs::read_to_string(folder.join("saved-contacts.json")).unwrap();
+            assert!(saved.contains(if saved_contacts_available {
+                "future_contact_field"
+            } else {
+                "TAKEOUT_INIT_DELAY_3600"
+            }));
+            assert!(
+                export
+                    .label()
+                    .starts_with("Export finished with limitations:")
+            );
+            assert_eq!(manifest["messages"], 2);
+            assert_eq!(manifest["protected_items_skipped"], 3);
+            let stories = std::fs::read_to_string(folder.join("stories.jsonl")).unwrap();
+            assert_eq!(stories.lines().count(), 2);
+            assert!(
+                stories
+                    .lines()
+                    .all(|line| line.contains("future_story_field"))
+            );
+            assert_eq!(
+                methods
+                    .iter()
+                    .filter(|m| m.as_str() == "getChatArchivedStories")
+                    .count(),
+                4
+            );
+            assert_eq!(
+                methods
+                    .iter()
+                    .filter(|m| m.as_str() == "getUserProfileAudios")
+                    .count(),
+                2
+            );
+            for name in ["chat-1.jsonl", "chat--2.jsonl"] {
+                let contents = std::fs::read_to_string(folder.join(name)).unwrap();
+                assert_eq!(contents.lines().count(), 1);
+                assert!(contents.contains("future_content"));
+            }
+            assert_eq!(
+                methods
+                    .iter()
+                    .filter(|m| m.as_str() == "getChatHistory")
+                    .count(),
+                6
+            );
+            assert_eq!(
+                std::fs::read(folder.join("media/4")).unwrap(),
+                b"media bytes"
+            );
+            assert!(!folder.join("media/5").exists());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    std::fs::metadata(&folder).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+                assert_eq!(
+                    std::fs::metadata(folder.join("account.json"))
+                        .unwrap()
+                        .permissions()
+                        .mode()
+                        & 0o777,
+                    0o600
+                );
+            }
+            drop(export);
+        }
         let deadline = Instant::now() + Duration::from_secs(5);
-        let mut sequence = 1;
-        while !export.finished.load(Ordering::Acquire) {
-            assert!(Instant::now() < deadline, "{}", export.label());
-            let Some(request) = export.next_request() else {
-                std::thread::sleep(Duration::from_millis(1));
-                continue;
-            };
-            let method = request["@type"].as_str().unwrap();
-            methods.push(method.to_owned());
-            let value = match method {
-                "getMe" => json!({"@type":"user","id":1,"future_profile_field":"retained"}),
-                "getContacts" => json!({"@type":"users","user_ids":[2]}),
-                "getUser" => {
-                    json!({"@type":"user","id":request["user_id"],"first_name":"Fixture sender"})
-                }
-                "getUserProfilePhotos" => json!({"@type":"chatPhotos","photos":[]}),
-                "getUserProfileAudios" => {
-                    if request["offset"] == 0 {
-                        json!({"@type":"audios","audios":[{"@type":"audio","audio":{"@type":"file","id":4}}]})
-                    } else {
-                        assert_eq!(request["offset"], 1);
-                        json!({"@type":"audios","audios":[]})
-                    }
-                }
-                "createPrivateChat" => json!({"@type":"chat","id":1}),
-                "getChatArchivedStories" => {
-                    let from = request["from_story_id"].as_i64().unwrap();
-                    let stories = match from {
-                        0 => vec![
-                            json!({"@type":"story","id":3,"future_story_field":true,"content":{"file":{"@type":"file","id":4}}}),
-                        ],
-                        3 => vec![
-                            json!({"@type":"story","id":3}),
-                            json!({"@type":"story","id":2,"can_be_forwarded":false,"file":{"@type":"file","id":5}}),
-                        ],
-                        2 => vec![json!({"@type":"story","id":1,"future_story_field":true})],
-                        1 => vec![],
-                        _ => panic!("Unexpected story cursor"),
-                    };
-                    json!({"@type":"stories","stories":stories})
-                }
-                "loadChats" => json!({"@type":"error","code":404}),
-                "getChats" => {
-                    if request["chat_list"]["@type"] == "chatListArchive" {
-                        json!({"@type":"chats","chat_ids":[-2]})
-                    } else {
-                        json!({"@type":"chats","chat_ids":[1]})
-                    }
-                }
-                "getChat" => json!({"@type":"chat","id":request["chat_id"],"title":"Fixture"}),
-                "getChatHistory" => {
-                    let from = request["from_message_id"].as_i64().unwrap();
-                    let messages = if from == 0 {
-                        vec![
-                            json!({"@type":"message","id":10,"sender_id":{"@type":"messageSenderUser","user_id":2},"future_content":{"retained":true},"file":{"@type":"file","id":4}}),
-                        ]
-                    } else if from == 10 {
-                        vec![
-                            json!({"@type":"message","id":10}),
-                            json!({"@type":"message","id":9,"has_protected_content":true,"file":{"@type":"file","id":5}}),
-                        ]
-                    } else {
-                        vec![]
-                    };
-                    json!({"@type":"messages","messages":messages})
-                }
-                "downloadFile" => {
-                    assert_eq!(request["file_id"], 4);
-                    json!({"@type":"file","id":4,"local":{"path":files.join("fixture"),"is_downloading_completed":true}})
-                }
-                _ => json!({"@type":"fixture"}),
-            };
-            let id = RequestId(sequence);
-            sequence += 1;
-            export.pending = Some(id);
-            export.reply(RequestId(id.0 + 10000), json!({"@type":"error","code":500}));
-            assert_eq!(export.pending, Some(id));
-            let encoded=json!({"@type":value["@type"],"@extra":{"quill_account_export":id.as_extra()},"content":value}).to_string();
-            let parsed = crate::telegram::envelope::parse_envelope(&encoded).unwrap();
-            assert_eq!(parsed.extra, Some(id));
-            let crate::telegram::envelope::EnvelopePayload::AccountExport(raw) = parsed.payload
-            else {
-                panic!("Raw response was projected");
-            };
-            export.reply(id, raw["content"].clone());
-        }
-        let folder = export.folder.clone();
-        let manifest: Value =
-            serde_json::from_slice(&std::fs::read(folder.join("manifest.json")).unwrap()).unwrap();
-        assert_eq!(manifest["complete"], false);
-        assert_eq!(manifest["finished"], true);
-        assert!(!manifest["limitations"].as_array().unwrap().is_empty());
-        assert!(
-            export
-                .label()
-                .starts_with("Export finished with limitations:")
-        );
-        assert_eq!(manifest["messages"], 2);
-        assert_eq!(manifest["protected_items_skipped"], 3);
-        let stories = std::fs::read_to_string(folder.join("stories.jsonl")).unwrap();
-        assert_eq!(stories.lines().count(), 2);
-        assert!(
-            stories
-                .lines()
-                .all(|line| line.contains("future_story_field"))
-        );
-        assert_eq!(
-            methods
-                .iter()
-                .filter(|m| m.as_str() == "getChatArchivedStories")
-                .count(),
-            4
-        );
-        assert_eq!(
-            methods
-                .iter()
-                .filter(|m| m.as_str() == "getUserProfileAudios")
-                .count(),
-            2
-        );
-        for name in ["chat-1.jsonl", "chat--2.jsonl"] {
-            let contents = std::fs::read_to_string(folder.join(name)).unwrap();
-            assert_eq!(contents.lines().count(), 1);
-            assert!(contents.contains("future_content"));
-        }
-        assert_eq!(
-            methods
-                .iter()
-                .filter(|m| m.as_str() == "getChatHistory")
-                .count(),
-            6
-        );
-        assert_eq!(
-            std::fs::read(folder.join("media/4")).unwrap(),
-            b"media bytes"
-        );
-        assert!(!folder.join("media/5").exists());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(&folder).unwrap().permissions().mode() & 0o777,
-                0o700
-            );
-            assert_eq!(
-                std::fs::metadata(folder.join("account.json"))
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o600
-            );
-        }
-        drop(export);
         let cancelled = AccountExport::start(&root, files, false).unwrap();
         let folder = cancelled.folder.clone();
         let finished = cancelled.finished.clone();
