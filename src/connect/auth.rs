@@ -221,20 +221,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Send `requestQrCodeAuthentication` when auth is WaitPhoneNumber.
-    /// TDLib answers with `updateAuthorizationState` carrying
-    /// `authorizationStateWaitOtherDeviceConfirmation` (with the QR link).
+    /// Switch to QR login only in supported states with no authentication query in flight.
     pub fn request_qr_login(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !matches!(self.session.auth, AuthorizationState::WaitPhoneNumber) {
+        if !crate::auth::can_request_qr_login(&self.session.auth)
+            || self.session.requests.has_auth_submit()
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.last_auth_error = None;
-        let extra = self
-            .session
-            .request(RequestPurpose::RequestQrCodeAuthentication, None);
-        self.sender
-            .send_json(&request_qr_code_authentication(extra))?;
-        Ok(extra)
+        self.login_request(
+            RequestPurpose::RequestQrCodeAuthentication,
+            request_qr_code_authentication,
+        )
     }
 
     /// Slice A2: shared send path for every 2FA management request. All

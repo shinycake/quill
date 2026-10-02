@@ -1,0 +1,11 @@
+# QR recovery from Premium-gated sign-in
+
+The pinned TDLib 1.8.67 schema permits `requestQrCodeAuthentication` from phone, Premium-purchase, email, email-code, code, registration and password authorization states (schema/td_api.tl:11342). Quill previously accepted only the phone state, leaving the Premium gate at an unsupported halt even when another logged-in device could authorize QR login.
+
+The shared eligibility predicate now controls both the login button and the driver. An outstanding authentication query disables the button and blocks sends; duplicate QR clicks also send nothing. The existing login-request helper clears the pending entry after transport failure. TDLib errors retain the existing classified error/retry presentation, and QR tokens stay out of diagnostics. The Premium screen explains the store-purchase requirement and the QR alternative. All login headings and explanations now have native accessibility roles and names; native testing exposed their absence before this fix.
+
+This is partial work on `parity:auth-premium-login`, not a completion declaration: no store transaction API, receipt, currency, amount or purchase is fabricated. In-store Premium purchases remain unsupported. The device-authorization checklist's “show QR so another device can log in” wording reverses Telegram's protocol: the device logging in displays the QR; the logged-in device scans and accepts it. Quill does not implement an in-app QR camera scanner or silently accept externally supplied login links.
+
+Validation: 1,375 core/replay tests passed (two ignored), strict core Clippy and formatting passed, and the macOS UI compiled. A driver regression covers all seven permitted states, pending-query refusal, duplicate clicks, errors/retry, invalid states and diagnostic token exclusion. The native accessibility smoke includes an injected Premium gate and existing sign-in/settings fixtures; no live login or payment is performed. Real command outputs and window captures are retained under the automation evidence directory for this run. The native build retains one existing unused_mut warning and a dependency future-compatibility notice.
+
+References: [Telegram QR login protocol](https://core.telegram.org/api/qr-login), pinned schema/td_api.tl:209, :11342. The parity total remains 510/525 while full purchase support is unchecked.

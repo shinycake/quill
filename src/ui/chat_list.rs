@@ -1668,9 +1668,19 @@ impl QuillApp {
         }
         list = list
             .child(div().mt_4().font_semibold().child("Authorization"))
-            .child(div().text_sm().child(auth.title))
             .child(
                 div()
+                    .id("auth-title")
+                    .role(Role::Heading)
+                    .aria_label(auth.title)
+                    .text_sm()
+                    .child(auth.title),
+            )
+            .child(
+                div()
+                    .id("auth-explanation")
+                    .role(Role::Label)
+                    .aria_label(auth.body.clone())
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(auth.body.clone()),
@@ -1710,15 +1720,20 @@ impl QuillApp {
                             this.submit_phone(window, cx);
                         })),
                 )
-                .child(
+        })
+        .when(
+            quill::auth::can_request_qr_login(&self.current_auth())
+                && (self.live.is_some() || self.demo_auth_inputs),
+            |this| {
+                this.child(
                     Button::new("qr-login")
                         .label("Sign in with QR code")
                         .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.request_qr_login(cx);
-                        })),
+                        .disabled(self.session().is_some_and(|s| s.requests.has_auth_submit()))
+                        .on_click(cx.listener(|this, _, _, cx| this.request_qr_login(cx))),
                 )
-        })
+            },
+        )
         .when(show_code, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Code"))
                 .child(
