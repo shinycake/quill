@@ -73,6 +73,12 @@ pub(super) fn demo_seed_for(
                 has_recovery_email: true,
             },
         ),
+        ScreenshotDemo::WaitPremium => (
+            None,
+            ConnectUiStatus::DemoWaitPhone,
+            "screenshot demo — WaitPremiumPurchase (injected auth, no live Telegram)".into(),
+            AuthorizationState::WaitPremiumPurchase,
+        ),
         ScreenshotDemo::WaitQr => (
             None,
             ConnectUiStatus::DemoWaitQr,
@@ -1416,6 +1422,7 @@ impl QuillApp {
                     ScreenshotDemo::WaitPhone
                         | ScreenshotDemo::WaitCode
                         | ScreenshotDemo::WaitPassword
+                        | ScreenshotDemo::WaitPremium
                         | ScreenshotDemo::WaitQr
                 )
             ),

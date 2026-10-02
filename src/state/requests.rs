@@ -734,6 +734,10 @@ impl RequestRegistry {
         self.pending.get(&id.0)
     }
 
+    pub fn has_auth_submit(&self) -> bool {
+        self.pending.values().any(|p| is_auth_submit(p.purpose))
+    }
+
     pub fn has_purpose(&self, purpose: RequestPurpose) -> bool {
         self.pending.values().any(|p| p.purpose == purpose)
     }

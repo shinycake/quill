@@ -21,10 +21,13 @@ func name(_ e:AXUIElement)->String { [kAXTitleAttribute,kAXDescriptionAttribute,
 let window=(attr(app,kAXWindowsAttribute) as! [AXUIElement])[0]
 _=attr(window,kAXChildrenAttribute);Thread.sleep(forTimeInterval:0.5)
 let all=nodes(window)
+for element in all { print("\(attr(element,kAXRoleAttribute) as? String ?? "") \(name(element))") }
+fflush(stdout)
 let expected: [String]
 switch CommandLine.arguments[2] {
 case "wait-phone": expected=["Phone number"]
 case "wait-code": expected=["Sign-in code"]
+case "wait-premium": expected=["Premium required for sign-in","Sign in with QR code","Quill cannot process store payments"]
 case "wait-password": expected=["Two-step verification password"]
 case "ready-profile-edit": expected=["First name","Last name","Public username","Bio","Edit profile"]
 case "ready-sessions": expected=["Active Sessions","Current session","Other sessions"]
@@ -47,7 +50,7 @@ if CommandLine.arguments[2] == "ready-storage-usage" {
 print("PASS: native \(CommandLine.arguments[2]) accessible titles and controls")
 SWIFT
 swiftc "$TMP/check.swift" -o "$TMP/check"
-for DEMO in wait-phone wait-code wait-password ready-profile-edit ready-sessions ready-storage-usage; do
+for DEMO in wait-phone wait-code wait-password wait-premium ready-profile-edit ready-sessions ready-storage-usage; do
   rm -f "$OUT/.quill-ready-$DEMO"
   QUILL_DEMO_LINGER_MS=30000 "$BIN" --screenshot-demo "$DEMO" "$OUT" > "$TMP/$DEMO.log" 2>&1 &
   PID=$!
