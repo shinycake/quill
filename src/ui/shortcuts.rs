@@ -93,7 +93,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title("Keyboard Shortcuts")
+                .title(crate::ui::shell::dialog_title("Keyboard Shortcuts"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.

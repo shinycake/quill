@@ -1746,6 +1746,9 @@ impl QuillApp {
                                     .child(
                                         div()
                                             .id("media-viewer-close")
+                                            .role(gpui_kit::Role::Button)
+                                            .aria_label("Close media viewer")
+                                            .tab_index(0)
                                             .cursor_pointer()
                                             .pressable(cx.theme())
                                             .px_2()

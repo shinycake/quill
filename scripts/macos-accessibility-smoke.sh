@@ -8,7 +8,7 @@ OUT="${2:-$(mktemp -d /tmp/quill-ax-evidence.XXXXXX)}"
 DEMO="${3:-ready-text-entities}"
 case "$DEMO" in ready-text-entities|ready-marketplace-gift|ready-unsupported-message) ;; *) exit 2 ;; esac
 [[ "$(uname -s)" == Darwin ]]
-if pgrep -x quill >/dev/null; then echo 'Close the existing Quill process before this isolated smoke check.' >&2; exit 2; fi
+# Every accessibility read, action and screenshot targets the owned demo PID.
 mkdir -p "$OUT"
 TMP="$(mktemp -d /tmp/quill-ax-smoke.XXXXXX)"
 APP_PID=''
@@ -99,7 +99,7 @@ SWIFT
 swiftc "$TMP/check.swift" -o "$TMP/check"
 rm -f "$OUT/.quill-ready-$DEMO"
 cd "$ROOT"
-"$BINARY" --screenshot-demo "$DEMO" "$OUT" > "$OUT/app.log" 2>&1 &
+QUILL_DEMO_LINGER_MS=10000 "$BINARY" --screenshot-demo "$DEMO" "$OUT" > "$OUT/app.log" 2>&1 &
 APP_PID=$!
 for _ in {1..40}; do [[ -f "$OUT/.quill-ready-$DEMO" ]] && break; sleep 0.1; done
 [[ -f "$OUT/.quill-ready-$DEMO" ]]

@@ -64,7 +64,9 @@ impl QuillApp {
                 this.close_edit_profile_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Edit profile");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Edit profile"));
             let Some(body) = this.edit_profile_dialog_body(cx) else {
                 return dialog.on_close(on_close);
             };
@@ -555,7 +557,11 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section("Photo"))
-                    .child(Textarea::new(&dialog.photo_path_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.photo_path_input)
+                            .aria_label("Profile photo file path")
+                            .h(px(40.)),
+                    )
                     .child(
                         div()
                             .flex()
@@ -589,8 +595,16 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section("Name"))
-                    .child(Textarea::new(&dialog.first_name_input).h(px(40.)))
-                    .child(Textarea::new(&dialog.last_name_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.first_name_input)
+                            .aria_label("First name")
+                            .h(px(40.)),
+                    )
+                    .child(
+                        Textarea::new(&dialog.last_name_input)
+                            .aria_label("Last name")
+                            .h(px(40.)),
+                    )
                     .child(
                         div().flex().gap_2().child(
                             Button::new("edit-profile-save-name")
@@ -607,7 +621,11 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section("Username"))
-                    .child(Textarea::new(&dialog.username_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.username_input)
+                            .aria_label("Public username")
+                            .h(px(40.)),
+                    )
                     .child(verdict_line)
                     .child(
                         div()
@@ -637,7 +655,11 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section("Bio"))
-                    .child(Textarea::new(&dialog.bio_input).h(px(40.)))
+                    .child(
+                        Textarea::new(&dialog.bio_input)
+                            .aria_label("Bio")
+                            .h(px(40.)),
+                    )
                     .child(
                         div().flex().gap_2().child(
                             Button::new("edit-profile-save-bio")

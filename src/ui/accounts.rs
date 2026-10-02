@@ -391,7 +391,11 @@ impl QuillApp {
                         .child("Switching restarts the connection under the other account."),
                 )
                 .child(div().font_semibold().text_sm().child("Add another account"))
-                .child(Textarea::new(&this.accounts_ui.add_name).h(px(40.)))
+                .child(
+                    Textarea::new(&this.accounts_ui.add_name)
+                        .aria_label("Account display name")
+                        .h(px(40.)),
+                )
                 .child(
                     Button::new("accounts-add")
                         .label("Add account")
@@ -410,7 +414,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title("Accounts")
+                .title(crate::ui::shell::dialog_title("Accounts"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.

@@ -1067,6 +1067,9 @@ impl QuillApp {
                     picker = picker.child(
                         div()
                             .id(("story-reaction-option", index))
+                            .role(gpui_kit::Role::Button)
+                            .aria_label(format!("React with {emoji}"))
+                            .tab_index(0)
                             .cursor_pointer()
                             .pressable(cx.theme())
                             .text_2xl()
@@ -1082,6 +1085,9 @@ impl QuillApp {
                     let path = self.story_custom_emoji_path(id);
                     let mut cell = div()
                         .id(("story-custom-emoji-option", index))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label(format!("React with custom emoji {id}"))
+                        .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
                         .w(px(64.))
@@ -1358,9 +1364,11 @@ impl QuillApp {
                         .items_center()
                         .w(px(360.))
                         .child(
-                            div()
-                                .flex_1()
-                                .child(Textarea::new(&self.story_reply_input).h(px(40.))),
+                            div().flex_1().child(
+                                Textarea::new(&self.story_reply_input)
+                                    .aria_label("Reply to story")
+                                    .h(px(40.)),
+                            ),
                         )
                         .child(Button::new("story-reply-send").label("Send").on_click(
                             cx.listener(|this, _, window, cx| {
@@ -1558,9 +1566,11 @@ impl QuillApp {
                         .gap_2()
                         .items_center()
                         .child(
-                            div()
-                                .flex_1()
-                                .child(Textarea::new(&self.story_report_text_input).h(px(40.))),
+                            div().flex_1().child(
+                                Textarea::new(&self.story_report_text_input)
+                                    .aria_label("Story report explanation")
+                                    .h(px(40.)),
+                            ),
                         )
                         .child(Button::new("story-report-send").label("Send").on_click(
                             cx.listener(|this, _, window, cx| {
@@ -1760,6 +1770,9 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_center()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(label.clone())
+                    .tab_index(0)
                     .cursor_pointer()
                     .rounded_md()
                     .bg(rgba(0x00000099))
@@ -1847,6 +1860,9 @@ impl QuillApp {
                             .child(
                                 div()
                                     .id("story-viewer-close")
+                                    .role(gpui_kit::Role::Button)
+                                    .aria_label("Close story viewer")
+                                    .tab_index(0)
                                     .cursor_pointer()
                                     .pressable(cx.theme())
                                     .px_2()

@@ -913,7 +913,7 @@ impl QuillApp {
             let Some((user_id, is_video)) = this.call_confirm else {
                 return dialog
                     .overlay(true)
-                    .title("Confirm call")
+                    .title(crate::ui::shell::dialog_title("Confirm call"))
                     .on_close(on_close.clone());
             };
             let name = this
@@ -956,7 +956,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(format!("Start {kind} with {name}?"))
+                .title(crate::ui::shell::dialog_title(format!(
+                    "Start {kind} with {name}?"
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
@@ -1049,7 +1051,7 @@ impl QuillApp {
             else {
                 return dialog
                     .overlay(true)
-                    .title("Incoming call")
+                    .title(crate::ui::shell::dialog_title("Incoming call"))
                     .on_close(on_close.clone());
             };
             let name = this
@@ -1092,7 +1094,7 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(format!("{name} is calling ({kind})"))
+                .title(crate::ui::shell::dialog_title(format!("{name} is calling ({kind})")))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {

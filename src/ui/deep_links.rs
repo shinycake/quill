@@ -217,11 +217,11 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(if channel {
+                .title(crate::ui::shell::dialog_title(if channel {
                     "Join channel?"
                 } else {
                     "Join group?"
-                })
+                }))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
@@ -270,7 +270,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title("Telegram link")
+                .title(crate::ui::shell::dialog_title("Telegram link"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {

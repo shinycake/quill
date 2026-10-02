@@ -146,7 +146,10 @@ impl QuillApp {
         }
         section = section
             .child(durations)
-            .child(Textarea::new(&self.emoji_status_hours_input))
+            .child(
+                Textarea::new(&self.emoji_status_hours_input)
+                    .aria_label("Emoji status duration in hours"),
+            )
             .child(
                 Button::new("status-custom-duration")
                     .label("Use custom duration")
@@ -432,7 +435,7 @@ impl QuillApp {
             .overflow_y_scroll()
             .child(self.emoji_status_panel(cx))
             .child(tabs)
-            .child(Textarea::new(&self.emoji_set_search_input))
+            .child(Textarea::new(&self.emoji_set_search_input).aria_label("Search emoji packs"))
             .child(
                 Button::new("emoji-pack-search")
                     .label("Search packs")
@@ -456,7 +459,7 @@ impl QuillApp {
             let body = Rc::new(RefCell::new(Some(this.emoji_sets_panel(cx))));
             dialog
                 .overlay(true)
-                .title("Emoji Packs and Status")
+                .title(crate::ui::shell::dialog_title("Emoji Packs and Status"))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         content.child(

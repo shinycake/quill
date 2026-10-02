@@ -266,7 +266,7 @@ impl QuillApp {
             ]);
             dialog
                 .overlay(true)
-                .title("Notification defaults")
+                .title(crate::ui::shell::dialog_title("Notification defaults"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -1203,6 +1203,12 @@ impl QuillApp {
             .px_2()
             .py_1()
             .rounded_md()
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!(
+                "{title}{}",
+                if selected { ", selected" } else { "" }
+            ))
+            .tab_index(0)
             .cursor_pointer()
             .hover(|style| style.bg(cx.theme().accent.opacity(0.08)))
             .child(

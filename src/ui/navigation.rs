@@ -251,7 +251,7 @@ impl QuillApp {
     ) -> Dialog {
         let app_c = app.clone();
         dialog
-            .title("Settings")
+            .title(crate::ui::shell::dialog_title("Settings"))
             .width(px(520.))
             .on_close(QuillShell::on_close_kind(
                 app,

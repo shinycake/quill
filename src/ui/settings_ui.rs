@@ -207,7 +207,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title("Archive settings")
+                .title(crate::ui::shell::dialog_title("Archive settings"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.

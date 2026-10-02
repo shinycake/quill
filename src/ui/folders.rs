@@ -87,7 +87,7 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(title)
+                .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
@@ -121,7 +121,7 @@ impl QuillApp {
             let Some(confirm) = this.folder_delete_confirm.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title("Delete folder")
+                    .title(crate::ui::shell::dialog_title("Delete folder"))
                     .on_close(on_close.clone());
             };
             let leave_count = this
@@ -186,7 +186,7 @@ impl QuillApp {
             let title = format!("Delete “{}”?", confirm.name);
             dialog
                 .overlay(true)
-                .title(title)
+                .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
@@ -354,7 +354,7 @@ impl QuillApp {
                 .into_any_element();
             dialog
                 .overlay(true)
-                .title("Folders")
+                .title(crate::ui::shell::dialog_title("Folders"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
@@ -378,7 +378,7 @@ impl QuillApp {
         // kit Phase 2 (redo): plain form content — the kit `Dialog`
         // provides the title, padding, and chrome via `.title()`.
         let mut panel = div().flex().flex_col().gap_2();
-        panel = panel.child(Textarea::new(&dialog.name_input));
+        panel = panel.child(Textarea::new(&dialog.name_input).aria_label("Chat folder name"));
         if let Some(error) = dialog.error.clone() {
             panel = panel.child(
                 div()

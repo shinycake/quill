@@ -251,6 +251,9 @@ pub(super) fn album_tile(
         .w(px(part.width as f32))
         .h(px(part.height as f32))
         .overflow_hidden()
+        .role(gpui_kit::Role::Button)
+        .aria_label("Open album media")
+        .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
             this.open_media_viewer(chat_id, message_id, cx);
@@ -734,6 +737,9 @@ pub(super) fn session_history_row(
                     .py_1()
                     .rounded_md()
                     .text_xs()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(label.clone())
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .when(chosen, |this| {

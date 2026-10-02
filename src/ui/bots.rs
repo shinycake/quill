@@ -439,7 +439,7 @@ impl QuillApp {
             let Some(dialog_state) = this.callback_password_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title("Enter 2-step password")
+                    .title(crate::ui::shell::dialog_title("Enter 2-step password"))
                     .on_close(on_close.clone());
             };
             let body = div()
@@ -454,6 +454,7 @@ impl QuillApp {
                 )
                 .child(
                     Input::new(&dialog_state.password_input)
+                        .aria_label("Two-step verification password")
                         .content_type(InputContentType::Password),
                 )
                 .into_any_element();
@@ -481,7 +482,7 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title("Enter 2-step password")
+                .title(crate::ui::shell::dialog_title("Enter 2-step password"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -559,7 +560,7 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title("Open login URL?")
+                .title(crate::ui::shell::dialog_title("Open login URL?"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.

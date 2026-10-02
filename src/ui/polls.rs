@@ -484,7 +484,7 @@ impl QuillApp {
             let body = this.poll_voters_dialog_body(cx);
             dialog
                 .overlay(true)
-                .title("Poll voters")
+                .title(crate::ui::shell::dialog_title("Poll voters"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -685,8 +685,16 @@ impl QuillApp {
             } else {
                 "New poll"
             }))
-            .child(Textarea::new(&dialog.description_input).h(px(40.)))
-            .child(Textarea::new(&dialog.question_input).h(px(64.)));
+            .child(
+                Textarea::new(&dialog.description_input)
+                    .aria_label("Poll description")
+                    .h(px(40.)),
+            )
+            .child(
+                Textarea::new(&dialog.question_input)
+                    .aria_label("Poll question")
+                    .h(px(64.)),
+            );
         let is_quiz = dialog.is_quiz;
         let quiz_correct_row = dialog.quiz_correct_row;
         for (index, input) in dialog.option_inputs.iter().enumerate() {
@@ -715,7 +723,11 @@ impl QuillApp {
                         })),
                 );
             }
-            row = row.child(div().flex_1().child(Textarea::new(input).h(px(40.))));
+            row = row.child(
+                div()
+                    .flex_1()
+                    .child(Textarea::new(input).aria_label("Poll answer").h(px(40.))),
+            );
             if dialog.option_inputs.len() > POLL_OPTIONS_MIN {
                 row = row.child(
                     Button::new(format!("poll-remove-option-{index}"))
@@ -740,7 +752,11 @@ impl QuillApp {
             );
         }
         if is_quiz {
-            panel = panel.child(Textarea::new(&dialog.explanation_input).h(px(64.)));
+            panel = panel.child(
+                Textarea::new(&dialog.explanation_input)
+                    .aria_label("Quiz explanation")
+                    .h(px(64.)),
+            );
         }
         panel = panel
             .child(
@@ -748,14 +764,18 @@ impl QuillApp {
                     .flex()
                     .gap_2()
                     .child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(&dialog.duration_input).h(px(40.))),
+                        div().flex_1().child(
+                            Textarea::new(&dialog.duration_input)
+                                .aria_label("Poll open duration in seconds")
+                                .h(px(40.)),
+                        ),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(&dialog.countries_input).h(px(40.))),
+                        div().flex_1().child(
+                            Textarea::new(&dialog.countries_input)
+                                .aria_label("Poll country codes")
+                                .h(px(40.)),
+                        ),
                     ),
             )
             .child(self.poll_toggle_row(cx));

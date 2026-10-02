@@ -137,7 +137,11 @@ impl QuillApp {
                         .text_sm()
                         .child("Recovery code"),
                 )
-                .child(Textarea::new(&self.recovery_code_input).h(px(40.)))
+                .child(
+                    Textarea::new(&self.recovery_code_input)
+                        .aria_label("Password recovery code")
+                        .h(px(40.)),
+                )
                 .child(
                     div()
                         .text_xs()
@@ -186,6 +190,7 @@ impl QuillApp {
                 )
                 .child(
                     Input::new(&self.password_input)
+                        .aria_label("Two-step verification password")
                         .content_type(InputContentType::Password)
                         .h(px(40.)),
                 )

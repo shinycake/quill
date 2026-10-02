@@ -151,6 +151,16 @@ impl QuillApp {
         // the result (file path or error) as a status note, then clear it.
         if let Some(live) = self.live.as_mut() {
             live.driver.pump_chat_export();
+            live.driver.pump_account_export();
+            if live
+                .driver
+                .session
+                .account_export
+                .as_ref()
+                .is_some_and(|e| !e.finished.load(std::sync::atomic::Ordering::Acquire))
+            {
+                progressed = true;
+            }
             let note = live
                 .driver
                 .session

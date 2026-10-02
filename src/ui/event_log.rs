@@ -129,7 +129,13 @@ impl QuillApp {
         // `null`), so "Clear" just removes every active chip.
         let mut controls = div().flex().items_center().w_full().gap_1();
         if let Some(input) = self.event_log_search.clone() {
-            controls = controls.child(div().flex_1().child(Textarea::new(&input).h(px(32.))));
+            controls = controls.child(
+                div().flex_1().child(
+                    Textarea::new(&input)
+                        .aria_label("Filter event log")
+                        .h(px(32.)),
+                ),
+            );
         }
         controls = controls.child(
             Button::new("event-log-search")

@@ -744,6 +744,9 @@ impl QuillApp {
             .child(
                 div()
                     .id("story-tray-add")
+                    .role(gpui_kit::Role::Button)
+                    .aria_label("Create story")
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .flex()
@@ -792,6 +795,9 @@ impl QuillApp {
             row = row.child(
                 div()
                     .id(("story-tray-item", chat_id as u64))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Open stories for chat {chat_id}"))
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .flex()
@@ -1675,19 +1681,25 @@ impl QuillApp {
         list.when(
             matches!(auth.action, quill::auth::AuthAction::EnterEmail) && self.live.is_some(),
             |this| {
-                this.child(Textarea::new(&self.email_input).h(px(40.)))
-                    .child(
-                        Button::new("submit-login-email")
-                            .label("Submit email")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.submit_email(window, cx)),
-                            ),
-                    )
+                this.child(
+                    Textarea::new(&self.email_input)
+                        .aria_label("Email address")
+                        .h(px(40.)),
+                )
+                .child(
+                    Button::new("submit-login-email")
+                        .label("Submit email")
+                        .on_click(cx.listener(|this, _, window, cx| this.submit_email(window, cx))),
+                )
             },
         )
         .when(show_phone, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Phone"))
-                .child(Textarea::new(&self.phone_input).h(px(40.)))
+                .child(
+                    Textarea::new(&self.phone_input)
+                        .aria_label("Phone number")
+                        .h(px(40.)),
+                )
                 .child(
                     Button::new("submit-phone")
                         .label("Submit phone")
@@ -1707,7 +1719,11 @@ impl QuillApp {
         })
         .when(show_code, |this| {
             this.child(div().mt_2().font_semibold().text_sm().child("Code"))
-                .child(Textarea::new(&self.code_input).h(px(40.)))
+                .child(
+                    Textarea::new(&self.code_input)
+                        .aria_label("Sign-in code")
+                        .h(px(40.)),
+                )
                 .child(
                     div()
                         .flex()

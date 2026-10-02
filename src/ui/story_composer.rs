@@ -585,7 +585,11 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(Textarea::new(&self.story_composer_user_search).h(px(32.)))
+                    .child(
+                        Textarea::new(&self.story_composer_user_search)
+                            .aria_label("Search story recipients")
+                            .h(px(32.)),
+                    )
                     .child(list)
                     .into_any_element()
             });
@@ -751,6 +755,9 @@ impl QuillApp {
                             .child(
                                 div()
                                     .id("story-composer-close")
+                                    .role(gpui_kit::Role::Button)
+                                    .aria_label("Close story composer")
+                                    .tab_index(0)
                                     .cursor_pointer()
                                     .pressable(cx.theme())
                                     .px_2()
@@ -790,11 +797,19 @@ impl QuillApp {
                                                 format!("{} file", kind.label())
                                             }),
                                     )
-                                    .child(Textarea::new(&self.story_composer_path).h(px(40.)))
+                                    .child(
+                                        Textarea::new(&self.story_composer_path)
+                                            .aria_label("Story media file path")
+                                            .h(px(40.)),
+                                    )
                                     .child(
                                         div().text_xs().text_color(text_muted()).child("Caption"),
                                     )
-                                    .child(Textarea::new(&self.story_composer_caption).h(px(64.))),
+                                    .child(
+                                        Textarea::new(&self.story_composer_caption)
+                                            .aria_label("Story caption")
+                                            .h(px(64.)),
+                                    ),
                             ),
                     )
                     // Phase 9.5: the "post as" picker (new posts and
@@ -841,14 +856,22 @@ impl QuillApp {
                                 .text_color(text_muted())
                                 .child("Link sticker URL"),
                         )
-                        .child(Textarea::new(&self.story_composer_link).h(px(32.)))
+                        .child(
+                            Textarea::new(&self.story_composer_link)
+                                .aria_label("Story link")
+                                .h(px(32.)),
+                        )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(text_muted())
                                 .child("Reaction stickers (emoji, space-separated)"),
                         )
-                        .child(Textarea::new(&self.story_composer_reaction).h(px(32.)))
+                        .child(
+                            Textarea::new(&self.story_composer_reaction)
+                                .aria_label("Story reaction emoji")
+                                .h(px(32.)),
+                        )
                     })
                     .when(!is_edit, |this| {
                         this.child(div().text_xs().text_color(text_muted()).child("Options"))

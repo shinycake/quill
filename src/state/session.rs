@@ -726,6 +726,7 @@ pub struct Session {
     /// The driver pages `getChatHistory` into this; the UI surfaces the
     /// result (path or error) and clears it.
     pub chat_export: Option<crate::chat_export::ChatExportState>,
+    pub account_export: Option<crate::account_export::AccountExport>,
     /// Parity slice: first active username per supergroup (`supergroup`
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
@@ -1137,6 +1138,7 @@ impl Session {
             comment_thread: None,
             chat_preview_fetch: None,
             chat_export: None,
+            account_export: None,
             supergroup_usernames: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),

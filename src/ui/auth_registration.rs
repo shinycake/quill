@@ -21,8 +21,8 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(Textarea::new(&self.registration_first_input))
-            .child(Textarea::new(&self.registration_last_input));
+            .child(Textarea::new(&self.registration_first_input).aria_label("First name"))
+            .child(Textarea::new(&self.registration_last_input).aria_label("Last name"));
         if let Some(terms) = terms {
             let label = if terms.min_user_age > 0 {
                 format!(

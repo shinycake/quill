@@ -1341,7 +1341,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.create_chat_dialog.as_ref() else {
-                return dialog.title("New chat").on_close(on_close);
+                return dialog
+                    .title(crate::ui::shell::dialog_title("New chat"))
+                    .on_close(on_close);
             };
             let kind = dialog_state.kind;
             let picks_members = kind.picks_members();
@@ -1355,23 +1357,29 @@ impl QuillApp {
             let mut body = div().flex().flex_col().gap_2();
             body = body
                 .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog_state.title_input).h(px(40.))),
+                    div().flex_1().child(
+                        Textarea::new(&dialog_state.title_input)
+                            .aria_label("Group or channel title")
+                            .h(px(40.)),
+                    ),
                 )
                 .when(kind != CreateChatKind::BasicGroup, |this| {
                     this.child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(&dialog_state.description_input).h(px(64.))),
+                        div().flex_1().child(
+                            Textarea::new(&dialog_state.description_input)
+                                .aria_label("Group or channel description")
+                                .h(px(64.)),
+                        ),
                     )
                 });
             if picks_members {
                 body = body.child(
                     div().flex().items_center().gap_2().child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(&dialog_state.search_input).h(px(40.))),
+                        div().flex_1().child(
+                            Textarea::new(&dialog_state.search_input)
+                                .aria_label("Search people to invite")
+                                .h(px(40.)),
+                        ),
                     ),
                 );
                 let mut list = div()
@@ -1432,7 +1440,7 @@ impl QuillApp {
                 );
             let body = body.into_any_element();
             dialog
-                .title(kind.title())
+                .title(crate::ui::shell::dialog_title(kind.title()))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -1465,7 +1473,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.username_dialog.as_ref() else {
-                return dialog.title("Public username").on_close(on_close);
+                return dialog
+                    .title(crate::ui::shell::dialog_title("Public username"))
+                    .on_close(on_close);
             };
             let (title, hint) = match dialog_state.kind {
                 TextPromptKind::Username => (
@@ -1504,9 +1514,11 @@ impl QuillApp {
                         .child(hint),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog_state.input).h(px(40.))),
+                    div().flex_1().child(
+                        Textarea::new(&dialog_state.input)
+                            .aria_label("Public username")
+                            .h(px(40.)),
+                    ),
                 )
                 .into_any_element();
             let footer = div()
@@ -1531,7 +1543,7 @@ impl QuillApp {
                         })),
                 );
             dialog
-                .title(title)
+                .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -1564,7 +1576,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.group_confirm_dialog.as_ref() else {
-                return dialog.title("Confirm").on_close(on_close);
+                return dialog.title(crate::ui::shell::dialog_title("Confirm")).on_close(on_close);
             };
             let (title, message, confirm_label): (String, String, String) =
                 match dialog_state.action {
@@ -1726,7 +1738,7 @@ impl QuillApp {
                     })),
             );
             dialog
-                .title(title)
+                .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.

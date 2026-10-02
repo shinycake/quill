@@ -1038,7 +1038,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("frame-001.png"), b"stale").unwrap();
         // Legacy pre-fix world-readable layout must be migrated away too.
-        let legacy = std::env::temp_dir().join("quill-gif-frames");
+        let legacy = crate::local_path::cache_temp_dir().join("quill-gif-frames");
         std::fs::create_dir_all(&legacy).unwrap();
         crate::local_path::sweep_media_caches();
         assert!(

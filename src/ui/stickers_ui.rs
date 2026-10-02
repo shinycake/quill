@@ -136,6 +136,9 @@ impl QuillApp {
                 .h(px(72.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
+                .role(gpui_kit::Role::Button)
+                .aria_label(format!("Send {emoji} sticker"))
+                .tab_index(0)
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
@@ -168,6 +171,9 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_center()
+                .role(gpui_kit::Role::Button)
+                .aria_label(format!("Send {emoji} sticker"))
+                .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -214,7 +220,7 @@ impl QuillApp {
             )));
             dialog
                 .overlay(true)
-                .title("Archived stickers")
+                .title(crate::ui::shell::dialog_title("Archived stickers"))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         content.child(
@@ -719,10 +725,11 @@ impl QuillApp {
                         .items_center()
                         .gap_2()
                         .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(Textarea::new(&self.sticker_search_input).h(px(36.))),
+                            div().flex_1().min_w_0().child(
+                                Textarea::new(&self.sticker_search_input)
+                                    .aria_label("Search stickers")
+                                    .h(px(36.)),
+                            ),
                         )
                         .child(
                             Button::new("sticker-search-submit")

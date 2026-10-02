@@ -369,7 +369,9 @@ impl QuillApp {
                 this.close_permissions_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Default permissions");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Default permissions"));
             let Some(dialog_state) = this.permissions_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -438,7 +440,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.restrict_dialog.as_ref() else {
-                return dialog.title("Restrict").on_close(on_close);
+                return dialog
+                    .title(crate::ui::shell::dialog_title("Restrict"))
+                    .on_close(on_close);
             };
             let name = this
                 .session()
@@ -509,7 +513,7 @@ impl QuillApp {
                 );
             let body = body.into_any_element();
             dialog
-                .title(title)
+                .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -767,7 +771,11 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().flex_1().child(Textarea::new(search_input).h(px(40.))))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Textarea::new(search_input).aria_label("Search").h(px(40.))),
+                    )
                     .child(
                         Button::new("admin-promote-search")
                             .label("Search")

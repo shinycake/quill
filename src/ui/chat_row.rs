@@ -390,6 +390,9 @@ impl QuillApp {
             .child(
                 div()
                     .id("archive-section-toggle")
+                    .role(gpui_kit::Role::Button)
+                    .aria_label("Expand or collapse archived chats")
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .text_xs()

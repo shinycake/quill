@@ -134,6 +134,9 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .min_w_0()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label("Open conversation information")
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -202,6 +205,9 @@ impl QuillApp {
                     div()
                         .id("conversation-title")
                         .font_semibold()
+                        .role(gpui_kit::Role::Button)
+                        .aria_label("Open conversation information")
+                        .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
                         .on_click(cx.listener(move |this, _, window, cx| {

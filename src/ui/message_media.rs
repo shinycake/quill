@@ -224,7 +224,10 @@ pub(super) fn photo_attachment(
             .rounded_md()
             .object_fit(ObjectFit::Cover)
             .when_some(viewer, |this, (chat_id, message_id)| {
-                this.cursor_pointer()
+                this.role(gpui_kit::Role::Button)
+                    .aria_label("Open photo")
+                    .tab_index(0)
+                    .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_media_viewer(chat_id, message_id, cx);
                     }))
@@ -279,7 +282,10 @@ pub(super) fn photo_attachment(
         // download when needed); spoiler photos keep the old
         // click-to-download placeholder, secret photos stay inert.
         .when_some(viewer_open, |this, (chat_id, message_id)| {
-            this.cursor_pointer()
+            this.role(gpui_kit::Role::Button)
+                .aria_label("Open photo")
+                .tab_index(0)
+                .cursor_pointer()
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_media_viewer(chat_id, message_id, cx);
@@ -288,7 +294,10 @@ pub(super) fn photo_attachment(
         .when(
             !has_viewer_open && photo.click_requests_download(),
             |this| {
-                this.cursor_pointer()
+                this.role(gpui_kit::Role::Button)
+                    .aria_label("Download photo")
+                    .tab_index(0)
+                    .cursor_pointer()
                     .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.request_media_download(open_id, sponsored, cx);
@@ -506,7 +515,10 @@ pub(super) fn video_attachment(
                 .id(("video-visual", row_id))
                 .relative()
                 .when_some(viewer_open, |this, (chat_id, message_id)| {
-                    this.cursor_pointer()
+                    this.role(gpui_kit::Role::Button)
+                        .aria_label("Open video")
+                        .tab_index(0)
+                        .cursor_pointer()
                         .pressable(cx.theme())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_media_viewer(chat_id, message_id, cx);
@@ -850,7 +862,10 @@ pub(super) fn sticker_attachment(
         .items_center()
         .justify_center()
         .when(display_id.0 != 0, |this| {
-            this.cursor_pointer()
+            this.role(gpui_kit::Role::Button)
+                .aria_label("Open sticker pack")
+                .tab_index(0)
+                .cursor_pointer()
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.request_media_download(display_id, None, cx);
@@ -902,6 +917,8 @@ pub(super) fn seek_bar_element(row_key: u64, seek: &SeekBarView) -> AnyElement {
     if let Some(slider) = &seek.slider {
         div()
             .id(("seek-bar", row_key))
+            .role(gpui_kit::Role::Group)
+            .aria_label("Playback position")
             .w_full()
             .child(Slider::new(slider).bg(accent()).text_color(text_on_fill()))
             .into_any_element()
@@ -1261,6 +1278,9 @@ pub(super) fn document_chip(
         .child(
             div()
                 .id(("doc-chip-name", row_id))
+                .role(gpui_kit::Role::Button)
+                .aria_label(format!("Open document {name}"))
+                .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .child(div().text_sm().font_medium().child(name))
@@ -1297,6 +1317,9 @@ pub(super) fn document_chip(
             this.child(
                 div()
                     .id(("doc-action", row_id))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(label)
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .mt_1()
@@ -1318,6 +1341,9 @@ pub(super) fn document_chip(
             this.child(
                 div()
                     .id(("doc-pause", row_id))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(label)
+                    .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
                     .mt_1()
@@ -1432,6 +1458,9 @@ pub(super) fn location_row(
             .id(("location-open-map", row_id))
             .text_sm()
             .text_color(accent())
+            .role(gpui_kit::Role::Button)
+            .aria_label("Open location in Maps")
+            .tab_index(0)
             .cursor_pointer()
             .pressable(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -1489,6 +1518,9 @@ pub(super) fn venue_row(
                 .id(("venue-open-map", row_id))
                 .text_sm()
                 .text_color(accent())
+                .role(gpui_kit::Role::Button)
+                .aria_label("Open venue in Maps")
+                .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {

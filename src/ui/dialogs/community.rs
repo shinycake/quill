@@ -101,7 +101,9 @@ pub fn build_create_community_dialog(
     app.update(cx, |this, cx| {
         let dialog = dialog.overlay(true);
         let Some(dialog_state) = this.community_ui.create_dialog.as_ref() else {
-            return dialog.title("New community").on_close(on_close);
+            return dialog
+                .title(crate::ui::shell::dialog_title("New community"))
+                .on_close(on_close);
         };
         let query = EditProfileDialog::text(&dialog_state.search_input, cx);
         let rows = this
@@ -115,14 +117,18 @@ pub fn build_create_community_dialog(
             .flex_col()
             .gap_2()
             .child(
-                div()
-                    .flex_1()
-                    .child(Textarea::new(&dialog_state.name_input).h(px(40.))),
+                div().flex_1().child(
+                    Textarea::new(&dialog_state.name_input)
+                        .aria_label("Community name")
+                        .h(px(40.)),
+                ),
             )
             .child(
-                div()
-                    .flex_1()
-                    .child(Textarea::new(&dialog_state.search_input).h(px(40.))),
+                div().flex_1().child(
+                    Textarea::new(&dialog_state.search_input)
+                        .aria_label("Search chats to add to community")
+                        .h(px(40.)),
+                ),
             );
         let mut list = div()
             .id("g10-create-chats")
@@ -204,7 +210,7 @@ pub fn build_create_community_dialog(
             );
         let body = body.into_any_element();
         dialog
-            .title("New community")
+            .title(crate::ui::shell::dialog_title("New community"))
             .content(crate::ui::shell::scrollable_dialog_content({
                 // `content` needs an `Fn` closure, but the body is built once
                 // per dialog render — hand it over through a one-shot cell.
@@ -301,7 +307,7 @@ pub fn build_community_hub_dialog(
         }
         let body = body.into_any_element();
         dialog
-            .title("Communities")
+            .title(crate::ui::shell::dialog_title("Communities"))
             .content(crate::ui::shell::scrollable_dialog_content({
                 let body = Rc::new(RefCell::new(Some(body)));
                 move |content, _, _| {

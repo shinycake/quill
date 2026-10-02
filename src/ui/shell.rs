@@ -501,3 +501,14 @@ where
         )
     }
 }
+
+/// Plain GPUI text does not become an accessible name. Use this for every
+/// dialog title so its visible heading is also available to screen readers.
+pub(crate) fn dialog_title(title: impl Into<SharedString>) -> impl IntoElement {
+    let title = title.into();
+    div()
+        .id("quill-dialog-title")
+        .role(Role::Heading)
+        .aria_label(title.clone())
+        .child(title)
+}

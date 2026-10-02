@@ -30,6 +30,7 @@ pub enum OptionValue {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnvelopePayload {
+    AccountExport(Value),
     UpdateAuthorizationState(AuthorizationState),
     /// MED4: `updateOption` (TDLib 1.8.67, `schema/td_api.tl:10926`).
     /// Only the options Quill reads are kept; everything else is still a
@@ -1335,8 +1336,18 @@ pub(crate) struct RawEnvelope {
 
 pub fn parse_envelope(json: &str) -> Result<Envelope, ParseError> {
     let raw: RawEnvelope = serde_json::from_str(json).map_err(|_| ParseError::InvalidJson)?;
-    let extra = parse_extra(raw.extra.as_ref());
-    let payload = parse_payload(&raw.type_name, json)?;
+    let export_extra = raw
+        .extra
+        .as_ref()
+        .and_then(|v| v.get("quill_account_export"));
+    let extra = parse_extra(export_extra.or(raw.extra.as_ref()));
+    let payload = if export_extra.is_some() {
+        EnvelopePayload::AccountExport(
+            serde_json::from_str(json).map_err(|_| ParseError::InvalidJson)?,
+        )
+    } else {
+        parse_payload(&raw.type_name, json)?
+    };
     Ok(Envelope {
         type_name: raw.type_name,
         extra,

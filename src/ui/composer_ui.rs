@@ -112,6 +112,9 @@ impl QuillApp {
                 .px_3()
                 .py_2()
                 .rounded_md()
+                .role(gpui_kit::Role::Button)
+                .aria_label(label.clone())
+                .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .when(highlighted, |this| this.bg(cx.theme().selection))
@@ -429,7 +432,9 @@ impl QuillApp {
                 this.close_quote_reply_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Quote part of message");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Quote part of message"));
             let Some(dialog_state) = this.quote_reply_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -444,9 +449,11 @@ impl QuillApp {
                         .child("Trim the text below to the part you want to quote"),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog_state.input).h(px(120.))),
+                    div().flex_1().child(
+                        Textarea::new(&dialog_state.input)
+                            .aria_label("Quoted message text")
+                            .h(px(120.)),
+                    ),
                 )
                 .into_any_element();
             let footer = div()

@@ -111,7 +111,7 @@ impl QuillApp {
                 this.close_import_contacts_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Import contacts");
+            let dialog = dialog.overlay(true).title(crate::ui::shell::dialog_title("Import contacts"));
             let Some(dialog_state) = this.import_contacts_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -128,7 +128,7 @@ impl QuillApp {
                 .child(
                     div()
                         .flex_1()
-                        .child(Textarea::new(&dialog_state.input).h(px(220.))),
+                        .child(Textarea::new(&dialog_state.input).aria_label("Contacts to import").h(px(220.))),
                 )
                 .into_any_element();
             let footer = div().flex().justify_end().gap_2().child(
@@ -176,7 +176,10 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let Some(dialog_state) = this.add_contact_dialog.as_ref() else {
-                return dialog.overlay(true).title("Add contact").on_close(on_close);
+                return dialog
+                    .overlay(true)
+                    .title(crate::ui::shell::dialog_title("Add contact"))
+                    .on_close(on_close);
             };
             let name = this
                 .session()
@@ -198,7 +201,11 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child("Phone number"),
                         )
-                        .child(Textarea::new(&dialog_state.phone_input).h(px(40.))),
+                        .child(
+                            Textarea::new(&dialog_state.phone_input)
+                                .aria_label("Phone number")
+                                .h(px(40.)),
+                        ),
                 )
                 .child(
                     div()
@@ -211,7 +218,11 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child("First name"),
                         )
-                        .child(Textarea::new(&dialog_state.first_name_input).h(px(40.))),
+                        .child(
+                            Textarea::new(&dialog_state.first_name_input)
+                                .aria_label("First name")
+                                .h(px(40.)),
+                        ),
                 )
                 .child(
                     div()
@@ -224,7 +235,11 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child("Last name"),
                         )
-                        .child(Textarea::new(&dialog_state.last_name_input).h(px(40.))),
+                        .child(
+                            Textarea::new(&dialog_state.last_name_input)
+                                .aria_label("Last name")
+                                .h(px(40.)),
+                        ),
                 )
                 .into_any_element();
             let footer = div()
@@ -249,7 +264,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(format!("Add {name} to contacts"))
+                .title(crate::ui::shell::dialog_title(format!(
+                    "Add {name} to contacts"
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -436,6 +453,9 @@ impl QuillApp {
             .px_2()
             .py_2()
             .rounded_md()
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!("{} · {}", name, status))
+            .tab_index(0)
             .cursor_pointer()
             .pressable(cx.theme())
             .bg(if selected {

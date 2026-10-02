@@ -248,7 +248,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title("Account")
+                .title(crate::ui::shell::dialog_title("Account"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -362,7 +362,7 @@ impl QuillApp {
                     .child("Access to your chats will be lost forever. All existing chats will see you as Deleted Account. Using the same phone number will create a new account."),
             )
             .child(div().mt_1().font_semibold().text_sm().child("Reason"))
-            .child(Textarea::new(&self.account_lifecycle.reason).h(px(40.)))
+            .child(Textarea::new(&self.account_lifecycle.reason).aria_label("Reason for deleting account").h(px(40.)))
             .child(
                 div()
                     .text_xs()
@@ -378,7 +378,11 @@ impl QuillApp {
                         .text_sm()
                         .child("Two-step verification password"),
                 )
-                .child(Textarea::new(&self.account_lifecycle.password).h(px(40.)))
+                .child(
+                    Textarea::new(&self.account_lifecycle.password)
+                        .aria_label("Two-step verification password")
+                        .h(px(40.)),
+                )
                 .child(
                     div()
                         .text_xs()

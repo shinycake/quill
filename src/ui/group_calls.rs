@@ -71,7 +71,7 @@ impl QuillApp {
             let Some(dialog_state) = this.group_call_start_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title("Start voice chat")
+                    .title(crate::ui::shell::dialog_title("Start voice chat"))
                     .on_close(on_close.clone());
             };
             let selected = dialog_state.schedule_offset;
@@ -92,7 +92,11 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(Textarea::new(&dialog_state.title_input).h(px(40.)))
+                .child(
+                    Textarea::new(&dialog_state.title_input)
+                        .aria_label("Voice chat title")
+                        .h(px(40.)),
+                )
                 .child(
                     div()
                         .text_xs()
@@ -127,7 +131,7 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title("Start voice chat")
+                .title(crate::ui::shell::dialog_title("Start voice chat"))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {

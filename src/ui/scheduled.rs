@@ -51,7 +51,9 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title("Scheduled messages");
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title("Scheduled messages"));
             let body = this.scheduled_dialog_body(cx);
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({

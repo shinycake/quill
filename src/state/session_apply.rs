@@ -40,6 +40,14 @@ impl Session {
         seq: u64,
     ) {
         match payload {
+            EnvelopePayload::AccountExport(value) => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::ExportAccount
+                    && let Some(export) = self.account_export.as_mut()
+                {
+                    export.reply(pending.id, value);
+                }
+            }
             EnvelopePayload::UpdateAuthorizationState(state) => self.set_auth(state),
             // MED4: `updateOption` (schema:10926). Only
             // `message_caption_length_max` is consumed (caption edits /
