@@ -35,7 +35,7 @@ func capture(_ label:String){
 }
 if CommandLine.arguments[2]=="wait-password" {
  let password=all().first{attr($0,kAXSubroleAttribute) as? String == "AXSecureTextField"}!
- precondition(name(password)=="Two-step password")
+ precondition(name(password)=="Two-step verification password")
  precondition(AXUIElementSetAttributeValue(password,kAXFocusedAttribute as CFString,kCFBooleanTrue) == .success)
  precondition(AXUIElementSetAttributeValue(password,kAXValueAttribute as CFString,"DemoSecret123" as CFString) == .success,"Cannot edit secure input")
  Thread.sleep(forTimeInterval:0.3)

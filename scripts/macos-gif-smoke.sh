@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY="${1:-$ROOT/target/debug/quill}"
 OUT="${2:-$(mktemp -d /tmp/quill-gif-evidence.XXXXXX)}"
 [[ "$(uname -s)" == Darwin ]]
-if pgrep -x quill >/dev/null; then echo 'Close the existing Quill process before this isolated smoke check.' >&2; exit 2; fi
+# Native reads, actions and captures target only the owned fixture PID.
 mkdir -p "$OUT"
 TMP="$(mktemp -d /tmp/quill-gif-smoke.XXXXXX)"
 APP_PID=''

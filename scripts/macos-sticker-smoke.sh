@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY="${1:-$ROOT/target/debug/quill}"
 OUT="${2:-$(mktemp -d /tmp/quill-sticker-evidence.XXXXXX)}"
 [[ "$(uname -s)" == Darwin ]]
-if pgrep -x quill >/dev/null; then echo 'Close the existing Quill process before this isolated smoke check.' >&2; exit 2; fi
+# Native reads, actions and captures target only the owned fixture PID.
 mkdir -p "$OUT"
 TMP="$(mktemp -d /tmp/quill-sticker-smoke.XXXXXX)"
 APP_PID=''
@@ -16,18 +16,24 @@ cat > "$TMP/check.swift" <<'SWIFT'
 import Foundation
 import CoreGraphics
 import ImageIO
+import ApplicationServices
 if CommandLine.arguments[1] == "window" {
     let pid = Int(CommandLine.arguments[2])!
     let rows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String:Any]] ?? []
     if let row = rows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }), let id = row[kCGWindowNumber as String] as? Int { print(id) }
 } else if CommandLine.arguments[1] == "close" {
-    let pid = Int(CommandLine.arguments[2])!
-    let rows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String:Any]] ?? []
-    let row = rows.first { ($0[kCGWindowOwnerPID as String] as? Int) == pid }!
-    let bounds = CGRect(dictionaryRepresentation: row[kCGWindowBounds as String] as! CFDictionary)!
-    let point = CGPoint(x:bounds.minX+1157, y:bounds.minY+106)
-    CGEvent(mouseEventSource:nil, mouseType:.leftMouseDown, mouseCursorPosition:point, mouseButton:.left)!.post(tap:.cghidEventTap)
-    CGEvent(mouseEventSource:nil, mouseType:.leftMouseUp, mouseCursorPosition:point, mouseButton:.left)!.post(tap:.cghidEventTap)
+    func attr(_ e: AXUIElement, _ key: String) -> CFTypeRef? {var value:CFTypeRef?;_=AXUIElementCopyAttributeValue(e,key as CFString,&value);return value}
+    func nodes(_ e: AXUIElement,_ depth:Int=0)->[AXUIElement] {if depth>40{return []};return [e]+(attr(e,kAXChildrenAttribute) as? [AXUIElement] ?? []).flatMap{nodes($0,depth+1)}}
+    let app=AXUIElementCreateApplication(pid_t(CommandLine.arguments[2])!)
+    _=nodes(app);Thread.sleep(forTimeInterval:0.4)
+    let close=nodes(app).first {e in
+        attr(e,kAXRoleAttribute) as? String == kAXButtonRole && [kAXTitleAttribute,kAXDescriptionAttribute].contains {attr(e,$0) as? String == "Close"}
+    }
+    guard let close else {
+        for e in nodes(app) {print("\(attr(e,kAXRoleAttribute) as? String ?? "") \(attr(e,kAXDescriptionAttribute) as? String ?? "") \(attr(e,kAXTitleAttribute) as? String ?? "")")}
+        fflush(stdout);fatalError("Sticker picker close control absent")
+    }
+    precondition(AXUIElementPerformAction(close,kAXPressAction as CFString) == .success)
 
 } else {
     let region = CommandLine.arguments[2]
@@ -73,7 +79,7 @@ swiftc "$TMP/check.swift" -o "$TMP/check"
 cd "$ROOT"
 for mode in on off; do
   rm -f "$OUT/.quill-ready-ready-sticker-playback"
-  QUILL_DEMO_LOOP_STICKERS="$mode" QUILL_RLOTTIE_PATH="${QUILL_RLOTTIE_PATH:-$ROOT/vendor/rlottie/prefix/lib/librlottie.dylib}" "$BINARY" --screenshot-demo ready-sticker-playback "$OUT" > "$OUT/app-$mode.log" 2>&1 &
+  QUILL_DEMO_LINGER_MS=30000 QUILL_DEMO_LOOP_STICKERS="$mode" QUILL_RLOTTIE_PATH="${QUILL_RLOTTIE_PATH:-$ROOT/vendor/rlottie/prefix/lib/librlottie.dylib}" "$BINARY" --screenshot-demo ready-sticker-playback "$OUT" > "$OUT/app-$mode.log" 2>&1 &
   APP_PID=$!
   for _ in {1..40}; do [[ -f "$OUT/.quill-ready-ready-sticker-playback" ]] && break; sleep 0.1; done
   WINDOW_ID="$("$TMP/check" window "$APP_PID")"
@@ -90,7 +96,8 @@ for mode in on off; do
     for frame in a b c; do screencapture -x -o -l "$WINDOW_ID" "$OUT/history-$frame.png"; sleep 0.2; done
     for region in history-tgs history-webm; do "$TMP/check" pixels "$region" "$OUT/history-a.png" "$OUT/history-b.png" "$OUT/history-c.png"; done
   fi
-  wait "$APP_PID"
+  kill "$APP_PID"
+  wait "$APP_PID" 2>/dev/null || true
   APP_PID=''
 done
 printf 'Evidence: %s\n' "$OUT"
