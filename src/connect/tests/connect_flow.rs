@@ -627,7 +627,7 @@ fn driver_resend_code_and_qr_login_only_in_matching_states() {
         )
         .unwrap();
     driver.ingest(wait_phone).unwrap();
-    // Resend needs WaitCode; QR login needs WaitPhoneNumber.
+    // Resend needs WaitCode; QR login can start at the phone screen.
     assert_eq!(driver.resend_code(), Err(ConnectSendError::InvalidRequest));
     let qr_extra = driver.request_qr_login().unwrap();
     let sent = recorder.snapshot();
@@ -643,10 +643,10 @@ fn driver_resend_code_and_qr_login_only_in_matching_states() {
         )
         .unwrap();
     driver.ingest(wait_code).unwrap();
-    assert_eq!(
-        driver.request_qr_login(),
-        Err(ConnectSendError::InvalidRequest)
-    );
+    // Clear the earlier QR query: switching states doesn't imply its answer arrived.
+    driver.session.requests.take(qr_extra);
+    let code_qr = driver.request_qr_login().unwrap();
+    driver.session.requests.take(code_qr);
     let resend_extra = driver.resend_code().unwrap();
     let sent = recorder.snapshot();
     let resend_json = sent.last().unwrap();
@@ -671,6 +671,78 @@ fn driver_resend_code_and_qr_login_only_in_matching_states() {
     assert!(!sink.rendered().contains("unit-test-token"));
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn qr_recovery_accepts_supported_states_and_waits_for_pending_auth() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for state in [
+        AuthorizationState::WaitPhoneNumber,
+        AuthorizationState::WaitPremiumPurchase,
+        AuthorizationState::WaitEmailAddress,
+        AuthorizationState::WaitEmailCode {
+            email_pattern: "u***@example.com".into(),
+            code_length: Some(6),
+        },
+        AuthorizationState::WaitCode {
+            code_length: Some(5),
+        },
+        AuthorizationState::WaitPassword {
+            has_recovery_email: false,
+        },
+        AuthorizationState::WaitRegistration { terms: None },
+    ] {
+        driver.session.auth = state;
+        let pending = driver.session.request(RequestPurpose::SetPhoneNumber, None);
+        let before = recorder.snapshot().len();
+        assert_eq!(
+            driver.request_qr_login(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(recorder.snapshot().len(), before);
+        driver.session.requests.take(pending);
+        let qr = driver.request_qr_login().unwrap();
+        assert_eq!(
+            driver.request_qr_login(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(recorder.snapshot().len(), before + 1);
+        let error = copy_and_parse(
+            &format!(r#"{{"@type":"error","code":429,"message":"FLOOD_WAIT_5 CANARY_AUTH_TOKEN","@extra":"{}"}}"#, qr.0),
+            &seq, &dyn_sink,
+        ).unwrap();
+        driver.ingest(error).unwrap();
+        assert!(!driver.session.requests.has_auth_submit());
+        assert!(driver.session.last_auth_error.is_some());
+        let retry = driver.request_qr_login().unwrap();
+        assert!(driver.session.last_auth_error.is_none());
+        driver.session.requests.take(retry);
+    }
+    for state in [
+        AuthorizationState::Ready,
+        AuthorizationState::Closed,
+        AuthorizationState::WaitOtherDeviceConfirmation {
+            link: "tg://login?token=CANARY_AUTH_TOKEN".into(),
+        },
+        AuthorizationState::Unknown("future".into()),
+    ] {
+        driver.session.auth = state;
+        let before = recorder.snapshot().len();
+        assert_eq!(
+            driver.request_qr_login(),
+            Err(ConnectSendError::InvalidRequest)
+        );
+        assert_eq!(recorder.snapshot().len(), before);
+    }
+    assert!(!sink.rendered().contains("CANARY_AUTH_TOKEN"));
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// Slice A2: the 2FA driver gates sends, dedupes the fetch, shapes

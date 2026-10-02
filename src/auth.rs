@@ -70,8 +70,8 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             blocking: true,
         },
         AuthorizationState::WaitPremiumPurchase => AuthView {
-            title: "Unsupported sign-in state",
-            body: "Telegram asked for a Premium purchase to continue. Quill will not start a payment. Use an official client, then return.".into(),
+            title: "Premium required for sign-in",
+            body: "Telegram requires an in-store Premium purchase for phone sign-in. If you are already signed in on another device, try QR sign-in. Otherwise, complete the purchase in an official Telegram app; Quill cannot process store payments.".into(),
             action: AuthAction::UnsupportedHalt {
                 reason: "premium-purchase",
             },
@@ -133,6 +133,20 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             blocking: true,
         },
     }
+}
+
+/// TDLib 1.8.67 permits switching these login states to QR authentication.
+pub fn can_request_qr_login(state: &AuthorizationState) -> bool {
+    matches!(
+        state,
+        AuthorizationState::WaitPhoneNumber
+            | AuthorizationState::WaitPremiumPurchase
+            | AuthorizationState::WaitEmailAddress
+            | AuthorizationState::WaitEmailCode { .. }
+            | AuthorizationState::WaitCode { .. }
+            | AuthorizationState::WaitRegistration { .. }
+            | AuthorizationState::WaitPassword { .. }
+    )
 }
 
 /// Live login is disabled until the owner supplies api_id/api_hash out of tree.

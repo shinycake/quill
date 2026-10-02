@@ -7,6 +7,7 @@ pub enum ScreenshotDemo {
     WaitPhone,
     WaitCode,
     WaitPassword,
+    WaitPremium,
     /// Slice A1: injected `authorizationStateWaitOtherDeviceConfirmation`
     /// with a fake link, rendered as a real QR (no live Telegram).
     WaitQr,

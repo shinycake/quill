@@ -180,12 +180,6 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        if !matches!(
-            live.driver.session.auth,
-            AuthorizationState::WaitPhoneNumber
-        ) {
-            return;
-        }
         match live.driver.request_qr_login() {
             Ok(_) => {
                 self.status_note = "QR login requested — scan with a logged-in Telegram app".into();
