@@ -63,11 +63,11 @@ impl AccountExport {
             let finished = result.is_ok();
             let manifest = json!({"format":"Quill raw TDLib JSONL", "complete":false,"finished":finished,
                 "messages":worker.messages,"unavailable_media":worker.unavailable,
-                "include_media":media,"protected_items_skipped":worker.protected,"limitations":["TDLib exposes imported non-user contact count, not their records"],"error":result.err().map(|e|e.to_string())});
+                "include_media":media,"protected_items_skipped":worker.protected,"limitations":["Telegram takeout-only saved contacts and left-channel histories are not included"],"error":result.err().map(|e|e.to_string())});
             let saved = worker.write("manifest.json", &manifest);
             let note = if finished && saved.is_ok() {
                 format!(
-                    "Export finished with limitations: {} messages, {} unavailable media files. Imported non-user contacts are not included; see manifest.json.",
+                    "Export finished with limitations: {} messages, {} unavailable media files. Takeout-only data is not included; see manifest.json.",
                     worker.messages, worker.unavailable
                 )
             } else {
@@ -256,18 +256,64 @@ impl Worker {
             self.collect(&value);
             self.write(name, &value)?;
         }
-        let mut photos = private_file(&self.output.join("profile-photos.jsonl"))?;
-        let mut offset = 0;
+        for (method, field, name) in [
+            ("getUserProfilePhotos", "photos", "profile-photos.jsonl"),
+            ("getUserProfileAudios", "audios", "profile-audios.jsonl"),
+        ] {
+            let mut output = private_file(&self.output.join(name))?;
+            let mut offset = 0;
+            loop {
+                let value = self
+                    .query(json!({"@type":method,"user_id":user_id,"offset":offset,"limit":100}))?;
+                let count = value[field]
+                    .as_array()
+                    .ok_or_else(|| io::Error::other("Missing profile media page"))?
+                    .len();
+                self.collect(&value);
+                line(&mut output, &value)?;
+                if count == 0 {
+                    break;
+                }
+                offset += count;
+            }
+            output.sync_all()?;
+        }
+        let own_chat =
+            self.query(json!({"@type":"createPrivateChat","user_id":user_id,"force":false}))?;
+        let chat_id = own_chat["id"]
+            .as_i64()
+            .ok_or_else(|| io::Error::other("Missing account chat identifier"))?;
+        let mut stories = private_file(&self.output.join("stories.jsonl"))?;
+        let mut from = 0;
         loop {
-            let value=self.query(json!({"@type":"getUserProfilePhotos","user_id":user_id,"offset":offset,"limit":100}))?;
-            let count = value["photos"].as_array().map_or(0, Vec::len);
-            self.collect(&value);
-            line(&mut photos, &value)?;
-            if count == 0 {
+            let page = self.query(json!({"@type":"getChatArchivedStories","chat_id":chat_id,"from_story_id":from,"limit":100}))?;
+            let items = page["stories"]
+                .as_array()
+                .ok_or_else(|| io::Error::other("Missing story archive page"))?;
+            let mut oldest = from;
+            for story in items {
+                let id = story["id"]
+                    .as_i64()
+                    .filter(|id| *id > 0)
+                    .ok_or_else(|| io::Error::other("Missing story identity"))?;
+                if from != 0 && id >= from {
+                    continue;
+                }
+                oldest = if oldest == 0 { id } else { oldest.min(id) };
+                if story["can_be_forwarded"] == false {
+                    self.protected += 1;
+                    continue;
+                }
+                self.collect(story);
+                line(&mut stories, story)?;
+            }
+            // Short pages aren't an end marker; continue until the cursor stops.
+            if oldest == from {
                 break;
             }
-            offset += count;
+            from = oldest;
         }
+        stories.sync_all()?;
         let mut chats = BTreeSet::new();
         for list in ["chatListMain", "chatListArchive"] {
             loop {
@@ -388,7 +434,7 @@ impl Worker {
         }
         users.sync_all()?;
         metadata.sync_all()?;
-        photos.sync_all()
+        Ok(())
     }
 }
 
@@ -428,6 +474,31 @@ mod tests {
                     json!({"@type":"user","id":request["user_id"],"first_name":"Fixture sender"})
                 }
                 "getUserProfilePhotos" => json!({"@type":"chatPhotos","photos":[]}),
+                "getUserProfileAudios" => {
+                    if request["offset"] == 0 {
+                        json!({"@type":"audios","audios":[{"@type":"audio","audio":{"@type":"file","id":4}}]})
+                    } else {
+                        assert_eq!(request["offset"], 1);
+                        json!({"@type":"audios","audios":[]})
+                    }
+                }
+                "createPrivateChat" => json!({"@type":"chat","id":1}),
+                "getChatArchivedStories" => {
+                    let from = request["from_story_id"].as_i64().unwrap();
+                    let stories = match from {
+                        0 => vec![
+                            json!({"@type":"story","id":3,"future_story_field":true,"content":{"file":{"@type":"file","id":4}}}),
+                        ],
+                        3 => vec![
+                            json!({"@type":"story","id":3}),
+                            json!({"@type":"story","id":2,"can_be_forwarded":false,"file":{"@type":"file","id":5}}),
+                        ],
+                        2 => vec![json!({"@type":"story","id":1,"future_story_field":true})],
+                        1 => vec![],
+                        _ => panic!("Unexpected story cursor"),
+                    };
+                    json!({"@type":"stories","stories":stories})
+                }
                 "loadChats" => json!({"@type":"error","code":404}),
                 "getChats" => {
                     if request["chat_list"]["@type"] == "chatListArchive" {
@@ -485,7 +556,28 @@ mod tests {
                 .starts_with("Export finished with limitations:")
         );
         assert_eq!(manifest["messages"], 2);
-        assert_eq!(manifest["protected_items_skipped"], 2);
+        assert_eq!(manifest["protected_items_skipped"], 3);
+        let stories = std::fs::read_to_string(folder.join("stories.jsonl")).unwrap();
+        assert_eq!(stories.lines().count(), 2);
+        assert!(
+            stories
+                .lines()
+                .all(|line| line.contains("future_story_field"))
+        );
+        assert_eq!(
+            methods
+                .iter()
+                .filter(|m| m.as_str() == "getChatArchivedStories")
+                .count(),
+            4
+        );
+        assert_eq!(
+            methods
+                .iter()
+                .filter(|m| m.as_str() == "getUserProfileAudios")
+                .count(),
+            2
+        );
         for name in ["chat-1.jsonl", "chat--2.jsonl"] {
             let contents = std::fs::read_to_string(folder.join(name)).unwrap();
             assert_eq!(contents.lines().count(), 1);
