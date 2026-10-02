@@ -575,6 +575,7 @@ pub struct QuillApp {
     /// Parity slice 5: message whose video clip is playing in the viewer
     /// (ffplay child alive) or paused (clock frozen, no child).
     pub(super) viewer_video: Option<MessageId>,
+    pub(super) pip_window: Option<WindowHandle<gpui_kit::component::Root>>,
     /// Sandbox-checked local path of the viewer's clip, for pause/resume
     /// ffplay restarts.
     pub(super) viewer_video_path: Option<PathBuf>,

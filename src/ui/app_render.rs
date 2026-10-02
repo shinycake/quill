@@ -448,9 +448,10 @@ impl Render for QuillApp {
                         .child(self.status_note.clone()),
                 )
             })
-            .when(self.media_viewer.is_open(), |this| {
-                this.child(self.media_viewer_overlay(window, cx))
-            })
+            .when(
+                self.media_viewer.is_open() && self.pip_window.is_none(),
+                |this| this.child(self.media_viewer_overlay(window, cx)),
+            )
             // Phase 9.1: story viewer overlay above the media viewer.
             .when(self.story_viewer.is_open(), |this| {
                 this.child(self.story_viewer_overlay(cx))

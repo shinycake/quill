@@ -110,6 +110,7 @@ mod stickers_ui;
 mod story_albums;
 mod story_composer;
 mod story_viewer;
+mod video_pip;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

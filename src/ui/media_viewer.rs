@@ -648,6 +648,7 @@ impl QuillApp {
     /// all viewer-video state. Called on viewer close/step and when any
     /// other player starts.
     pub(super) fn stop_viewer_video(&mut self) {
+        self.pip_window = None;
         self.kill_viewer_player();
         self.kill_viewer_extraction();
         self.viewer_video = None;
@@ -1254,17 +1255,7 @@ impl QuillApp {
         // loading status).
         let frame: Option<Arc<RenderImage>> =
             if item.kind == MediaViewerKind::Video && !self.viewer_video_frames.is_empty() {
-                let elapsed = self
-                    .viewer_clock
-                    .as_ref()
-                    .map(|clock| clock.elapsed_secs())
-                    .unwrap_or(0.0);
-                // Clamp, don't wrap: frames cover (duration − start_timestamp),
-                // so the tail of the clock holds the last frame instead of
-                // replaying early frames.
-                let idx = ((elapsed * self.viewer_video_fps) as usize)
-                    .min(self.viewer_video_frames.len() - 1);
-                self.viewer_video_frames.get(idx).cloned()
+                self.viewer_render_frame()
             } else {
                 None
             };
@@ -1504,6 +1495,19 @@ impl QuillApp {
                             .into_any_element()
                     })
                     .child(div().text_sm().text_color(text_bright()).child(label))
+                    .when(
+                        cfg!(target_os = "macos") && !self.viewer_video_frames.is_empty(),
+                        |this| {
+                            this.child(
+                                Button::new("media-viewer-pip")
+                                    .label("Picture-in-Picture")
+                                    .accessibility_label("Picture-in-Picture")
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.open_video_pip(cx)),
+                                    ),
+                            )
+                        },
+                    )
                     // MED1: seek slider (created in `begin_viewer_video`).
                     .when_some(self.viewer_seek_slider.clone(), |this, slider| {
                         this.child(

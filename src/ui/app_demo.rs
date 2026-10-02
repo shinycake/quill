@@ -557,7 +557,7 @@ pub(super) fn demo_seed_for(
             "screenshot demo — fullscreen media viewer".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVideoPlayback => (
+        ScreenshotDemo::ReadyVideoPlayback | ScreenshotDemo::ReadyVideoPip => (
             Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — in-viewer video playback".into(),
@@ -1576,6 +1576,7 @@ impl QuillApp {
             viewer_zoom: ViewerZoom::new(),
             viewer_drag: None,
             viewer_video: None,
+            pip_window: None,
             viewer_video_path: None,
             viewer_player: None,
             viewer_clock: None,

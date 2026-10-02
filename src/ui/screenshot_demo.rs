@@ -251,6 +251,7 @@ pub enum ScreenshotDemo {
     /// 12 s duration is fixture data for the screenshot.
     /// (Parity slice 5.)
     ReadyVideoPlayback,
+    ReadyVideoPip,
     /// Story viewer demo (injected, no live Telegram): the story tray above
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).
