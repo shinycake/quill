@@ -20,6 +20,6 @@ concurrency:
   cancel-in-progress: false
 jobs:
   project:
-    uses: shinycake/quill-dashboard/.github/workflows/project-data.yml@44a11d64c73e53cda040bfccb4704def69828c2d
+    uses: shinycake/quill-dashboard/.github/workflows/project-data.yml@86331f884706a9ed3b65c9354f463edc7e107e9d
     with:
-      implementation_ref: 44a11d64c73e53cda040bfccb4704def69828c2d
+      implementation_ref: 86331f884706a9ed3b65c9354f463edc7e107e9d
