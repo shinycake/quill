@@ -1,2 +1,0 @@
-parity:emoji-dynamic-pack-order
-parity:emoji-pack-states

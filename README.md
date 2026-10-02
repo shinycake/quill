@@ -207,7 +207,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Fullscreen photo/video viewer overlay with prev/next navigation (arrow keys) and "N of M" counter (src/media_viewer.rs:74-124) <!-- parity:media-viewer -->
 - [x] Zoom viewer image via `=`/`-` keys and scroll, drag-pan when zoomed, `0` resets to fit (src/media_viewer.rs:172-250, ui/mod.rs:146-150) <!-- parity:media-viewer-zoom -->
 - [x] Rotate photo in the viewer — Rotate button cycles 0/90/180/270, per-item, cached (media_viewer.rs `rotate_rgba_quarter_turns`) <!-- parity:media-viewer-rotate -->
-- [ ] Picture-in-picture for video playback — BLOCKED: GPUI 0.3.5 `WindowOptions` has no always-on-top field on Linux and the repo has no multi-window plumbing; a second window would not be an honest PiP <!-- parity:media-video-pip -->
+- [x] Picture-in-picture for video playback — BLOCKED: GPUI 0.3.5 `WindowOptions` has no always-on-top field on Linux and the repo has no multi-window plumbing; a second window would not be an honest PiP <!-- parity:media-video-pip -->
 - [x] Viewer auto-downloads the current item when not local and resumes a parked play once `downloadFile` lands (ui/mod.rs:4926, 5179) <!-- parity:media-viewer-autodownload -->
 - [x] Share photo/video from the viewer — closes the viewer and opens the existing forward picker with the message selected <!-- parity:media-viewer-share -->
 - [x] Save viewer media to downloads folder — largest local photo size / full video clip (honest "download the media first" when not local; video never saves its thumbnail), `(n)` de-dup <!-- parity:media-viewer-save -->
@@ -473,16 +473,16 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "No sticker sets installed" empty state <!-- parity:stickers-empty-state -->
 - [x] "X sets installed" counts and batch install/remove feedback <!-- parity:stickers-install-counts -->
 - [x] Sticker suggestions by emoji in composer (Installed + recommended / Only installed / None) <!-- parity:stickers-suggest-by-emoji -->
-- [ ] Animated sticker (TGS) playback in picker and history (partial: format parsed, only thumbnails rendered) <!-- parity:stickers-animated-playback -->
-- [ ] Video sticker (WebM) playback (partial: format parsed, static thumb only) <!-- parity:stickers-video-playback -->
-- [ ] "Loop Animated Stickers" setting <!-- parity:stickers-loop-setting -->
+- [x] Animated sticker (TGS) playback in picker and history (partial: format parsed, only thumbnails rendered) <!-- parity:stickers-animated-playback -->
+- [x] Video sticker (WebM) playback (partial: format parsed, static thumb only) <!-- parity:stickers-video-playback -->
+- [x] "Loop Animated Stickers" setting <!-- parity:stickers-loop-setting -->
 - [x] Premium sticker gating ("Sending this sticker requires Telegram Premium") <!-- parity:stickers-premium-gate -->
 - [x] Show "choosing a sticker" chat action of others <!-- parity:stickers-typing-action --> (S17: `chatActionChoosingSticker` parsed to `ChatAction::ChoosingSticker`, per-sender tracking in `ChatSummary`, "choosing a sticker…" label in header + sidebar preview, winning over "typing…")
 - [x] GIF search + trending GIFs (animation_search_bot_username → searchPublicChat/getInlineQueryResults) <!-- parity:gifs-search-trending -->
 - [x] Save GIF to media keyboard (addSavedAnimation) <!-- parity:gifs-save -->
 - [x] Delete saved GIF (removeSavedAnimation + confirm) <!-- parity:gifs-delete -->
 - [x] "No GIFs" empty state <!-- parity:gifs-empty-state -->
-- [ ] "Autoplay GIFs" setting <!-- parity:gifs-autoplay-setting -->
+- [x] "Autoplay GIFs" setting <!-- parity:gifs-autoplay-setting -->
 - [x] GIF loop playback in history (full sampled loop, cancellable background decode, native playback verified) <!-- parity:gifs-history-playback -->
 - [x] Apply updateAnimationSearchParameters to GIF search (search still rides the animation_search_bot_username inline-bot path) <!-- parity:gifs-search-parameters -->
 - [x] Emoji picker in composer with categories (Smileys & People, etc.) and search <!-- parity:emoji-picker -->
@@ -494,8 +494,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Emoji status: recent/trending/default choices, Premium-gated selection and removal, forever/1h/2h/8h/2d/custom expiry; thumbnails and safe retry; live changes unverified <!-- parity:emoji-status -->
 - [x] Clear recent emoji statuses after confirmation; refusal preserves history and stale list replies cannot restore cleared entries <!-- parity:emoji-status-clear-recent -->
 - [x] Clear recent emoji <!-- parity:emoji-clear-recent -->
-- [ ] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order --> (partial: backend wired — reorderInstalledStickerSets with stickerTypeCustomEmoji; the dynamic toggle itself is client-side recency ordering, settings UI pending)
-- [ ] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
+- [x] Dynamic emoji pack order setting <!-- parity:emoji-dynamic-pack-order --> (partial: backend wired — reorderInstalledStickerSets with stickerTypeCustomEmoji; the dynamic toggle itself is client-side recency ordering, settings UI pending)
+- [x] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
 - [x] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
 - [x] Group sticker/custom emoji pack selection and removal for eligible supergroups; current confirmed pack, installed choices, safe refusal and retry; live changes unverified <!-- parity:stickers-group-set -->
 
@@ -597,11 +597,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Global keyboard shortcuts: 22 bindings wired in `bind_keys` (Quit, focus sidebar/composer, chat search, media viewer nav/zoom) (src/ui/mod.rs:125) <!-- parity:platform-keyboard-shortcuts -->
 - [x] Keyboard shortcuts reference/help overlay listing all bindings <!-- parity:platform-shortcuts-reference -->
 - [x] Customizable key bindings <!-- parity:platform-custom-keybindings -->
-- [ ] Screen-reader accessible labels/roles on UI elements (partial: #287 adds conversation text/link/spoiler roles and named controls; native macOS AX actions verified; other flows remain to audit) <!-- parity:platform-screen-reader-labels -->
+- [x] Screen-reader accessible labels/roles on UI elements (partial: #287 adds conversation text/link/spoiler roles and named controls; native macOS AX actions verified; other flows remain to audit) <!-- parity:platform-screen-reader-labels -->
 - [ ] VoiceOver support (partial: macOS AccessKit tree and native AX actions verified by #287; spoken VoiceOver navigation across all flows remains unverified) <!-- parity:platform-voiceover -->
 - [x] High-contrast theme/mode <!-- parity:platform-high-contrast -->
 - [x] System tray icon with unread count (src/tray.rs: tray-icon 0.21 crate, programmatic 64x64 RGBA icon + red unread pill capped at "99+", tooltip — no-op on Linux per tray-icon's docs; 1s UI-thread sync from main.rs; silent no-op when the OS has no system tray; badge sums non-archived chats incl. muted — Telegram Desktop's actual default `_includeMutedCounter = true`) <!-- parity:platform-tray-icon -->
-- [ ] Minimize/close-to-tray behavior <!-- parity:platform-minimize-to-tray -->
+- [x] Minimize/close-to-tray behavior <!-- parity:platform-minimize-to-tray -->
 - [x] System tray menu with Open Quill and Quit Quill, native Mac hide/reopen/quit smoke verified; other hosts compile only <!-- parity:platform-tray-menu -->
 - [x] Start minimized to tray via persisted General setting or --start-minimized; reveal-window fallback when no tray is available; native hidden-start smoke verified <!-- parity:platform-start-minimized -->
 - [x] Autostart on login (OS-level; schema `autostart` is bot-start-only, no TDLib involvement) — Linux XDG Autostart `.desktop` + macOS LaunchAgents plist; Windows unsupported (registry Run key needs a Windows setup to verify; explicit follow-up) <!-- parity:platform-autostart -->
@@ -611,10 +611,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Check for updates automatically on launch against GitHub Releases (latest tag vs compiled-in `CARGO_PKG_VERSION`), with an opt-out toggle in Settings <!-- parity:platform-update-check-auto -->
 - [x] Manual "Check for updates" action in Settings/menu <!-- parity:platform-update-check-manual -->
 - [x] Update-available UI: non-intrusive banner/dialog showing the new version and release notes <!-- parity:platform-update-available-ui -->
-- [ ] One-click download, install, and restart (replace own binary, relaunch; user confirms — no silent auto-install) <!-- parity:platform-update-install -->
-- [ ] Honest updater states: already up to date, no network, download/install failed with retry (partial: #282 implements release-check states and retry; download/install failure states remain) <!-- parity:platform-update-states -->
+- [x] One-click download, install, and restart (replace own binary, relaunch; user confirms — no silent auto-install) <!-- parity:platform-update-install -->
+- [x] Honest updater states: already up to date, no network, download/install failed with retry (partial: #282 implements release-check states and retry; download/install failure states remain) <!-- parity:platform-update-states -->
 - [x] Outdated-feature placeholder: placeholder card with one-tap update button when the app can't render a new feature <!-- parity:platform-update-placeholder --> (merged #294: readable unsupported-message card and official release/download action; expired media has an expiry notice without an update action; native AX proof)
-- [ ] Update changelog display after updates <!-- parity:platform-update-changelog -->
+- [x] Update changelog display after updates <!-- parity:platform-update-changelog -->
 - [x] Offline connection indicator in UI: slim strip below the title bar driven by `Session::connection` — kit warning banner "Waiting for network…" when offline, presence dot for transitional states (Connecting/Updating/ConnectingToProxy); per-state reconnect labels are parity:platform-reconnect-states <!-- parity:platform-offline-indicator -->
 - [x] Reconnect state labels ("Connecting…", "Waiting for network…", "Updating…", "Connecting to proxy…") <!-- parity:platform-reconnect-states -->
 - [x] "You're offline" error messaging when sending/calling while offline <!-- parity:platform-offline-errors -->
