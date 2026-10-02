@@ -111,6 +111,8 @@ pub struct ParsedRtcServer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadyParams {
     pub encryption_key: Vec<u8>,
+    pub library_versions: Vec<String>,
+    pub custom_parameters: String,
     pub servers: Vec<ParsedRtcServer>,
     pub allow_p2p: bool,
     /// `callStateReady.emojis` (schema 1.8.67, :7068): the 4-emoji
@@ -277,6 +279,23 @@ pub(crate) fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
     let ready = state_value
         .filter(|state| state.get("@type").and_then(Value::as_str) == Some("callStateReady"))
         .map(|state| ReadyParams {
+            library_versions: state
+                .get("protocol")
+                .and_then(|protocol| protocol.get("library_versions"))
+                .and_then(Value::as_array)
+                .map(|versions| {
+                    versions
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            custom_parameters: state
+                .get("custom_parameters")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             encryption_key: state
                 .get("encryption_key")
                 .and_then(Value::as_str)

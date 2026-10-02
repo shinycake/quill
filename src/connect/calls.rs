@@ -143,12 +143,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn call_connect_params(&self, is_outgoing: bool, ready: &ReadyParams) -> ConnectParams {
-        let library_versions = self
-            .call_engine
-            .as_ref()
-            .filter(|engine| engine.is_available())
-            .map(|engine| engine.protocol().library_versions)
-            .unwrap_or_default();
+        let library_versions = ready.library_versions.clone();
         let is_video = self.session.active_call.as_ref().is_some_and(|call| {
             // A camera toggle before the transport existed is stored in
             // `camera_on` and must survive into the connect params (a
@@ -163,6 +158,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .flatten();
         ConnectParams {
             encryption_key: ready.encryption_key.clone(),
+            custom_parameters: ready.custom_parameters.clone(),
             is_outgoing,
             servers: ready
                 .servers

@@ -1,9 +1,10 @@
 //! `NtgcallsEngine`: runtime-loaded ntgcalls adapter implementing `CallEngine`.
 use super::*;
 use ntgcalls_sys::{
-    Loader, NTG_ERR_INVALID_PARAMS, NTG_MEDIA_SOURCE_DESKTOP, NTG_MEDIA_SOURCE_DEVICE, NTG_OK,
-    NTG_STREAM_MODE_CAPTURE, NTG_STREAM_MODE_PLAYBACK, ntg_instance, ntg_media_description,
-    ntg_media_devices, ntg_protocol, ntg_ssrc_group, ntg_video_description,
+    Loader, NTG_ERR_INVALID_PARAMS, NTG_MEDIA_SOURCE_DESKTOP, NTG_MEDIA_SOURCE_DEVICE,
+    NTG_MEDIA_SOURCE_EXTERNAL, NTG_OK, NTG_STREAM_MODE_CAPTURE, NTG_STREAM_MODE_PLAYBACK,
+    ntg_instance, ntg_media_description, ntg_media_devices, ntg_protocol, ntg_ssrc_group,
+    ntg_video_description,
 };
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -347,13 +348,24 @@ impl NtgcallsEngine {
         }
 
         let mut speaker_audio = audio_description(speaker.as_ref());
+        // External playback delivers decoded peer video to our frame callback.
+        // NULL descriptions disable receiving these tracks altogether.
+        let mut peer_camera = ntg_video_description {
+            media_source: NTG_MEDIA_SOURCE_EXTERNAL,
+            input: null_mut(),
+            ..camera_video
+        };
+        let mut peer_screen = ntg_video_description {
+            media_source: NTG_MEDIA_SOURCE_EXTERNAL,
+            ..Self::screen_video_description()
+        };
         let playback = ntg_media_description {
             // P2PCall attaches incoming audio to its Microphone receiver.
             // The description still identifies an output device.
             microphone: &mut speaker_audio,
             speaker: null_mut(),
-            camera: null_mut(),
-            screen: null_mut(),
+            camera: &mut peer_camera,
+            screen: &mut peer_screen,
         };
         let rc = unsafe {
             (self.api.ntg_set_stream_sources)(
@@ -511,7 +523,8 @@ impl CallEngine for NtgcallsEngine {
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {
         let user_id = self.user_id(call_id)?;
         let instance = self.ensure_instance()?;
-        if params.encryption_key.is_empty() {
+        // Native P2P setup copies a fixed 256-byte Telegram auth key.
+        if params.encryption_key.len() != 256 {
             return Err(EngineError::Engine {
                 op: "ntg_skip_exchange",
                 code: NTG_ERR_INVALID_PARAMS,
@@ -519,6 +532,11 @@ impl CallEngine for NtgcallsEngine {
         }
         let servers = NativeRtcServers::new(&params.servers)?;
         let versions = c_strings(&params.library_versions)?;
+        let custom_parameters = if params.custom_parameters.is_empty() {
+            None
+        } else {
+            Some(native_string(&params.custom_parameters)?)
+        };
         let version_ptrs: Vec<_> = versions.iter().map(|value| value.as_ptr()).collect();
         let rc = unsafe {
             (self.api.ntg_skip_exchange)(
@@ -552,7 +570,9 @@ impl CallEngine for NtgcallsEngine {
                 version_ptrs.as_ptr(),
                 version_ptrs.len(),
                 params.p2p_allowed,
-                std::ptr::null(),
+                custom_parameters
+                    .as_ref()
+                    .map_or(std::ptr::null(), |value| value.as_ptr()),
             )
         };
         if rc != NTG_OK {
@@ -1199,6 +1219,28 @@ mod native_tests {
         }
         let mut engine = NtgcallsEngine::load().expect("Native engine");
         engine.start_call(1, 42, true).expect("Local transport");
+        let mut params = ConnectParams {
+            encryption_key: Vec::new(),
+            custom_parameters: String::new(),
+            is_outgoing: true,
+            servers: Vec::new(),
+            library_versions: Vec::new(),
+            p2p_allowed: false,
+            mic_input: None,
+            speaker_input: None,
+            video_enabled: false,
+            camera_input: None,
+        };
+        for length in [0, 1, 255, 257] {
+            params.encryption_key = vec![1; length];
+            assert!(matches!(
+                engine.connect(1, &params),
+                Err(EngineError::Engine {
+                    op: "ntg_skip_exchange",
+                    code: NTG_ERR_INVALID_PARAMS
+                })
+            ));
+        }
         engine.call_media.insert(
             1,
             CallMediaConfig {
@@ -1212,6 +1254,17 @@ mod native_tests {
         // Before connect, ntgcalls constructs readers without opening them.
         // This checks device metadata without recording or making a call.
         engine.set_media_sources(1).expect("Default audio sources");
+        let key = [1_u8; 256];
+        let instance = engine.instance.expect("Live native instance");
+        // Exercise the native operation reported in the user's screenshot.
+        // No connection follows, so these synthetic bytes never leave the process.
+        let result = unsafe {
+            (engine.api.ntg_skip_exchange)(instance.as_ptr(), 42, key.as_ptr(), key.len(), true)
+        };
+        assert_eq!(
+            result, NTG_OK,
+            "Native key exchange must find the local call"
+        );
         engine.hangup(1).expect("Teardown");
     }
 }
