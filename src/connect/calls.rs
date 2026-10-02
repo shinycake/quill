@@ -434,25 +434,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 let params = self.call_connect_params(is_outgoing, ready);
                 self.call_connect_params = Some(params.clone());
                 self.reconnect_attempts = 0;
-                let result = self
-                    .call_engine
-                    .as_deref_mut()
-                    .ok_or(crate::calls::engine::EngineError::Unavailable)
-                    .and_then(|engine| engine.connect(call_id, &params));
-                let pre_muted = self
-                    .session
-                    .active_call
-                    .as_ref()
-                    .is_some_and(|call| call.muted);
-                if result.is_ok()
-                    && pre_muted
-                    && let Some(engine) = self.call_engine.as_deref_mut()
-                {
-                    // A mute requested before the transport existed applies
-                    // once it does; failure here is non-fatal (the unmute
-                    // path can retry).
-                    let _ = engine.set_muted(call_id, true);
-                }
+                let result = self.connect_call_transport(call_id, &params);
                 // Phase C2i: a screen-share toggle made before the
                 // transport existed applies once it does (mirrors the
                 // pre-transport mute above; non-fatal so the UI toggle
@@ -509,18 +491,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .is_some_and(|engine| engine.is_available())
                 {
                     Some("call engine is unavailable for reconnect".to_string())
-                } else if let Some(params) = self.call_connect_params.as_ref() {
+                } else if let Some(params) = self.call_connect_params.clone() {
                     self.reconnect_attempts += 1;
                     if let Some(call) = self.session.active_call.as_mut() {
                         call.transport = Some(TransportState::Reconnecting);
                         call.transport_error = None;
                     }
-                    match self
-                        .call_engine
-                        .as_deref_mut()
-                        .expect("available engine")
-                        .connect(call_id, params)
-                    {
+                    match self.connect_call_transport(call_id, &params) {
                         // The retry is in flight: leave the call in
                         // `Reconnecting` so the UI can show it. The
                         // engine's own state callbacks move it to
@@ -632,6 +609,33 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
 
+        Ok(())
+    }
+
+    fn connect_call_transport(
+        &mut self,
+        call_id: i32,
+        params: &ConnectParams,
+    ) -> Result<(), EngineError> {
+        let muted = self
+            .session
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.muted);
+        let engine = self
+            .call_engine
+            .as_deref_mut()
+            .ok_or(EngineError::Unavailable)?;
+        engine.connect(call_id, params)?;
+        if muted && let Err(error) = engine.set_muted(call_id, true) {
+            // Never keep an unmuted replacement transport behind a muted UI.
+            let _ = engine.hangup(call_id);
+            self.transport_outbox
+                .lock()
+                .expect("call transport outbox")
+                .retain(|(id, _)| *id != call_id);
+            return Err(error);
+        }
         Ok(())
     }
 
