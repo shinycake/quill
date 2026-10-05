@@ -15,10 +15,8 @@ pub(super) fn title_bar(
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let _ = live;
-    let title = match mode {
-        PaneMode::Connecting => "Quill — connecting…",
-        PaneMode::Synthetic | PaneMode::Ready => "Quill",
-    };
+    let _ = mode;
+    let title = "Quill";
     let show_cycle = mode == PaneMode::Synthetic;
     // kit Phase 7: kit `TitleBar` — native-feel chrome (drag, double-click
     // zoom, Linux min/max/close, macOS traffic-light inset) in theme tokens,

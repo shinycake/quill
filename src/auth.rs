@@ -55,7 +55,7 @@ pub enum AuthAction {
 pub fn view_for(state: &AuthorizationState) -> AuthView {
     match state {
         AuthorizationState::WaitTdlibParameters => AuthView {
-            title: "Starting",
+            title: "Connecting",
             body: "Connecting to Telegram…".into(),
             action: AuthAction::ProvideParameters,
             blocking: true,
@@ -67,7 +67,7 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             blocking: true,
         },
         AuthorizationState::WaitCode { code_length } => AuthView {
-            title: "Verification code",
+            title: "Enter the code",
             body: match code_length {
                 Some(len) => format!("Enter the {len}-digit code from Telegram."),
                 None => "Enter the verification code from Telegram.".into(),
@@ -76,7 +76,7 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             blocking: true,
         },
         AuthorizationState::WaitPassword { has_recovery_email } => AuthView {
-            title: "Two-step password",
+            title: "Enter your password",
             body: if *has_recovery_email {
                 // Slice A10: recovery runs inside Quill now — "Forgot
                 // password?" emails a recovery code via
@@ -90,7 +90,7 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
         },
         AuthorizationState::WaitOtherDeviceConfirmation { .. } => AuthView {
             title: "Confirm on another device",
-            body: "Scan the QR code in a logged-in Telegram client. The QR payload is never logged."
+            body: "Scan this code with Telegram on a device where you're already signed in."
                 .into(),
             action: AuthAction::WaitOtherDevice,
             blocking: true,
@@ -136,25 +136,25 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
         },
         AuthorizationState::Ready => AuthView {
             title: "Ready",
-            body: "Signed in. Cloud chats only.".into(),
+            body: "Signed in.".into(),
             action: AuthAction::Ready,
             blocking: false,
         },
         AuthorizationState::LoggingOut => AuthView {
             title: "Signing out",
-            body: "Waiting for TDLib to finish logout.".into(),
+            body: "Finishing sign-out…".into(),
             action: AuthAction::LoggingOut,
             blocking: true,
         },
         AuthorizationState::Closing => AuthView {
             title: "Closing",
-            body: "TDLib is closing this client. Wait for the closed state before quitting the process.".into(),
+            body: "Closing…".into(),
             action: AuthAction::Closing,
             blocking: true,
         },
         AuthorizationState::Closed => AuthView {
             title: "Closed",
-            body: "Session databases are closed. Create a new client to continue.".into(),
+            body: "Signed out.".into(),
             action: AuthAction::Closed,
             blocking: true,
         },
