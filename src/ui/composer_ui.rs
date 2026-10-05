@@ -6,19 +6,25 @@ use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::attachment::{
+    Attachment, AttachmentContent, AttachmentDescription, AttachmentGroup, AttachmentMedia,
+    AttachmentTitle,
+};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::{ComposerEdit, ComposerReplyTo, find_urls};
+use quill::composer::{AttachmentKind, ComposerEdit, ComposerReplyTo, find_urls};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::effective_content;
+use quill::telegram::requests::SelfDestructSend;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -856,12 +862,9 @@ impl QuillApp {
                         )
                         .when(captionable && !self.open_chat_is_secret(), |this| {
                             this.child(
-                                Button::new("composer-caption-above")
-                                    .label(if above {
-                                        "Caption: above"
-                                    } else {
-                                        "Caption: below"
-                                    })
+                                Checkbox::new("composer-caption-above")
+                                    .label("Caption above media")
+                                    .checked(above)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if let Some(edit) = this.pending_edit.as_mut() {
                                             edit.caption_above = !edit.caption_above;
@@ -1022,4 +1025,181 @@ fn composer_context_bar(
         )
         .when_some(trailing, |this, trailing| this.child(trailing))
         .child(close)
+}
+
+impl QuillApp {
+    /// The paperclip: a menu of what can be attached (Telegram Desktop's
+    /// attach button), instead of a permanent row of text buttons.
+    pub(super) fn attach_menu_button(
+        &self,
+        polls_allowed: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let owner = cx.entity().downgrade();
+        let gifs_open = self.gif_panel_open();
+        Button::new("composer-attach")
+            .icon(IconName::Paperclip)
+            .ghost()
+            .tooltip("Attach")
+            .accessibility_label("Attach")
+            .on_click(|event, window, cx| {
+                if matches!(event, ClickEvent::Keyboard(_)) {
+                    window.dispatch_action(
+                        Box::new(gpui_kit::base::actions::Confirm { secondary: false }),
+                        cx,
+                    );
+                }
+            })
+            .dropdown_menu(move |mut menu, _, _| {
+                for (label, icon, kind) in [
+                    ("Photo", IconName::Image, AttachmentKind::Photo),
+                    ("Video", IconName::Film, AttachmentKind::Video),
+                    ("File", IconName::File, AttachmentKind::Document),
+                    ("Video message", IconName::Video, AttachmentKind::VideoNote),
+                ] {
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new(label).icon(icon).on_click(
+                        move |_, _, cx| {
+                            let _ = owner.update(cx, |this, cx| this.attach_local(kind, cx));
+                        },
+                    ));
+                }
+                let poll_owner = owner.clone();
+                let gif_owner = owner.clone();
+                menu.separator()
+                    .item(
+                        PopupMenuItem::new(if polls_allowed {
+                            "Poll"
+                        } else {
+                            "Polls are restricted here"
+                        })
+                        .icon(IconName::ChartBar)
+                        .disabled(!polls_allowed)
+                        .on_click(move |_, window, cx| {
+                            let _ =
+                                poll_owner.update(cx, |this, cx| this.open_poll_dialog(window, cx));
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new("GIFs")
+                            .icon(IconName::SquarePlay)
+                            .checked(gifs_open)
+                            .on_click(move |_, _, cx| {
+                                let _ = gif_owner.update(cx, |this, cx| this.toggle_gif_panel(cx));
+                            }),
+                    )
+            })
+    }
+
+    /// Picked files waiting to be sent: removable cards, plus the album and
+    /// self-destruct options that apply to them.
+    pub(super) fn composer_attachment_tray(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut group =
+            AttachmentGroup::new("composer-attachments").with_edge_fade(cx.theme().background);
+        for (index, attachment) in self.pending_attachments.iter().enumerate() {
+            let (icon, kind) = match attachment.kind {
+                AttachmentKind::Photo => (IconName::Image, "Photo"),
+                AttachmentKind::Video => (IconName::Film, "Video"),
+                AttachmentKind::Document => (IconName::File, "File"),
+                AttachmentKind::VideoNote => (IconName::Video, "Video message"),
+            };
+            group = group.child(
+                Attachment::new()
+                    .id(("composer-attach-item", index as u64))
+                    .small()
+                    .tooltip(attachment.file_name.clone())
+                    .media(AttachmentMedia::new().child(Icon::new(icon)))
+                    .content(
+                        AttachmentContent::new()
+                            .title(AttachmentTitle::new(attachment.file_name.clone()))
+                            .description(AttachmentDescription::new(kind)),
+                    )
+                    .on_remove(cx.listener(move |this, _, _, cx| {
+                        this.remove_attachment(index, cx);
+                    })),
+            );
+        }
+        let several = self.pending_attachments.len() >= 2;
+        let grouped = self.composer_group_media_effective();
+        let remember = self
+            .session()
+            .map(|s| s.media_prefs.remember_media_grouping)
+            .unwrap_or(false);
+        let timer = self.self_destruct_picker_visible().then(|| {
+            let owner = cx.entity().downgrade();
+            let current = self.composer_self_destruct;
+            Button::new("self-destruct-menu")
+                .icon(IconName::Timer)
+                .label(self.self_destruct_button_label())
+                .ghost()
+                .small()
+                .tooltip("Self-destruct timer")
+                .dropdown_menu(move |mut menu, _, _| {
+                    for choice in QuillApp::SELF_DESTRUCT_CHOICES {
+                        let owner = owner.clone();
+                        let label = match choice {
+                            None => "Off".to_string(),
+                            Some(SelfDestructSend::Timer(secs)) if secs < 60 => {
+                                format!("{secs} seconds")
+                            }
+                            Some(SelfDestructSend::Timer(secs)) => {
+                                format!("{} minute", secs / 60)
+                            }
+                            Some(SelfDestructSend::Immediately) => "View once".to_string(),
+                        };
+                        menu = menu.item(
+                            PopupMenuItem::new(label)
+                                .checked(choice == current)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |this, cx| {
+                                        this.set_composer_self_destruct(choice, cx);
+                                    });
+                                }),
+                        );
+                    }
+                    menu
+                })
+        });
+        div()
+            .id("composer-attach-tray")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(group)
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_4()
+                    .text_sm()
+                    .when(several, |row| {
+                        row.child(
+                            Checkbox::new("composer-group-media")
+                                .label("Send as album")
+                                .checked(grouped)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_composer_group_media(cx);
+                                })),
+                        )
+                        .child(
+                            Checkbox::new("composer-remember-grouping")
+                                .label("Remember choice")
+                                .checked(remember)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_remember_media_grouping(cx);
+                                })),
+                        )
+                    })
+                    .children(timer)
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("clear-attach")
+                            .label(if several { "Remove all" } else { "Remove" })
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| this.clear_attachment(cx))),
+                    ),
+            )
+    }
 }

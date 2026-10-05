@@ -553,6 +553,19 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Drop one picked file; the batch options reset with the last one.
+    pub(super) fn remove_attachment(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.pending_attachments.len() {
+            return;
+        }
+        self.pending_attachments.remove(index);
+        if self.pending_attachments.is_empty() {
+            self.clear_attachment(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
     pub(super) fn clear_attachment(&mut self, cx: &mut Context<Self>) {
         self.pending_attachments.clear();
         self.composer_self_destruct = None;
@@ -600,17 +613,13 @@ impl QuillApp {
                 .all(|att| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
     }
 
-    /// Phase B3: cycle the composer's self-destruct choice (Off → 5s →
-    /// 30s → 1m → View once → Off). Called from the picker button and the
-    /// screenshot demo.
-    pub(super) fn cycle_composer_self_destruct(&mut self, cx: &mut Context<Self>) {
-        let choices = Self::SELF_DESTRUCT_CHOICES;
-        let next = choices
-            .iter()
-            .position(|choice| *choice == self.composer_self_destruct)
-            .and_then(|index| choices.get(index + 1))
-            .copied()
-            .unwrap_or(choices[0]);
+    /// Phase B3: set the composer's self-destruct choice (one of
+    /// `SELF_DESTRUCT_CHOICES`), picked from the timer menu.
+    pub(super) fn set_composer_self_destruct(
+        &mut self,
+        next: Option<SelfDestructSend>,
+        cx: &mut Context<Self>,
+    ) {
         self.composer_self_destruct = next;
         self.status_note = match next {
             None => "self-destruct off".into(),
@@ -1301,9 +1310,9 @@ impl QuillApp {
     /// Phase B3: label for the picker button (`⏱` cycle affordance).
     pub(super) fn self_destruct_button_label(&self) -> String {
         match self.composer_self_destruct {
-            None => "⏱ Off".to_string(),
-            Some(SelfDestructSend::Timer(secs)) => format!("⏱ {secs}s"),
-            Some(SelfDestructSend::Immediately) => "⏱ Once".to_string(),
+            None => "Off".to_string(),
+            Some(SelfDestructSend::Timer(secs)) => format!("{secs}s"),
+            Some(SelfDestructSend::Immediately) => "View once".to_string(),
         }
     }
 
