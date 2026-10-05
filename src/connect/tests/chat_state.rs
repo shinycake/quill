@@ -851,7 +851,7 @@ fn cl1_remove_chat_from_list_sends_delete_history() {
 }
 
 #[test]
-fn chat_export_pages_history_until_short_page() {
+fn chat_export_pages_history_until_a_page_adds_nothing() {
     // `parity:platform-chat-export`: starting an export sends
     // `getChatHistory` (newest first, limit 100); a full page triggers the
     // next page from the oldest id, a short page ends paging.
@@ -939,7 +939,8 @@ fn chat_export_pages_history_until_short_page() {
     assert_eq!(value["from_message_id"], 901);
 
     // Short page (2 messages: the boundary id 901 re-included by TDLib's
-    // inclusive from_message_id, then 900) → boundary deduped, paging done.
+    // inclusive from_message_id, then 900) → boundary deduped. Short is
+    // not the end: TDLib picks the page size (schema 1.8.67, line 11822).
     let extra = driver
         .session
         .requests
@@ -970,6 +971,39 @@ fn chat_export_pages_history_until_short_page() {
     assert_eq!(export.messages.len(), 101);
     assert_eq!(export.messages.iter().filter(|m| m.id == 901).count(), 1);
     assert!(export.messages.last().unwrap().outgoing);
+    assert!(!export.done_paging);
+
+    // A page with nothing new (only the boundary) ends paging.
+    driver.pump_chat_export();
+    let third = recorder
+        .snapshot()
+        .into_iter()
+        .filter(|j| j.contains("\"@type\":\"getChatHistory\""))
+        .nth(2)
+        .expect("third export page sent");
+    let value: Value = serde_json::from_str(&third).unwrap();
+    assert_eq!(value["from_message_id"], 900);
+    let extra = driver
+        .session
+        .requests
+        .pending_extra_for(RequestPurpose::ExportChatHistory, Some(ChatId(16)))
+        .expect("third export page in flight");
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"messages","@extra":"{}","messages":[{}]}}"#,
+                    extra.0,
+                    msg(900, "last"),
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let export = driver.session.chat_export.as_ref().expect("export active");
+    assert_eq!(export.messages.len(), 101);
     assert!(export.done_paging);
     let _ = std::fs::remove_dir_all(&dir);
 }
