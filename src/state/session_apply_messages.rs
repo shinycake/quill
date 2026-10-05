@@ -236,15 +236,20 @@ impl Session {
                 for message in &messages {
                     self.remember_files(&message.files);
                 }
+                let empty = messages.is_empty();
+                let rows: Vec<HistoryMessage> = messages
+                    .into_iter()
+                    .map(|message| history_message(message, false))
+                    .collect();
+                for row in &rows {
+                    self.index_poll(row);
+                }
                 let entry = self
                     .topic_histories
                     .entry((chat_id.0, forum_topic_id))
                     .or_default();
-                let empty = messages.is_empty();
-                for message in messages {
-                    entry
-                        .messages
-                        .insert(message.id.0, history_message(message, false));
+                for row in rows {
+                    entry.messages.insert(row.id.0, row);
                 }
                 if next_from_message_id.0 == 0 || empty {
                     entry.loaded_complete = true;
@@ -341,9 +346,15 @@ impl Session {
         {
             slot.content = content.clone();
         }
-        self.edit_loaded_message(chat_id, message_id, |message| {
+        let loaded = self.edit_loaded_message(chat_id, message_id, |message| {
             message.content = content.clone();
         });
+        if loaded && let MessageContent::Poll(poll) = &content {
+            self.poll_messages
+                .entry(poll.poll.id)
+                .or_default()
+                .insert((chat_id.0, message_id.0));
+        }
         // The row preview follows the chat's last message, loaded or not
         // (Telegram X `TGChat.updateMessageContent`). The newest loaded
         // row is not it after a jump, and while TDLib reports the last

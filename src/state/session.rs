@@ -438,6 +438,11 @@ pub struct Session {
     pub forum_topics: HashMap<i64, Vec<ForumTopic>>,
     /// Phase 5.1: per-topic histories keyed by `(chat_id, forum_topic_id)`.
     pub topic_histories: HashMap<(i64, i32), TopicHistory>,
+    /// `poll.id` → `(chat_id, message_id)` of rows loaded with that poll,
+    /// so `updatePoll` (which carries no chat or message id) touches only
+    /// its rows. Entries can be stale; `apply_update_poll` re-checks and
+    /// prunes them.
+    pub(crate) poll_messages: HashMap<i64, HashSet<(i64, i64)>>,
     pub view_generation: ViewGeneration,
     pub requests: RequestRegistry,
     pub chats_exhausted: bool,
@@ -552,6 +557,15 @@ pub struct Session {
     /// clears the mark (Telegram X `TdlibFilesManager.onFileUpdate` treats
     /// a stopped download as paused until asked again).
     pub stalled_auto_downloads: HashSet<i32>,
+    /// Avatar file id → number of chats / users showing it (chat-list
+    /// photos and contact `photo_small`), kept where those ids are set.
+    pub(crate) avatar_file_refs: HashMap<i32, u32>,
+    /// Avatar file ids whose download state may have changed since the
+    /// driver last looked (`take_due_chat_list_photos`).
+    pub(crate) avatar_downloads_due: BTreeSet<i32>,
+    /// Re-check every avatar once (new session, any auth change: requests
+    /// were invalidated and files may have been cleared).
+    pub(crate) avatar_rescan: bool,
     /// Recently completed downloads (file ids, most recent last, capped) for
     /// the downloads manager's "recent" list. Recorded only when a file was
     /// in `downloading` and its `updateFile` shows completion — pre-existing
@@ -1051,6 +1065,7 @@ impl Session {
             pending_bot_period_secs: 30,
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
+            poll_messages: HashMap::new(),
             view_generation: ViewGeneration(1),
             requests: RequestRegistry::default(),
             chats_exhausted: false,
@@ -1091,6 +1106,9 @@ impl Session {
             paused_downloads: HashSet::new(),
             failed_downloads: HashSet::new(),
             stalled_auto_downloads: HashSet::new(),
+            avatar_file_refs: HashMap::new(),
+            avatar_downloads_due: BTreeSet::new(),
+            avatar_rescan: true,
             completed_downloads: VecDeque::new(),
             downloads_panel_open: false,
             download_extras: HashMap::new(),

@@ -10,33 +10,53 @@ impl Session {
     }
 
     /// Phase 4.2: apply `updatePoll` (schema 1.8.67 line 11179). The update
-    /// carries no chat or message id, so every loaded history is scanned for
-    /// a `messagePoll` whose `poll.id` matches; the poll is replaced in
-    /// place (vote counts, percentages, chosen marks). Returns the number
-    /// of rows updated.
+    /// carries no chat or message id, so the rows holding that poll are
+    /// found through `poll_messages` (filled wherever a row is loaded) and
+    /// the poll is replaced in place (vote counts, percentages, chosen
+    /// marks) in the main history and any loaded topic history. Returns the
+    /// number of main-history rows updated.
     pub fn apply_update_poll(&mut self, poll: Poll) -> usize {
+        let Some(rows) = self.poll_messages.remove(&poll.id) else {
+            return 0;
+        };
         let mut updated = 0;
         let mut touched = Vec::new();
-        for (chat_id, history) in self.histories.iter_mut() {
-            for message in history.messages.values_mut() {
-                if let MessageContent::Poll(poll_content) = &mut message.content
-                    && poll_content.poll.id == poll.id
-                {
+        let mut live = HashSet::new();
+        for (chat_id, message_id) in rows {
+            let replace = |message: &mut HistoryMessage| match &mut message.content {
+                MessageContent::Poll(poll_content) if poll_content.poll.id == poll.id => {
                     poll_content.poll = poll.clone();
-                    touched.push((*chat_id, message.id.0));
-                    updated += 1;
+                    true
                 }
+                _ => false,
+            };
+            let mut found = false;
+            if let Some(message) = self
+                .histories
+                .get_mut(&chat_id)
+                .and_then(|history| history.messages.get_mut(&message_id))
+                && replace(message)
+            {
+                touched.push((chat_id, message_id));
+                updated += 1;
+                found = true;
+            }
+            // The topic view reads only `topic_histories`.
+            for ((topic_chat_id, _), topic) in self.topic_histories.iter_mut() {
+                if *topic_chat_id == chat_id
+                    && let Some(message) = topic.messages.get_mut(&message_id)
+                    && replace(message)
+                {
+                    found = true;
+                }
+            }
+            // Rows that left (deleted, edited away) drop out of the index.
+            if found {
+                live.insert((chat_id, message_id));
             }
         }
-        // The topic view reads only `topic_histories`.
-        for topic in self.topic_histories.values_mut() {
-            for message in topic.messages.values_mut() {
-                if let MessageContent::Poll(poll_content) = &mut message.content
-                    && poll_content.poll.id == poll.id
-                {
-                    poll_content.poll = poll.clone();
-                }
-            }
+        if !live.is_empty() {
+            self.poll_messages.insert(poll.id, live);
         }
         // N2: an open voter dialog goes stale when the poll updates
         // (counts/options change) — drop cached pages for touched

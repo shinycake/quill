@@ -5,6 +5,9 @@ impl Session {
     pub(crate) fn set_auth(&mut self, state: AuthorizationState) {
         if self.auth != state {
             self.requests.invalidate_auth();
+            // Download requests were dropped and files may be cleared
+            // below: every avatar gets one fresh look.
+            self.avatar_rescan = true;
         }
         if matches!(
             state,
@@ -168,6 +171,7 @@ impl Session {
         }
         let topic_id = message.topic_id;
         let row = history_message(message, pending);
+        self.index_poll(&row);
         let history = self.histories.entry(chat_id.0).or_default();
         history.upsert(row.clone());
         // Parity slice 4: a message addressed to a forum topic also lands
@@ -210,6 +214,16 @@ impl Session {
             }
         }
         found
+    }
+
+    /// Record a loaded poll row in `poll_messages` (see `apply_update_poll`).
+    pub(crate) fn index_poll(&mut self, message: &HistoryMessage) {
+        if let MessageContent::Poll(content) = &message.content {
+            self.poll_messages
+                .entry(content.poll.id)
+                .or_default()
+                .insert((message.chat_id.0, message.id.0));
+        }
     }
 
     pub(crate) fn remember_files(&mut self, files: &[ParsedFile]) {

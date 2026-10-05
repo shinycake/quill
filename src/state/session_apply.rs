@@ -163,10 +163,15 @@ impl Session {
                 if let Some(file) = &photo {
                     self.remember_files(std::slice::from_ref(file));
                 }
-                self.chats
-                    .entry(chat_id.0)
-                    .or_insert_with(|| placeholder_chat(chat_id))
-                    .photo_file_id = photo_file_id;
+                let old_photo_file_id = std::mem::replace(
+                    &mut self
+                        .chats
+                        .entry(chat_id.0)
+                        .or_insert_with(|| placeholder_chat(chat_id))
+                        .photo_file_id,
+                    photo_file_id,
+                );
+                self.replace_avatar(old_photo_file_id, photo_file_id);
             }
             EnvelopePayload::UpdateChatPermissions {
                 chat_id,
@@ -200,7 +205,11 @@ impl Session {
             EnvelopePayload::UpdateUser { user_id, user } => {
                 // Phase 6: keep the full user object for the contacts list
                 // and info panels.
-                self.users.insert(user_id.0, user.clone());
+                let old_photo_file_id = self
+                    .users
+                    .insert(user_id.0, user.clone())
+                    .map(|old| old.photo_small_file_id);
+                self.replace_avatar(old_photo_file_id, Some(user.photo_small_file_id));
                 if user.is_bot {
                     self.bot_user_ids.insert(user_id.0);
                 } else {
@@ -1157,6 +1166,7 @@ impl Session {
                 let topic_id = message.topic_id;
                 self.remember_files(&message.files);
                 let row = history_message(message, false);
+                self.index_poll(&row);
                 let history = self.histories.entry(chat_id.0).or_default();
                 history.replace_id(old_message_id, row.clone());
                 // Parity slice 4: the pending row in the topic's history
@@ -1187,6 +1197,7 @@ impl Session {
                 // may be retried.
                 let mut row = history_message(message, true);
                 row.failed = true;
+                self.index_poll(&row);
                 let history = self.histories.entry(chat_id.0).or_default();
                 history.replace_id(old_message_id, row.clone());
                 // Parity slice 4: the failed pending row shows in the topic
@@ -1242,9 +1253,9 @@ impl Session {
             }
             EnvelopePayload::UpdatePoll { poll } => {
                 // Phase 4.2: `updatePoll` (schema 1.8.67 line 11179) carries
-                // only the new `poll` — no chat or message id — so every
-                // loaded history is scanned for a `messagePoll` with a
-                // matching poll id and the poll is replaced in place.
+                // only the new `poll` — no chat or message id — so its rows
+                // are found through the poll-id index and the poll is
+                // replaced in place.
                 self.apply_update_poll(poll);
             }
             EnvelopePayload::UpdateMessageContent {

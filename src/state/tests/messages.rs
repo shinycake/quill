@@ -943,6 +943,85 @@ fn update_poll_refreshes_counts_and_chosen_marks() {
 }
 
 #[test]
+fn update_poll_reaches_polls_loaded_by_every_path() {
+    // `updatePoll` is matched by poll id through an index: rows loaded
+    // from a history page, a sent message and an edit that turned a row
+    // into a poll must all be found, and a deleted row must not be.
+    let poll = |id: i64, voters: i32| {
+        format!(
+            r#"{{"@type":"poll","id":{id},"question":{{"@type":"formattedText","text":"Q","entities":[]}},"options":[{{"@type":"pollOption","id":"a","text":{{"@type":"formattedText","text":"A","entities":[]}},"voter_count":{voters},"vote_percentage":100,"is_chosen":false}}],"total_voter_count":{voters},"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{{"@type":"pollTypeRegular"}}}}"#
+        )
+    };
+    let poll_content = |id: i64| {
+        format!(
+            r#"{{"@type":"messagePoll","poll":{},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":false}}"#,
+            poll(id, 1)
+        )
+    };
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(15));
+    let extra = session.request(RequestPurpose::GetHistory, Some(ChatId(15)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":3,"messages":[{{"id":30,"chat_id":15,"is_outgoing":false,"content":{}}},{{"id":20,"chat_id":15,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"t","entities":[]}}}}}},{{"id":10,"chat_id":15,"is_outgoing":false,"content":{}}}]}}"#,
+            extra.0,
+            poll_content(1),
+            poll_content(4)
+        ),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateMessageSendSucceeded","old_message_id":-5,"message":{{"id":40,"chat_id":15,"is_outgoing":true,"content":{}}}}}"#,
+            poll_content(2)
+        ),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateMessageContent","chat_id":15,"message_id":20,"new_content":{}}}"#,
+            poll_content(3)
+        ),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateDeleteMessages","chat_id":15,"message_ids":[10],"is_permanent":true,"from_cache":false}"#,
+    );
+    let mut updated = 0;
+    for id in 1..=4 {
+        let owned = copy_and_parse(
+            &format!(r#"{{"@type":"updatePoll","poll":{}}}"#, poll(id, 9)),
+            &seq,
+            &(sink.clone() as Arc<dyn DiagnosticSink>),
+        )
+        .unwrap();
+        let EnvelopePayload::UpdatePoll { poll } = owned.envelope.payload else {
+            panic!("updatePoll");
+        };
+        updated += session.apply_update_poll(poll);
+    }
+    assert_eq!(updated, 3);
+    let history = &session.histories[&15];
+    for id in [20, 30, 40] {
+        let MessageContent::Poll(content) = &history.messages[&id].content else {
+            panic!("poll row {id}");
+        };
+        assert_eq!(content.poll.total_voter_count, 9, "row {id}");
+    }
+    assert!(!history.messages.contains_key(&10));
+}
+
+#[test]
 fn update_poll_with_unknown_id_updates_nothing() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
