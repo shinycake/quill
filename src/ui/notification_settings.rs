@@ -244,6 +244,7 @@ impl QuillApp {
             body = body.child(this.inapp_sounds_section(cx));
             let footer = div().flex().justify_end().gap_2().children([
                 Button::new("reset-all-notif-settings")
+                    .small()
                     .label("Reset all")
                     .danger()
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -252,6 +253,7 @@ impl QuillApp {
                     }))
                     .into_any_element(),
                 Button::new("close-notif-defaults")
+                    .small()
                     .label("Close")
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -526,8 +528,9 @@ impl QuillApp {
         for (label, seconds) in presets {
             preset_row = preset_row.child(
                 Button::new(format!("mute-for-{seconds}"))
+                    .small()
                     .label(label)
-                    .ghost()
+                    .outline()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(chat_id) = open_chat {
                             this.apply_chat_mute(chat_id, seconds, cx);
@@ -590,8 +593,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_sm()
                             .child("Show message preview in notifications"),
                     )
                     .child(
@@ -614,12 +616,12 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_sm()
                             .child(format!("Notification sound: {sound_label}")),
                     )
                     .child(
                         Button::new("notif-sound-picker-toggle")
+                            .small()
                             .label(if self.notif_sound_picker_open {
                                 "Hide"
                             } else {
@@ -663,12 +665,7 @@ impl QuillApp {
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Mute story notifications"),
-                )
+                .child(div().text_sm().child("Mute story notifications"))
                 .child(
                     Switch::new("notif-story-mute-toggle")
                         .checked(story_muted)
@@ -686,12 +683,7 @@ impl QuillApp {
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Show story poster"),
-                )
+                .child(div().text_sm().child("Show story poster"))
                 .child(
                     Switch::new("notif-story-poster-toggle")
                         .checked(story_poster_on)
@@ -711,12 +703,12 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
+                        .text_sm()
                         .child(format!("Story sound: {story_sound_label}")),
                 )
                 .child(
                     Button::new("notif-story-sound-picker-toggle")
+                        .small()
                         .label(if self.story_sound_picker_open {
                             "Hide"
                         } else {
@@ -753,6 +745,7 @@ impl QuillApp {
         }
         panel.child(
             Button::new("notif-open-defaults")
+                .small()
                 .label("Defaults for all chats\u{2026}")
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1240,6 +1233,7 @@ impl QuillApp {
         if let Some(sound_id) = preview_sound_id {
             row = row.child(
                 Button::new((row_id, sound_id as u64))
+                    .small()
                     .label("▶")
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, _| {
@@ -1781,6 +1775,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("notifications-confirm-cancel")
+                            .small()
                             .label("Cancel")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -1789,6 +1784,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("notifications-confirm-reset")
+                            .small()
                             .label("Reset")
                             .danger()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -1853,6 +1849,7 @@ impl QuillApp {
         for (label, seconds) in presets {
             preset_row = preset_row.child(
                 Button::new(format!("scope-mute-{scope:?}-{seconds}"))
+                    .small()
                     .label(label)
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1971,6 +1968,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(format!("scope-sound-{:?}", scope))
+                            .small()
                             .label(
                                 if self.defaults_sound_picker
                                     == Some(SoundPickerTarget::Scope(scope))
@@ -2082,6 +2080,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new(format!("scope-exceptions-{scope:?}"))
+                        .small()
                         .label(if self.defaults_exceptions_scope == Some(scope) {
                             "Hide"
                         } else {
@@ -2159,6 +2158,7 @@ impl QuillApp {
                     .child(div().text_sm().child(title))
                     .child(
                         Button::new(format!("exception-reset-{id}"))
+                            .small()
                             .label("Reset to default")
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -2294,6 +2294,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("reaction-sound-toggle")
+                            .small()
                             .label(
                                 if self.defaults_sound_picker == Some(SoundPickerTarget::Reaction) {
                                     "Hide"
@@ -2347,6 +2348,7 @@ impl QuillApp {
         ] {
             row = row.child(
                 Button::new(format!("reaction-source-{kind:?}-{source:?}"))
+                    .small()
                     .label(preset_label)
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
