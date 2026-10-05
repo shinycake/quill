@@ -1765,12 +1765,14 @@ impl QuillApp {
             return None;
         }
         let status = chat.my_member_status;
+        let muted = chat.is_muted();
         let footer = div()
             .p_3()
             .border_t_1()
             .border_color(cx.theme().border)
             .flex()
             .items_center()
+            .justify_center()
             .gap_3();
         match status {
             None => Some(
@@ -1783,38 +1785,42 @@ impl QuillApp {
                     )
                     .into_any_element(),
             ),
-            Some(ChannelMemberStatus::Left) => {
-                Some(
-                    footer
-                        .child(Button::new("channel-join").label("Join channel").on_click(
-                            cx.listener(move |this, _, _, cx| {
+            // Not subscribed: one clear action.
+            Some(ChannelMemberStatus::Left) => Some(
+                footer
+                    .child(
+                        Button::new("channel-join")
+                            .label("Join channel")
+                            .primary()
+                            .w_full()
+                            .max_w(px(360.))
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 this.join_channel(open, cx);
-                            }),
-                        ))
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("Join to follow new posts."),
-                        )
-                        .into_any_element(),
-                )
-            }
+                            })),
+                    )
+                    .into_any_element(),
+            ),
+            // Subscribers can't post: the bar mutes / unmutes the channel.
+            // Leaving lives in the info panel (with confirmation).
             Some(ChannelMemberStatus::Member) => Some(
                 footer
                     .child(
-                        Button::new("channel-leave")
-                            .label("Leave channel")
+                        Button::new("channel-mute-toggle")
+                            .label(if muted { "Unmute" } else { "Mute" })
                             .ghost()
+                            .w_full()
+                            .max_w(px(360.))
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.leave_channel(open, cx);
+                                this.apply_chat_mute(
+                                    open,
+                                    if muted {
+                                        0
+                                    } else {
+                                        quill::telegram::envelope::MUTE_FOREVER
+                                    },
+                                    cx,
+                                );
                             })),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Posting in channels is admin-only."),
                     )
                     .into_any_element(),
             ),
