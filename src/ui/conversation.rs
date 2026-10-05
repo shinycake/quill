@@ -12,6 +12,7 @@ use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::message_scroller::MessageScroller;
 use gpui_kit::component::*;
 use gpui_kit::gpui::StyleRefinement;
@@ -830,12 +831,12 @@ impl QuillApp {
                                     ),
                             )
                         })
-                        // M1: formatting toolbar + send options row, above the
-                        // input; the schedule picker opens above the toolbar.
+                        // Non-default send options as clearable chips; the
+                        // schedule picker opens above the input.
                         .when(self.schedule_popup_open, |this| {
                             this.child(self.schedule_popup(cx))
                         })
-                        .child(self.format_toolbar(cx))
+                        .when_some(self.composer_options_row(cx), |this, row| this.child(row))
                         // MED4: detected-URL chip (send-time preview
                         // control) and caption bar ("Add a caption…",
                         // above/below toggle, n / max counter).
@@ -883,6 +884,7 @@ impl QuillApp {
                                                 this.toggle_sticker_panel(cx);
                                             })),
                                     )
+                                    .child(self.format_menu_button(cx))
                                 })
                                 .child(
                                     div().flex_1().min_w_0().child(
@@ -926,26 +928,22 @@ impl QuillApp {
                                     )
                                 })
                                 .child(
-                                    // Right-click opens the schedule picker
-                                    // (desktop parity with the ⏰ toolbar
-                                    // button); the picker itself is
-                                    // unchanged.
+                                    // Right-click: send options (silent,
+                                    // schedule, link preview).
                                     div()
                                         .id("composer-send-wrap")
-                                        .on_mouse_down(
-                                            MouseButton::Right,
-                                            cx.listener(|this, _, _, cx| {
-                                                this.schedule_popup_open =
-                                                    !this.schedule_popup_open;
-                                                cx.notify();
-                                            }),
-                                        )
+                                        .context_menu({
+                                            let owner = cx.entity().downgrade();
+                                            move |menu, _, cx| {
+                                                QuillApp::send_options_menu(owner.clone(), menu, cx)
+                                            }
+                                        })
                                         .child(
                                             Button::new("composer-send")
                                                 .icon(IconName::Send)
                                                 .primary()
                                                 .rounded_full()
-                                                .tooltip("Send · right-click for schedule options")
+                                                .tooltip("Send · right-click for options")
                                                 .accessibility_label("Send message")
                                                 .on_click(cx.listener(|this, _, window, cx| {
                                                     let text =

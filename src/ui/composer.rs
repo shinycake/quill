@@ -721,117 +721,205 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// M1: composer formatting toolbar (Telegram X `InputView` format menu
-    /// / tdesktop markdown behavior): bold, italic, underline,
+    /// M1: the composer's formatting menu (Telegram X `InputView` format
+    /// menu / tdesktop markdown behavior): bold, italic, underline,
     /// strikethrough, inline code, code block, spoiler, quote, link, and
-    /// clear-formatting, plus the send-options toggles (silent, schedule,
-    /// link preview). Formatting applies to the textarea selection via
+    /// clear-formatting. Formatting applies to the textarea selection via
     /// `apply_format_markup`; the send path converts markup to TDLib
     /// `textEntities` (`parse_format_markup`).
-    pub(super) fn format_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn format_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let owner = cx.entity().downgrade();
+        Button::new("composer-format-menu")
+            .icon(IconName::ALargeSmall)
+            .ghost()
+            .tooltip("Formatting")
+            .accessibility_label("Formatting")
+            .on_click(|event, window, cx| {
+                if matches!(event, ClickEvent::Keyboard(_)) {
+                    window.dispatch_action(
+                        Box::new(gpui_kit::base::actions::Confirm { secondary: false }),
+                        cx,
+                    );
+                }
+            })
+            .dropdown_menu(move |mut menu, _, _| {
+                for (name, action) in [
+                    ("Bold", FormatAction::Bold),
+                    ("Italic", FormatAction::Italic),
+                    ("Underline", FormatAction::Underline),
+                    ("Strikethrough", FormatAction::Strikethrough),
+                    ("Inline code", FormatAction::Code),
+                    ("Code block", FormatAction::Pre),
+                    ("Spoiler", FormatAction::Spoiler),
+                    ("Block quote", FormatAction::BlockQuote),
+                    ("Insert link", FormatAction::Link(String::new())),
+                ] {
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new(name).on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.apply_composer_format(action.clone(), window, cx)
+                        });
+                    }));
+                }
+                let owner = owner.clone();
+                menu.separator()
+                    .item(
+                        PopupMenuItem::new("Clear formatting").on_click(move |_, window, cx| {
+                            let _ =
+                                owner.update(cx, |this, cx| this.clear_composer_format(window, cx));
+                        }),
+                    )
+            })
+    }
+
+    /// Send options for the next message (right-click on Send, like the
+    /// official desktop client): silent send, scheduling, link previews.
+    pub(super) fn send_options_menu(
+        owner: WeakEntity<Self>,
+        menu: gpui_kit::component::menu::PopupMenu,
+        cx: &App,
+    ) -> gpui_kit::component::menu::PopupMenu {
+        let Some(app) = owner.upgrade() else {
+            return menu;
+        };
+        let (silent, preview_off, scheduled) = {
+            let app = app.read(cx);
+            (
+                app.composer_silent,
+                app.composer_preview_disabled,
+                !matches!(app.composer_scheduling, ComposerScheduling::None),
+            )
+        };
+        let toggle_silent = owner.clone();
+        let schedule = owner.clone();
+        let toggle_preview = owner;
+        menu.item(
+            PopupMenuItem::new("Send without sound")
+                .checked(silent)
+                .on_click(move |_, _, cx| {
+                    let _ = toggle_silent.update(cx, |this, cx| {
+                        this.composer_silent = !this.composer_silent;
+                        cx.notify();
+                    });
+                }),
+        )
+        .item(
+            PopupMenuItem::new(if scheduled {
+                "Change schedule…"
+            } else {
+                "Schedule message…"
+            })
+            .on_click(move |_, _, cx| {
+                let _ = schedule.update(cx, |this, cx| {
+                    this.schedule_popup_open = true;
+                    cx.notify();
+                });
+            }),
+        )
+        .item(
+            PopupMenuItem::new("Link preview")
+                .checked(!preview_off)
+                .on_click(move |_, _, cx| {
+                    let _ = toggle_preview.update(cx, |this, cx| {
+                        this.composer_preview_disabled = !this.composer_preview_disabled;
+                        cx.notify();
+                    });
+                }),
+        )
+    }
+
+    /// Chips for send options that differ from the default (silent,
+    /// scheduled, previews off) — visible state for an otherwise hidden
+    /// menu, each clearable in place — plus the rich-editor entry point.
+    /// `None` when there is nothing to show, so the composer stays one row.
+    pub(super) fn composer_options_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let chip = |id: &'static str, label: String, cx: &mut Context<Self>| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .gap_1()
+                .pl_2()
+                .pr_1()
+                .h(px(22.))
+                .rounded_full()
+                .bg(cx.theme().secondary)
+                .text_xs()
+                .text_color(cx.theme().secondary_foreground)
+                .child(label)
+        };
         let mut row = div()
-            .id("format-toolbar")
+            .id("composer-options")
             .flex()
             .flex_wrap()
             .items_center()
             .gap_1()
             .px_1()
-            .py_1();
-        let owner = cx.entity().downgrade();
-        row = row.child(
-            Button::new("composer-format-menu")
-                .label("Aa")
-                .ghost()
-                .tooltip("Formatting")
-                .accessibility_label("Formatting")
-                .on_click(|event, window, cx| {
-                    if matches!(event, ClickEvent::Keyboard(_)) {
-                        window.dispatch_action(
-                            Box::new(gpui_kit::base::actions::Confirm { secondary: false }),
-                            cx,
-                        );
-                    }
-                })
-                .dropdown_menu(move |mut menu, _, _| {
-                    for (name, action) in [
-                        ("Bold", FormatAction::Bold),
-                        ("Italic", FormatAction::Italic),
-                        ("Underline", FormatAction::Underline),
-                        ("Strikethrough", FormatAction::Strikethrough),
-                        ("Inline code", FormatAction::Code),
-                        ("Code block", FormatAction::Pre),
-                        ("Spoiler", FormatAction::Spoiler),
-                        ("Block quote", FormatAction::BlockQuote),
-                        ("Insert link", FormatAction::Link(String::new())),
-                    ] {
-                        let owner = owner.clone();
-                        menu =
-                            menu.item(PopupMenuItem::new(name).on_click(move |_, window, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.apply_composer_format(action.clone(), window, cx)
-                                });
-                            }));
-                    }
-                    let owner = owner.clone();
-                    menu.item(PopupMenuItem::new("Clear formatting").on_click(
-                        move |_, window, cx| {
-                            let _ =
-                                owner.update(cx, |this, cx| this.clear_composer_format(window, cx));
-                        },
-                    ))
-                }),
-        );
-        row = row
-            .child(
-                Button::new("send-silent")
-                    .label(if self.composer_silent {
-                        "🔕 Silent on"
-                    } else {
-                        "🔕 Silent"
-                    })
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.composer_silent = !this.composer_silent;
-                        this.status_note = if this.composer_silent {
-                            "silent send on".into()
-                        } else {
-                            "silent send off".into()
-                        };
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("schedule-open")
-                    .label(match self.composer_scheduling {
-                        ComposerScheduling::None => "⏰ Schedule".to_string(),
-                        ComposerScheduling::SendAtDate(_) => "⏰ Scheduled".to_string(),
-                        ComposerScheduling::SendWhenOnline => "⏰ When online".to_string(),
-                    })
-                    .ghost()
+            .pb_1();
+        let mut any = false;
+        if self.composer_silent {
+            any = true;
+            row = row.child(
+                chip("chip-silent", "Silent".into(), cx).child(
+                    Button::new("chip-silent-clear")
+                        .icon(gpui_kit::assets::IconName::X)
+                        .xsmall()
+                        .ghost()
+                        .accessibility_label("Send with sound")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.composer_silent = false;
+                            cx.notify();
+                        })),
+                ),
+            );
+        }
+        let schedule_label = match self.composer_scheduling {
+            ComposerScheduling::None => None,
+            ComposerScheduling::SendAtDate(date) => Some(format!(
+                "Scheduled · {}",
+                super::message_text::format_unix_date_time(i64::from(date))
+            )),
+            ComposerScheduling::SendWhenOnline => Some("When online".to_string()),
+        };
+        if let Some(label) = schedule_label {
+            any = true;
+            row = row.child(
+                chip("chip-schedule", label, cx)
+                    .cursor_pointer()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.schedule_popup_open = !this.schedule_popup_open;
                         cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("preview-toggle")
-                    .label(if self.composer_preview_disabled {
-                        "🔗 Preview off"
-                    } else {
-                        "🔗 Preview"
-                    })
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.composer_preview_disabled = !this.composer_preview_disabled;
-                        this.status_note = if this.composer_preview_disabled {
-                            "link previews off for the next send"
-                        } else {
-                            "link previews on"
-                        }
-                        .into();
-                        cx.notify();
-                    })),
+                    }))
+                    .child(
+                        Button::new("chip-schedule-clear")
+                            .icon(gpui_kit::assets::IconName::X)
+                            .xsmall()
+                            .ghost()
+                            .accessibility_label("Send now")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.composer_scheduling = ComposerScheduling::None;
+                                cx.stop_propagation();
+                                cx.notify();
+                            })),
+                    ),
             );
+        }
+        if self.composer_preview_disabled {
+            any = true;
+            row = row.child(
+                chip("chip-preview", "No link preview".into(), cx).child(
+                    Button::new("chip-preview-clear")
+                        .icon(gpui_kit::assets::IconName::X)
+                        .xsmall()
+                        .ghost()
+                        .accessibility_label("Show link preview")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.composer_preview_disabled = false;
+                            cx.notify();
+                        })),
+                ),
+            );
+        }
         // M2: the rich editor opens via ⛶ after typing more than 3 lines
         // (anniversary post). The button hides again while the editor is
         // open (a ✕ close button takes its place in the editor bar).
@@ -858,8 +946,9 @@ impl QuillApp {
                         cx.notify();
                     })),
             );
+            any = true;
         }
-        row
+        any.then(|| row.into_any_element())
     }
 
     /// Slice msg-richtext-ai-tools: run one AI action against the open

@@ -917,7 +917,7 @@ impl QuillApp {
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Message")
-                .auto_grow(2, 6)
+                .auto_grow(1, 8)
                 .submit_on_enter(submit_on_enter)
         });
         // Phase C2h: in-call group-chat composer for the voice-chat
