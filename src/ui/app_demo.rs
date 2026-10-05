@@ -1633,6 +1633,7 @@ impl QuillApp {
             quote_reply_dialog: None,
             media_viewer: MediaViewer::closed(),
             viewer_zoom: ViewerZoom::new(),
+            viewer_frame: (720.0, 480.0),
             viewer_drag: None,
             viewer_video: None,
             pip_window: None,

@@ -1,9 +1,13 @@
 //! media_viewer.
 
 use super::app::QuillApp;
+
+/// Height of the viewer's top bar (title + actions).
+const VIEWER_TOP_BAR: f32 = 56.0;
+/// Width kept free on each side of the media for the prev/next arrows.
+const VIEWER_SIDE_LANE: f32 = 80.0;
 use super::message_media::{file_is_downloading, viewer_display_path};
 use super::message_text::rich_text_line;
-use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
@@ -126,8 +130,6 @@ impl QuillApp {
     /// overlay keeps Play/Pause and elapsed/total; the thumbnail shows
     /// until frames are ready. Closing or stepping the viewer stops
     /// playback and drops the frame cache.
-    /// Fixed size of the viewer visual container (zoom/pan frame), in px.
-    pub(super) const VIEWER_FRAME: (f32, f32) = (720.0, 480.0);
 
     /// Sandbox-checked local path of the current item's full video clip.
     pub(super) fn viewer_clip_path(&self, item: &MediaViewerItem) -> Option<PathBuf> {
@@ -1173,7 +1175,7 @@ impl QuillApp {
         if delta_y == 0.0 {
             return;
         }
-        self.viewer_zoom.step(delta_y > 0.0, Self::VIEWER_FRAME);
+        self.viewer_zoom.step(delta_y > 0.0, self.viewer_frame);
         cx.notify();
     }
 
@@ -1182,13 +1184,13 @@ impl QuillApp {
         if !self.viewer_zoom.is_zoomed() {
             return;
         }
-        self.viewer_zoom.pan_by(dx, dy, Self::VIEWER_FRAME);
+        self.viewer_zoom.pan_by(dx, dy, self.viewer_frame);
         cx.notify();
     }
 
     /// Parity slice 5: step the viewer zoom in or out one notch.
     pub(super) fn viewer_zoom_step(&mut self, zoom_in: bool, cx: &mut Context<Self>) {
-        self.viewer_zoom.step(zoom_in, Self::VIEWER_FRAME);
+        self.viewer_zoom.step(zoom_in, self.viewer_frame);
         cx.notify();
     }
 
@@ -1237,6 +1239,7 @@ impl QuillApp {
                 caption: String::new(),
                 caption_entities: Vec::new(),
                 duration_label: None,
+                natural_size: None,
             });
         let (position, total) = self.media_viewer.position().unwrap_or((0, 0));
         let files: HashMap<i32, ParsedFile> =
@@ -1301,11 +1304,38 @@ impl QuillApp {
                     "Pin album".to_string()
                 })
             });
-        // Parity slice 5: the visual lives in a fixed 720×480 frame; scroll
-        // zooms (1×–8×, frame-center kept) and drag pans when zoomed.
+        // The visual fills the window between the top bar and the bottom
+        // controls, leaving lanes for the prev/next arrows; the media fits
+        // inside it (object-fit contain). Scroll zooms (1×–8×, frame-center
+        // kept) and drag pans when zoomed.
+        let viewport = window.viewport_size();
+        let bottom_space = if item.caption.is_empty() { 72.0 } else { 104.0 };
+        let fit = (
+            (f32::from(viewport.width) - 2.0 * VIEWER_SIDE_LANE).max(240.0),
+            (f32::from(viewport.height) - VIEWER_TOP_BAR - bottom_space).max(200.0),
+        );
+        let frame_h = fit.1;
+        // The media's own box inside the frame: sized from its natural
+        // dimensions (axes swapped for a quarter turn) rather than trusting
+        // object-fit, so it can never spill out of the frame.
+        let natural = item.natural_size.map(|(w, h)| {
+            if self.viewer_rotation % 2 == 1 {
+                (h as f32, w as f32)
+            } else {
+                (w as f32, h as f32)
+            }
+        });
+        let (media_w, media_h) = natural
+            .map(|natural| quill::media_viewer::fit_within(natural, fit))
+            .unwrap_or(fit);
+        // Zoom and pan work in the media's own box.
+        if (media_w, media_h) != self.viewer_frame {
+            // A resized window (or another item) refits the media.
+            self.viewer_frame = (media_w, media_h);
+            self.viewer_zoom.reset();
+        }
         let zoom = self.viewer_zoom;
-        let (frame_w, frame_h) = Self::VIEWER_FRAME;
-        let (zoom_w, zoom_h) = (frame_w * zoom.zoom, frame_h * zoom.zoom);
+        let (zoom_w, zoom_h) = (media_w * zoom.zoom, media_h * zoom.zoom);
         let (pan_x, pan_y) = zoom.pan;
         let content: AnyElement = {
             // Pre-decoded video frame and thumbnail both render through
@@ -1330,7 +1360,6 @@ impl QuillApp {
                     .w(px(zoom_w))
                     .h(px(zoom_h))
                     .object_fit(ObjectFit::Contain)
-                    .bg(bg_deep())
                     .with_fallback(move || {
                         div()
                             .w(px(zoom_w))
@@ -1339,7 +1368,7 @@ impl QuillApp {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .text_color(text_bright())
+                            .text_color(gpui_kit::white())
                             .child(format!("{kind_label} — could not render"))
                             .into_any_element()
                     })
@@ -1373,7 +1402,7 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(div().text_sm().text_color(text_bright()).child(status))
+                    .child(div().text_sm().text_color(gpui_kit::white()).child(status))
                     .into_any_element()
             }
         };
@@ -1386,11 +1415,9 @@ impl QuillApp {
             div()
                 .id(("media-viewer-visual", row_id))
                 .relative()
-                .w(px(frame_w))
-                .h(px(frame_h))
+                .w(px(media_w))
+                .h(px(media_h))
                 .overflow_hidden()
-                .rounded_md()
-                .bg(bg_deep())
                 .child(
                     div()
                         .absolute()
@@ -1482,7 +1509,7 @@ impl QuillApp {
                     .child(if extracting {
                         div()
                             .text_sm()
-                            .text_color(text_bright())
+                            .text_color(gpui_kit::white())
                             .child("Loading video…")
                             .into_any_element()
                     } else {
@@ -1494,7 +1521,7 @@ impl QuillApp {
                             }))
                             .into_any_element()
                     })
-                    .child(div().text_sm().text_color(text_bright()).child(label))
+                    .child(div().text_sm().text_color(gpui_kit::white()).child(label))
                     .when(
                         cfg!(target_os = "macos") && !self.viewer_video_frames.is_empty(),
                         |this| {
@@ -1561,22 +1588,19 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(text_bright())
-                            .child(if clip_downloading {
-                                "Video — downloading clip…"
-                            } else {
-                                "Video — clip not downloaded"
-                            }),
-                    )
+                    .child(div().text_sm().text_color(gpui_kit::white()).child(
+                        if clip_downloading {
+                            "Video — downloading clip…"
+                        } else {
+                            "Video — clip not downloaded"
+                        },
+                    ))
                     .when_some(play_id.filter(|_| !clip_downloading), |this, id| {
                         this.child(
                             Button::new(("media-viewer-download", row_id))
                                 .label("Download")
                                 .ghost()
-                                .text_color(text_bright())
+                                .text_color(gpui_kit::white())
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.viewer_pending_play = Some((item.message_id, id));
                                     this.request_media_download(id, None, cx);
@@ -1597,17 +1621,22 @@ impl QuillApp {
                 Button::new(("media-viewer-zoom-out", row_id))
                     .label("−")
                     .ghost()
-                    .text_color(text_bright())
+                    .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_zoom_step(false, cx);
                     })),
             )
-            .child(div().text_sm().text_color(text_bright()).child(zoom_pct))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(gpui_kit::white())
+                    .child(zoom_pct),
+            )
             .child(
                 Button::new(("media-viewer-zoom-in", row_id))
                     .label("+")
                     .ghost()
-                    .text_color(text_bright())
+                    .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_zoom_step(true, cx);
                     })),
@@ -1616,7 +1645,7 @@ impl QuillApp {
                 Button::new(("media-viewer-zoom-reset", row_id))
                     .label("Reset")
                     .ghost()
-                    .text_color(text_bright())
+                    .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_reset_zoom(cx);
                     })),
@@ -1639,6 +1668,141 @@ impl QuillApp {
                 cx,
             )
         });
+        let icon_action =
+            |id: (&'static str, u64), icon: gpui_kit::assets::IconName, label: &'static str| {
+                Button::new(id)
+                    .icon(icon)
+                    .ghost()
+                    .text_color(gpui_kit::white())
+                    .tooltip(label)
+                    .accessibility_label(label)
+            };
+        let top_bar = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(VIEWER_TOP_BAR))
+            .px_4()
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .font_semibold()
+                    .text_color(gpui_kit::white())
+                    .child(header_label),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .when(item.kind == MediaViewerKind::Photo, |this| {
+                        this.child(
+                            icon_action(
+                                ("media-viewer-rotate", row_id),
+                                gpui_kit::assets::IconName::RotateCw,
+                                "Rotate",
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.rotate_viewer_photo(cx);
+                            })),
+                        )
+                    })
+                    .child(
+                        icon_action(
+                            ("media-viewer-share", row_id),
+                            gpui_kit::assets::IconName::Forward,
+                            "Share",
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.share_viewer_media(window, cx);
+                        })),
+                    )
+                    .child(
+                        icon_action(
+                            ("media-viewer-save", row_id),
+                            gpui_kit::assets::IconName::Download,
+                            "Save",
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.save_viewer_media(cx);
+                        })),
+                    )
+                    .child(
+                        icon_action(
+                            ("media-viewer-show-in-chat", row_id),
+                            gpui_kit::assets::IconName::MessageSquare,
+                            "Show in chat",
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.show_viewer_in_chat(cx);
+                        })),
+                    )
+                    .when_some(album_pin_label, |this, label| {
+                        this.child(
+                            Button::new(("media-viewer-pin-album", row_id))
+                                .icon(gpui_kit::assets::IconName::Pin)
+                                .ghost()
+                                .text_color(gpui_kit::white())
+                                .tooltip(label.clone())
+                                .accessibility_label(label)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_viewer_album_pin(cx);
+                                })),
+                        )
+                    })
+                    .child(
+                        icon_action(
+                            ("media-viewer-close", row_id),
+                            gpui_kit::assets::IconName::X,
+                            "Close media viewer",
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.close_media_viewer(cx);
+                        })),
+                    ),
+            );
+        let nav_arrow = |id: &'static str,
+                         icon: gpui_kit::assets::IconName,
+                         label: &'static str,
+                         step: i32,
+                         cx: &mut Context<Self>| {
+            Button::new(id)
+                .icon(icon)
+                .large()
+                .rounded_full()
+                .custom(
+                    ButtonCustomVariant::new(cx)
+                        .color(gpui_kit::black().opacity(0.4))
+                        .foreground(gpui_kit::white())
+                        .hover(gpui_kit::black().opacity(0.6)),
+                )
+                .tooltip(label)
+                .accessibility_label(label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.step_media_viewer(step, cx);
+                }))
+        };
+        let prev = (position > 1).then(|| {
+            nav_arrow(
+                "media-viewer-prev",
+                gpui_kit::assets::IconName::ChevronLeft,
+                "Previous",
+                -1,
+                cx,
+            )
+        });
+        let next = (position < total).then(|| {
+            nav_arrow(
+                "media-viewer-next",
+                gpui_kit::assets::IconName::ChevronRight,
+                "Next",
+                1,
+                cx,
+            )
+        });
         div()
             .id("media-viewer-overlay")
             .occlude()
@@ -1647,158 +1811,75 @@ impl QuillApp {
             .left_0()
             .right_0()
             .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
+            // Clicking anywhere outside the media and controls closes.
             .child(
                 div()
                     .id("media-viewer-backdrop")
                     .occlude()
                     .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(scrim())
+                    .inset_0()
+                    .bg(gpui_kit::black().opacity(0.92))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.close_media_viewer(cx);
                     })),
             )
+            .child(top_bar)
             .child(
                 div()
-                    .id("media-viewer-panel")
+                    .absolute()
+                    .top(px(VIEWER_TOP_BAR))
+                    .left_0()
+                    .right_0()
+                    .h(px(frame_h))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(visual),
+            )
+            .when_some(prev, |this, prev| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(16.))
+                        .top(px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0))
+                        .child(prev),
+                )
+            })
+            .when_some(next, |this, next| {
+                this.child(
+                    div()
+                        .absolute()
+                        .right(px(16.))
+                        .top(px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0))
+                        .child(next),
+                )
+            })
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .px_6()
+                    .pb_4()
                     .flex()
                     .flex_col()
                     .items_center()
                     .gap_2()
-                    .p_4()
-                    .max_w(px(800.))
-                    .max_h_full()
-                    .child(
-                        div()
-                            .flex()
-                            .w(px(720.))
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .font_semibold()
-                                    .text_color(text_bright())
-                                    .child(header_label),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1()
-                                    // MED1: photo rotation (90° clockwise per tap).
-                                    .when(item.kind == MediaViewerKind::Photo, |this| {
-                                        this.child(
-                                            Button::new(("media-viewer-rotate", row_id))
-                                                .label("Rotate")
-                                                .ghost()
-                                                .text_color(text_bright())
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.rotate_viewer_photo(cx);
-                                                })),
-                                        )
-                                    })
-                                    // MED1: share via the forward picker.
-                                    .child(
-                                        Button::new(("media-viewer-share", row_id))
-                                            .label("Share")
-                                            .ghost()
-                                            .text_color(text_bright())
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.share_viewer_media(window, cx);
-                                            })),
-                                    )
-                                    // MED1: save to the downloads folder.
-                                    .child(
-                                        Button::new(("media-viewer-save", row_id))
-                                            .label("Save")
-                                            .ghost()
-                                            .text_color(text_bright())
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.save_viewer_media(cx);
-                                            })),
-                                    )
-                                    // MED1: close and jump to the source message.
-                                    .child(
-                                        Button::new(("media-viewer-show-in-chat", row_id))
-                                            .label("Show in chat")
-                                            .ghost()
-                                            .text_color(text_bright())
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.show_viewer_in_chat(cx);
-                                            })),
-                                    )
-                                    // MED1: pin/unpin the album (rights-gated).
-                                    .when_some(album_pin_label, |this, label| {
-                                        this.child(
-                                            Button::new(("media-viewer-pin-album", row_id))
-                                                .label(label)
-                                                .ghost()
-                                                .text_color(text_bright())
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.toggle_viewer_album_pin(cx);
-                                                })),
-                                        )
-                                    })
-                                    .child(
-                                        div()
-                                            .id("media-viewer-close")
-                                            .role(gpui_kit::Role::Button)
-                                            .aria_label("Close media viewer")
-                                            .tab_index(0)
-                                            .cursor_pointer()
-                                            .pressable(cx.theme())
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_md()
-                                            .text_color(text_bright())
-                                            .child("Close")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.close_media_viewer(cx);
-                                            })),
-                                    ),
-                            ),
-                    )
-                    .child(visual)
-                    .child(transport)
+                    .when_some(caption, |this, caption| {
+                        this.child(
+                            div()
+                                .max_w(px(720.))
+                                .text_color(gpui_kit::white())
+                                .child(caption),
+                        )
+                    })
                     // MED1: honest playback error (unsupported format /
                     // player failure) instead of a silent stall.
                     .when_some(self.playback_error.clone(), |this, err| {
                         this.child(div().text_sm().text_color(danger_bright()).child(err))
                     })
-                    .when_some(caption, |this, caption| {
-                        this.child(div().text_color(text_bright()).child(caption))
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                Button::new("media-viewer-prev")
-                                    .label("‹ Prev")
-                                    .ghost()
-                                    .text_color(text_bright())
-                                    .disabled(position <= 1)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.step_media_viewer(-1, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("media-viewer-next")
-                                    .label("Next ›")
-                                    .ghost()
-                                    .text_color(text_bright())
-                                    .disabled(position >= total)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.step_media_viewer(1, cx);
-                                    })),
-                            ),
-                    ),
+                    .child(transport),
             )
     }
 }

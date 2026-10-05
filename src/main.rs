@@ -52,7 +52,13 @@ gpui_kit::assets::icon_assets!(
         ShieldCheck,
         MessagesSquare,
         Hand,
-        LogOut
+        LogOut,
+        RotateCw,
+        Forward,
+        Download,
+        MessageSquare,
+        ChevronLeft,
+        ChevronRight
     ]
 );
 

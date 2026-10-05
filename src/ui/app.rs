@@ -608,6 +608,9 @@ pub struct QuillApp {
     pub(super) media_viewer: MediaViewer,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
     pub(super) viewer_zoom: ViewerZoom,
+    /// The viewer's media frame for the current window size (zoom/pan
+    /// math works in it).
+    pub(super) viewer_frame: (f32, f32),
     /// Parity slice 5: drag-pan anchor — last mouse position in px while the
     /// left button is held over the zoomed visual.
     pub(super) viewer_drag: Option<(f32, f32)>,

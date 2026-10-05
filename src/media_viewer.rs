@@ -66,6 +66,9 @@ pub struct MediaViewerItem {
     pub caption_entities: Vec<TextEntity>,
     /// Video duration (`0:12`), shown when no visual is local.
     pub duration_label: Option<String>,
+    /// Natural pixel size (photo's largest size / video frame) when known:
+    /// the viewer sizes the media to fit its frame from this.
+    pub natural_size: Option<(i32, i32)>,
 }
 
 /// Viewer state: the open chat's media list plus the current position.
@@ -367,6 +370,10 @@ fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
                 caption: photo.caption.clone(),
                 caption_entities: photo.caption_entities.clone(),
                 duration_label: None,
+                natural_size: photo
+                    .largest_size()
+                    .map(|size| (size.width, size.height))
+                    .filter(|(w, h)| *w > 0 && *h > 0),
             })
         }
         MessageContent::Video(video) if !video.is_secret && !video.has_spoiler => {
@@ -388,6 +395,8 @@ fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
                 caption: video.caption.clone(),
                 caption_entities: video.caption_entities.clone(),
                 duration_label: Some(format_voice_duration(video.duration)),
+                natural_size: (video.width > 0 && video.height > 0)
+                    .then_some((video.width, video.height)),
             })
         }
         _ => None,
@@ -493,6 +502,7 @@ mod tests {
             caption: String::new(),
             caption_entities: Vec::new(),
             duration_label: None,
+            natural_size: None,
         }
     }
 
@@ -836,5 +846,29 @@ mod tests {
         let second = save_media_to_downloads_in_dir(&src, &dir).unwrap();
         assert_eq!(second.file_name().unwrap(), "photo (2).jpg");
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+}
+
+/// Largest size with `natural`'s aspect ratio that fits in `frame`.
+pub fn fit_within(natural: (f32, f32), frame: (f32, f32)) -> (f32, f32) {
+    let (nw, nh) = natural;
+    let (fw, fh) = frame;
+    if nw <= 0.0 || nh <= 0.0 {
+        return frame;
+    }
+    let scale = (fw / nw).min(fh / nh);
+    (nw * scale, nh * scale)
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::fit_within;
+
+    #[test]
+    fn fits_by_the_tighter_side() {
+        assert_eq!(fit_within((1200.0, 800.0), (640.0, 400.0)), (600.0, 400.0));
+        assert_eq!(fit_within((800.0, 1200.0), (640.0, 400.0)).1, 400.0);
+        assert_eq!(fit_within((300.0, 200.0), (640.0, 400.0)), (600.0, 400.0));
+        assert_eq!(fit_within((0.0, 0.0), (640.0, 400.0)), (640.0, 400.0));
     }
 }
