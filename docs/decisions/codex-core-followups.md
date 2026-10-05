@@ -24,7 +24,7 @@ This pass covers the follow-ups listed under "Deliberately left out" in `codex-c
 4. **List paging never restarted.** `chats_exhausted`, `archive_chats_exhausted` and `folder_chats_exhausted` now reset on `authorizationStateLoggingOut` / `Closed` and when Ready is entered. TDLib leaves Ready only through LoggingOut/Closing/Closed. The driver's existing `became_ready` → `loadChats` (main list, then archive after its 404) therefore pages again after a re-login within one `Session`. Test: `state::tests::requests::chat_list_paging_restarts_after_logout_and_login`.
 5. **`updateChatLastMessage` with `last_message: null`.** The existing handling was already correct. TDLib sends null when the last message "became unknown" (td_api.tl:10504). TGX `telegram/Tdlib.java` `updateChatLastMessage` stores the null and still applies positions, and `data/TGChat.java` then draws an empty preview. Quill clears the preview, its style, sender and `ChatSummary::last_message`, and keeps the positions. The related bug was in edit handling. The preview followed `updateMessageContent` only when the edited id was the newest *loaded* history row. So an edit to the last message of a never-opened chat left a stale preview. And after a null last message, an edit to a loaded row re-invented one. The preview is now keyed on `ChatSummary::last_message`, as in TGX `data/TGChat.java` `updateMessageContent`. Ephemeral-content edits use the same rule. Test: `state::tests::chat_list::edits_refresh_the_preview_only_for_the_chats_last_message`.
 
-## UI hook for visible-message reporting (not wired yet)
+## UI hook for visible-message reporting (wired in codex/view-visible)
 
 ```rust
 // After the open chat's history list lays out, when a scroll settles, and
@@ -49,3 +49,7 @@ driver.view_messages(chat_id, &visible)?; // Ok(None) when nothing new is due
 ## Validation
 
 `cargo fmt --all -- --check`, `cargo clippy --no-default-features --all-targets --locked -- -D warnings` and `cargo test --no-default-features --locked` pass. None of this was exercised against a live account.
+
+## Wiring (codex/view-visible)
+
+The history list's row renderer records which rows it built each frame (the virtual list only builds on-screen rows plus a small overdraw). On the next app render, `report_visible_history` maps them to message ids, album items included, and calls `ConnectDriver::view_messages(open_chat, ids)`. It does this only while the window is active, so nothing counts as seen while Quill sits behind another app, and only when the set changed. A row that scrolls into view and hasn't been reported asks for one more app render, because list scrolling alone doesn't re-render the app view. The last reported set is recorded even if the send fails; the driver keeps the ids queued, so the report never spins the render loop.

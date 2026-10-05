@@ -106,6 +106,14 @@ impl HistoryRow {
         }
     }
 
+    /// Every message id the row shows (one, or each album item).
+    pub(crate) fn message_ids(&self) -> Vec<MessageId> {
+        match self {
+            HistoryRow::Single(inputs) => vec![inputs.message.id],
+            HistoryRow::Album { messages, .. } => messages.iter().map(|m| m.id).collect(),
+        }
+    }
+
     pub(crate) fn contains(&self, id: MessageId) -> bool {
         match self {
             HistoryRow::Single(inputs) => inputs.message.id == id,
