@@ -1,0 +1,3 @@
+# Adaptive TDLib poll cadence
+
+The UI drained the TDLib receive bridge on a fixed 40ms timer: 25 main-thread wakeups a second while idle, and ≥40ms of added latency per batch during bursts. `poll_live` now reports whether anything arrived. The loop polls every 10ms while updates flow and doubles its delay up to 120ms while idle. Idle wakeups drop to ~8/s, and bursts (chat list load, history pages, file progress) drain faster. Worst-case latency for the first update after a quiet period is 120ms. Timers that need their own cadence (slow-mode, self-destruct, call clocks) already run separate 1s ticks.
