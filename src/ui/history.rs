@@ -826,12 +826,21 @@ pub(super) fn session_history_row(
     // the Phase A1 slow-mode countdown); TDLib removes the row via
     // `updateDeleteMessages` when the timer fires. The 1-second render
     // tick (see `ensure_self_destruct_tick`) keeps this fresh.
+    let outgoing = message.is_outgoing;
     let self_destruct_badge = message.self_destruct_badge(unix_ms_now()).map(|label| {
         div()
             .id(("self-destruct-badge", message.id.0 as u64))
             .mt_1()
             .text_xs()
-            .text_color(warning_text())
+            // Outgoing bubbles are accent-filled: inherit their text
+            // color like the time footer instead of warning orange.
+            .map(|this| {
+                if outgoing {
+                    this.opacity(0.8)
+                } else {
+                    this.text_color(warning_text())
+                }
+            })
             .child(label)
     });
     // Phase B4: auto-delete countdown chip (`message.auto_delete_in`,
@@ -842,7 +851,15 @@ pub(super) fn session_history_row(
             .id(("auto-delete-chip", message.id.0 as u64))
             .mt_1()
             .text_xs()
-            .text_color(warning_text())
+            // Outgoing bubbles are accent-filled: inherit their text
+            // color like the time footer instead of warning orange.
+            .map(|this| {
+                if outgoing {
+                    this.opacity(0.8)
+                } else {
+                    this.text_color(warning_text())
+                }
+            })
             .child(label)
     });
     // A time footer exists and nothing renders after the body/caption: the
@@ -974,8 +991,12 @@ pub(super) fn session_history_row(
             .when_some(extra_media, |this, media| this.child(media))
             // MED4: caption below the media.
             .when_some(caption_below_el, |this, el| this.child(el))
-            .when_some(self_destruct_badge, |this, badge| this.child(badge))
-            .when_some(auto_delete_chip, |this, chip| this.child(chip))
+            .when_some(self_destruct_badge, |this, badge| {
+                this.child(badge.when(media_led, |badge| badge.px_2()))
+            })
+            .when_some(auto_delete_chip, |this, chip| {
+                this.child(chip.when(media_led, |chip| chip.px_2()))
+            })
             .when_some(keyboard, |this, keyboard| this.child(keyboard))
             .when_some(views_footer, |this, footer| this.child(footer))
             .when_some(author_signature_line, |this, line| this.child(line))
