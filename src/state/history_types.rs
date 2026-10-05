@@ -285,7 +285,10 @@ impl HistoryState {
         if self.tombstones.contains(&message.id.0) {
             return;
         }
-        if !message.pending && !message.failed {
+        // Incoming messages always carry server ids; an outgoing row may
+        // still hold a temporary id that never becomes a server position
+        // (failed sends), and the chat summary covers outgoing tails.
+        if !message.is_outgoing && !message.pending && !message.failed {
             self.latest_seen = self.latest_seen.max(message.id.0);
         }
         self.messages.insert(message.id.0, message);

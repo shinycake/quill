@@ -194,3 +194,27 @@ fn chat_without_unread_opens_at_the_latest_page() {
     assert_eq!(h.last_history_request()["from_message_id"], 0);
     assert_eq!(h.history().unread_anchor, None);
 }
+
+#[test]
+fn a_failed_send_does_not_make_the_window_look_short() {
+    let mut h = Harness::with_unread_chat();
+    h.ingest(r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":60,"unread_count":0}"#);
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[50, 60]);
+    // A send gets a temporary id, then fails under a different one.
+    h.ingest(&format!(
+        r#"{{"@type":"updateNewMessage","message":{}}}"#,
+        message_json(61, true)
+    ));
+    h.ingest(&format!(
+        r#"{{"@type":"updateMessageSendFailed","old_message_id":61,"error":{{"@type":"error","code":400,"message":"FAIL"}},"message":{}}}"#,
+        message_json(62, true)
+    ));
+    assert!(!h.history().has_newer);
+    // A later incoming message still joins the window.
+    h.ingest(&format!(
+        r#"{{"@type":"updateNewMessage","message":{}}}"#,
+        message_json(70, false)
+    ));
+    assert!(h.history().contains(MessageId(70)));
+}
