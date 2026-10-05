@@ -262,11 +262,6 @@ pub fn bg_badge_muted() -> Rgba {
     // Mid-gray badge fill with white text works in both modes.
     hex(0x6e7681)
 }
-#[inline]
-pub fn bg_premium() -> Rgba {
-    // Brand purple with white text works in both modes.
-    hex(0x8250df)
-}
 // 0x444c56 doubles as a muted fill and (once) a spoiler-mask text color.
 #[inline]
 pub fn fill_muted() -> Rgba {

@@ -27,3 +27,4 @@ td.binlog
 db.sqlite
 db.sqlite-wal
 db.sqlite-shm
+.claude/worktrees/

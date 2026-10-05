@@ -15,12 +15,10 @@ pub(super) fn title_bar(
     chat_search_open: bool,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
+    let _ = live;
     let title = match mode {
-        PaneMode::Synthetic => "Quill — synthetic chat",
-        PaneMode::Connecting if live => "Quill — connecting",
-        PaneMode::Connecting => "Quill — connecting",
-        PaneMode::Ready if live => "Quill — chats",
-        PaneMode::Ready => "Quill — chats (demo)",
+        PaneMode::Connecting => "Quill — connecting…",
+        PaneMode::Synthetic | PaneMode::Ready => "Quill",
     };
     let show_cycle = mode == PaneMode::Synthetic;
     // kit Phase 7: kit `TitleBar` — native-feel chrome (drag, double-click
@@ -39,16 +37,6 @@ pub(super) fn title_bar(
                 .gap_2()
                 .items_center()
                 .flex_none()
-                .child(
-                    Button::new("older")
-                        .icon(IconName::ChevronsUp)
-                        .ghost()
-                        .tooltip("Load older messages")
-                        .accessibility_label("Load older messages")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.load_older_action(cx);
-                        })),
-                )
                 .when(mode == PaneMode::Ready, |this| {
                     this.child(
                         Button::new("search")

@@ -119,11 +119,11 @@ pub fn preview_sender_name(
     }
 }
 
-/// Fixed chat-row height for the virtual list: 56px base (avatar 40 +
-/// the old py_2), 80px with the folder-tag strip; the third line adds
+/// Fixed chat-row height for the virtual list: 64px base (avatar 46 +
+/// padding), 88px with the folder-tag strip; the third line adds
 /// one text_xs line (16px). The row renderer enforces the same height.
 pub fn chat_row_height_px(has_tags: bool, preview_lines: u8) -> f32 {
-    let base = if has_tags { 80.0 } else { 56.0 };
+    let base = if has_tags { 88.0 } else { 64.0 };
     base + (clamp_preview_lines(preview_lines) - PREVIEW_LINES_MIN) as f32 * 16.0
 }
 
