@@ -1312,3 +1312,66 @@ fn every_open_chat_is_closed_when_leaving_it() {
     assert_eq!(closed_9, 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn archive_list_is_loaded_after_the_main_list() {
+    // TDLib reports a list's chats only once the list is loaded: "The
+    // loaded chats and their positions in the chat list will be sent
+    // through updates" (`loadChats`, schema 1.8.67, line 11595). The
+    // archive was never loaded, so it showed only chats that happened to
+    // get a position. Telegram X loads every list it shows through
+    // `loadChats` (`TdlibChatList.loadMore`).
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let load_chats = |recorder: &RecordingSender| -> Vec<Value> {
+        recorder
+            .snapshot()
+            .iter()
+            .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+            .filter(|v| v["@type"] == "loadChats")
+            .collect()
+    };
+    let answer = |driver: &mut ConnectDriver<Arc<RecordingSender>>, extra: &Value, ok: bool| {
+        let extra = extra.as_str().unwrap();
+        let json = if ok {
+            format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#)
+        } else {
+            format!(r#"{{"@type":"error","@extra":"{extra}","code":404,"message":"Not Found"}}"#)
+        };
+        driver
+            .ingest(copy_and_parse(&json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let sent = load_chats(&recorder);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["chat_list"]["@type"], "chatListMain");
+    // Main list exhausted → the archive starts paging.
+    answer(&mut driver, &sent[0]["@extra"], false);
+    let sent = load_chats(&recorder);
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1]["chat_list"]["@type"], "chatListArchive");
+    assert_eq!(sent[1]["limit"], MAIN_CHAT_LOAD_LIMIT);
+    // ok → next archive page; 404 → done.
+    answer(&mut driver, &sent[1]["@extra"], true);
+    let sent = load_chats(&recorder);
+    assert_eq!(sent.len(), 3);
+    assert_eq!(sent[2]["chat_list"]["@type"], "chatListArchive");
+    answer(&mut driver, &sent[2]["@extra"], false);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateChatTitle","chat_id":1,"title":"x"}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(load_chats(&recorder).len(), 3);
+    let _ = std::fs::remove_dir_all(&dir);
+}

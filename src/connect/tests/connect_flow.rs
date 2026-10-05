@@ -1317,12 +1317,22 @@ fn driver_loads_chats_after_ready_then_send_text() {
     .unwrap();
     driver.ingest(err404).unwrap();
     assert!(driver.session.chats_exhausted);
+    // The main list's 404 starts archive paging (one page in flight);
+    // the main list itself pages no further.
+    let main_loads = |recorder: &RecordingSender| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("loadChats") && j.contains("chatListMain"))
+            .count()
+    };
+    assert_eq!(main_loads(&recorder), 2);
     let loads_done = recorder
         .snapshot()
         .iter()
         .filter(|j| j.contains("loadChats"))
         .count();
-    assert_eq!(loads_done, 2);
+    assert_eq!(loads_done, 3);
     driver
         .ingest(
             copy_and_parse(

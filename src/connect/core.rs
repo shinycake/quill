@@ -8,7 +8,9 @@ use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AuthorizationState, EnvelopePayload, MessageContent, RichMessageContent, UsernameCheckResult,
 };
-use crate::telegram::requests::{close_request, get_authorization_state, load_chats, log_out};
+use crate::telegram::requests::{
+    close_request, get_authorization_state, load_archive_chats, load_chats, log_out,
+};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -96,6 +98,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             && owned.envelope.extra.is_some_and(|id| {
                 self.session.requests.purpose(id) == Some(RequestPurpose::LoadChats)
             });
+        // The archive pages the same way, starting once the main list is
+        // exhausted (its 404 lands in this envelope).
+        let load_archive_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
+            && owned.envelope.extra.is_some_and(|id| {
+                self.session.requests.purpose(id) == Some(RequestPurpose::LoadArchiveChats)
+            });
+        let main_was_exhausted = self.session.chats_exhausted;
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
         // Captured before `apply` takes the pending request.
@@ -554,6 +563,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }
+        if load_archive_ok || (!main_was_exhausted && self.session.chats_exhausted) {
+            self.maybe_load_archive_chats()?;
+        }
         if let Some(folder_id) = folder_load_ok {
             self.maybe_load_folder_chats(folder_id)?;
         }
@@ -819,6 +831,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(RequestPurpose::LoadChats, None);
         self.sender
             .send_json(&load_chats(extra, MAIN_CHAT_LOAD_LIMIT))?;
+        Ok(Some(extra))
+    }
+
+    /// One `loadChats(chatListArchive)` page unless the archive is
+    /// exhausted or a page is in flight. TDLib sends archived chats'
+    /// positions only for the loaded part of the list (Telegram X
+    /// `TdlibChatList.loadMore`).
+    pub fn maybe_load_archive_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || self.session.archive_chats_exhausted {
+            return Ok(None);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::LoadArchiveChats)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request(RequestPurpose::LoadArchiveChats, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&load_archive_chats(extra, MAIN_CHAT_LOAD_LIMIT))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(Some(extra))
     }
 

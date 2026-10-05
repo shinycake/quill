@@ -32,6 +32,10 @@ pub enum RequestPurpose {
     /// tab is selected. Separate from `LoadChats` so the ok-response does
     /// not re-trigger main-list paging.
     LoadFolderChats,
+    /// `loadChats(chatListArchive)` pages, sent once the main list is
+    /// exhausted. Separate from `LoadChats` so its ok pages the archive,
+    /// not the main list.
+    LoadArchiveChats,
     GetHistory,
     /// Slice CL: one-shot `getChatHistory` for the chat-list peek preview
     /// (`parity:chatlist-chat-preview`). The `messages` answer lands in

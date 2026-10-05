@@ -441,6 +441,9 @@ pub struct Session {
     pub view_generation: ViewGeneration,
     pub requests: RequestRegistry,
     pub chats_exhausted: bool,
+    /// `loadChats(chatListArchive)` answered 404 — the archive is fully
+    /// loaded (paging starts once the main list is exhausted).
+    pub archive_chats_exhausted: bool,
     pub shutdown: ShutdownPhase,
     pub last_seq: u64,
     /// Last classified error for phone / code / password submit. Never a secret.
@@ -1051,6 +1054,7 @@ impl Session {
             view_generation: ViewGeneration(1),
             requests: RequestRegistry::default(),
             chats_exhausted: false,
+            archive_chats_exhausted: false,
             shutdown: ShutdownPhase::Running,
             last_seq: 0,
             last_auth_error: None,
