@@ -35,8 +35,8 @@ pub fn community_member_ids(full_info: Option<&ParsedCommunityFullInfo>) -> Hash
 /// mode — the UI calls it directly, and the tests exercise it through
 /// the real `Session` reducer path, so there is exactly one
 /// implementation to keep in sync.
-pub fn retain_community_chats(
-    chats: &mut Vec<ChatSummary>,
+pub fn retain_community_chats<C: std::borrow::Borrow<ChatSummary>>(
+    chats: &mut Vec<C>,
     community_id: Option<i64>,
     full_infos: &HashMap<i64, ParsedCommunityFullInfo>,
 ) {
@@ -44,5 +44,5 @@ pub fn retain_community_chats(
         return;
     };
     let members = community_member_ids(full_infos.get(&community_id));
-    chats.retain(|chat| members.contains(&chat.id.0));
+    chats.retain(|chat| members.contains(&chat.borrow().id.0));
 }

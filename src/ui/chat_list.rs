@@ -1391,15 +1391,13 @@ impl QuillApp {
                                 )
                             })
                             .unwrap_or_default();
-                        let mut chats: Vec<ChatSummary> = self
+                        // Borrowed, never cloned: the list can hold thousands
+                        // of chats and this runs every render.
+                        let mut chats: Vec<&ChatSummary> = self
                             .session()
                             .map(|s| match folder {
-                                Some(folder_id) => s
-                                    .ordered_folder_chats(folder_id)
-                                    .into_iter()
-                                    .cloned()
-                                    .collect(),
-                                None => s.ordered_chats().into_iter().cloned().collect(),
+                                Some(folder_id) => s.ordered_folder_chats(folder_id),
+                                None => s.ordered_chats(),
                             })
                             .unwrap_or_default();
                         // Slice CL2: the Unread category filters the loaded
@@ -1582,12 +1580,19 @@ impl QuillApp {
                         // photos, pin-drag and multi-select state resolve
                         // per visible row in `chat_list_item_element`.
                         // Rebuilt every render; the list below only reads it.
-                        self.chat_list_items.clear();
+                        let row_height = |chat: &ChatSummary| {
+                            chat_row_height(
+                                &chat_row_tags(chat, &folder_names, show_folder_tags),
+                                self.appearance.preview_lines,
+                            )
+                        };
+                        let mut items: Vec<ChatListItem> = Vec::with_capacity(chats.len() + 2);
                         if show_main_list {
                             for chat in chats {
-                                self.chat_list_items.push(ChatListItem::Chat {
-                                    chat: Box::new(chat),
+                                items.push(ChatListItem::Chat {
+                                    id: chat.id,
                                     archived: false,
+                                    height: row_height(chat),
                                 });
                             }
                         }
@@ -1601,9 +1606,9 @@ impl QuillApp {
                         // the archive header + rows are items in the same
                         // virtual list so the whole chat list scrolls as one.
                         if folder.is_none() {
-                            let mut archived: Vec<ChatSummary> = self
+                            let mut archived: Vec<&ChatSummary> = self
                                 .session()
-                                .map(|s| s.ordered_archived_chats().into_iter().cloned().collect())
+                                .map(|s| s.ordered_archived_chats())
                                 .unwrap_or_default();
                             if filter == ChatListFilter::Unread {
                                 archived.retain(|c| c.is_unread());
@@ -1621,17 +1626,18 @@ impl QuillApp {
                                     any_unread,
                                     collapsed,
                                 };
-                                self.chat_list_items.push(header);
+                                items.push(header);
                                 if !collapsed {
                                     // Collapsed keeps the rows hidden; the
                                     // header above still shows the count.
                                     if archived.is_empty() {
-                                        self.chat_list_items.push(ChatListItem::ArchiveEmpty);
+                                        items.push(ChatListItem::ArchiveEmpty);
                                     } else {
                                         for chat in archived {
-                                            self.chat_list_items.push(ChatListItem::Chat {
-                                                chat: Box::new(chat),
+                                            items.push(ChatListItem::Chat {
+                                                id: chat.id,
                                                 archived: true,
+                                                height: row_height(chat),
                                             });
                                         }
                                     }
@@ -1643,14 +1649,11 @@ impl QuillApp {
                         // construction (see `chat_row_height`), so declared
                         // sizes always match the rendered rows.
                         let sizes: Rc<Vec<ItemSize<Pixels>>> = Rc::new(
-                            self.chat_list_items
+                            items
                                 .iter()
                                 .map(|item| {
                                     let height = match item {
-                                        ChatListItem::Chat { chat, .. } => chat_row_height(
-                                            &chat_row_tags(chat, &folder_names, show_folder_tags),
-                                            self.appearance.preview_lines,
-                                        ),
+                                        ChatListItem::Chat { height, .. } => *height,
                                         ChatListItem::ArchiveHeader { .. } => px(32.),
                                         ChatListItem::ArchiveEmpty => px(24.),
                                     };
@@ -1658,6 +1661,7 @@ impl QuillApp {
                                 })
                                 .collect(),
                         );
+                        self.chat_list_items = items;
                         list = list.child(
                             v_virtual_list(
                                 cx.entity(),

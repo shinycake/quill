@@ -26,9 +26,7 @@ use quill::state::{
     ChatSearchJump, ChatSummary, HistoryMessage, InfoPanelTarget, OutboxReceipt, Session,
 };
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{
-    ChatKind, MessageContent, MessageSender, ParsedFile, format_ttl_setting,
-};
+use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender, format_ttl_setting};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -957,12 +955,6 @@ impl QuillApp {
         // so the chat summary can't borrow the session here.
         let chat: Option<ChatSummary> =
             open.and_then(|id| session.and_then(|s| s.chats.get(&id.0).cloned()));
-        let files: HashMap<i32, ParsedFile> = session.map(|s| s.files.clone()).unwrap_or_default();
-        let downloading: std::collections::HashSet<i32> =
-            session.map(|s| s.downloading.clone()).unwrap_or_default();
-        let failed: std::collections::HashSet<i32> = session
-            .map(|s| s.failed_downloads.clone())
-            .unwrap_or_default();
         let media_roots = self.media_display_roots();
         let sender_name = title.clone();
         let chat_search_open = session.is_some_and(|s| s.chat_search.open);
@@ -1086,9 +1078,6 @@ impl QuillApp {
                         chat.as_ref(),
                         &sender_name,
                         highlight_id,
-                        files,
-                        downloading,
-                        failed,
                         media_roots,
                         cx,
                     )
@@ -1125,9 +1114,6 @@ impl QuillApp {
                     chat.as_ref(),
                     &sender_name,
                     highlight_id,
-                    files,
-                    downloading,
-                    failed,
                     media_roots,
                     cx,
                 )
@@ -1148,9 +1134,6 @@ impl QuillApp {
         chat: Option<&ChatSummary>,
         sender_name: &str,
         highlight_id: Option<MessageId>,
-        files: HashMap<i32, ParsedFile>,
-        downloading: std::collections::HashSet<i32>,
-        failed: std::collections::HashSet<i32>,
         media_roots: Vec<PathBuf>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1321,12 +1304,7 @@ impl QuillApp {
         }
         // kit Phase 3: stash the per-render shared inputs, then sync the
         // scroller state with the new row list.
-        self.history_shared = HistoryShared {
-            files,
-            downloading,
-            failed,
-            media_roots,
-        };
+        self.history_shared = HistoryShared { media_roots };
         let count = rows.len();
         let (first, last) = (
             rows.first().and_then(HistoryRow::first_id),
@@ -1337,14 +1315,18 @@ impl QuillApp {
         // message is edited, reactions arrive — and would then be clipped,
         // so remeasure rows whose inputs changed. File readiness affects
         // any media row, so a change there remeasures every row.
-        let media_signature = (
-            self.history_shared
-                .files
-                .values()
-                .filter(|file| file.usable_path().is_some())
-                .count(),
-            self.history_shared.downloading.len(),
-        );
+        let media_signature = self
+            .session()
+            .map(|s| {
+                (
+                    s.files
+                        .values()
+                        .filter(|file| file.usable_path().is_some())
+                        .count(),
+                    s.downloading.len(),
+                )
+            })
+            .unwrap_or_default();
         if self.history_key == Some(history_key)
             && count == self.history_rows.len()
             && count == self.history_scroller.read(cx).item_count()
@@ -1535,6 +1517,14 @@ impl QuillApp {
 
     fn render_history_row_body(&self, row: &HistoryRow, cx: &mut Context<Self>) -> AnyElement {
         let shared = &self.history_shared;
+        // File state is read from the session at row-render time rather
+        // than copied into a per-render snapshot.
+        let no_files = HashMap::new();
+        let no_ids = std::collections::HashSet::new();
+        let session = self.session();
+        let files = session.map_or(&no_files, |s| &s.files);
+        let downloading = session.map_or(&no_ids, |s| &s.downloading);
+        let failed = session.map_or(&no_ids, |s| &s.failed_downloads);
         // Settings → Appearance: font size + bubble/plain style.
         let look = self.bubble_look(cx);
         match row {
@@ -1550,8 +1540,8 @@ impl QuillApp {
                 album_history_row(
                     *album_id,
                     &refs,
-                    &shared.files,
-                    &shared.downloading,
+                    files,
+                    downloading,
                     &shared.media_roots,
                     sender.clone(),
                     *receipt,
@@ -1565,9 +1555,9 @@ impl QuillApp {
                 let message = &inputs.message;
                 let row = session_history_row(
                     message,
-                    &shared.files,
-                    &shared.downloading,
-                    &shared.failed,
+                    files,
+                    downloading,
+                    failed,
                     &shared.media_roots,
                     inputs.sender.clone(),
                     inputs.receipt,

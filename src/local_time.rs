@@ -65,6 +65,24 @@ pub fn civil_at(unix: i64, offset_secs: i32) -> CivilTime {
 /// The OS's UTC offset (seconds east) in effect at `unix`. Falls back to
 /// UTC where the platform offers no zone lookup.
 pub fn utc_offset_at(unix: i64) -> i32 {
+    // Renders format every visible stamp each frame; zones only change
+    // offset on hour boundaries, so remember the answer per hour.
+    thread_local! {
+        static BY_HOUR: std::cell::RefCell<(i64, i32)> = const { std::cell::RefCell::new((i64::MIN, 0)) };
+    }
+    let hour = unix.div_euclid(3600);
+    if let Some(offset) = BY_HOUR.with(|cell| {
+        let (cached_hour, offset) = *cell.borrow();
+        (cached_hour == hour).then_some(offset)
+    }) {
+        return offset;
+    }
+    let offset = os_utc_offset_at(unix);
+    BY_HOUR.with(|cell| *cell.borrow_mut() = (hour, offset));
+    offset
+}
+
+fn os_utc_offset_at(unix: i64) -> i32 {
     #[cfg(unix)]
     {
         let t = unix as libc::time_t;

@@ -362,11 +362,65 @@ pub(super) fn kit_avatar_element(
     photo: Option<&std::path::Path>,
     size: Pixels,
 ) -> AnyElement {
-    let mut avatar = Avatar::new().name(name).with_size(size);
     if let Some(path) = photo {
-        avatar = avatar.src(path.to_path_buf());
+        return Avatar::new()
+            .name(name)
+            .with_size(size)
+            .src(path.to_path_buf())
+            .into_any_element();
     }
-    avatar.into_any_element()
+    initials_circle(name, size)
+}
+
+/// Initials fallback avatar. The kit's own fallback sizes its text box
+/// (not its font) for custom sizes, which leaves the initials small and
+/// off-center; this draws the same identity colors (12 OkLCH hues keyed
+/// by the initials, as gpui-kit does) with centered initials at ~40% of
+/// the avatar size.
+fn initials_circle(name: &str, size: Pixels) -> AnyElement {
+    let initials = avatar_initials(name);
+    let hue = (gpui_kit::hash(&SharedString::from(initials.clone())) % 12) as f32 * 30.;
+    let (background, foreground) = if crate::ui::chat_theme::is_dark_palette() {
+        (
+            gpui_kit::component::oklch(0.30, 0.05, hue),
+            gpui_kit::component::oklch(0.82, 0.11, hue),
+        )
+    } else {
+        (
+            gpui_kit::component::oklch(0.93, 0.05, hue),
+            gpui_kit::component::oklch(0.48, 0.14, hue),
+        )
+    };
+    div()
+        .size(size)
+        .flex_none()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(background)
+        .text_color(foreground)
+        .text_size(size * 0.4)
+        .line_height(size * 0.4)
+        .font_semibold()
+        .child(initials)
+        .into_any_element()
+}
+
+/// Up to two initials: first letters of the first two words, or the first
+/// two characters of a single word (gpui-kit's rule), uppercased.
+fn avatar_initials(name: &str) -> String {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let initials: String = match words.as_slice() {
+        [] => String::new(),
+        [single] => single.chars().take(1).collect(),
+        [first, second, ..] => first
+            .chars()
+            .take(1)
+            .chain(second.chars().take(1))
+            .collect(),
+    };
+    initials.to_uppercase()
 }
 
 /// kit Phase 4: builds the shared kit-shell chrome (sender header /

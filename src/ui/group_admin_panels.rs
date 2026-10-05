@@ -1,6 +1,7 @@
 //! admin panels: management, invites, admins, boosts, sign flags.
 
 use super::app::QuillApp;
+use super::pressable::action_row;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -313,9 +314,7 @@ impl QuillApp {
         macro_rules! row {
             ($id:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
                 section = section.child(
-                    Button::new($id)
-                        .label($label)
-                        .ghost()
+                    action_row($id, None, $label, false, cx)
                         .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
                 );
             };
@@ -620,15 +619,21 @@ impl QuillApp {
                 .child(div().flex_1())
                 .child(
                     Button::new("invite-links-refresh")
-                        .label("Refresh")
+                        .icon(gpui_kit::assets::IconName::RotateCcw)
                         .ghost()
+                        .xsmall()
+                        .tooltip("Refresh")
+                        .accessibility_label("Refresh")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.refresh_invite_links(chat_id, cx);
                         })),
                 )
                 .child(
                     Button::new("invite-link-create")
-                        .label("Create")
+                        .icon(gpui_kit::assets::IconName::Plus)
+                        .xsmall()
+                        .tooltip("Create invite link")
+                        .accessibility_label("Create invite link")
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_invite_link_dialog(chat_id, window, cx);
@@ -803,8 +808,11 @@ impl QuillApp {
         }
         header = header.child(div().flex_1()).child(
             Button::new("join-requests-refresh")
-                .label("Refresh")
+                .icon(gpui_kit::assets::IconName::RotateCcw)
                 .ghost()
+                .xsmall()
+                .tooltip("Refresh")
+                .accessibility_label("Refresh")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.refresh_join_requests(chat_id, cx);
                 })),
@@ -950,15 +958,21 @@ impl QuillApp {
                 .child(div().flex_1())
                 .child(
                     Button::new("admin-list-refresh")
-                        .label("Refresh")
+                        .icon(gpui_kit::assets::IconName::RotateCcw)
                         .ghost()
+                        .xsmall()
+                        .tooltip("Refresh")
+                        .accessibility_label("Refresh")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.refresh_administrators(chat_id, cx);
                         })),
                 )
                 .child(
                     Button::new("admin-promote-open")
-                        .label("Add")
+                        .icon(gpui_kit::assets::IconName::Plus)
+                        .xsmall()
+                        .tooltip("Add administrator")
+                        .accessibility_label("Add administrator")
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_promote_picker(chat_id, window, cx);

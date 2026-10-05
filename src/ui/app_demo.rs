@@ -1820,6 +1820,21 @@ impl QuillApp {
         // notifies when the effective theme actually changed, so the
         // tick is free when idle.
         app.apply_appearance(cx);
+        // Performance fixture: keep rendering at ~60 Hz so a profiler sees
+        // steady-state frames.
+        if demo.is_some() && super::demo::demo_stress_size().is_some() {
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(16))
+                        .await;
+                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
         if demo.is_none()
             && app.appearance.check_updates_on_launch
             && app.update_state == quill::updater::UpdateState::Idle
