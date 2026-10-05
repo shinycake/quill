@@ -233,17 +233,6 @@ pub(super) fn compact_count(count: i32) -> String {
     count.to_string()
 }
 
-/// Parity slice: one-line description snippet for the channel/supergroup
-/// header.
-pub(super) fn description_snippet(description: &str, max_chars: usize) -> String {
-    let one_line: String = description.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one_line.chars().count() <= max_chars {
-        return one_line;
-    }
-    let truncated: String = one_line.chars().take(max_chars).collect();
-    format!("{truncated}…")
-}
-
 /// kit Phase 3: folder-tag chip names for a chat row — shared by the row
 /// renderer and the virtual-list height computation so they agree.
 pub(super) fn chat_row_tags(

@@ -1,7 +1,6 @@
 //! conversation header, typing indicators.
 
 use super::app::{PaneMode, QuillApp, pane_placeholder};
-use super::chat_row::description_snippet;
 use super::chat_row::{chat_avatar, compact_count};
 use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
@@ -72,23 +71,14 @@ impl QuillApp {
                 _ => return None,
             };
             let full = session.supergroup_full_infos.get(&supergroup_id).cloned();
-            let roots = self.media_display_roots();
-            let photo = session
-                .chat_photo_path(chat_id)
-                .and_then(|path| sandboxed_display_path(path, &roots));
             let username = session
                 .supergroup_username(supergroup_id)
                 .filter(|name| !name.is_empty())
                 .map(|name| name.to_string());
             Some(SupergroupHeaderExtras {
                 is_channel,
-                photo,
                 username,
                 member_count: full.as_ref().map(|info| info.member_count),
-                description_snippet: full.as_ref().and_then(|info| {
-                    let snippet = description_snippet(&info.description, 120);
-                    (!snippet.is_empty()).then_some(snippet)
-                }),
                 discussion_chat_id: session.discussion_chat_id(chat_id),
             })
         });
@@ -114,182 +104,107 @@ impl QuillApp {
         // S17: widen the gate — sticker-picking sets no typing senders, so
         // `typing` alone would hide the "choosing a sticker…" label.
         let typing = typing || activity_label.is_some();
-        // Status lines kept for every chat kind (typing / muted).
-        let identity: AnyElement = match (info_target, extras) {
-            (Some(InfoPanelTarget::Supergroup(supergroup_id)), Some(ex)) => {
-                let mut meta: Vec<String> = Vec::new();
-                if let Some(username) = &ex.username {
-                    meta.push(format!("@{username}"));
-                }
-                if let Some(count) = ex.member_count.filter(|count| *count > 0) {
-                    let noun = if ex.is_channel {
-                        "subscribers"
-                    } else {
-                        "members"
-                    };
-                    meta.push(format!("{} {noun}", compact_count(count)));
-                }
-                let meta_line = meta.join(" · ");
+        // One identity block for every chat kind: avatar, title, and a
+        // single status line — activity wins, then secret-chat state, then
+        // presence or member count, then the muted / timer notes.
+        let session = self.session();
+        let private_user = match info_target {
+            Some(InfoPanelTarget::User(user_id)) => Some(user_id),
+            _ => None,
+        };
+        let presence = private_user.and_then(|user_id| {
+            let user = session?.user(user_id)?;
+            if user.is_bot {
+                Some(("bot".to_string(), false))
+            } else {
+                let line = user.status.display();
+                (!line.is_empty()).then(|| (line, user.status.is_online()))
+            }
+        });
+        let meta_line = extras.as_ref().and_then(|ex| {
+            let mut meta: Vec<String> = Vec::new();
+            if let Some(count) = ex.member_count.filter(|count| *count > 0) {
+                let noun = if ex.is_channel {
+                    "subscribers"
+                } else {
+                    "members"
+                };
+                meta.push(format!("{} {noun}", compact_count(count)));
+            }
+            if let Some(username) = &ex.username {
+                meta.push(format!("@{username}"));
+            }
+            (!meta.is_empty()).then(|| meta.join(" · "))
+        });
+        let secret_line = self.secret_pending_subtitle(chat_id);
+        let (status_line, status_accent): (Option<String>, bool) = if typing {
+            (Some(activity_label.unwrap_or("typing…").to_string()), true)
+        } else if let Some(line) = secret_line {
+            (Some(line), true)
+        } else if let Some((line, online)) = presence {
+            (Some(line), online)
+        } else if let Some(line) = meta_line {
+            (Some(line), false)
+        } else if muted {
+            (
+                Some(if forever { "muted forever" } else { "muted" }.to_string()),
+                false,
+            )
+        } else {
+            (ttl_line.clone(), false)
+        };
+        let photo = actions.and_then(|(chat_id, _, _, _)| {
+            let roots = self.media_display_roots();
+            session
+                .and_then(|s| s.chat_photo_path(chat_id))
+                .and_then(|path| sandboxed_display_path(path, &roots))
+        });
+        let identity = div()
+            .id("conversation-identity")
+            .flex()
+            .items_center()
+            .gap_3()
+            .min_w_0()
+            .when(actions.is_some(), |this| {
+                this.child(chat_avatar(&title_text, photo.as_deref(), 38.))
+            })
+            .child(
                 div()
-                    .id("conversation-identity")
                     .flex()
-                    .items_center()
-                    .gap_2()
+                    .flex_col()
                     .min_w_0()
-                    .role(gpui_kit::Role::Button)
+                    .child(div().font_semibold().truncate().child(title_text))
+                    .when_some(status_line, |this, line| {
+                        this.child(
+                            div()
+                                .id("conversation-status")
+                                .text_xs()
+                                .truncate()
+                                .text_color(if status_accent {
+                                    cx.theme().primary
+                                } else {
+                                    muted_fg
+                                })
+                                .child(line),
+                        )
+                    }),
+            )
+            .when_some(info_target, |this, target| {
+                this.role(gpui_kit::Role::Button)
                     .aria_label("Open conversation information")
                     .tab_index(0)
                     .cursor_pointer()
+                    .rounded_md()
                     .pressable(cx.theme())
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_supergroup_panel(supergroup_id, window, cx);
+                        this.open_info_panel_target(target, window, cx);
                     }))
-                    .child(chat_avatar(&title_text, ex.photo.as_deref(), 40.))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .min_w_0()
-                            .child(div().font_semibold().child(title_text))
-                            .when(!meta_line.is_empty(), |this| {
-                                this.child(
-                                    div()
-                                        .id("conversation-meta")
-                                        .text_xs()
-                                        .text_color(muted_fg)
-                                        .child(meta_line),
-                                )
-                            })
-                            .when_some(ex.description_snippet, |this, snippet| {
-                                this.child(
-                                    div()
-                                        .id("conversation-description")
-                                        .text_xs()
-                                        .text_color(muted_fg)
-                                        .child(snippet),
-                                )
-                            })
-                            .when(typing, |this| {
-                                this.child(
-                                    div()
-                                        .id("peer-typing")
-                                        .text_sm()
-                                        .text_color(cx.theme().accent)
-                                        .child(activity_label.unwrap_or("typing…")),
-                                )
-                            })
-                            .when(muted && !typing, |this| {
-                                this.child(div().text_xs().text_color(muted_fg).child(if forever {
-                                    "Muted forever"
-                                } else {
-                                    "Muted"
-                                }))
-                            })
-                            // Phase B4: chat-level auto-delete / self-destruct timer
-                            // status line (hidden when no timer is set).
-                            .when_some(ttl_line.clone(), |this, line| {
-                                this.child(
-                                    div()
-                                        .id("conversation-ttl")
-                                        .text_xs()
-                                        .text_color(muted_fg)
-                                        .child(line),
-                                )
-                            }),
-                    )
-                    .into_any_element()
-            }
-            (Some(InfoPanelTarget::User(user_id)), _) => div()
-                .flex()
-                .flex_col()
-                .min_w_0()
-                .child(
-                    div()
-                        .id("conversation-title")
-                        .font_semibold()
-                        .role(gpui_kit::Role::Button)
-                        .aria_label("Open conversation information")
-                        .tab_index(0)
-                        .cursor_pointer()
-                        .pressable(cx.theme())
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_user_panel(user_id, window, cx);
-                        }))
-                        .child(title_text),
-                )
-                // Phase S1: pending secret chats show the TGX
-                // `AwaitingEncryption` subtitle under the title.
-                .when_some(self.secret_pending_subtitle(chat_id), |this, line| {
-                    this.child(
-                        div()
-                            .id("secret-pending-subtitle")
-                            .text_xs()
-                            .text_color(cx.theme().accent)
-                            .child(line),
-                    )
-                })
-                .when(typing, |this| {
-                    this.child(
-                        div()
-                            .id("peer-typing")
-                            .text_sm()
-                            .text_color(cx.theme().accent)
-                            .child(activity_label.unwrap_or("typing…")),
-                    )
-                })
-                .when(muted && !typing, |this| {
-                    this.child(div().text_xs().text_color(muted_fg).child(if forever {
-                        "Muted forever"
-                    } else {
-                        "Muted"
-                    }))
-                })
-                // Phase B4: chat-level auto-delete / self-destruct timer
-                // status line (hidden when no timer is set).
-                .when_some(ttl_line.clone(), |this, line| {
-                    this.child(
-                        div()
-                            .id("conversation-ttl")
-                            .text_xs()
-                            .text_color(muted_fg)
-                            .child(line),
-                    )
-                })
-                .into_any_element(),
-            _ => div()
-                .flex()
-                .flex_col()
-                .min_w_0()
-                .child(div().font_semibold().child(title_text))
-                .when(typing, |this| {
-                    this.child(
-                        div()
-                            .id("peer-typing")
-                            .text_sm()
-                            .text_color(cx.theme().accent)
-                            .child(activity_label.unwrap_or("typing…")),
-                    )
-                })
-                .when(muted && !typing, |this| {
-                    this.child(div().text_xs().text_color(muted_fg).child(if forever {
-                        "Muted forever"
-                    } else {
-                        "Muted"
-                    }))
-                })
-                // Phase B4: chat-level auto-delete / self-destruct timer
-                // status line (hidden when no timer is set).
-                .when_some(ttl_line.clone(), |this, line| {
-                    this.child(
-                        div()
-                            .id("conversation-ttl")
-                            .text_xs()
-                            .text_color(muted_fg)
-                            .child(line),
-                    )
-                })
-                .into_any_element(),
-        };
+            })
+            .into_any_element();
+        let can_call = private_user.is_some_and(|user_id| {
+            session.is_some_and(|s| Self::can_start_secret_chat_with(s, user_id))
+        });
+        let chat_search_open = self.chat_search_is_open();
         div()
             .id("conversation-header")
             .px_4()
@@ -339,17 +254,58 @@ impl QuillApp {
                 this.child(
                     div()
                         .flex()
+                        .items_center()
                         .gap_1()
-                        .child(self.chat_navigation_menu(cx))
+                        .when_some(private_user.filter(|_| can_call), |this, user_id| {
+                            this.child(
+                                Button::new("chat-call")
+                                    .icon(gpui_kit::assets::IconName::Phone)
+                                    .ghost()
+                                    .tooltip("Call")
+                                    .accessibility_label("Call")
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.start_call_for_user(user_id, false, cx);
+                                    })),
+                            )
+                        })
+                        .child(
+                            Button::new("chat-find")
+                                .icon(if chat_search_open {
+                                    gpui_kit::assets::IconName::X
+                                } else {
+                                    gpui_kit::assets::IconName::Search
+                                })
+                                .ghost()
+                                .tooltip(if chat_search_open {
+                                    "Close search"
+                                } else {
+                                    "Search this chat"
+                                })
+                                .accessibility_label("Search this chat")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if this.chat_search_is_open() {
+                                        this.close_chat_search_ui(window, cx);
+                                    } else {
+                                        this.open_chat_search_ui(window, cx);
+                                    }
+                                })),
+                        )
                         .when(voice_ok, |this| {
                             this.child(
                                 Button::new("chat-voice-chat")
-                                    .label(if voice_live {
-                                        "🔊 Voice chat"
+                                    .icon(gpui_kit::assets::IconName::AudioLines)
+                                    .ghost()
+                                    .when(voice_live, |button| button.selected(true))
+                                    .tooltip(if voice_live {
+                                        "Join voice chat"
                                     } else {
                                         "Start voice chat"
                                     })
-                                    .ghost()
+                                    .accessibility_label(if voice_live {
+                                        "Join voice chat"
+                                    } else {
+                                        "Start voice chat"
+                                    })
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.start_or_join_video_chat(chat_id, window, cx);
                                     })),
@@ -392,7 +348,8 @@ impl QuillApp {
                                         this.select_listed_chat(ChatId(discussion_id), window, cx);
                                     })),
                             )
-                        }),
+                        })
+                        .child(self.chat_navigation_menu(cx)),
                 )
             })
     }
