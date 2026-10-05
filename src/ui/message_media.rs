@@ -271,11 +271,6 @@ pub(super) fn photo_attachment(
             })
             .into_any_element();
     }
-    let (w, h) = photo
-        .largest_size()
-        .or_else(|| photo.thumb_size())
-        .map(|s| (s.width, s.height))
-        .unwrap_or((0, 0));
     let downloading_now = file_is_downloading(open_id, files, downloading);
     let ready = files
         .get(&open_id.0)
@@ -284,17 +279,35 @@ pub(super) fn photo_attachment(
     let status = if photo.is_secret || photo.has_spoiler {
         photo.placeholder_label(downloading_now, ready)
     } else if downloading_now {
-        "Photo — downloading…".into()
-    } else if w > 0 && h > 0 {
-        format!("Photo {w}×{h} — not downloaded")
+        "Downloading…".into()
     } else {
-        "Photo — not downloaded".into()
+        "Click to load".into()
     };
     let viewable = !photo.is_secret && !photo.has_spoiler;
     let viewer_open = viewable.then_some(viewer).flatten();
     let has_viewer_open = viewer_open.is_some();
+    // The inline minithumbnail, scaled to the frame, previews the picture
+    // (soft, like a blur) while the real size downloads. Secret and
+    // spoiler photos never reveal it.
+    let preview = viewable
+        .then_some(photo.minithumbnail.as_ref())
+        .flatten()
+        .filter(|mini| !mini.data.is_empty())
+        .map(|mini| {
+            img(ImageSource::Image(Arc::new(gpui_kit::Image::from_bytes(
+                gpui_kit::ImageFormat::Jpeg,
+                mini.data.clone(),
+            ))))
+            .absolute()
+            .inset_0()
+            .size_full()
+            .object_fit(ObjectFit::Cover)
+        });
+    let has_preview = preview.is_some();
     div()
         .id(("photo-ph", row_id))
+        .relative()
+        .overflow_hidden()
         .w(frame_w)
         .h(frame_h)
         .rounded_md()
@@ -302,6 +315,7 @@ pub(super) fn photo_attachment(
         .flex()
         .items_center()
         .justify_center()
+        .children(preview)
         // Phase 4.5: viewable photos open the viewer (it triggers the
         // download when needed); spoiler photos keep the old
         // click-to-download placeholder, secret photos stay inert.
@@ -328,7 +342,20 @@ pub(super) fn photo_attachment(
                     }))
             },
         )
-        .child(div().text_xs().text_color(text_bright()).child(status))
+        .child(
+            div()
+                .text_xs()
+                .when(has_preview, |this| {
+                    // Over the preview: a legible pill.
+                    this.px_2()
+                        .py_0p5()
+                        .rounded_full()
+                        .bg(gpui_kit::black().opacity(0.45))
+                        .text_color(gpui_kit::white())
+                })
+                .when(!has_preview, |this| this.text_color(text_bright()))
+                .child(status),
+        )
         .into_any_element()
 }
 

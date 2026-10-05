@@ -16,6 +16,10 @@ pub struct PhotoContent {
     pub sizes: Vec<PhotoSizeView>,
     pub is_secret: bool,
     pub has_spoiler: bool,
+    /// `photo.minithumbnail`: a tiny inline JPEG shown (scaled up, so
+    /// soft) until a real size downloads. Never shown for secret or
+    /// spoiler photos.
+    pub minithumbnail: Option<MiniThumbnail>,
 }
 
 impl PhotoContent {
@@ -195,6 +199,7 @@ pub(crate) fn parse_message_photo(value: &Value) -> (MessageContent, Vec<ParsedF
                 .get("has_spoiler")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            minithumbnail: photo.and_then(|photo| parse_minithumbnail(photo.get("minithumbnail"))),
         }),
         files,
     )

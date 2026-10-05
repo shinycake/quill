@@ -148,6 +148,7 @@ pub(crate) fn parse_link_preview_kind(
                                 sizes,
                                 is_secret: false,
                                 has_spoiler: false,
+                                minithumbnail: None,
                             });
                         }
                     }
@@ -170,6 +171,7 @@ pub(crate) fn parse_link_preview_kind(
                                 }],
                                 is_secret: false,
                                 has_spoiler: false,
+                                minithumbnail: None,
                             });
                         }
                     }
@@ -206,6 +208,7 @@ pub(crate) fn parse_link_preview_photo(
                 sizes,
                 is_secret: false,
                 has_spoiler: false,
+                minithumbnail: None,
             }),
             files,
         );

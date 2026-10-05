@@ -423,6 +423,7 @@ mod tests {
                     .collect(),
                 is_secret: false,
                 has_spoiler: false,
+                minithumbnail: None,
             }),
         )
     }

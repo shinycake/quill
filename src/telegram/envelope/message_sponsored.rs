@@ -281,6 +281,7 @@ pub(crate) fn parse_sponsored_photo(photo: &Value) -> (Option<PhotoContent>, Vec
             sizes,
             is_secret: false,
             has_spoiler: false,
+            minithumbnail: None,
         }),
         files,
     )

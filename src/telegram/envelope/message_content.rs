@@ -679,6 +679,7 @@ pub(crate) fn parse_message_game(value: &Value) -> (MessageContent, Vec<ParsedFi
                 sizes,
                 is_secret: false,
                 has_spoiler: false,
+                minithumbnail: None,
             },
         }),
         files,
