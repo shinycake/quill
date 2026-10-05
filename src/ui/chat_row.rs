@@ -587,25 +587,12 @@ pub(super) fn session_chat_row(
                 // Slice CL3: the select-mode check circle precedes the
                 // avatar while multi-select is active.
                 .when(selecting, |this| this.child(select_check(id, checked)))
-                .child(
-                    div()
-                        .relative()
-                        .flex_none()
-                        .child(chat_avatar(&title, photo_path, CHAT_ROW_AVATAR))
-                        .when(online, |this| {
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .right(px(0.))
-                                    .bottom(px(1.))
-                                    .size(px(13.))
-                                    .rounded_full()
-                                    .border_2()
-                                    .border_color(cx.theme().sidebar)
-                                    .bg(cx.theme().success),
-                            )
-                        }),
-                )
+                .child(with_presence_dot(
+                    chat_avatar(&title, photo_path, CHAT_ROW_AVATAR),
+                    online,
+                    13.,
+                    cx,
+                ))
                 .child(
                     div()
                         .flex()
@@ -795,6 +782,33 @@ impl Render for PinnedChatDrag {
             .font_medium()
             .child(self.title.clone())
     }
+}
+
+/// An avatar with a green "online" dot at its bottom-right, ringed in the
+/// sidebar color (chat list and contacts).
+pub(super) fn with_presence_dot(
+    avatar: impl IntoElement,
+    online: bool,
+    dot: f32,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .relative()
+        .flex_none()
+        .child(avatar)
+        .when(online, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .right(px(0.))
+                    .bottom(px(1.))
+                    .size(px(dot))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(cx.theme().sidebar)
+                    .bg(cx.theme().success),
+            )
+        })
 }
 
 /// Chat-row avatar edge (px). Row heights in `chatlist_style` leave room
