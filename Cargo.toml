@@ -15,6 +15,9 @@ publish = false
 [features]
 default = ["ui"]
 ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ureq"]
+# Development only: `--screenshot-demo` also rasterizes the window in-process
+# when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
+demo-capture = ["ui", "gpui-kit/test-support"]
 
 [dependencies]
 base64 = "0.22"
@@ -38,7 +41,7 @@ unicode-segmentation = "1.13"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 
 [dependencies.gpui-kit]
-version = "=0.6.1"
+version = "=0.7.0"
 optional = true
 default-features = false
 features = ["component", "assets"]

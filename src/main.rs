@@ -159,8 +159,8 @@ fn ui_main(args: &[String]) {
                             cx.activate(true);
                             window.activate_window();
                         }
-                        // kit Phase 2 (redo): shell mounts the kit dialog +
-                        // notification layers that Root does not mount itself.
+                        // The shell adds Quill's dialog hit-test barrier; Root
+                        // hosts the kit dialog and notification layers.
                         let shell = cx.new(|_cx| ui::QuillShell::new(view));
                         cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
                     },
@@ -719,8 +719,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             if window.focused(cx).is_none() {
                                 window.focus(&view.focus_handle(cx), cx);
                             }
-                            // kit Phase 2 (redo): shell mounts the kit dialog +
-                            // notification layers that Root does not mount itself.
+                            // The shell adds Quill's dialog hit-test barrier; Root
+                            // hosts the kit dialog and notification layers.
                             let shell = cx.new(|_cx| ui::QuillShell::new(view));
                             cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
                         },
@@ -742,6 +742,17 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                         },
                     ))
                     .await;
+                #[cfg(feature = "demo-capture")]
+                if let Some(path) = std::env::var_os("QUILL_DEMO_CAPTURE") {
+                    let captured = demo_window
+                        .update(cx, |_, window, _| window.render_to_image())
+                        .map_err(|err| err.to_string())
+                        .and_then(|image| image.map_err(|err| err.to_string()))
+                        .and_then(|image| image.save(&path).map_err(|err| err.to_string()));
+                    if let Err(err) = captured {
+                        eprintln!("quill screenshot-demo: capture failed: {err}");
+                    }
+                }
                 let _ = std::fs::write(&marker_for_spawn, b"ready\n");
                 cx.background_executor()
                     .timer(Duration::from_millis(
