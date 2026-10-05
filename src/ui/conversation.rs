@@ -1076,7 +1076,7 @@ impl QuillApp {
                 } else {
                     self.history_message_list(
                         "topic-history",
-                        &topic_messages,
+                        topic_messages,
                         chat.as_ref(),
                         &sender_name,
                         highlight_id,
@@ -1112,7 +1112,7 @@ impl QuillApp {
             } else {
                 self.history_message_list(
                     "session-history",
-                    &messages,
+                    messages,
                     chat.as_ref(),
                     &sender_name,
                     highlight_id,
@@ -1132,7 +1132,7 @@ impl QuillApp {
     pub(super) fn history_message_list(
         &mut self,
         id: &'static str,
-        messages: &[HistoryMessage],
+        messages: Vec<HistoryMessage>,
         chat: Option<&ChatSummary>,
         sender_name: &str,
         highlight_id: Option<MessageId>,
@@ -1154,7 +1154,7 @@ impl QuillApp {
             session.and_then(|s| s.open_topic),
         );
         let groups = quill::album::group_media_albums(
-            messages,
+            &messages,
             |message| message.media_album_id,
             |message| message.is_outgoing,
             |message| quill::album::is_album_media(&message.content),
@@ -1185,6 +1185,19 @@ impl QuillApp {
                 }
             })
             .collect();
+        // Each group's span over `messages` (album id, item count): the
+        // rows below take the messages by value instead of cloning them.
+        let spans: Vec<(Option<i64>, usize)> = groups
+            .iter()
+            .map(|group| match group {
+                quill::album::HistoryGroup::Album { album_id, messages } => {
+                    (Some(*album_id), messages.len())
+                }
+                quill::album::HistoryGroup::Single(_) => (None, 1),
+            })
+            .collect();
+        drop(groups);
+        let mut owned = messages.into_iter();
         let mut previous = None;
         let mut row_chrome = |message: &HistoryMessage, continues: bool| {
             let identity = (message.is_outgoing, message.sender);
@@ -1263,14 +1276,13 @@ impl QuillApp {
             (previous_day.replace(day) != Some(day))
                 .then(|| quill::local_time::day_label(&civil, &now))
         };
-        for (index, group) in groups.into_iter().enumerate() {
+        for (index, (album, len)) in spans.into_iter().enumerate() {
             let continues = identities
                 .get(index + 1)
                 .is_some_and(|next| Some(next) == identities.get(index));
-            match group {
-                quill::album::HistoryGroup::Album { album_id, messages } => {
-                    let album_messages: Vec<HistoryMessage> =
-                        messages.iter().map(|message| (*message).clone()).collect();
+            match album {
+                Some(album_id) => {
+                    let album_messages: Vec<HistoryMessage> = owned.by_ref().take(len).collect();
                     // Same chrome rule as single rows, from the first item.
                     let (sender, receipt, sender_avatar, _) = album_messages
                         .first()
@@ -1286,9 +1298,12 @@ impl QuillApp {
                         day_label,
                     })
                 }
-                quill::album::HistoryGroup::Single(message) => {
+                None => {
+                    let Some(message) = owned.next() else {
+                        break;
+                    };
                     let (sender, receipt, sender_avatar, run_start) =
-                        row_chrome(message, continues);
+                        row_chrome(&message, continues);
                     // Phase 4.6: audio/voice rows get a seek-bar view model.
                     let seek_bar = match &message.content {
                         MessageContent::VoiceNote(note) => {
@@ -1318,7 +1333,6 @@ impl QuillApp {
                         None
                     };
                     rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
-                        message: message.clone(),
                         sender,
                         receipt,
                         sender_avatar,
@@ -1329,7 +1343,7 @@ impl QuillApp {
                             .pending_forward
                             .as_ref()
                             .is_some_and(|draft| draft.contains(message.id)),
-                        quote_preview: session.and_then(|s| s.reply_quote_preview(message)),
+                        quote_preview: session.and_then(|s| s.reply_quote_preview(&message)),
                         forward_from: message
                             .forward_info
                             .as_ref()
@@ -1340,6 +1354,7 @@ impl QuillApp {
                         video_playing,
                         video_frame,
                         is_secret,
+                        message,
                     })));
                 }
             }
