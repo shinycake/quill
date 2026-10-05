@@ -9,6 +9,7 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.scheduled_messages.push(ParsedMessage {
+        sender: None,
         id: MessageId(70),
         chat_id: ChatId(7),
         date: 0,

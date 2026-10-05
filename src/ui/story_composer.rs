@@ -711,6 +711,7 @@ impl QuillApp {
 
         div()
             .id("story-composer-overlay")
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -722,6 +723,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("story-composer-backdrop")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()

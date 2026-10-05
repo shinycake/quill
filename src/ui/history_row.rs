@@ -24,7 +24,6 @@ pub(crate) struct HistoryRowInputs {
     pub(crate) selected_forward: bool,
     pub(crate) quote_preview: Option<String>,
     pub(crate) forward_from: Option<String>,
-    pub(crate) reaction_open: bool,
     pub(crate) seek_bar: Option<SeekBarView>,
     pub(crate) animation_playing: bool,
     pub(crate) animation_frame: Option<std::sync::Arc<gpui_kit::RenderImage>>,

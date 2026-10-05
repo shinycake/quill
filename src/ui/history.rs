@@ -27,11 +27,11 @@ use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, ForwardDraft};
+use quill::composer::ComposerReplyTo;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::FileId;
 use quill::local_path::sandboxed_display_path;
-use quill::state::{HistoryMessage, OutboxReceipt, Session, effective_preview, unix_ms_now};
+use quill::state::{HistoryMessage, OutboxReceipt, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     MessageContent, ParsedFile, chat_ttl_service_label, effective_content,
@@ -384,8 +384,6 @@ pub(super) fn session_history_row(
     sender_avatar: Option<(String, Option<PathBuf>)>,
     quote_preview: Option<String>,
     forward_from: Option<String>,
-    selected_forward: bool,
-    reaction_open: bool,
     // Seek-bar view for audio/voice rows (`None` for other content).
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
@@ -404,9 +402,31 @@ pub(super) fn session_history_row(
     look: BubbleLook,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    let look = if matches!(message.content, MessageContent::Sticker(_)) {
+        BubbleLook {
+            plain: true,
+            ..look
+        }
+    } else {
+        look
+    };
     // Phase B4: timer-change service rows (`messageChatSetMessageAutoDeleteTime`,
     // schema 1.8.67 line 5387) render as a centered neutral notice — no
     // bubble, no reply/react/edit/delete controls.
+    if let MessageContent::Service(text) = &message.content {
+        return div()
+            .id(("service-message", message.id.0 as u64))
+            .flex()
+            .justify_center()
+            .py_1()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text.clone()),
+            )
+            .into_any_element();
+    }
     if let MessageContent::ChatTtlChanged { secs } = &message.content {
         return div()
             .id(("ttl-service-row", message.id.0 as u64))
@@ -555,130 +575,24 @@ pub(super) fn session_history_row(
         (None, Some(reply)) => Some(reply),
         (None, None) => None,
     };
-    let reply_id = format!("reply-{}", message.id.0);
-    let reply_target =
-        ComposerReplyTo::new(message.chat_id, message.id, effective_preview(message));
-    // The action row below renders inside the bubble fill (`extra` in
-    // synthetic.rs): the kit Ghost variant hardwires its label to the
-    // theme's secondary foreground and ignores caller text colors, so on an
-    // outgoing (blue) bubble the actions would be dark-on-blue in light
-    // mode. Use a Custom variant with white text for outgoing bubbles;
-    // keep ghost for incoming.
-    let outgoing = message.is_outgoing;
-    let action_style = |btn: Button, cx: &App| {
-        if outgoing {
-            btn.custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
-        } else {
-            btn.ghost()
-        }
-    };
-    let reply_btn = action_style(Button::new(reply_id).label("Reply"), cx).on_click(cx.listener(
-        move |this, _, window, cx| {
-            this.begin_reply_to(reply_target.clone(), window, cx);
-        },
-    ));
     let chat_id = message.chat_id;
     let message_id = message.id;
-    let pending = message.pending;
-    // Phase S1: TGX only offers Forward when
-    // `messageProperties.canBeForwarded` (`MessagesController.java:5287`);
-    // TDLib sets it false for secret-chat messages — the chat kind is the
-    // faithful equivalent here.
-    let forward_btn = (!is_secret)
-        .then(|| ForwardDraft::from_message(chat_id, message_id, pending))
-        .flatten()
-        .map(|_| {
-            action_style(
-                Button::new(format!("forward-{}", message_id.0)).label("Forward"),
-                cx,
-            )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.begin_forward_one(chat_id, message_id, pending, window, cx);
-            }))
-        });
-    let select_btn = (!is_secret)
-        .then(|| ForwardDraft::from_message(chat_id, message_id, pending))
-        .flatten()
-        .map(|_| {
-            action_style(
-                Button::new(format!("select-forward-{}", message_id.0)).label(
-                    if selected_forward {
-                        "Selected"
-                    } else {
-                        "Select"
-                    },
-                ),
-                cx,
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.toggle_forward_select(chat_id, message_id, pending, cx);
-            }))
-        });
-    let edit_btn = ComposerEdit::from_own_content(
-        message.chat_id,
-        message.id,
-        message.is_outgoing,
-        message.pending,
-        &message.content,
-    )
-    .map(|edit| {
-        action_style(
-            Button::new(format!("edit-{}", message.id.0)).label("Edit"),
-            cx,
-        )
-        .on_click(cx.listener(move |this, _, window, cx| {
-            this.begin_edit(edit.clone(), window, cx);
-        }))
-    });
-    let delete_btn = DeleteConfirm::own(
-        message.chat_id,
-        message.id,
-        message.is_outgoing,
-        message.pending,
-    )
-    .map(|confirm| {
-        action_style(
-            Button::new(format!("delete-{}", message.id.0)).label("Delete"),
-            cx,
-        )
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.begin_delete(confirm.clone(), cx);
-        }))
-    });
-    let react_btn = message.can_react().then(|| {
-        action_style(
-            Button::new(format!("react-{}", message_id.0)).label(if reaction_open {
-                "Reacting"
-            } else {
-                "React"
-            }),
-            cx,
-        )
-        .on_click(cx.listener(move |this, _, _, cx| {
-            if this
-                .pending_react
-                .is_some_and(|(chat, id)| chat == chat_id && id == message_id)
-            {
-                this.close_reaction_picker(cx);
-            } else {
-                this.open_reaction_picker(chat_id, message_id, cx);
-            }
-        }))
-    });
-    let pin_btn = message.can_pin().then(|| {
-        let pinned = message.is_pinned;
-        action_style(
-            Button::new(format!("pin-{}", message_id.0)).label(if pinned {
-                "Unpin"
-            } else {
-                "Pin"
-            }),
-            cx,
-        )
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.toggle_pin_message(chat_id, message_id, cx);
-        }))
-    });
+    let more_btn = Button::new(format!("message-actions-{}", message_id.0))
+        .label("•••")
+        .ghost()
+        .when(message.is_outgoing && !look.plain, |button| {
+            button.custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
+        })
+        .tooltip("Message actions")
+        .accessibility_label("Message actions")
+        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+            this.message_menu = Some(MessageMenuState {
+                chat_id,
+                message_id,
+                position: event.position(),
+            });
+            cx.notify();
+        }));
     // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
     // official clients' post footer. Renders whenever views exist; only
     // channel posts carry a view count in practice.
@@ -902,7 +816,8 @@ pub(super) fn session_history_row(
         MessageContent::Venue(venue) => Some(venue_row(message.id.0 as u64, venue, cx)),
         MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
-        MessageContent::Text(_)
+        MessageContent::Service(_)
+        | MessageContent::Text(_)
         | MessageContent::RichMessage(_)
         | MessageContent::Game(_)
         | MessageContent::GroupCallInvitation { .. }
@@ -1016,19 +931,7 @@ pub(super) fn session_history_row(
             .when_some(views_footer, |this, footer| this.child(footer))
             .when_some(author_signature_line, |this, line| this.child(line))
             .when_some(chip_row, |this, chips| this.child(chips))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(reply_btn)
-                    .when_some(react_btn, |this, btn| this.child(btn))
-                    .when_some(pin_btn, |this, btn| this.child(btn))
-                    .when_some(forward_btn, |this, btn| this.child(btn))
-                    .when_some(select_btn, |this, btn| this.child(btn))
-                    .when_some(edit_btn, |this, btn| this.child(btn))
-                    .when_some(delete_btn, |this, btn| this.child(btn)),
-            )
+            .child(div().flex().justify_end().child(more_btn))
             .into_any_element(),
     );
     // kit Phase 4: the shared kit-shell chrome, built fresh per divergent

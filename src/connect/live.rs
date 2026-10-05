@@ -115,6 +115,16 @@ pub fn start_live_connect_for_account(
     }
     let app_root = safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
     let prepared = prepare_connect(&app_root, account, store, &credentials)?;
+    start_prepared_live_connect(credentials, prepared, diagnostics)
+}
+
+/// Build the native client after account preparation. UI callers can resolve
+/// the database key on a worker without moving the thread-bound call engine.
+pub fn start_prepared_live_connect(
+    credentials: TelegramCredentials,
+    prepared: PreparedConnect,
+    diagnostics: Arc<dyn DiagnosticSink>,
+) -> Result<LiveConnect, ConnectBlocker> {
     let live = LiveTdJson::connect().map_err(|e| match e {
         TdJsonError::NotFound => ConnectBlocker::MissingTdjson,
         _ => ConnectBlocker::TdjsonLoad,

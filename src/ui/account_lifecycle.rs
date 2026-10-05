@@ -387,7 +387,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Sent to TDLib only — never logged"),
+                        .child("Sent securely to Telegram."),
                 );
         } else if pw_loading {
             body = body.child(

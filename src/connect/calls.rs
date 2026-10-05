@@ -78,7 +78,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2c: whether a call engine is installed at all.
     pub fn has_call_engine(&self) -> bool {
-        self.call_engine.is_some()
+        self.call_engine
+            .as_ref()
+            .is_some_and(|engine| engine.is_available())
     }
 
     /// Phase C2c: last-enumerated audio devices; empty when the engine
@@ -651,10 +653,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         user_id: i64,
         is_video: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
+        if !self.chats_path_active() || !self.has_call_engine() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.active_call.is_some() {
+        if self.session.active_call.is_some()
+            || self
+                .session
+                .requests
+                .pending
+                .values()
+                .any(|pending| matches!(pending.purpose, RequestPurpose::CreateCall { .. }))
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         let user = self.session.user(user_id);
@@ -680,7 +689,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// incoming `Pending` call — answering a call that already moved on
     /// is rejected here, not sent.
     pub fn accept_call(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
+        if !self.chats_path_active() || !self.has_call_engine() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let call_id = match &self.session.active_call {

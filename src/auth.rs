@@ -56,8 +56,7 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
     match state {
         AuthorizationState::WaitTdlibParameters => AuthView {
             title: "Starting",
-            body: "Quill needs local TDLib parameters (database path and API credentials)."
-                .into(),
+            body: "Connecting to Telegram…".into(),
             action: AuthAction::ProvideParameters,
             blocking: true,
         },

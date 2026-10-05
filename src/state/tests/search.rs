@@ -554,6 +554,7 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
         r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[70],"is_permanent":true,"from_cache":false}"#,
     );
     session.chat_search.hits.push(SearchMessageHit {
+        sender: None,
         chat_id: ChatId(11),
         message_id: MessageId(70),
         preview: "gone".into(),
@@ -582,6 +583,7 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
     );
 
     session.chat_search.hits.push(SearchMessageHit {
+        sender: None,
         chat_id: ChatId(11),
         message_id: MessageId(80),
         preview: "ghost".into(),

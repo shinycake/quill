@@ -489,3 +489,87 @@ fn download_file_error_marks_failed_download() {
     assert!(!session.downloading.contains(&12));
     assert!(!session.failed_downloads.contains(&12));
 }
+
+#[test]
+fn nested_file_snapshots_cannot_erase_downloaded_media() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let complete = media_file_json(91, "/tmp/quill-regression-photo.jpg", true);
+    let idle = media_file_json(91, "", false);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"updateFile","file":{complete}}}"#),
+    );
+    let stale: crate::telegram::envelope::ParsedFile =
+        match crate::telegram::envelope::parse_envelope(&format!(
+            r#"{{"@type":"updateFile","file":{idle}}}"#
+        ))
+        .unwrap()
+        .payload
+        {
+            crate::telegram::envelope::EnvelopePayload::UpdateFile(file) => file,
+            _ => unreachable!(),
+        };
+    session.remember_files(&[stale]);
+    assert_eq!(
+        session.file(FileId(91)).unwrap().usable_path(),
+        Some("/tmp/quill-regression-photo.jpg")
+    );
+    assert!(!session.should_download(FileId(91)));
+    // Explicit cache eviction remains authoritative.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"updateFile","file":{idle}}}"#),
+    );
+    assert!(session.file(FileId(91)).unwrap().usable_path().is_none());
+    assert!(session.should_download(FileId(91)));
+}
+
+#[test]
+fn paused_download_survives_idle_file_updates_in_either_order() {
+    for pause_first in [true, false] {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        session.begin_download(FileId(31));
+        session.user_downloads.insert(31);
+        let pause =
+            r#"{"@type":"updateFileDownload","file_id":31,"complete_date":0,"is_paused":true}"#;
+        if pause_first {
+            apply_json(&mut session, &seq, &sink, pause);
+        }
+        session.upsert_file(
+            ParsedFile {
+                id: FileId(31),
+                size: 100,
+                expected_size: 100,
+                local: LocalFileState {
+                    path: String::new(),
+                    can_be_downloaded: true,
+                    is_downloading_active: false,
+                    is_downloading_completed: false,
+                    downloaded_size: 25,
+                },
+            },
+            true,
+        );
+        if !pause_first {
+            apply_json(&mut session, &seq, &sink, pause);
+        }
+        assert!(session.user_downloads.contains(&31));
+        assert!(session.downloading.contains(&31));
+        assert!(session.paused_downloads.contains(&31));
+        assert!(!session.failed_downloads.contains(&31));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateFileDownload","file_id":31,"complete_date":0,"is_paused":false}"#,
+        );
+        assert!(session.user_downloads.contains(&31));
+        assert!(!session.paused_downloads.contains(&31));
+    }
+}

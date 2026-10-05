@@ -82,6 +82,7 @@ impl QuillApp {
         // reads active_playback_id().
         self.clear_playback_state();
         self.playing_voice = None;
+        self.pending_voice_play = None;
     }
 
     pub(super) fn stop_audio_playback(&mut self) {
@@ -444,9 +445,12 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
+            self.pending_audio_play = None;
+            self.pending_voice_play = Some((chat_id, message_id, file_id, listened, duration_secs));
             self.request_media_download(file_id, None, cx);
             return;
         };
+        self.pending_voice_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
             self.status_note = "voice file is outside the account files".into();
@@ -504,9 +508,9 @@ impl QuillApp {
                 .map(str::to_string)
         });
         let Some(path) = path else {
+            self.pending_voice_play = None;
             self.pending_audio_play = Some((message_id, file_id, duration_secs));
             self.request_media_download(file_id, None, cx);
-            self.status_note = "downloading audio".into();
             return;
         };
         self.pending_audio_play = None;
@@ -532,6 +536,21 @@ impl QuillApp {
             "playing audio (no audio player)".into()
         };
         cx.notify();
+    }
+
+    pub(super) fn resume_pending_voice(&mut self, cx: &mut Context<Self>) {
+        let Some((chat_id, message_id, file_id, listened, duration)) = self.pending_voice_play
+        else {
+            return;
+        };
+        if self
+            .session()
+            .and_then(|s| s.file(file_id))
+            .and_then(|f| f.usable_path())
+            .is_some()
+        {
+            self.toggle_voice_playback(chat_id, message_id, file_id, listened, duration, cx);
+        }
     }
 
     pub(super) fn resume_pending_audio(&mut self, cx: &mut Context<Self>) {

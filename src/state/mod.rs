@@ -38,10 +38,10 @@ use crate::telegram::envelope::{
     ParsedWelcomeMessage, PasswordState, PaymentFormData, PaymentReceiptData, Poll,
     ReactionNotificationSettings, ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption,
     ReportSponsoredResult, ReportStoryResult, RichMessageContent, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StarSubscriptionsData, StickerFormat, StickerItem,
-    StickerSetInfo, StorageStats, StoryAvailableReactionView, StoryInteractionView,
-    StoryInteractionsView, StoryListView, TdError, UsernameCheckResult, ValidatedOrderInfoData,
-    effective_content, reply_markup_demands_reply,
+    SecretChatState, SponsoredMessage, StarSubscriptionsData, StickerItem, StickerSetInfo,
+    StorageStats, StoryAvailableReactionView, StoryInteractionView, StoryInteractionsView,
+    StoryListView, TdError, UsernameCheckResult, ValidatedOrderInfoData, effective_content,
+    reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;

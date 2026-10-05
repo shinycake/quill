@@ -827,10 +827,11 @@ pub(super) fn sticker_attachment(
     }
     let display_id = sticker.display_file_id().unwrap_or(sticker.file_id);
     let fallback_label = sticker_label(sticker);
-    if let Some(path) = files
-        .get(&display_id.0)
-        .and_then(|file| file.usable_path())
-        .and_then(|path| sandboxed_display_path(path, media_roots))
+    if let Some(path) = [Some(display_id), sticker.thumb_file_id]
+        .into_iter()
+        .flatten()
+        .filter_map(|id| files.get(&id.0).and_then(|file| file.usable_path()))
+        .find_map(|path| sandboxed_display_path(path, media_roots))
     {
         let fallback_label = fallback_label.clone();
         return img(path)
@@ -873,7 +874,7 @@ pub(super) fn sticker_attachment(
         .justify_center()
         .when(display_id.0 != 0, |this| {
             this.role(gpui_kit::Role::Button)
-                .aria_label("Open sticker pack")
+                .aria_label("Download sticker")
                 .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())

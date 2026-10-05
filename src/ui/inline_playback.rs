@@ -315,7 +315,6 @@ impl QuillApp {
         let Some(path) = path else {
             self.pending_gif_play = Some((message_id, file_id, mime));
             self.request_media_download(file_id, None, cx);
-            self.status_note = "downloading GIF".into();
             return;
         };
         self.pending_gif_play = None;
@@ -441,7 +440,6 @@ impl QuillApp {
             self.pending_video_play =
                 Some((message_id, file_id, mime, start_timestamp, mark_opened));
             self.request_media_download(file_id, None, cx);
-            self.status_note = "downloading video".into();
             return;
         };
         self.pending_video_play = None;

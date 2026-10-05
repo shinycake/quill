@@ -6,6 +6,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageContent {
     Text(TextContent),
+    Service(String),
     Photo(PhotoContent),
     Document(DocumentContent),
     Sticker(StickerContent),
@@ -374,7 +375,8 @@ impl MessageContent {
                     call_entry_label(*is_video, discard_reason, *duration, false)
                 )
             }
-            MessageContent::Unsupported { type_name } => format!("({type_name})"),
+            MessageContent::Service(text) => text.chars().take(80).collect(),
+            MessageContent::Unsupported { .. } => "Unsupported message".into(),
             // Slice bots-games: chat-list preview for a game card.
             MessageContent::Game(game) => {
                 let title = game.title.trim();
@@ -449,6 +451,59 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
     };
     match value.get("@type").and_then(Value::as_str) {
         Some("messageText") => parse_message_text(value),
+        Some("messageAnimatedEmoji") => {
+            // TDLib sends standalone emoji as its own content constructor.
+            // Keep the text when animation metadata isn't available locally.
+            let text = serde_json::json!({"text": {"text": value.get("emoji").and_then(Value::as_str).unwrap_or(""), "entities": []}});
+            parse_message_text(&text)
+        }
+        Some(
+            kind @ ("messageBasicGroupChatCreate"
+            | "messageSupergroupChatCreate"
+            | "messageChatChangeTitle"
+            | "messageChatChangePhoto"
+            | "messageChatDeletePhoto"
+            | "messageChatAddMembers"
+            | "messageChatDeleteMember"
+            | "messageChatJoinByLink"
+            | "messageChatJoinByRequest"
+            | "messagePinMessage"
+            | "messageContactRegistered"
+            | "messageCustomServiceAction"
+            | "messageChatUpgradeTo"
+            | "messageChatUpgradeFrom"
+            | "messageVideoChatStarted"
+            | "messageVideoChatEnded"),
+        ) => {
+            let text = match kind {
+                "messageBasicGroupChatCreate" | "messageSupergroupChatCreate" => {
+                    "Group created".to_string()
+                }
+                "messageChatChangeTitle" => format!(
+                    "Chat renamed to {}",
+                    value.get("title").and_then(Value::as_str).unwrap_or("")
+                ),
+                "messageChatChangePhoto" => "Chat photo changed".to_string(),
+                "messageChatDeletePhoto" => "Chat photo removed".to_string(),
+                "messageChatAddMembers" => "Members added".to_string(),
+                "messageChatDeleteMember" => "A member left or was removed".to_string(),
+                "messageChatJoinByLink" | "messageChatJoinByRequest" => {
+                    "A member joined the chat".to_string()
+                }
+                "messagePinMessage" => "A message was pinned".to_string(),
+                "messageContactRegistered" => "Joined Telegram".to_string(),
+                "messageCustomServiceAction" => value
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                "messageChatUpgradeTo" | "messageChatUpgradeFrom" => "Group upgraded".to_string(),
+                "messageVideoChatStarted" => "Voice chat started".to_string(),
+                "messageVideoChatEnded" => "Voice chat ended".to_string(),
+                _ => unreachable!(),
+            };
+            (MessageContent::Service(text), Vec::new())
+        }
         Some("messagePhoto") => parse_message_photo(value),
         Some("messageDocument") => parse_message_document(value),
         Some("messageSticker") => parse_message_sticker(value),

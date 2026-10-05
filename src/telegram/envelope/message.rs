@@ -81,6 +81,7 @@ pub(crate) fn parse_message_scheduling_state(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedMessage {
+    pub sender: Option<MessageSender>,
     pub id: MessageId,
     pub chat_id: ChatId,
     /// Schema `message.date` (TDLib 1.8.67, line 3165): unix seconds,
@@ -373,6 +374,7 @@ pub(crate) fn parse_message_sender(value: Option<&Value>) -> Result<MessageSende
 pub(crate) fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> {
     let (content, files) = parse_content(value.get("content"));
     Ok(ParsedMessage {
+        sender: parse_message_sender(value.get("sender_id")).ok(),
         id: MessageId(int53(value.get("id"))?),
         chat_id: ChatId(int53(value.get("chat_id"))?),
         date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,

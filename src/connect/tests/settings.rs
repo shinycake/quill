@@ -650,3 +650,38 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
     assert!(!format!("{:?}", sink.snapshot()).contains(link));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn media_download_resolves_message_origin_and_picker_files_use_direct_api() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.ingest(copy_and_parse(r#"{"@type":"updateNewMessage","message":{"id":99,"chat_id":7,"content":{"@type":"messageVideo","video":{"@type":"video","video":{"id":51,"local":{"can_be_downloaded":true}}}}}}"#, &seq, &sink).unwrap()).unwrap();
+    driver
+        .download_user_file(FileId(51), None)
+        .unwrap()
+        .unwrap();
+    let sent = recorder.snapshot();
+    let request: Value = serde_json::from_str(sent.last().unwrap()).unwrap();
+    assert_eq!(request["@type"], "addFileToDownloads");
+    assert_eq!(request["chat_id"], 7);
+    assert_eq!(request["message_id"], 99);
+    assert!(driver.session.user_downloads.contains(&51));
+    driver
+        .download_user_file(FileId(52), None)
+        .unwrap()
+        .unwrap();
+    let sent = recorder.snapshot();
+    let request: Value = serde_json::from_str(sent.last().unwrap()).unwrap();
+    assert_eq!(request["@type"], "downloadFile");
+    assert_eq!(request["file_id"], 52);
+    assert!(!driver.session.user_downloads.contains(&52));
+    assert!(driver.cancel_download(FileId(52)).unwrap());
+    let sent = recorder.snapshot();
+    let request: Value = serde_json::from_str(sent.last().unwrap()).unwrap();
+    assert_eq!(request["@type"], "cancelDownloadFile");
+    let _ = std::fs::remove_dir_all(dir);
+}

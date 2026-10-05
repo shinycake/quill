@@ -112,17 +112,12 @@ impl QuillApp {
             .thumb_file_id
             .filter(|id| id.0 != 0)
             .map(|id| (id, sticker.thumb_width, sticker.thumb_height));
-        let display_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
-            (sticker.format == quill::telegram::envelope::StickerFormat::Webp && file_id.0 != 0)
-                .then_some(file_id)
-        });
-        let path = display_id.and_then(|id| {
-            self.session()
-                .map(|s| &s.files)?
-                .get(&id.0)
-                .and_then(|file| file.usable_path())
-                .and_then(|path| sandboxed_display_path(path, &roots))
-        });
+        let display_id = sticker.display_file_id();
+        let path = [display_id, sticker.thumb_file_id]
+            .into_iter()
+            .flatten()
+            .filter_map(|id| self.session()?.files.get(&id.0)?.usable_path())
+            .find_map(|path| sandboxed_display_path(path, &roots));
         let label = if emoji.is_empty() {
             "Sticker".to_string()
         } else {
@@ -140,13 +135,6 @@ impl QuillApp {
                 .h(px(72.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
-                .role(gpui_kit::Role::Button)
-                .aria_label(format!("Send {emoji} sticker"))
-                .tab_index(0)
-                .cursor_pointer()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
-                }))
                 .with_fallback({
                     let label = label.clone();
                     move || {
@@ -175,17 +163,26 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .role(gpui_kit::Role::Button)
-                .aria_label(format!("Send {emoji} sticker"))
-                .tab_index(0)
-                .cursor_pointer()
-                .pressable(cx.theme())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
-                }))
                 .child(label)
                 .into_any_element()
         };
+        let cell = div()
+            .id(SharedString::from(format!(
+                "sticker-button-{prefix}-{}-{}",
+                sticker.set_id, sticker.id
+            )))
+            .w(px(72.))
+            .h(px(72.))
+            .rounded_md()
+            .pressable(cx.theme())
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!("Send {emoji} sticker"))
+            .tab_index(0)
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.send_sticker_pick(file_id, emoji.clone(), width, height, thumb, cx);
+            }))
+            .child(cell);
         div()
             .flex()
             .flex_col()

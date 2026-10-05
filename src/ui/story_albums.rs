@@ -1125,6 +1125,7 @@ impl QuillApp {
 
         div()
             .id("story-page-overlay")
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -1136,6 +1137,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("story-page-backdrop")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()

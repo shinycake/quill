@@ -1641,6 +1641,7 @@ impl QuillApp {
         });
         div()
             .id("media-viewer-overlay")
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -1652,6 +1653,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("media-viewer-backdrop")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()

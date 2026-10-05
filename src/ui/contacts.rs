@@ -1,7 +1,7 @@
 //! contacts list, import/add dialogs.
 
 use super::app::QuillApp;
-use super::chat_row::initials_avatar;
+use super::chat_row::chat_avatar;
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -446,6 +446,12 @@ impl QuillApp {
         let user_id = row.user_id;
         let name = row.name.clone();
         let status = row.status_text.clone();
+        let photo = self
+            .session()
+            .and_then(|s| s.user_photo_path(user_id))
+            .and_then(|path| {
+                quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
+            });
         let selected =
             self.session().and_then(|s| s.open_info_panel) == Some(InfoPanelTarget::User(user_id));
         div()
@@ -471,7 +477,7 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(initials_avatar(&name, 32.))
+                    .child(chat_avatar(&name, photo.as_deref(), 32.))
                     .child(
                         div()
                             .flex()

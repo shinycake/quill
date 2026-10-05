@@ -456,6 +456,7 @@ mod tests {
     /// `SearchMessageHit` construction in `media_viewer.rs` (test fixture).
     fn test_message(chat: i64, id: i64, content: MessageContent) -> HistoryMessage {
         HistoryMessage {
+            sender: None,
             id: MessageId(id),
             chat_id: ChatId(chat),
             is_outgoing: false,

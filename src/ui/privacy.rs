@@ -104,6 +104,7 @@ impl QuillApp {
     ) -> AnyElement {
         div()
             .id(format!("privacy-overlay-{id}"))
+            .occlude()
             .absolute()
             .top_0()
             .left_0()

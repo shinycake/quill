@@ -116,6 +116,7 @@ fn ui_main(args: &[String]) {
     gpui_kit::application()
         .with_assets(QuillAssets)
         .run(move |cx| {
+            cx.set_app_identity("org.shinycake.quill", "Quill");
             gpui_kit::init(cx);
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
@@ -679,6 +680,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
     gpui_kit::application()
         .with_assets(QuillAssets)
         .run(move |cx| {
+            cx.set_app_identity("org.shinycake.quill", "Quill");
             gpui_kit::init(cx);
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
@@ -713,8 +715,9 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             });
                             if kind == ScreenshotDemo::ReadyTrayBehavior {
                                 install_main_window_tray(window, cx, &view);
-                                let focus = view.focus_handle(cx);
-                                window.defer(cx, move |window, cx| window.focus(&focus, cx));
+                            }
+                            if window.focused(cx).is_none() {
+                                window.focus(&view.focus_handle(cx), cx);
                             }
                             // kit Phase 2 (redo): shell mounts the kit dialog +
                             // notification layers that Root does not mount itself.
@@ -750,7 +753,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             } else {
                                 3500
                             })
-                            .clamp(3500, 60000),
+                            .clamp(3500, 600000),
                     ))
                     .await;
                 cx.update(|cx| cx.quit());

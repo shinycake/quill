@@ -27,15 +27,12 @@ pub struct StickerContent {
 }
 
 impl StickerContent {
-    /// File to show: thumbnail first, else the sticker itself when it is static WEBP.
+    /// Display the full static sticker; animated formats use their image thumbnail until decoded.
     pub fn display_file_id(&self) -> Option<FileId> {
-        if let Some(id) = self.thumb_file_id.filter(|id| id.0 != 0) {
-            return Some(id);
-        }
         if self.format == StickerFormat::Webp && self.file_id.0 != 0 {
             return Some(self.file_id);
         }
-        None
+        self.thumb_file_id.filter(|id| id.0 != 0)
     }
 }
 
@@ -57,15 +54,12 @@ pub struct StickerItem {
 }
 
 impl StickerItem {
-    /// File to show: thumbnail first, else the sticker itself when it is static WEBP.
+    /// Display the full static sticker; animated formats use their image thumbnail until decoded.
     pub fn display_file_id(&self) -> Option<FileId> {
-        if let Some(id) = self.thumb_file_id.filter(|id| id.0 != 0) {
-            return Some(id);
-        }
         if self.format == StickerFormat::Webp && self.file_id.0 != 0 {
             return Some(self.file_id);
         }
-        None
+        self.thumb_file_id.filter(|id| id.0 != 0)
     }
 }
 

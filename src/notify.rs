@@ -10,11 +10,7 @@
 //!   so a click can focus the chat. Action support varies by notification
 //!   daemon (GNOME/KDE honor it; others may ignore clicks) — the click path
 //!   is best-effort, documented in DECISIONS.md.
-//! - macOS: `osascript` `display notification` fallback. gpui-kit 0.6.1
-//!   exposes no NotificationCenter binding, and inventing a native
-//!   `UNUserNotificationCenter` binding here is out of scope, so macOS
-//!   notifications are display-only (no click-to-focus) until a real native
-//!   binding lands.
+//! - macOS: native GPUI system notifications (dispatched by the UI).
 //!
 //! Command arguments are passed to the process without a shell, so message
 //! text can never inject shell syntax. The reducer never spawns processes;
@@ -238,8 +234,6 @@ pub fn decide_notification_sound(input: &SoundInput) -> Option<NotificationSound
 pub enum NotifyBackend {
     /// Linux: `notify-send` (libnotify).
     NotifySend,
-    /// macOS: `osascript` `display notification` fallback (display only).
-    MacOsScript,
     /// No supported backend on this platform.
     Unsupported,
 }
@@ -247,8 +241,6 @@ pub enum NotifyBackend {
 pub fn current_backend() -> NotifyBackend {
     if cfg!(target_os = "linux") {
         NotifyBackend::NotifySend
-    } else if cfg!(target_os = "macos") {
-        NotifyBackend::MacOsScript
     } else {
         NotifyBackend::Unsupported
     }
@@ -283,48 +275,9 @@ fn linux_notify_send_command(notification: &OsNotification) -> NotificationComma
     }
 }
 
-/// Escape a string for embedding in an AppleScript double-quoted literal.
-/// `\\` and `"` are the only AppleScript string metacharacters (injection
-/// safety); control characters are mapped to AppleScript escapes so a
-/// multi-line title/body can't terminate the literal and break osascript.
-fn applescript_escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-fn macos_osascript_command(notification: &OsNotification) -> NotificationCommand {
-    NotificationCommand {
-        program: "osascript".to_string(),
-        args: vec![
-            "-e".to_string(),
-            format!(
-                "display notification \"{}\" with title \"{}\"",
-                applescript_escape(&notification.body),
-                applescript_escape(&notification.title),
-            ),
-        ],
-        // `display notification` offers no click callback, so macOS
-        // notifications are display-only in this slice.
-        report_click: false,
-    }
-}
-
-/// Build the OS command for one notification, or `None` when this platform
-/// has no backend.
 pub fn build_notification_command(notification: &OsNotification) -> Option<NotificationCommand> {
     match current_backend() {
         NotifyBackend::NotifySend => Some(linux_notify_send_command(notification)),
-        NotifyBackend::MacOsScript => Some(macos_osascript_command(notification)),
         NotifyBackend::Unsupported => None,
     }
 }
@@ -438,6 +391,7 @@ mod tests {
 
     fn test_message(chat_id: i64, id: i64, outgoing: bool, text: &str) -> ParsedMessage {
         ParsedMessage {
+            sender: None,
             id: MessageId(id),
             chat_id: ChatId(chat_id),
             date: 0,
@@ -623,34 +577,6 @@ mod tests {
             ]
         );
         assert!(cmd.report_click);
-    }
-
-    #[test]
-    fn macos_command_escapes_quotes() {
-        let notification = OsNotification {
-            chat_id: ChatId(7),
-            title: "Ada \"the\" dev".into(),
-            body: "back\\slash".into(),
-        };
-        let cmd = macos_osascript_command(&notification);
-        assert_eq!(cmd.program, "osascript");
-        assert_eq!(cmd.args.len(), 2);
-        assert_eq!(cmd.args[0], "-e");
-        assert_eq!(
-            cmd.args[1],
-            "display notification \"back\\\\slash\" with title \"Ada \\\"the\\\" dev\""
-        );
-        assert!(!cmd.report_click);
-    }
-
-    #[test]
-    fn macos_command_escapes_control_characters() {
-        // Newlines must become AppleScript escapes, not literal line breaks —
-        // a raw newline would terminate the string literal and break osascript.
-        assert_eq!(
-            applescript_escape("line1\nline2\r\nline3\tend"),
-            "line1\\nline2\\r\\nline3\\tend"
-        );
     }
 
     #[test]

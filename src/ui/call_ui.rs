@@ -81,6 +81,7 @@ impl QuillApp {
 
         div()
             .id("call-overlay")
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -92,6 +93,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("call-backdrop")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()

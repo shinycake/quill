@@ -159,6 +159,7 @@ fn create_call_uses_engine_protocol_when_present() {
     seed_ready_call_user(&mut driver, &seq, &sink);
 
     driver.start_call(41, false).unwrap();
+    assert_invalid(driver.start_call(41, false));
     let create = sent_request(&recorder, "createCall");
     assert_eq!(create["protocol"]["udp_p2p"], true);
     assert_eq!(create["protocol"]["udp_reflector"], true);
@@ -172,19 +173,16 @@ fn create_call_uses_engine_protocol_when_present() {
 }
 
 #[test]
-fn create_call_keeps_signaling_only_protocol_without_engine() {
+fn create_call_rejects_missing_audio_engine() {
     let (dir, mut driver, recorder, sink, seq) = call_driver();
     seed_ready_call_user(&mut driver, &seq, &sink);
 
-    driver.start_call(41, false).unwrap();
-    let create = sent_request(&recorder, "createCall");
-    assert_eq!(create["protocol"]["udp_p2p"], false);
-    assert_eq!(create["protocol"]["udp_reflector"], false);
-    assert_eq!(create["protocol"]["min_layer"], 65);
-    assert_eq!(create["protocol"]["max_layer"], 92);
+    let before = recorder.snapshot().len();
+    assert_invalid(driver.start_call(41, false));
     assert_eq!(
-        create["protocol"]["library_versions"],
-        serde_json::json!([])
+        recorder.snapshot().len(),
+        before,
+        "unavailable audio must not ring a recipient"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -218,20 +216,17 @@ fn call_engine_absent_keeps_signaling_only() {
 }
 
 #[test]
-fn create_call_uses_signaling_only_protocol_when_engine_unavailable() {
+fn create_call_rejects_unavailable_audio_engine() {
     let (dir, mut driver, recorder, sink, seq) = call_driver();
     driver.set_call_engine(Box::new(MockEngine::unavailable()));
     seed_ready_call_user(&mut driver, &seq, &sink);
 
-    driver.start_call(41, false).unwrap();
-    let create = sent_request(&recorder, "createCall");
-    assert_eq!(create["protocol"]["udp_p2p"], false);
-    assert_eq!(create["protocol"]["udp_reflector"], false);
-    assert_eq!(create["protocol"]["min_layer"], 65);
-    assert_eq!(create["protocol"]["max_layer"], 92);
+    let before = recorder.snapshot().len();
+    assert_invalid(driver.start_call(41, false));
     assert_eq!(
-        create["protocol"]["library_versions"],
-        serde_json::json!([])
+        recorder.snapshot().len(),
+        before,
+        "unavailable audio must not ring a recipient"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -139,7 +139,7 @@ pub(super) fn chat_list_caption(
 ) -> SharedString {
     match mode {
         PaneMode::Synthetic => "Synthetic".into(),
-        PaneMode::Connecting => "Waiting for Ready".into(),
+        PaneMode::Connecting => "Connecting…".into(),
         PaneMode::Ready => {
             if session.is_some_and(|s| s.search.open) {
                 if session.is_some_and(|s| s.search.recents) {
@@ -154,7 +154,7 @@ pub(super) fn chat_list_caption(
                 format!("{name} · {n}").into()
             } else {
                 let n = session.map(|s| s.ordered_chats().len()).unwrap_or(0);
-                format!("Main list · {n}").into()
+                format!("Chats · {n}").into()
             }
         }
     }
@@ -168,13 +168,21 @@ pub(super) fn static_chat_row(
 ) -> impl IntoElement {
     div()
         .id(title)
+        .w_full()
         .px_2()
         .py_2()
         .rounded_md()
         .role(Role::Button)
         .aria_label(title)
+        .aria_selected(selected)
+        .border_l_2()
+        .border_color(if selected {
+            cx.theme().primary
+        } else {
+            transparent_black()
+        })
         .bg(if selected {
-            cx.theme().accent.opacity(0.15)
+            cx.theme().primary.opacity(0.25)
         } else {
             cx.theme().sidebar
         })
@@ -506,6 +514,7 @@ pub(super) fn session_chat_row(
     let tags = chat_row_tags(chat, folders, show_tags);
     div()
         .id(("chat-row", id.0 as u64))
+        .w_full()
         .px_2()
         .role(Role::Button)
         .aria_label(row_label)
@@ -519,9 +528,20 @@ pub(super) fn session_chat_row(
         .justify_center()
         .rounded_md()
         .cursor_pointer()
-        .pressable(cx.theme())
+        .when(!selected, |this| this.pressable(cx.theme()))
+        .aria_selected(selected)
+        .when(selected, |this| {
+            this.hover(|s| s.bg(cx.theme().primary.opacity(0.3)))
+                .active(|s| s.bg(cx.theme().primary.opacity(0.4)))
+        })
+        .border_l_2()
+        .border_color(if selected {
+            cx.theme().primary
+        } else {
+            transparent_black()
+        })
         .bg(if selected {
-            cx.theme().accent.opacity(0.15)
+            cx.theme().primary.opacity(0.25)
         } else {
             cx.theme().sidebar
         })
@@ -715,7 +735,7 @@ impl Render for PinnedChatDrag {
             .px_3()
             .py_2()
             .rounded_md()
-            .bg(cx.theme().accent.opacity(0.15))
+            .bg(cx.theme().primary.opacity(0.25))
             .border_1()
             .border_color(cx.theme().border)
             .text_sm()
