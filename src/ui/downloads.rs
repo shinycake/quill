@@ -2,8 +2,6 @@
 
 use super::app::QuillApp;
 use super::message_media::{download_display_name, format_bytes};
-use super::pressable::PressableDiv;
-use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -293,132 +291,136 @@ impl QuillApp {
             && session
                 .as_ref()
                 .is_some_and(|s| s.paused_downloads.contains(&file_id));
-        let status = if paused {
-            "paused".to_string()
-        } else if active {
-            match progress {
-                Some(p) => format!("{}%", (p * 100.0).round() as i32),
-                None => "downloading…".to_string(),
+        let done = file.map_or(0, |f| f.local.downloaded_size);
+        let meta = if active {
+            let amount = if done > 0 && !size_label.is_empty() {
+                format!("{} of {}", format_bytes(done), size_label)
+            } else {
+                size_label.clone()
+            };
+            let lead = if paused {
+                "Paused".to_string()
+            } else {
+                progress.map_or("Downloading…".to_string(), |p| {
+                    format!("{}%", (p * 100.0).round() as i32)
+                })
+            };
+            if amount.is_empty() {
+                lead
+            } else {
+                format!("{lead} · {amount}")
             }
         } else if failed {
-            "download failed".to_string()
+            "Download failed".to_string()
         } else {
             size_label.clone()
         };
-        let mut row = div()
-            .id(("download-row", file_id as u64))
-            .px_3()
-            .py_2()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(div().text_sm().font_medium().child(name))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(status),
-            );
-        if active {
-            row = row.child(
-                div().w_full().h(px(4.)).rounded_full().bg(border()).child(
-                    div()
-                        .h_full()
-                        .w(relative(progress.unwrap_or(0.0)))
-                        .rounded_full()
-                        .bg(accent()),
-                ),
-            );
-        }
-        let actions = if active {
-            div()
-                .flex()
-                .gap_2()
-                .child(
-                    div()
-                        .id(("download-pause", file_id as u64))
-                        .role(gpui_kit::Role::Button)
-                        .aria_label("Pause or resume download")
-                        .tab_index(0)
-                        .cursor_pointer()
-                        .pressable(cx.theme())
-                        .text_xs()
-                        .text_color(accent())
-                        .child(if paused { "Resume" } else { "Pause" })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if paused {
-                                this.resume_media_download(FileId(file_id), cx);
-                            } else {
-                                this.pause_media_download(FileId(file_id), cx);
-                            }
-                        })),
-                )
-                .child(
-                    div()
-                        .id(("download-cancel", file_id as u64))
-                        .role(gpui_kit::Role::Button)
-                        .aria_label("Cancel download")
-                        .tab_index(0)
-                        .cursor_pointer()
-                        .pressable(cx.theme())
-                        .text_xs()
-                        .text_color(accent())
-                        .child("Cancel")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.cancel_media_download(FileId(file_id), cx);
-                        })),
-                )
+        // The disc is the primary action: pause/resume (inside the progress
+        // ring), retry, or open.
+        let (icon, label, ring) = if active {
+            (
+                if paused {
+                    IconName::Play
+                } else {
+                    IconName::Pause
+                },
+                if paused {
+                    "Resume download"
+                } else {
+                    "Pause download"
+                },
+                // Paused: a frozen ring; unknown progress: a spinning one.
+                Some(if paused {
+                    Some(progress.unwrap_or(0.))
+                } else {
+                    progress
+                }),
+            )
         } else if failed {
-            div().flex().gap_2().child(
-                div()
-                    .id(("download-retry", file_id as u64))
-                    .role(gpui_kit::Role::Button)
-                    .aria_label("Retry download")
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .text_xs()
-                    .text_color(accent())
-                    .child("Retry")
+            (IconName::RotateCcw, "Retry download", None)
+        } else {
+            (IconName::File, "Open file", None)
+        };
+        let disc = super::message_media::action_disc(
+            ("download-disc", file_id as u64),
+            false,
+            icon,
+            ring,
+            label,
+            cx,
+        )
+        .size(px(40.))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            let id = FileId(file_id);
+            if active && paused {
+                this.resume_media_download(id, cx);
+            } else if active {
+                this.pause_media_download(id, cx);
+            } else if failed {
+                this.request_media_download(id, None, cx);
+            } else {
+                this.open_downloaded_file(id, cx);
+            }
+        }));
+        let secondary = if active {
+            Some(
+                Button::new(("download-cancel", file_id as u64))
+                    .icon(IconName::X)
+                    .ghost()
+                    .small()
+                    .tooltip("Cancel download")
+                    .accessibility_label("Cancel download")
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.request_media_download(FileId(file_id), None, cx);
+                        this.cancel_media_download(FileId(file_id), cx);
+                    })),
+            )
+        } else if !failed {
+            Some(
+                Button::new(("download-reveal", file_id as u64))
+                    .icon(IconName::FolderOpen)
+                    .ghost()
+                    .small()
+                    .tooltip("Show in folder")
+                    .accessibility_label("Show downloaded file in folder")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.reveal_downloaded_file(FileId(file_id), cx);
                     })),
             )
         } else {
-            div()
-                .flex()
-                .gap_2()
-                .child(
-                    div()
-                        .id(("download-open", file_id as u64))
-                        .role(gpui_kit::Role::Button)
-                        .aria_label("Open downloaded file")
-                        .tab_index(0)
-                        .cursor_pointer()
-                        .pressable(cx.theme())
-                        .text_xs()
-                        .text_color(accent())
-                        .child("Open")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_downloaded_file(FileId(file_id), cx);
-                        })),
-                )
-                .child(
-                    div()
-                        .id(("download-reveal", file_id as u64))
-                        .role(gpui_kit::Role::Button)
-                        .aria_label("Show downloaded file in Finder")
-                        .tab_index(0)
-                        .cursor_pointer()
-                        .pressable(cx.theme())
-                        .text_xs()
-                        .text_color(accent())
-                        .child("Show in folder")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.reveal_downloaded_file(FileId(file_id), cx);
-                        })),
-                )
+            None
         };
-        row.child(actions).into_any_element()
+        div()
+            .id(("download-row", file_id as u64))
+            .mx_1()
+            .px_2()
+            .py_1p5()
+            .rounded_md()
+            .hover(|style| style.bg(cx.theme().accent.opacity(0.5)))
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(disc)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_0p5()
+                    .child(div().text_sm().font_medium().truncate().child(name))
+                    .child(
+                        div()
+                            .text_xs()
+                            .truncate()
+                            .text_color(if failed {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().muted_foreground
+                            })
+                            .child(meta),
+                    ),
+            )
+            .children(secondary)
+            .into_any_element()
     }
 }
