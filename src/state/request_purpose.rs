@@ -84,6 +84,10 @@ pub enum RequestPurpose {
     },
     /// `getChatHistory` around a jump target (Unigram `LoadMessageSliceImpl`).
     GetHistoryAround,
+    /// `getChatHistory` with a negative offset: the page newer than the
+    /// loaded window's newest message, while the window does not reach the
+    /// chat's latest message (`HistoryState::has_newer`).
+    GetHistoryNewer,
     /// `editMessageText` / `editMessageCaption`. Response is `message`.
     EditMessage,
     /// `deleteMessages`. Response is `ok`; rows leave via `updateDeleteMessages`.

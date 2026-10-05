@@ -68,6 +68,10 @@ pub struct Session {
     /// chats the delete-confirm dialog offers to leave with the folder.
     pub folder_chats_to_leave: HashMap<i32, Vec<i64>>,
     pub histories: HashMap<i64, HistoryState>,
+    /// History page requests issued for a window that has since been
+    /// replaced (`reset_history_window`): their answers are dropped so an
+    /// old page can't land in the new window and fake contiguity.
+    pub(crate) stale_history_requests: HashSet<u64>,
     /// M1: parsed `messageLink.link` from the last `getMessageLink` response
     /// (one-shot; the UI copies it to the clipboard and clears it).
     pub message_link_result: Option<String>,
@@ -957,6 +961,7 @@ impl Session {
             folder_remove_queue: Vec::new(),
             folder_chats_to_leave: HashMap::new(),
             histories: HashMap::new(),
+            stale_history_requests: HashSet::new(),
             message_link_result: None,
             message_caption_length_max: 1024,
             // Slice CL1: TDLib's compiled defaults for the pin limits

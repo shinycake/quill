@@ -230,6 +230,26 @@ pub struct HistoryState {
     /// The UI has reported visible rows this open generation; from then on
     /// only reported rows are viewed (before that, only the newest row).
     pub visible_reported: bool,
+    /// The loaded window is one contiguous run of the chat's history. When
+    /// it does not reach the chat's latest message (opened at the first
+    /// unread, or jumped back to an old message), newer pages load on
+    /// demand and live `updateNewMessage`s stay out of it — inserting them
+    /// would show a gapless timeline that is missing messages.
+    pub has_newer: bool,
+    /// A newer-page request failed; stop auto-loading until the window is
+    /// reset, so a persistent error can't re-send on every render.
+    pub newer_failed: bool,
+    /// The chat's last read incoming message when it was opened with unread
+    /// messages: the window loads around it and the UI draws the "Unread
+    /// messages" divider after it. Cleared by jumping to the latest.
+    pub unread_anchor: Option<MessageId>,
+    /// Bumped whenever the window is replaced, so the UI re-anchors its
+    /// scroll position (unread divider, jump target, or bottom).
+    pub window_epoch: u64,
+    /// Newest server message id ever seen for this chat (survives window
+    /// resets): a lower bound for the chat's latest message when the chat
+    /// summary doesn't carry one.
+    pub latest_seen: i64,
 }
 
 impl HistoryState {
@@ -241,9 +261,35 @@ impl HistoryState {
         self.messages.keys().next().copied().map(MessageId)
     }
 
+    /// Newest server message in the window (pending sends excluded: their
+    /// temporary ids are not positions in the server history).
+    pub fn newest_id(&self) -> Option<MessageId> {
+        self.messages
+            .values()
+            .rev()
+            .find(|message| !message.pending && !message.failed)
+            .map(|message| message.id)
+    }
+
+    /// Drop the loaded window so a new one can load somewhere else in the
+    /// chat. Tombstones and `viewMessages` bookkeeping stay.
+    pub(crate) fn reset_window(&mut self) {
+        self.messages.clear();
+        self.loaded_complete = false;
+        self.has_newer = false;
+        self.newer_failed = false;
+        self.window_epoch = self.window_epoch.wrapping_add(1);
+    }
+
     pub(crate) fn upsert(&mut self, message: HistoryMessage) {
         if self.tombstones.contains(&message.id.0) {
             return;
+        }
+        // Incoming messages always carry server ids; an outgoing row may
+        // still hold a temporary id that never becomes a server position
+        // (failed sends), and the chat summary covers outgoing tails.
+        if !message.is_outgoing && !message.pending && !message.failed {
+            self.latest_seen = self.latest_seen.max(message.id.0);
         }
         self.messages.insert(message.id.0, message);
     }

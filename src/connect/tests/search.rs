@@ -119,15 +119,17 @@ fn driver_search_happy_empty_error_and_select() {
         .unwrap();
     assert_eq!(driver.session.search.status, SearchStatus::Closed);
     assert_eq!(driver.session.open_chat, Some(ChatId(7)));
-    assert!(
-        driver
-            .session
-            .histories
-            .get(&7)
-            .unwrap()
-            .messages
-            .contains_key(&50)
+    // The hit opens in context: a window loads around it (highlighted)
+    // instead of the lone hit being spliced into the history.
+    assert_eq!(
+        driver.session.chat_search.jump,
+        crate::state::ChatSearchJump::Loading {
+            message_id: MessageId(50)
+        }
     );
+    assert!(recorder.snapshot().iter().any(|j| {
+        j.contains("\"@type\":\"getChatHistory\"") && j.contains("\"from_message_id\":50")
+    }));
     assert!(
         recorder.snapshot().iter().any(
             |j| j.contains("\"@type\":\"addRecentlyFoundChat\"") && j.contains("\"chat_id\":7")
@@ -477,24 +479,21 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
             .unwrap();
     assert_eq!(driver.session.chat_search.status, SearchStatus::Empty);
 
-    let before_close = driver
-        .session
-        .histories
-        .get(&7)
-        .unwrap()
-        .messages
-        .contains_key(&50);
+    // Jumping to 40 replaced the window (50 was newer and not adjacent to
+    // the loaded page): it now knows it stops short of the latest message.
+    let history = driver.session.histories.get(&7).unwrap();
+    assert!(!history.contains(MessageId(50)));
+    assert!(history.has_newer);
     driver.close_chat_search();
     assert_eq!(driver.session.chat_search.status, SearchStatus::Closed);
     assert_eq!(driver.session.open_chat, Some(ChatId(7)));
-    assert!(before_close);
     assert!(
         driver
             .session
             .histories
             .get(&7)
             .unwrap()
-            .contains(MessageId(50))
+            .contains(MessageId(40))
     );
     assert_eq!(SEARCH_DEBOUNCE, Duration::from_millis(900));
     assert!(!sink.rendered().contains("CANARY_DRV_chat"));

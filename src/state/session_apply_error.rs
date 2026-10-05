@@ -1180,6 +1180,11 @@ impl Session {
                 call_request_error_line(&err, "Could not load shared media"),
             );
         }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetHistoryNewer
+        {
+            self.fail_history_newer(pending);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetHistoryAround)
             && let Some(message_id) = pending.and_then(|p| p.around_message_id)
         {

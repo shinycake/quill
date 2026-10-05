@@ -395,9 +395,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
-        self.session.promote_search_message(chat_id, message_id);
         self.session.close_search();
-        self.select_chat(chat_id)
+        let opened = self.select_chat(chat_id)?;
+        // Open the found message in context (a window around it, with the
+        // highlight) rather than splicing the lone hit into the history.
+        match self.jump_to_chat_search_message(message_id)? {
+            Some(extra) => Ok(Some(extra)),
+            None => Ok(opened),
+        }
     }
 
     /// tdesktop `searchInChat` when history is focused (`Command::Search` / Ctrl+F).
@@ -613,7 +618,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         match self.session.begin_chat_search_jump(message_id) {
             ChatSearchJumpNeed::AlreadyReady | ChatSearchJumpNeed::Missing => Ok(None),
-            ChatSearchJumpNeed::LoadAround => self.fetch_history_around(message_id),
+            ChatSearchJumpNeed::LoadAround => {
+                // The target is outside the loaded window: replace the
+                // window instead of dropping a disconnected slice into it.
+                if let Some(chat_id) = self.session.chat_search.chat_id.or(self.session.open_chat) {
+                    self.session.reset_history_window(chat_id);
+                }
+                self.fetch_history_around(message_id)
+            }
         }
     }
 

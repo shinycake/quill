@@ -26,6 +26,9 @@ pub(crate) struct HistoryRowInputs {
     /// Local-day separator rendered above the row ("Today", "Monday",
     /// "12 March") when this row starts a new day.
     pub(crate) day_label: Option<String>,
+    /// First unread incoming message: the "Unread messages" divider sits
+    /// above it.
+    pub(crate) unread_divider: bool,
     pub(crate) selected_forward: bool,
     pub(crate) quote_preview: Option<String>,
     pub(crate) forward_from: Option<String>,
@@ -62,6 +65,7 @@ pub(crate) enum HistoryRow {
         receipt: OutboxReceipt,
         sender_avatar: Option<(String, Option<PathBuf>)>,
         day_label: Option<String>,
+        unread_divider: bool,
     },
 }
 
@@ -70,6 +74,13 @@ impl HistoryRow {
         match self {
             HistoryRow::Single(inputs) => inputs.day_label.as_deref(),
             HistoryRow::Album { day_label, .. } => day_label.as_deref(),
+        }
+    }
+
+    pub(crate) fn unread_divider(&self) -> bool {
+        match self {
+            HistoryRow::Single(inputs) => inputs.unread_divider,
+            HistoryRow::Album { unread_divider, .. } => *unread_divider,
         }
     }
 
@@ -85,6 +96,7 @@ impl HistoryRow {
                     && a.quote_preview == b.quote_preview
                     && a.forward_from == b.forward_from
                     && a.day_label == b.day_label
+                    && a.unread_divider == b.unread_divider
                     && a.run_start == b.run_start
                     && a.sender_avatar == b.sender_avatar
             }
@@ -99,7 +111,12 @@ impl HistoryRow {
                     sender: sb,
                     ..
                 },
-            ) => a == b && sa == sb && self.day_label() == other.day_label(),
+            ) => {
+                a == b
+                    && sa == sb
+                    && self.day_label() == other.day_label()
+                    && self.unread_divider() == other.unread_divider()
+            }
             _ => false,
         }
     }

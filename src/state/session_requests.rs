@@ -3,7 +3,10 @@ use super::*;
 
 impl Session {
     pub fn request(&mut self, purpose: RequestPurpose, chat_id: Option<ChatId>) -> RequestId {
-        let view = if matches!(purpose, RequestPurpose::GetHistory) {
+        let view = if matches!(
+            purpose,
+            RequestPurpose::GetHistory | RequestPurpose::GetHistoryNewer
+        ) {
             Some(self.view_generation)
         } else {
             None

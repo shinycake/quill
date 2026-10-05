@@ -120,6 +120,10 @@ impl Session {
         history.viewing.clear();
         history.visible.clear();
         history.visible_reported = false;
+        history.unread_anchor = self
+            .chats
+            .get(&chat_id.0)
+            .and_then(ChatSummary::unread_anchor);
     }
 
     /// Message ids of the open history that are due for `viewMessages`
@@ -145,6 +149,11 @@ impl Session {
                 .filter(|id| due(*id))
                 .map(MessageId)
                 .collect();
+        }
+        // Opened at the first unread message: nothing is read until the
+        // UI reports what is actually on screen.
+        if history.unread_anchor.is_some() {
+            return Vec::new();
         }
         history
             .messages
