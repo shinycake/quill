@@ -422,7 +422,11 @@ pub(super) fn session_history_row(
     look: BubbleLook,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let look = if matches!(message.content, MessageContent::Sticker(_)) {
+    // Stickers and round video messages stand on their own, without a bubble.
+    let look = if matches!(
+        message.content,
+        MessageContent::Sticker(_) | MessageContent::VideoNote(_)
+    ) {
         BubbleLook {
             plain: true,
             ..look
