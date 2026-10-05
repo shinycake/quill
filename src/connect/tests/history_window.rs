@@ -218,3 +218,27 @@ fn a_failed_send_does_not_make_the_window_look_short() {
     ));
     assert!(h.history().contains(MessageId(70)));
 }
+
+#[test]
+fn last_editable_message_is_the_newest_own_message_of_a_tail_window() {
+    let mut h = Harness::with_unread_chat();
+    h.ingest(r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":60,"unread_count":0}"#);
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    let page = format!(
+        r#"{{"@type":"messages","@extra":"{}","total_count":3,"messages":[{},{},{}]}}"#,
+        first.0,
+        message_json(60, false),
+        message_json(55, true),
+        message_json(50, true)
+    );
+    h.ingest(&page);
+    let edit = h
+        .driver
+        .session
+        .last_editable_message(ChatId(7))
+        .expect("own text message");
+    assert_eq!(edit.message_id, MessageId(55));
+    // A window that stops short of the latest has no reliable "last".
+    h.driver.session.histories.get_mut(&7).unwrap().has_newer = true;
+    assert!(h.driver.session.last_editable_message(ChatId(7)).is_none());
+}

@@ -1474,6 +1474,31 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Up in the composer: start editing the last own message when the
+    /// composer is focused and empty and nothing else uses the key.
+    pub(super) fn try_edit_last_message(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.composer.read(cx).focus_handle(cx).is_focused(window)
+            || !self.composer.read(cx).value().is_empty()
+            || self.pending_edit.is_some()
+            || !self.pending_attachments.is_empty()
+            || self.command_menu_open
+        {
+            return false;
+        }
+        let Some(edit) = self
+            .session()
+            .and_then(|s| s.open_chat.and_then(|chat| s.last_editable_message(chat)))
+        else {
+            return false;
+        };
+        self.begin_edit(edit, window, cx);
+        true
+    }
+
     pub(super) fn begin_edit(
         &mut self,
         edit: ComposerEdit,
