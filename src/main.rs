@@ -21,7 +21,11 @@ gpui_kit::assets::icon_assets!(
         Send,
         Pin,
         CheckCheck,
-        BellOff
+        BellOff,
+        ALargeSmall,
+        Reply,
+        Pencil,
+        Trash
     ]
 );
 

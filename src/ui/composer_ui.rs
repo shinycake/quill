@@ -7,6 +7,7 @@ use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
@@ -555,39 +556,24 @@ impl QuillApp {
             quill::composer::ComposerEditKind::Text => "Editing message",
             quill::composer::ComposerEditKind::Caption => "Editing caption",
         };
-        div()
-            .id("composer-edit-header")
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(warning())
-            .bg(bg_subtle())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(warning())
-                            .child(kind),
-                    )
-                    .child(div().text_sm().text_color(text_primary()).child(preview)),
-            )
-            .child(
-                Button::new("cancel-edit")
-                    .label("Cancel")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.clear_edit(window, cx);
-                    })),
-            )
+        composer_context_bar(
+            "composer-edit-header",
+            gpui_kit::assets::IconName::Pencil,
+            accent().into(),
+            kind,
+            preview,
+            None,
+            Button::new("cancel-edit")
+                .icon(gpui_kit::assets::IconName::X)
+                .ghost()
+                .small()
+                .tooltip("Cancel editing")
+                .accessibility_label("Cancel editing")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.clear_edit(window, cx);
+                })),
+            cx,
+        )
     }
 
     /// MED4b: debounced `getLinkPreview` prefetch for the detected-URL
@@ -900,91 +886,60 @@ impl QuillApp {
 
     pub(super) fn delete_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let confirm = self.pending_delete.clone();
-        let scope_label = match confirm.as_ref() {
-            // M1: only own outgoing messages offer the for-everyone toggle
-            // (`deleteMessages.revoke`, schema 1.8.67 lines 6228–6229);
-            // incoming deletes are always for-me.
-            Some(c) if c.can_revoke => {
-                if c.revoke {
-                    "Deletes for everyone"
-                } else {
-                    "Deletes for me"
-                }
-            }
-            _ => "Deletes for me",
-        };
-        div()
-            .id("delete-confirm")
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(danger())
-            .bg(danger_bg())
-            .child(
+        let can_revoke = confirm.as_ref().is_some_and(|c| c.can_revoke);
+        let revoke = confirm.as_ref().is_some_and(|c| c.revoke);
+        composer_context_bar(
+            "delete-confirm",
+            gpui_kit::assets::IconName::Trash,
+            danger().into(),
+            "Delete message?",
+            if can_revoke && revoke {
+                "It will be deleted for everyone in this chat.".to_string()
+            } else {
+                "It will be deleted for you only.".to_string()
+            },
+            Some(
                 div()
                     .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(danger())
-                            .child("Delete this message?"),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(text_primary())
-                            .child(scope_label.to_string()),
-                    ),
-            )
-            .when(confirm.as_ref().is_some_and(|c| c.can_revoke), |this| {
-                this.child(
-                    Button::new("delete-toggle-scope")
-                        .label(if confirm.as_ref().is_some_and(|c| c.revoke) {
-                            "For me"
-                        } else {
-                            "For everyone"
-                        })
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(confirm) = this.pending_delete.as_mut() {
-                                confirm.revoke = !confirm.revoke;
-                                this.status_note = if confirm.revoke {
-                                    "delete: for everyone".into()
-                                } else {
-                                    "delete: for me".into()
-                                };
-                            }
-                            cx.notify();
-                        })),
-                )
-            })
-            .child(
-                div()
-                    .flex()
+                    .items_center()
                     .gap_2()
-                    .child(
-                        Button::new("cancel-delete")
-                            .label("Cancel")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cancel_delete(cx);
-                            })),
-                    )
+                    .when(can_revoke, |this| {
+                        this.child(
+                            // M1: only own outgoing messages offer the
+                            // for-everyone option (`deleteMessages.revoke`).
+                            Checkbox::new("delete-for-everyone")
+                                .label("Delete for everyone")
+                                .checked(revoke)
+                                .on_click(cx.listener(|this, &on: &bool, _, cx| {
+                                    if let Some(confirm) = this.pending_delete.as_mut() {
+                                        confirm.revoke = on;
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .child(
                         Button::new("confirm-delete")
                             .label("Delete")
+                            .danger()
+                            .small()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.confirm_delete(cx);
                             })),
-                    ),
-            )
+                    )
+                    .into_any_element(),
+            ),
+            Button::new("cancel-delete")
+                .icon(gpui_kit::assets::IconName::X)
+                .ghost()
+                .small()
+                .tooltip("Cancel")
+                .accessibility_label("Cancel delete")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.cancel_delete(cx);
+                })),
+            cx,
+        )
     }
 
     pub(super) fn composer_reply_banner(
@@ -998,41 +953,73 @@ impl QuillApp {
             .quote
             .as_ref()
             .map(|quote| format!("❝{}❞", quote.text));
-        div()
-            .id("composer-reply-quote")
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_subtle())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(accent())
-                            .child("Replying to"),
-                    )
-                    .child(div().text_sm().text_color(text_primary()).child(preview))
-                    .when_some(quote_label, |this, label| {
-                        this.child(div().text_xs().text_color(text_muted()).child(label))
-                    }),
-            )
-            .child(
-                Button::new("cancel-reply")
-                    .label("Cancel")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.clear_reply(cx);
-                    })),
-            )
+        composer_context_bar(
+            "composer-reply-quote",
+            gpui_kit::assets::IconName::Reply,
+            accent().into(),
+            "Reply",
+            quote_label.unwrap_or(preview),
+            None,
+            Button::new("cancel-reply")
+                .icon(gpui_kit::assets::IconName::X)
+                .ghost()
+                .small()
+                .tooltip("Cancel reply")
+                .accessibility_label("Cancel reply")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.clear_reply(cx);
+                })),
+            cx,
+        )
     }
+}
+
+/// Slim bar above the composer for what the next send will do (reply,
+/// edit, delete confirm): icon, accent rule, title and one-line preview,
+/// optional trailing controls, and a close button.
+#[allow(clippy::too_many_arguments)]
+fn composer_context_bar(
+    id: &'static str,
+    icon: gpui_kit::assets::IconName,
+    color: Hsla,
+    title: impl Into<SharedString>,
+    preview: impl Into<SharedString>,
+    trailing: Option<AnyElement>,
+    close: Button,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap_3()
+        .px_2()
+        .py_1()
+        .child(Icon::new(icon).size(px(18.)).text_color(color))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .pl_2()
+                .border_l_2()
+                .border_color(color)
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(color)
+                        .child(title.into()),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .truncate()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(preview.into()),
+                ),
+        )
+        .when_some(trailing, |this, trailing| this.child(trailing))
+        .child(close)
 }
