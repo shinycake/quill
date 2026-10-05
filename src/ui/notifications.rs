@@ -35,6 +35,10 @@ pub(super) fn notification_settings_json(settings: &ChatNotificationSettings) ->
     )
 }
 
+/// Main-thread time one poll tick may spend applying TDLib updates (half a
+/// 60 Hz frame).
+const INGEST_BUDGET: Duration = Duration::from_millis(8);
+
 impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
         let generation = self.connection_generation;
@@ -108,6 +112,11 @@ impl QuillApp {
         // before one poll runs; a `prev_auth`-only check then sees
         // Ready → Closed and misses the restart entirely.
         let mut saw_logging_out = matches!(prev_auth, AuthorizationState::LoggingOut);
+        // Apply updates under a per-tick time budget: a sync burst (thousands
+        // of updates after reconnecting) is spread over several frames
+        // instead of freezing one. Leftovers stay queued and the loop comes
+        // back at its busy cadence.
+        let budget_start = std::time::Instant::now();
         while let Some(owned) = live.bridge.next_timeout(Duration::from_millis(0)) {
             if live.driver.ingest(owned).is_err() {
                 send_failed = true;
@@ -115,6 +124,9 @@ impl QuillApp {
             saw_logging_out = saw_logging_out
                 || matches!(live.driver.session.auth, AuthorizationState::LoggingOut);
             progressed = true;
+            if budget_start.elapsed() >= INGEST_BUDGET {
+                break;
+            }
         }
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
