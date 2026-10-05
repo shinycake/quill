@@ -467,21 +467,30 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .unwrap_or(0) as i32,
         }),
         // Slice CL3: mention / reaction badge counts (schema 1.8.67,
-        // lines 10567/10570).
-        "updateChatUnreadMentionCount" => Ok(EnvelopePayload::UpdateChatUnreadMentionCount {
-            chat_id: ChatId(int53(value.get("chat_id"))?),
-            unread_mention_count: value
-                .get("unread_mention_count")
-                .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
-        }),
-        "updateChatUnreadReactionCount" => Ok(EnvelopePayload::UpdateChatUnreadReactionCount {
-            chat_id: ChatId(int53(value.get("chat_id"))?),
-            unread_reaction_count: value
-                .get("unread_reaction_count")
-                .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
-        }),
+        // lines 10567/10570). Reading a mention or a reaction reports the
+        // chat's new counter on `updateMessageMentionRead` /
+        // `updateMessageUnreadReactions` instead (lines 10443/10450);
+        // Quill keeps no per-message unread flags, so both fold into the
+        // chat counter (Telegram X `Tdlib.updateMessageMentionRead` /
+        // `Tdlib.updateMessageUnreadReactions`).
+        "updateChatUnreadMentionCount" | "updateMessageMentionRead" => {
+            Ok(EnvelopePayload::UpdateChatUnreadMentionCount {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                unread_mention_count: value
+                    .get("unread_mention_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+            })
+        }
+        "updateChatUnreadReactionCount" | "updateMessageUnreadReactions" => {
+            Ok(EnvelopePayload::UpdateChatUnreadReactionCount {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                unread_reaction_count: value
+                    .get("unread_reaction_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+            })
+        }
         // Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594).
         "updateChatBlockList" => Ok(EnvelopePayload::UpdateChatBlockList {
             chat_id: ChatId(int53(value.get("chat_id"))?),

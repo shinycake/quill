@@ -930,3 +930,34 @@ fn new_chat_positions_place_the_chat_in_its_lists() {
         .collect();
     assert_eq!(folder, vec![11]);
 }
+
+#[test]
+fn message_level_read_updates_refresh_chat_badge_counts() {
+    // Reading a mention / reaction reports the chat's new counter on the
+    // message-level update (schema 1.8.67, lines 10443 and 10450).
+    // Telegram X copies the count onto the chat
+    // (`Tdlib.updateMessageMentionRead` / `Tdlib.updateMessageUnreadReactions`).
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":21,"title":"group","type":{"@type":"chatTypeBasicGroup","basic_group_id":21},"unread_count":4,"unread_mention_count":2,"unread_reaction_count":3}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageMentionRead","chat_id":21,"message_id":1048576,"unread_mention_count":1}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageUnreadReactions","chat_id":21,"message_id":2097152,"unread_reactions":[],"unread_reaction_count":0}"#,
+    );
+    let chat = session.chats.get(&21).unwrap();
+    assert_eq!(chat.unread_mention_count, 1);
+    assert_eq!(chat.unread_reaction_count, 0);
+}
