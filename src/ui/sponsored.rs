@@ -92,39 +92,54 @@ pub(super) fn sponsored_message_row(
             None,
             cx,
         )),
-        MessageContent::Photo(photo) => Some(photo_attachment(
-            row_id,
-            photo,
-            files,
-            downloading,
-            media_roots,
-            Some((chat_id, message.message_id)),
-            None,
-            cx,
-        )),
-        MessageContent::Animation(animation) => Some(animation_attachment(
-            MessageId(message.message_id),
-            animation,
-            files,
-            downloading,
-            media_roots,
-            false,
-            None,
-            Some((chat_id, message.message_id)),
-            cx,
-        )),
-        MessageContent::Video(video) => Some(video_attachment(
-            MessageId(message.message_id),
-            video,
-            files,
-            downloading,
-            media_roots,
-            false,
-            None,
-            Some((chat_id, message.message_id)),
-            None,
-            cx,
-        )),
+        MessageContent::Photo(photo) => Some(
+            div()
+                .mt_2()
+                .child(photo_attachment(
+                    row_id,
+                    photo,
+                    files,
+                    downloading,
+                    media_roots,
+                    Some((chat_id, message.message_id)),
+                    None,
+                    cx,
+                ))
+                .into_any_element(),
+        ),
+        MessageContent::Animation(animation) => Some(
+            div()
+                .mt_2()
+                .child(animation_attachment(
+                    MessageId(message.message_id),
+                    animation,
+                    files,
+                    downloading,
+                    media_roots,
+                    false,
+                    None,
+                    Some((chat_id, message.message_id)),
+                    cx,
+                ))
+                .into_any_element(),
+        ),
+        MessageContent::Video(video) => Some(
+            div()
+                .mt_2()
+                .child(video_attachment(
+                    MessageId(message.message_id),
+                    video,
+                    files,
+                    downloading,
+                    media_roots,
+                    false,
+                    None,
+                    Some((chat_id, message.message_id)),
+                    None,
+                    cx,
+                ))
+                .into_any_element(),
+        ),
         MessageContent::Document(doc) => Some(document_chip(
             row_id,
             doc,

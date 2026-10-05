@@ -937,6 +937,30 @@ pub(super) fn session_history_row(
             caption_below_el = el;
         }
     }
+    // Photo/GIF/video bubbles without a reply or forward header: the
+    // picture sits on a thin inset and a caption gets its own padding.
+    let media_led = header.is_none()
+        && extra_media.is_some()
+        && matches!(
+            effective_content(&message.content, message.ephemeral.as_ref()),
+            MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_)
+        );
+    // Media with nothing under it shows its time on the picture.
+    let footer_overlay = media_led && caption_below_el.is_none() && reserve_footer;
+    let caption_below_el = caption_below_el.map(|caption| {
+        if media_led {
+            div().px_2().pt_1().child(caption).into_any_element()
+        } else {
+            caption
+        }
+    });
+    let extra_media = extra_media.map(|media| {
+        if media_led {
+            media
+        } else {
+            div().mt_2().child(media).into_any_element()
+        }
+    });
     let extra_is_empty =
         extra_media.is_none() && caption_below_el.is_none() && tail_empty && keyboard.is_none();
     let extra = Some(
@@ -978,6 +1002,8 @@ pub(super) fn session_history_row(
             message.pending,
         );
         chrome.footer_inline = footer_inline;
+        chrome.footer_overlay = footer_overlay;
+        chrome.media_led = media_led;
         chrome.actions = more_btn.take().map(IntoElement::into_any_element);
         chrome
     };
