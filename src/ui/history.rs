@@ -27,9 +27,9 @@ use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::ComposerReplyTo;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::FileId;
+use quill::ids::{ChatId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{HistoryMessage, OutboxReceipt, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
@@ -191,17 +191,13 @@ pub(super) fn album_history_row(
         };
         if text.is_empty() { None } else { Some(text) }
     });
-    let reply_target = ComposerReplyTo::new(
-        first.chat_id,
-        first.id,
-        caption.clone().unwrap_or_else(|| "Album".into()),
-    );
-    let reply_btn = Button::new(format!("reply-album-{}", album_id))
-        .label("Reply")
-        .ghost()
-        .on_click(cx.listener(move |this, _, window, cx| {
-            this.begin_reply_to(reply_target.clone(), window, cx);
-        }));
+    // Media-led like single photos: the mosaic sits on a thin inset and,
+    // without a caption, the time rides on the picture.
+    let has_caption = caption.is_some();
+    let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending);
+    chrome.media_led = true;
+    chrome.footer_overlay = !has_caption;
+    chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx).into_any_element());
     let extra = div()
         .id(("album-extra", album_id as u64))
         .flex()
@@ -209,13 +205,12 @@ pub(super) fn album_history_row(
         .gap_1()
         .child(mosaic)
         .when_some(caption, |this, text| {
-            this.child(div().text_sm().child(text))
+            this.child(div().px_2().pt_1().text_sm().child(text))
         })
-        .child(reply_btn)
         .into_any_element();
     session_bubble_quoted(
         album_id as u64,
-        message_chrome(sender, receipt, sender_avatar, first.date, first.pending),
+        chrome,
         String::new(),
         first.is_outgoing,
         Some(extra),
@@ -223,6 +218,34 @@ pub(super) fn album_history_row(
         // Settings → Appearance: font size + bubble/plain style.
         look,
     )
+}
+
+/// Round "…" button shown beside a bubble on hover; opens the message menu.
+fn message_actions_button(
+    chat_id: ChatId,
+    message_id: MessageId,
+    cx: &mut Context<QuillApp>,
+) -> Button {
+    Button::new(format!("message-actions-{}", message_id.0))
+        .icon(IconName::Ellipsis)
+        .xsmall()
+        .rounded_full()
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(cx.theme().background.opacity(0.85))
+                .foreground(cx.theme().foreground)
+                .hover(cx.theme().background),
+        )
+        .tooltip("Message actions")
+        .accessibility_label("Message actions")
+        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+            this.message_menu = Some(MessageMenuState {
+                chat_id,
+                message_id,
+                position: event.position(),
+            });
+            cx.notify();
+        }))
 }
 
 pub(super) fn album_tile(
@@ -580,26 +603,7 @@ pub(super) fn session_history_row(
     };
     let chat_id = message.chat_id;
     let message_id = message.id;
-    let more_btn = Button::new(format!("message-actions-{}", message_id.0))
-        .icon(IconName::Ellipsis)
-        .xsmall()
-        .rounded_full()
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(cx.theme().background.opacity(0.85))
-                .foreground(cx.theme().foreground)
-                .hover(cx.theme().background),
-        )
-        .tooltip("Message actions")
-        .accessibility_label("Message actions")
-        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-            this.message_menu = Some(MessageMenuState {
-                chat_id,
-                message_id,
-                position: event.position(),
-            });
-            cx.notify();
-        }));
+    let more_btn = message_actions_button(chat_id, message_id, cx);
     // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
     // official clients' post footer. Renders whenever views exist; only
     // channel posts carry a view count in practice.
