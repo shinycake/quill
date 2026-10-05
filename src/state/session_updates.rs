@@ -14,6 +14,22 @@ impl Session {
         ) {
             self.account_export = None;
         }
+        // List paging belongs to one authorization. TDLib only leaves Ready
+        // through LoggingOut / Closing / Closed, so a later Ready (another
+        // login in this Session) must page every list from the start; the
+        // Ready entry resets too in case the leaving state was missed.
+        let entering_ready =
+            matches!(state, AuthorizationState::Ready) && self.auth != AuthorizationState::Ready;
+        if entering_ready
+            || matches!(
+                state,
+                AuthorizationState::LoggingOut | AuthorizationState::Closed
+            )
+        {
+            self.chats_exhausted = false;
+            self.archive_chats_exhausted = false;
+            self.folder_chats_exhausted.clear();
+        }
         if matches!(state, AuthorizationState::Closed) {
             self.shutdown = ShutdownPhase::Closed;
             self.requests.invalidate_account();
