@@ -15,11 +15,10 @@ use super::message_payments::{
 };
 use super::message_poll::poll_body;
 use super::message_text::{
-    caption_above_media, message_chrome, message_rich_block, message_text_block, reply_quote_strip,
-    rich_text_reserving,
+    caption_above_media, message_chrome, message_footer_meta, message_rich_block,
+    message_text_block, reply_quote_strip, rich_text_reserving,
 };
 use super::pressable::PressableDiv;
-use super::statistics::format_view_count;
 use super::synthetic::{BubbleLook, footer_reserve, session_bubble_quoted, session_bubble_rich};
 use super::*;
 use gpui_kit::component::button::*;
@@ -611,41 +610,22 @@ pub(super) fn session_history_row(
     // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
     // official clients' post footer. Renders whenever views exist; only
     // channel posts carry a view count in practice.
-    let views_footer = message
+    // Channel post views and the author signature ride in the footer row
+    // with the time ("Demo Admin · 👁 12.4K · 16:44").
+    let views = message
         .interaction_info
         .as_ref()
         .map(|info| info.view_count)
-        .filter(|&count| count > 0)
-        .map(|count| {
-            div()
-                .id(("row-views", message_id.0 as u64))
-                .mt_1()
-                .text_xs()
-                .opacity(0.75)
-                .child(format!("👁 {}", format_view_count(count)))
-        });
+        .filter(|&count| count > 0);
     // Phase D2: author signature (`message.author_signature`, schema 1.8.67
     // lines 3155/3165). The official clients show it under channel posts
     // and anonymous admin messages. Suppressed when the message is
     // forwarded — `forward_from_strip` already attributes the signature
     // there, and a second line would double-attribute.
-    let author_signature_line = message
+    let signature = message
         .author_signature
-        .as_ref()
-        .filter(|_| message.forward_info.is_none())
-        .map(|signature| {
-            div()
-                .id(("row-signature", message_id.0 as u64))
-                .mt_1()
-                .text_xs()
-                // Inside the bubble fill: white on outgoing, kit muted otherwise.
-                .text_color(if message.is_outgoing {
-                    text_on_fill().into()
-                } else {
-                    cx.theme().muted_foreground
-                })
-                .child(signature.clone())
-        });
+        .clone()
+        .filter(|_| message.forward_info.is_none());
     let chips = message.emoji_reaction_chips();
     let chip_row = (!chips.is_empty()).then(|| {
         let mut row = div()
@@ -877,8 +857,8 @@ pub(super) fn session_history_row(
     let tail_empty = keyboard.is_none()
         && self_destruct_badge.is_none()
         && auto_delete_chip.is_none()
-        && views_footer.is_none()
-        && author_signature_line.is_none()
+        && views.is_none()
+        && signature.is_none()
         && chip_row.is_none();
     let reserve_footer = tail_empty && message.date > 0;
     // M2: ephemeral content replaces the regular content for rendering
@@ -1008,8 +988,6 @@ pub(super) fn session_history_row(
                 this.child(chip.when(media_led, |chip| chip.px_2()))
             })
             .when_some(keyboard, |this, keyboard| this.child(keyboard))
-            .when_some(views_footer, |this, footer| this.child(footer))
-            .when_some(author_signature_line, |this, line| this.child(line))
             .when_some(chip_row, |this, chips| this.child(chips))
             .into_any_element(),
     )
@@ -1035,6 +1013,15 @@ pub(super) fn session_history_row(
             message.date,
             message.pending,
         );
+        if views.is_some() || signature.is_some() {
+            chrome.footer = message_footer_meta(
+                message.date,
+                message.pending,
+                receipt,
+                views,
+                signature.clone(),
+            );
+        }
         chrome.footer_inline = footer_inline;
         chrome.footer_overlay = footer_overlay;
         chrome.media_led = media_led;

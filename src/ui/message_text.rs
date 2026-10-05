@@ -354,6 +354,56 @@ pub(super) fn message_footer(
     )
 }
 
+/// The time footer of a channel post or signed message: author signature,
+/// view count (eye icon) and the time/receipt, on one row.
+pub(super) fn message_footer_meta(
+    date: i32,
+    pending: bool,
+    receipt: OutboxReceipt,
+    views: Option<i32>,
+    signature: Option<String>,
+) -> Option<AnyElement> {
+    let time = message_footer(date, pending, receipt);
+    if views.is_none() && signature.is_none() {
+        return time;
+    }
+    Some(
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_xs()
+            .when_some(signature, |this, signature| {
+                this.child(
+                    div()
+                        .opacity(0.7)
+                        .max_w(px(200.))
+                        .truncate()
+                        .child(signature),
+                )
+            })
+            .when_some(views, |this, views| {
+                this.child(
+                    div()
+                        .id("message-views")
+                        .role(Role::Label)
+                        .aria_label(format!(
+                            "{} views",
+                            super::statistics::format_view_count(views)
+                        ))
+                        .flex()
+                        .items_center()
+                        .gap_0p5()
+                        .opacity(0.7)
+                        .child(Icon::new(gpui_kit::assets::IconName::Eye).size(px(12.)))
+                        .child(super::statistics::format_view_count(views)),
+                )
+            })
+            .children(time)
+            .into_any_element(),
+    )
+}
+
 /// kit Phase 4: kit `Avatar` — photo when available, otherwise the kit's
 /// initials + theme fallback colors. Shared by the message avatar slot
 /// and the `initials_avatar` / `chat_avatar` helpers below.
