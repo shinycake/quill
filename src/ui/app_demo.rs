@@ -1355,6 +1355,7 @@ impl QuillApp {
             history_window_epoch: 0,
             history_anchor_pending: false,
             history_had_newer: false,
+            history_rows_key: None,
             history_media_signature: (0, 0),
             last_highlight: None,
             group_call_composer,

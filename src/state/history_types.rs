@@ -214,9 +214,75 @@ impl HistoryMessage {
     }
 }
 
+/// A chat's loaded messages keyed by id. Reads go through `Deref`; every
+/// mutation goes through these methods and bumps `revision`, so views can
+/// cache what they derived from the messages and know exactly when to
+/// rebuild.
+#[derive(Debug, Default)]
+pub struct HistoryMessages {
+    map: BTreeMap<i64, HistoryMessage>,
+    revision: u64,
+}
+
+impl HistoryMessages {
+    /// Bumped on every mutation (conservatively: also on `get_mut`).
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub fn insert(&mut self, id: i64, message: HistoryMessage) -> Option<HistoryMessage> {
+        self.touch();
+        self.map.insert(id, message)
+    }
+
+    pub fn remove(&mut self, id: &i64) -> Option<HistoryMessage> {
+        self.touch();
+        self.map.remove(id)
+    }
+
+    pub fn get_mut(&mut self, id: &i64) -> Option<&mut HistoryMessage> {
+        self.touch();
+        self.map.get_mut(id)
+    }
+
+    pub fn values_mut(
+        &mut self,
+    ) -> std::collections::btree_map::ValuesMut<'_, i64, HistoryMessage> {
+        self.touch();
+        self.map.values_mut()
+    }
+
+    pub fn iter_mut(&mut self) -> std::collections::btree_map::IterMut<'_, i64, HistoryMessage> {
+        self.touch();
+        self.map.iter_mut()
+    }
+
+    pub fn retain(&mut self, keep: impl FnMut(&i64, &mut HistoryMessage) -> bool) {
+        self.touch();
+        self.map.retain(keep);
+    }
+
+    pub fn clear(&mut self) {
+        self.touch();
+        self.map.clear();
+    }
+}
+
+impl std::ops::Deref for HistoryMessages {
+    type Target = BTreeMap<i64, HistoryMessage>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.map
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct HistoryState {
-    pub messages: BTreeMap<i64, HistoryMessage>,
+    pub messages: HistoryMessages,
     pub tombstones: HashSet<i64>,
     pub loaded_complete: bool,
     pub view_generation: ViewGeneration,
