@@ -15,6 +15,11 @@ on:
         description: 'Unique run name for exact run tracking (optional; defaults to ref + run id)'
         required: false
         type: string
+      package:
+        description: 'Also build the release binary and package smoke (slow: LTO)'
+        required: false
+        default: false
+        type: boolean
 run-name: ${{ inputs.run_name || format('{0} (run {1})', inputs.ref, github.run_id) }}
 permissions:
   contents: read
@@ -31,6 +36,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
         with:
           ref: ${{ inputs.ref }}
+          # Keep the runner's cargo cache: the default clean (git clean
+          # -ffdx) deleted target/ and vendor/ before every build, so each
+          # run compiled everything from scratch.
+          clean: false
+          # Full history makes fetches into the persistent workspace
+          # incremental; a shallow fetch re-downloads the whole tree.
+          fetch-depth: 0
+      - name: clean workspace (keep build caches)
+        run: git clean -ffdx -e target/ -e vendor/
       - name: assert checked-out SHA matches requested ref
         run: |
           if [[ ! "$BUILDER_REF" =~ ^[0-9a-f]{40}$ ]]; then
@@ -52,10 +66,13 @@ jobs:
       - name: compile ui
         run: cargo build --features ui --locked
       - name: compile release ui
+        if: inputs.package
         run: cargo build --features ui --release --locked
       - name: build bundled TGS renderer
+        if: inputs.package
         run: bash scripts/build-rlottie.sh
       - name: package smoke
+        if: inputs.package
         run: bash scripts/macos-package-smoke.sh
       - name: publish actual build result
         if: always()
