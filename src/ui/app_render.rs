@@ -471,6 +471,20 @@ impl Render for QuillApp {
                             .flex()
                             .flex_1()
                             .min_h_0()
+                            // The chat list follows its resize edge while dragged.
+                            .on_drag_move(cx.listener(
+                                |this,
+                                 event: &DragMoveEvent<super::navigation::SidebarResize>,
+                                 window,
+                                 cx| {
+                                    let left = event.bounds.origin.x;
+                                    this.set_sidebar_width(
+                                        event.event.position.x - left,
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            ))
                             .child(self.sidebar(
                                 &auth,
                                 show_phone,
@@ -479,6 +493,7 @@ impl Render for QuillApp {
                                 show_qr,
                                 cx,
                             ))
+                            .child(self.sidebar_resize_handle(cx))
                             .child(self.conversation(cx))
                             // Phase 6: user / group info panel beside the conversation.
                             .when_some(self.info_panel(cx), |this, panel| this.child(panel))

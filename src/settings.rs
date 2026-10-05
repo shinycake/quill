@@ -100,13 +100,93 @@ fn save_json_prefs<T>(paths: &AccountPaths, file_name: &str, prefs: &T) -> std::
 where
     T: Serialize,
 {
-    let path = paths.root.join(file_name);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let bytes = serde_json::to_vec_pretty(prefs)
+    write_json_atomic(&paths.root.join(file_name), prefs)
+}
+
+/// Write `value` as JSON to `path` atomically: a sibling temp file is
+/// written, synced, and renamed over the target, so a crash mid-write
+/// leaves the previous file intact instead of a truncated one that would
+/// silently reset the settings to defaults.
+fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "no parent dir"))?;
+    std::fs::create_dir_all(parent)?;
+    let bytes = serde_json::to_vec_pretty(value)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, bytes)
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("prefs.json");
+    let tmp = parent.join(format!(".{file_name}.tmp-{}", std::process::id()));
+    let result = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// Main-window geometry, app-wide (`window_state.json` at the app root):
+/// restored on launch so the window reopens where the user left it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WindowState {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    #[serde(default)]
+    pub maximized: bool,
+    #[serde(default = "default_sidebar_width")]
+    pub sidebar_width: f32,
+}
+
+fn default_sidebar_width() -> f32 {
+    DEFAULT_SIDEBAR_WIDTH
+}
+
+/// Chat list column width when nothing is stored.
+pub const DEFAULT_SIDEBAR_WIDTH: f32 = 300.;
+/// Resizable chat list column bounds.
+pub const MIN_SIDEBAR_WIDTH: f32 = 240.;
+pub const MAX_SIDEBAR_WIDTH: f32 = 560.;
+
+impl WindowState {
+    /// Sizes that can't be a real window (corrupt file, 0×0 from a
+    /// minimized save) are rejected; the sidebar width is clamped.
+    pub fn sanitized(mut self) -> Option<Self> {
+        let finite = [self.x, self.y, self.width, self.height, self.sidebar_width]
+            .iter()
+            .all(|v| v.is_finite());
+        if !finite || self.width < 480. || self.height < 360. {
+            return None;
+        }
+        self.sidebar_width = self
+            .sidebar_width
+            .clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+        Some(self)
+    }
+}
+
+/// The stored main-window geometry, when there is a usable one.
+pub fn load_window_state() -> Option<WindowState> {
+    let path = safe_app_root()?.join("window_state.json");
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice::<WindowState>(&bytes)
+        .ok()?
+        .sanitized()
+}
+
+pub fn save_window_state(state: &WindowState) -> std::io::Result<()> {
+    let root = safe_app_root().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no app data directory")
+    })?;
+    write_json_atomic(&root.join("window_state.json"), state)
 }
 
 /// Load call prefs; missing or corrupt files fall back to defaults
@@ -859,6 +939,50 @@ pub fn use_isolated_app_root(root: PathBuf) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn atomic_json_write_replaces_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join(format!("quill-atomic-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("prefs.json");
+        write_json_atomic(&path, &serde_json::json!({"a": 1})).unwrap();
+        write_json_atomic(&path, &serde_json::json!({"a": 2})).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value["a"], 2);
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn window_state_rejects_unusable_geometry_and_clamps_sidebar() {
+        let state = WindowState {
+            x: 10.,
+            y: 20.,
+            width: 1200.,
+            height: 800.,
+            maximized: false,
+            sidebar_width: 9000.,
+        };
+        assert_eq!(state.sanitized().unwrap().sidebar_width, MAX_SIDEBAR_WIDTH);
+        assert!(WindowState { width: 0., ..state }.sanitized().is_none());
+        assert!(
+            WindowState {
+                x: f32::NAN,
+                ..state
+            }
+            .sanitized()
+            .is_none()
+        );
+        // A file without the sidebar field still loads.
+        let legacy: WindowState =
+            serde_json::from_str(r#"{"x":0,"y":0,"width":1000,"height":700}"#).unwrap();
+        assert_eq!(legacy.sidebar_width, DEFAULT_SIDEBAR_WIDTH);
+    }
 
     #[test]
     fn account_paths_are_scoped() {

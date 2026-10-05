@@ -1355,6 +1355,11 @@ impl QuillApp {
             history_window_epoch: 0,
             history_anchor_pending: false,
             history_had_newer: false,
+            sidebar_width: px(quill::settings::load_window_state()
+                .map_or(quill::settings::DEFAULT_SIDEBAR_WIDTH, |state| {
+                    state.sidebar_width
+                })),
+            window_state_save_pending: false,
             history_media_signature: (0, 0),
             last_highlight: None,
             group_call_composer,
@@ -1822,6 +1827,11 @@ impl QuillApp {
         // notifies when the effective theme actually changed, so the
         // tick is free when idle.
         app.apply_appearance(cx);
+        // Remember the window's geometry when the user moves or resizes it.
+        cx.observe_window_bounds(window, |this, window, cx| {
+            this.schedule_window_state_save(window, cx);
+        })
+        .detach();
         // Performance fixture: keep rendering at ~60 Hz so a profiler sees
         // steady-state frames.
         if demo.is_some() && super::demo::demo_stress_size().is_some() {

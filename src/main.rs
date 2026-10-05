@@ -114,6 +114,38 @@ fn main() {
     }
 }
 
+/// The main window's opening bounds: where the user left it, when that
+/// still lands on a connected display (its title strip must be reachable),
+/// else a centered default.
+#[cfg(feature = "ui")]
+fn restored_window_bounds(
+    state: Option<quill::settings::WindowState>,
+    cx: &gpui_kit::App,
+) -> gpui_kit::WindowBounds {
+    use gpui_kit::*;
+    let default = Bounds::centered(None, size(px(1200.), px(760.)), cx);
+    let Some(state) = state else {
+        return WindowBounds::Windowed(default);
+    };
+    let bounds = Bounds {
+        origin: point(px(state.x), px(state.y)),
+        size: size(px(state.width), px(state.height)),
+    };
+    let title_strip = Bounds {
+        origin: bounds.origin,
+        size: size(bounds.size.width, px(40.)),
+    };
+    let reachable = cx
+        .displays()
+        .iter()
+        .any(|display| display.bounds().intersects(&title_strip));
+    match (reachable, state.maximized) {
+        (false, _) => WindowBounds::Windowed(default),
+        (true, true) => WindowBounds::Maximized(bounds),
+        (true, false) => WindowBounds::Windowed(bounds),
+    }
+}
+
 #[cfg(feature = "ui")]
 fn ui_main(args: &[String]) {
     use gpui_kit::*;
@@ -153,13 +185,11 @@ fn ui_main(args: &[String]) {
             // kit Phase 7: File / Edit / View / Window / Help — native on
             // macOS, kit `AppMenuBar` data on Linux/Windows.
             ui::setup_app_menus(cx);
+            let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
             cx.spawn(async move |cx| {
                 cx.open_window(
                     WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(Bounds {
-                            origin: point(px(20.), px(20.)),
-                            size: size(px(1200.), px(740.)),
-                        })),
+                        window_bounds: Some(window_bounds),
                         app_id: Some("org.shinycake.quill".into()),
                         show: !start_in_tray,
                         focus: !start_in_tray,

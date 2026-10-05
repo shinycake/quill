@@ -91,6 +91,10 @@ pub struct QuillApp {
     /// The window stopped short of the latest message at the last render:
     /// rows appended since are a newer page, not live messages.
     pub(super) history_had_newer: bool,
+    /// Chat list column width (drag its right edge; double-click resets).
+    pub(super) sidebar_width: Pixels,
+    /// A debounced `window_state.json` save is scheduled.
+    pub(super) window_state_save_pending: bool,
     /// (ready files, downloading files) at the last history render; a
     /// change remeasures the virtualized rows (media grew in place).
     pub(super) history_media_signature: (usize, usize),

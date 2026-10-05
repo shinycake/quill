@@ -410,3 +410,108 @@ impl QuillApp {
             ))
     }
 }
+
+/// Drag payload for the chat list's resize edge.
+#[derive(Clone, Copy)]
+pub(super) struct SidebarResize;
+
+impl Render for SidebarResize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // The drag has no preview; the column itself follows the pointer.
+        div()
+    }
+}
+
+impl QuillApp {
+    /// The chat list's right edge: drag to resize, double-click to reset.
+    pub(super) fn sidebar_resize_handle(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("sidebar-resize-handle")
+            .relative()
+            .w_0()
+            .h_full()
+            .flex_none()
+            .child(
+                div()
+                    .id("sidebar-resize-hit")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(-3.))
+                    .w(px(6.))
+                    .cursor_col_resize()
+                    .hover(|style| style.bg(cx.theme().border))
+                    .on_drag(SidebarResize, |_, _, _, cx| cx.new(|_| SidebarResize))
+                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                        if event.click_count() == 2 {
+                            this.set_sidebar_width(
+                                px(quill::settings::DEFAULT_SIDEBAR_WIDTH),
+                                window,
+                                cx,
+                            );
+                        }
+                    })),
+            )
+    }
+
+    pub(super) fn set_sidebar_width(
+        &mut self,
+        width: Pixels,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let width = width.clamp(
+            px(quill::settings::MIN_SIDEBAR_WIDTH),
+            px(quill::settings::MAX_SIDEBAR_WIDTH),
+        );
+        if width != self.sidebar_width {
+            self.sidebar_width = width;
+            self.schedule_window_state_save(window, cx);
+            cx.notify();
+        }
+    }
+
+    /// Save the window geometry shortly after the last change (moves and
+    /// resizes arrive as a stream).
+    pub(super) fn schedule_window_state_save(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.window_state_save_pending {
+            return;
+        }
+        self.window_state_save_pending = true;
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(600))
+                .await;
+            let _ = this.update_in(cx, |this, window, _| {
+                this.window_state_save_pending = false;
+                this.save_window_state(window);
+            });
+        })
+        .detach();
+    }
+
+    fn save_window_state(&self, window: &Window) {
+        let (bounds, maximized) = match window.window_bounds() {
+            WindowBounds::Windowed(bounds) => (bounds, false),
+            WindowBounds::Maximized(bounds) => (bounds, true),
+            // Fullscreen is not restored; keep the windowed geometry.
+            WindowBounds::Fullscreen(bounds) => (bounds, false),
+        };
+        let state = quill::settings::WindowState {
+            x: f32::from(bounds.origin.x),
+            y: f32::from(bounds.origin.y),
+            width: f32::from(bounds.size.width),
+            height: f32::from(bounds.size.height),
+            maximized,
+            sidebar_width: f32::from(self.sidebar_width),
+        };
+        // Demo windows run on an isolated app root; nothing to protect.
+        if let Some(state) = state.sanitized() {
+            let _ = quill::settings::save_window_state(&state);
+        }
+    }
+}
