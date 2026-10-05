@@ -90,6 +90,67 @@ fn last_message_positions_replace_main_list_membership() {
 }
 
 #[test]
+fn edits_refresh_the_preview_only_for_the_chats_last_message() {
+    // Telegram X `TGChat.updateMessageContent`: the row preview follows an
+    // edit when the edited id is `chat.last_message.id`, whether or not the
+    // history is loaded. While the last message is unknown
+    // (`updateChatLastMessage` with null, schema 1.8.67 line 10504) the
+    // preview stays empty.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":11,"title":"c","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":{"id":100,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
+    );
+    // History never loaded: the edit still reaches the row preview.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageContent","chat_id":11,"message_id":100,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"edited","entities":[]}}}"#,
+    );
+    assert_eq!(session.chats[&11].last_preview, "edited");
+    // The last message becomes unknown.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatLastMessage","chat_id":11,"last_message":null,"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
+    );
+    assert_eq!(session.chats[&11].last_preview, "");
+    assert!(session.chats[&11].last_message.is_none());
+    assert!(session.chats[&11].in_main_list);
+    // A loaded row being edited does not invent a preview.
+    session.open_chat(ChatId(11));
+    let extra = session.request(RequestPurpose::GetHistory, Some(ChatId(11)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"id":100,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"edited","entities":[]}}}}}}]}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.histories[&11].contains(MessageId(100)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageContent","chat_id":11,"message_id":100,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"again","entities":[]}}}"#,
+    );
+    assert_eq!(session.chats[&11].last_preview, "");
+}
+
+#[test]
 fn archive_position_does_not_clear_main_list() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
