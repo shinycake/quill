@@ -14,7 +14,8 @@ impl Session {
 
     /// Slice bots-games: like `request`, but also stamps the message id for
     /// `GetGameHighScores` correlation (`PendingRequest::around_message_id`
-    /// — the pending record has no message field).
+    /// — the pending record has no message field). `GetHistory` stamps its
+    /// `from_message_id` the same way.
     pub fn request_for_message(
         &mut self,
         purpose: RequestPurpose,

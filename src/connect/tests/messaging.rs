@@ -829,3 +829,67 @@ fn driver_sends_photo_and_document_from_picked_paths() {
     let _ = std::fs::remove_dir_all(&pick_dir);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn history_paging_keeps_going_on_short_pages_and_stops_without_progress() {
+    // `getChatHistory` (schema 1.8.67, line 11821): "the number of returned
+    // messages is chosen by TDLib and can be smaller than the specified
+    // limit" — a short page is not the end. A page that brings nothing
+    // older than `from_message_id` (offset 0 starts "from exactly the
+    // message from_message_id") is: re-sending the same request would
+    // return the same page forever.
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: String| {
+        driver
+            .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let page = |extra: &str, ids: &[i64]| {
+        let messages: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"id":{id},"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"@type":"messages","@extra":"{extra}","total_count":{},"messages":[{}]}}"#,
+            ids.len(),
+            messages.join(",")
+        )
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#.into(),
+    );
+    driver.select_chat(ChatId(7)).unwrap();
+    let first = sent_request(&recorder, "getChatHistory");
+    assert_eq!(first["from_message_id"], 0);
+    // TDLib's usual first answer: just the last message.
+    ingest(&mut driver, page(first["@extra"].as_str().unwrap(), &[300]));
+    assert!(!driver.session.histories[&7].loaded_complete);
+    driver
+        .fetch_history()
+        .unwrap()
+        .expect("short page pages on");
+    let second = sent_request(&recorder, "getChatHistory");
+    assert_eq!(second["from_message_id"], 300);
+    ingest(
+        &mut driver,
+        page(second["@extra"].as_str().unwrap(), &[300, 200, 100]),
+    );
+    assert!(!driver.session.histories[&7].loaded_complete);
+    driver.fetch_history().unwrap().expect("progress pages on");
+    let third = sent_request(&recorder, "getChatHistory");
+    assert_eq!(third["from_message_id"], 100);
+    // Only the boundary message again: nothing older exists.
+    ingest(&mut driver, page(third["@extra"].as_str().unwrap(), &[100]));
+    assert!(driver.session.histories[&7].loaded_complete);
+    assert_eq!(driver.fetch_history().unwrap(), None);
+    let _ = std::fs::remove_dir_all(&dir);
+}

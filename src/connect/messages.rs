@@ -174,9 +174,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .and_then(|h| h.oldest_id())
             .unwrap_or(MessageId(0));
+        // The page's `from_message_id` rides on the pending request so the
+        // reducer can tell a page that made no progress (end of history)
+        // from a merely short one.
         let extra = self
             .session
-            .request(RequestPurpose::GetHistory, Some(chat_id));
+            .request_for_message(RequestPurpose::GetHistory, chat_id, from);
         self.sender.send_json(&get_chat_history(
             extra,
             chat_id,

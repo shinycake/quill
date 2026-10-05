@@ -118,7 +118,16 @@ impl Session {
                     });
                     return;
                 }
-                if messages.is_empty() {
+                // TDLib may answer with fewer messages than asked ("the
+                // number of returned messages is chosen by TDLib", schema
+                // 1.8.67, line 11822) — that is not the end; the UI keeps
+                // paging. The end is a page with nothing older than the
+                // request's `from_message_id` (stamped by `fetch_history`):
+                // empty (Telegram X `ListManager.processData`), or only the
+                // boundary message itself, which the identical next request
+                // would return again forever.
+                let from = pending.around_message_id.map_or(0, |id| id.0);
+                if !messages.iter().any(|m| from == 0 || m.id.0 < from) {
                     self.histories.entry(chat_id.0).or_default().loaded_complete = true;
                 }
                 for message in messages {
