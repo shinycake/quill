@@ -4,6 +4,7 @@ use super::app::QuillApp;
 use super::chat_row::initials_avatar;
 use super::chat_row::{chat_avatar, compact_count};
 use super::pressable::PressableDiv;
+use super::pressable::action_row;
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -423,18 +424,19 @@ impl QuillApp {
                 .into_any_element(),
             None => initials_avatar(&name, 96.).into_any_element(),
         };
-        let mut detail_rows: Vec<(&str, String)> = Vec::new();
-        if !username.is_empty() {
-            detail_rows.push(("Username", format!("@{username}")));
-        }
-        if !phone.is_empty() {
-            detail_rows.push(("Phone", phone));
-        }
+        let is_self = session
+            .and_then(|s| s.my_user_id)
+            .is_some_and(|me| me == user_id);
+        // Phase B1 / C1: secret chat and calls share the eligibility rule
+        // (non-bot users, not yourself).
+        let can_reach = session
+            .as_ref()
+            .is_some_and(|s| Self::can_start_secret_chat_with(s, user_id));
         let mut body = div()
             .flex()
             .flex_col()
             .items_center()
-            .gap_3()
+            .gap_4()
             .p_4()
             .child(avatar)
             .child(
@@ -442,7 +444,7 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap_1()
+                    .gap_0p5()
                     .child(div().text_lg().font_semibold().child(name.clone()))
                     .child(
                         div()
@@ -451,150 +453,149 @@ impl QuillApp {
                             .child(status),
                     ),
             );
-        for (label, value) in detail_rows {
-            body = body.child(
-                div()
-                    .flex()
-                    .w_full()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(label),
-                    )
-                    .child(div().text_sm().child(value)),
-            );
-        }
-        if !bio.is_empty() {
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Bio"),
-                    )
-                    .child(div().text_sm().child(bio)),
-            );
+        // Primary actions as a row of labeled icon tiles.
+        let mut tiles = div().flex().justify_center().gap_2().w_full();
+        let mut any_tile = false;
+        if can_reach {
+            any_tile = true;
+            tiles = tiles
+                .child(info_tile(
+                    "info-panel-call",
+                    gpui_kit::assets::IconName::Phone,
+                    "Call",
+                    cx.listener(move |this, _, _, cx| this.start_call_for_user(user_id, false, cx)),
+                    cx,
+                ))
+                .child(info_tile(
+                    "info-panel-video-call",
+                    gpui_kit::assets::IconName::Video,
+                    "Video",
+                    cx.listener(move |this, _, _, cx| this.start_call_for_user(user_id, true, cx)),
+                    cx,
+                ))
+                .child(info_tile(
+                    "info-panel-start-secret",
+                    gpui_kit::assets::IconName::Lock,
+                    "Secret chat",
+                    cx.listener(move |this, _, _, cx| this.start_secret_chat_for_user(user_id, cx)),
+                    cx,
+                ));
         }
         if show_add {
-            body = body.child(
-                Button::new("info-panel-add-contact")
-                    .label("Add contact")
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_add_contact_dialog(user_id, window, cx);
-                    })),
-            );
+            any_tile = true;
+            tiles = tiles.child(info_tile(
+                "info-panel-add-contact",
+                gpui_kit::assets::IconName::UserPlus,
+                "Add contact",
+                cx.listener(move |this, _, window, cx| {
+                    this.open_add_contact_dialog(user_id, window, cx)
+                }),
+                cx,
+            ));
         }
-        // A5: the profile edit UI entry point — only on your own panel
-        // (`setName` / `setBio` / `setUsername` / `setProfilePhoto` all
-        // act on the current user).
-        let is_self = session
-            .and_then(|s| s.my_user_id)
-            .is_some_and(|me| me == user_id);
+        // A5: profile editing only on your own panel.
         if is_self {
-            body = body.child(
-                Button::new("info-panel-edit-profile")
-                    .label("Edit profile")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_edit_profile_dialog(window, cx);
-                    })),
-            );
+            any_tile = true;
+            tiles = tiles.child(info_tile(
+                "info-panel-edit-profile",
+                gpui_kit::assets::IconName::Pencil,
+                "Edit profile",
+                cx.listener(|this, _, window, cx| this.open_edit_profile_dialog(window, cx)),
+                cx,
+            ));
         }
-        // Slice A6: contact management for any other user — "Delete
-        // contact" when they are a contact (`removeContacts`, schema
-        // 1.8.67 line 14528; TGX `DeleteContactConfirm` "Delete %1$s
-        // from contacts?") and Block/Unblock
-        // (`setMessageSenderBlockList`, schema 1.8.67 line 14492; TGX
-        // `BlockUserConfirm` "Are you sure you want to block %1$s?").
-        // The blocked state comes from `userFullInfo.block_list`
-        // (schema 1.8.67, line 2468).
-        if !is_self && user.is_some() {
-            let blocked = info.as_ref().is_some_and(|i| i.blocked);
-            let mut actions = div().flex().flex_wrap().gap_2();
-            if user.as_ref().is_some_and(|u| u.is_contact) {
-                actions = actions.child(
-                    Button::new("info-panel-delete-contact")
-                        .label("Delete contact")
-                        .ghost()
-                        .danger()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_group_confirm(
-                                ChatId(0),
-                                GroupConfirmAction::DeleteContact { user_id },
-                                cx,
-                            );
-                        })),
+        if any_tile {
+            body = body.child(tiles);
+        }
+        // Details: value over label, left-aligned like a contact card.
+        let mut details: Vec<(&str, String)> = Vec::new();
+        if !bio.is_empty() {
+            details.push(("Bio", bio));
+        }
+        if !username.is_empty() {
+            details.push(("Username", format!("@{username}")));
+        }
+        if !phone.is_empty() {
+            details.push(("Phone", format_phone(&phone)));
+        }
+        if !details.is_empty() {
+            let mut card = div()
+                .flex()
+                .flex_col()
+                .w_full()
+                .rounded_lg()
+                .border_1()
+                .border_color(cx.theme().border);
+            for (index, (label, value)) in details.into_iter().enumerate() {
+                card = card.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .px_3()
+                        .py_2()
+                        .when(index > 0, |this| {
+                            this.border_t_1().border_color(cx.theme().border)
+                        })
+                        .child(div().text_sm().child(value))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(label),
+                        ),
                 );
             }
-            actions = actions.child(
-                Button::new("info-panel-block-user")
-                    .label(if blocked {
+            body = body.child(card);
+        }
+        // Slice A6: contact management for any other user — Delete
+        // contact (`removeContacts`) and Block/Unblock
+        // (`setMessageSenderBlockList`; state from `userFullInfo.block_list`).
+        // Destructive, so they sit last as plain danger rows.
+        if !is_self && user.is_some() {
+            let blocked = info.as_ref().is_some_and(|i| i.blocked);
+            let mut danger = div().flex().flex_col().w_full().gap_0p5();
+            danger = danger.child(
+                action_row(
+                    "info-panel-block-user",
+                    Some(gpui_kit::assets::IconName::Ban),
+                    if blocked {
                         "Unblock user"
                     } else {
                         "Block user"
-                    })
-                    .ghost()
+                    },
+                    !blocked,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_group_confirm(
+                        ChatId(0),
+                        GroupConfirmAction::BlockContact {
+                            user_id,
+                            block: !blocked,
+                        },
+                        cx,
+                    );
+                })),
+            );
+            if user.as_ref().is_some_and(|u| u.is_contact) {
+                danger = danger.child(
+                    action_row(
+                        "info-panel-delete-contact",
+                        Some(gpui_kit::assets::IconName::UserX),
+                        "Delete contact",
+                        true,
+                        cx,
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_group_confirm(
                             ChatId(0),
-                            GroupConfirmAction::BlockContact {
-                                user_id,
-                                block: !blocked,
-                            },
+                            GroupConfirmAction::DeleteContact { user_id },
                             cx,
                         );
                     })),
-            );
-            body = body.child(actions);
-        }
-        // Phase B1: "Start secret chat" from a user profile — E2E chat
-        // with a non-bot user (`createNewSecretChat`, schema 1.8.67 line
-        // 13340). Not offered for bots or for yourself.
-        let show_start_secret = session
-            .as_ref()
-            .is_some_and(|s| Self::can_start_secret_chat_with(s, user_id));
-        if show_start_secret {
-            body = body.child(
-                Button::new("info-panel-start-secret")
-                    .label("Start secret chat")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.start_secret_chat_for_user(user_id, cx);
-                    })),
-            );
-        }
-        // Phase C1: "Call" from a user profile — `createCall`
-        // (audio-only). Phase C1b: "🎥 Video call" — `createCall` with
-        // `is_video: true` (signaling only; media transport is C2). Same
-        // gating as secret chats: non-bot users, not yourself.
-        let show_call = show_start_secret;
-        if show_call {
-            body = body.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("info-panel-call")
-                            .label("Call")
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.start_call_for_user(user_id, false, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("info-panel-video-call")
-                            .label("🎥 Video call")
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.start_call_for_user(user_id, true, cx);
-                            })),
-                    ),
-            );
+                );
+            }
+            body = body.child(danger);
         }
         // Phase B2: encryption-key section — only when the open chat is a
         // Ready secret chat with this user (the key is meaningful once
@@ -707,10 +708,8 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(if members > 0 {
-                                format!("{} {noun}", compact_count(members))
-                            } else {
-                                format!("{noun} unknown")
+                            .when(members > 0, |this| {
+                                this.child(format!("{} {noun}", compact_count(members)))
                             }),
                     )
                     .when_some(username, |this, name| {
@@ -880,13 +879,69 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(match member_count {
-                                Some(count) => format!("{count} members"),
-                                None => "members unknown".to_string(),
+                            .when_some(member_count, |this, count| {
+                                this.child(format!("{count} members"))
                             }),
                     ),
             );
         body = body.child(self.group_management_section(chat_id, false, true, cx));
         body.into_any_element()
+    }
+}
+
+/// Labeled icon tile for an info panel's primary actions.
+fn info_tile(
+    id: &'static str,
+    icon: gpui_kit::assets::IconName,
+    label: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_1()
+        .w(px(76.))
+        .py_2()
+        .rounded_lg()
+        .bg(cx.theme().secondary)
+        .cursor_pointer()
+        .hover(|style| style.bg(cx.theme().secondary_hover))
+        .role(gpui_kit::Role::Button)
+        .aria_label(label)
+        .tab_index(0)
+        .on_click(on_click)
+        .child(Icon::new(icon).size(px(18.)).text_color(cx.theme().primary))
+        .child(div().text_xs().child(label))
+}
+
+/// `+15550101031` → `+1 555 010 1031`-style grouping for readability;
+/// numbers that don't look like E.164 pass through unchanged.
+fn format_phone(raw: &str) -> String {
+    let digits: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.len() < 7 || digits.len() > 15 {
+        return raw.to_string();
+    }
+    let (country, rest) = if digits.len() == 11 && digits.starts_with('1') {
+        ("1", &digits[1..])
+    } else {
+        return format!("+{digits}");
+    };
+    format!("+{country} {} {} {}", &rest[..3], &rest[3..6], &rest[6..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_phone;
+
+    #[test]
+    fn phone_numbers_group_for_reading() {
+        assert_eq!(format_phone("15550101031"), "+1 555 010 1031");
+        assert_eq!(format_phone("+15550101031"), "+1 555 010 1031");
+        // Other country codes keep their digits rather than guessing groups.
+        assert_eq!(format_phone("442071838750"), "+442071838750");
+        assert_eq!(format_phone("12"), "12");
     }
 }
