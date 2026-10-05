@@ -1170,8 +1170,23 @@ impl QuillApp {
                     }
             )
         );
+        // Sender of each row (first item for albums): a run is consecutive
+        // rows from one sender. The name heads a run; the avatar sits
+        // beside its last row, with a spacer keeping earlier rows aligned.
+        let identities: Vec<(bool, Option<MessageSender>)> = groups
+            .iter()
+            .map(|group| match group {
+                quill::album::HistoryGroup::Album { messages, .. } => messages
+                    .first()
+                    .map(|m| (m.is_outgoing, m.sender))
+                    .unwrap_or((false, None)),
+                quill::album::HistoryGroup::Single(message) => {
+                    (message.is_outgoing, message.sender)
+                }
+            })
+            .collect();
         let mut previous = None;
-        let mut row_chrome = |message: &HistoryMessage| {
+        let mut row_chrome = |message: &HistoryMessage, continues: bool| {
             let identity = (message.is_outgoing, message.sender);
             let service = matches!(
                 message.content,
@@ -1227,9 +1242,15 @@ impl QuillApp {
                 None => None,
             }
             .and_then(|path| sandboxed_display_path(path, &media_roots));
-            let sender_avatar =
-                (!message.is_outgoing && is_group && show_sender).then_some((name, photo));
-            (sender, receipt, sender_avatar)
+            let sender_avatar = (!message.is_outgoing && is_group).then(|| {
+                if continues {
+                    // Spacer: same column width, no avatar.
+                    (String::new(), None)
+                } else {
+                    (name, photo)
+                }
+            });
+            (sender, receipt, sender_avatar, show_sender)
         };
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
         let mut previous_day: Option<i64> = None;
@@ -1242,16 +1263,19 @@ impl QuillApp {
             (previous_day.replace(day) != Some(day))
                 .then(|| quill::local_time::day_label(&civil, &now))
         };
-        for group in groups {
+        for (index, group) in groups.into_iter().enumerate() {
+            let continues = identities
+                .get(index + 1)
+                .is_some_and(|next| Some(next) == identities.get(index));
             match group {
                 quill::album::HistoryGroup::Album { album_id, messages } => {
                     let album_messages: Vec<HistoryMessage> =
                         messages.iter().map(|message| (*message).clone()).collect();
                     // Same chrome rule as single rows, from the first item.
-                    let (sender, receipt, sender_avatar) = album_messages
+                    let (sender, receipt, sender_avatar, _) = album_messages
                         .first()
-                        .map(&mut row_chrome)
-                        .unwrap_or((None, OutboxReceipt::None, None));
+                        .map(|message| row_chrome(message, continues))
+                        .unwrap_or((None, OutboxReceipt::None, None, false));
                     let day_label = album_messages.first().and_then(|m| day_label(m.date));
                     rows.push(HistoryRow::Album {
                         album_id,
@@ -1263,7 +1287,8 @@ impl QuillApp {
                     })
                 }
                 quill::album::HistoryGroup::Single(message) => {
-                    let (sender, receipt, sender_avatar) = row_chrome(message);
+                    let (sender, receipt, sender_avatar, run_start) =
+                        row_chrome(message, continues);
                     // Phase 4.6: audio/voice rows get a seek-bar view model.
                     let seek_bar = match &message.content {
                         MessageContent::VoiceNote(note) => {
@@ -1298,6 +1323,7 @@ impl QuillApp {
                         receipt,
                         sender_avatar,
                         highlighted: highlight_id == Some(message.id),
+                        run_start: run_start && index > 0,
                         day_label: day_label(message.date),
                         selected_forward: self
                             .pending_forward
@@ -1604,7 +1630,9 @@ impl QuillApp {
                 let highlighted = inputs.highlighted;
                 let selected_forward = inputs.selected_forward;
                 let failed = message.failed;
+                let run_start = inputs.run_start;
                 div()
+                    .when(run_start, |this| this.pt_2())
                     .when(highlighted || selected_forward, |this| {
                         this.rounded_lg()
                             .border_2()

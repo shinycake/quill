@@ -438,8 +438,15 @@ pub(super) fn message_chrome(
             .and_then(|label| label.accent)
             .map(super::chat_theme::peer_name_color),
         sender: sender.map(|label| SharedString::from(label.name)),
-        avatar: sender_avatar
-            .map(|(name, photo)| kit_avatar_element(&name, photo.as_deref(), px(32.))),
+        // An empty name is a spacer: a row inside a sender run keeps the
+        // avatar column so bubbles stay aligned.
+        avatar: sender_avatar.map(|(name, photo)| {
+            if name.is_empty() {
+                div().size(px(32.)).flex_none().into_any_element()
+            } else {
+                kit_avatar_element(&name, photo.as_deref(), px(32.))
+            }
+        }),
         footer: message_footer(date, pending, receipt),
         footer_inline: false,
         footer_overlay: false,

@@ -21,6 +21,8 @@ pub(crate) struct HistoryRowInputs {
     /// outgoing — never invented.
     pub(crate) sender_avatar: Option<(String, Option<PathBuf>)>,
     pub(crate) highlighted: bool,
+    /// First row of a sender run (gets extra top spacing).
+    pub(crate) run_start: bool,
     /// Local-day separator rendered above the row ("Today", "Monday",
     /// "12 March") when this row starts a new day.
     pub(crate) day_label: Option<String>,
@@ -83,6 +85,8 @@ impl HistoryRow {
                     && a.quote_preview == b.quote_preview
                     && a.forward_from == b.forward_from
                     && a.day_label == b.day_label
+                    && a.run_start == b.run_start
+                    && a.sender_avatar == b.sender_avatar
             }
             (
                 HistoryRow::Album {
