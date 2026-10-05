@@ -59,7 +59,10 @@ impl Session {
             return;
         }
         // `parity:platform-chat-export` — append the page to the export
-        // buffer. A short page means the server has no more history.
+        // buffer. A page that adds nothing means the server has no more
+        // history. A merely short page does not: TDLib picks the page size
+        // and "can be smaller than the specified limit" (schema 1.8.67,
+        // line 11827) — its first answer is often the last message alone.
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::ExportChatHistory
             && let Some(chat_id) = pending.chat_id
@@ -67,22 +70,23 @@ impl Session {
             if let Some(export) = self.chat_export.as_mut()
                 && export.chat_id == chat_id
             {
-                let short_page = messages.len() < crate::chat_export::EXPORT_PAGE_LIMIT as usize;
                 // `getChatHistory` is inclusive of `from_message_id`, so the
                 // first message of every non-first page is the boundary
-                // message already in the buffer — skip it (matched by id,
-                // not position, so a boundary deleted between pages doesn't
-                // cost a message) so each message exports exactly once.
+                // message already in the buffer — keep only messages older
+                // than it (matched by id, not position, so a boundary
+                // deleted between pages doesn't cost a message) so each
+                // message exports exactly once.
                 let boundary_id = export.messages.last().map(|m| m.id);
+                let before = export.messages.len();
                 for message in messages {
                     let exported = crate::chat_export::project_message(&message);
-                    if Some(exported.id) == boundary_id {
+                    if boundary_id.is_some_and(|boundary| exported.id >= boundary) {
                         continue;
                     }
                     export.messages.push(exported);
                 }
                 export.in_flight = false;
-                if short_page {
+                if export.messages.len() == before {
                     export.done_paging = true;
                 }
             }
@@ -118,7 +122,16 @@ impl Session {
                     });
                     return;
                 }
-                if messages.is_empty() {
+                // TDLib may answer with fewer messages than asked ("the
+                // number of returned messages is chosen by TDLib", schema
+                // 1.8.67, line 11822) — that is not the end; the UI keeps
+                // paging. The end is a page with nothing older than the
+                // request's `from_message_id` (stamped by `fetch_history`):
+                // empty (Telegram X `ListManager.processData`), or only the
+                // boundary message itself, which the identical next request
+                // would return again forever.
+                let from = pending.around_message_id.map_or(0, |id| id.0);
+                if !messages.iter().any(|m| from == 0 || m.id.0 < from) {
                     self.histories.entry(chat_id.0).or_default().loaded_complete = true;
                 }
                 for message in messages {

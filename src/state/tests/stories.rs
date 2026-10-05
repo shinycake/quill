@@ -285,6 +285,38 @@ fn topic_history_response_is_stored_per_topic() {
 }
 
 #[test]
+fn deleted_messages_leave_loaded_topic_histories() {
+    // The topic view reads `topic_histories` only, so `updateDeleteMessages`
+    // must reach it too — not just the chat's main history.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(16));
+    let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            "{{\"@type\":\"foundChatMessages\",\"@extra\":\"{}\",{}}}",
+            extra.0,
+            r#""total_count":2,"next_from_message_id":0,"messages":[{"id":50,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"keep","entities":[]}}},{"id":40,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"gone","entities":[]}}}]"#
+        ),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateDeleteMessages","chat_id":16,"message_ids":[40],"is_permanent":true,"from_cache":false}"#,
+    );
+    let ids: Vec<i64> = session.topic_histories[&(16, 2)]
+        .messages
+        .keys()
+        .copied()
+        .collect();
+    assert_eq!(ids, vec![50]);
+}
+
+#[test]
 fn topic_message_update_lands_in_loaded_topic_history() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

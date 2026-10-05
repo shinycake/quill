@@ -658,6 +658,9 @@ fn replay_mute_and_archive_move_sidebar_lists() {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, archive.0),
             r#"{"@type":"updateChatRemovedFromList","chat_id":7,"chat_list":{"@type":"chatListMain"}}"#,
             r#"{"@type":"updateChatAddedToList","chat_id":7,"chat_list":{"@type":"chatListArchive"}}"#,
+            // TDLib moves the row with positions; list membership alone
+            // does not (schema 1.8.67, line 3595).
+            r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#,
             r#"{"@type":"updateChatPosition","chat_id":7,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"4","is_pinned":false}}"#,
         ],
     );

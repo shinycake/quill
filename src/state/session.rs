@@ -441,6 +441,9 @@ pub struct Session {
     pub view_generation: ViewGeneration,
     pub requests: RequestRegistry,
     pub chats_exhausted: bool,
+    /// `loadChats(chatListArchive)` answered 404 — the archive is fully
+    /// loaded (paging starts once the main list is exhausted).
+    pub archive_chats_exhausted: bool,
     pub shutdown: ShutdownPhase,
     pub last_seq: u64,
     /// Last classified error for phone / code / password submit. Never a secret.
@@ -543,6 +546,12 @@ pub struct Session {
     /// in `downloading` until unstuck; the UI shows "failed — retry").
     /// Cleared when a new download starts or the file completes.
     pub failed_downloads: HashSet<i32>,
+    /// Automatic (non-user) downloads TDLib refused or stopped without
+    /// completing. The automatic path skips them so each ingest does not
+    /// re-send `downloadFile`; an explicit user download or completion
+    /// clears the mark (Telegram X `TdlibFilesManager.onFileUpdate` treats
+    /// a stopped download as paused until asked again).
+    pub stalled_auto_downloads: HashSet<i32>,
     /// Recently completed downloads (file ids, most recent last, capped) for
     /// the downloads manager's "recent" list. Recorded only when a file was
     /// in `downloading` and its `updateFile` shows completion — pre-existing
@@ -1045,6 +1054,7 @@ impl Session {
             view_generation: ViewGeneration(1),
             requests: RequestRegistry::default(),
             chats_exhausted: false,
+            archive_chats_exhausted: false,
             shutdown: ShutdownPhase::Running,
             last_seq: 0,
             last_auth_error: None,
@@ -1080,6 +1090,7 @@ impl Session {
             user_downloads: HashSet::new(),
             paused_downloads: HashSet::new(),
             failed_downloads: HashSet::new(),
+            stalled_auto_downloads: HashSet::new(),
             completed_downloads: VecDeque::new(),
             downloads_panel_open: false,
             download_extras: HashMap::new(),

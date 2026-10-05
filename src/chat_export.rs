@@ -37,7 +37,7 @@ pub struct ChatExportState {
     pub messages: Vec<ExportedMessage>,
     /// A `getChatHistory` page is in flight.
     pub in_flight: bool,
-    /// The server returned a short page — no more history to fetch.
+    /// A page added no older message — no more history to fetch.
     pub done_paging: bool,
     /// Set when a page send or the file write failed; the UI surfaces and
     /// clears the state.

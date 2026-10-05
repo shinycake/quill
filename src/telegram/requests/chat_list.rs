@@ -5,6 +5,12 @@ pub fn load_chats(extra: RequestId, limit: i32) -> String {
     load_chats_list(extra, json!({ "@type": "chatListMain" }), limit)
 }
 
+/// `loadChats(chatListArchive)` — TDLib reports archived chats' positions
+/// only once the archive list is loaded.
+pub fn load_archive_chats(extra: RequestId, limit: i32) -> String {
+    load_chats_list(extra, json!({ "@type": "chatListArchive" }), limit)
+}
+
 /// `loadChats` for an arbitrary chat list (Phase 7.1: `chatListFolder`).
 /// Schema 1.8.67: `loadChats chat_list:ChatList limit:int32 = Ok` (line 11595).
 pub fn load_chats_list(extra: RequestId, chat_list: Value, limit: i32) -> String {

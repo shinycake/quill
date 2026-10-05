@@ -510,6 +510,99 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
 }
 
 #[test]
+fn failed_automatic_downloads_are_not_retried_on_every_ingest() {
+    // An automatic download that TDLib stops (active → idle without
+    // completing) or refuses must not be re-sent by the next ingest —
+    // that turns every update into another `downloadFile`. Telegram X
+    // treats a stopped download as paused until the user asks again
+    // (`TdlibFilesManager.onFileUpdate` → `STATE_PAUSED`).
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let file = |id: i32, active: bool| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":{active},"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u{id}","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}}"#
+        )
+    };
+    let downloads = |recorder: &RecordingSender, id: i32| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|j| {
+                j.contains("\"@type\":\"downloadFile\"") && j.contains(&format!("\"file_id\":{id}"))
+            })
+            .count()
+    };
+    for (chat_id, file_id) in [(7, 91), (8, 92)] {
+        ingest(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"c","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0,"photo":{{"@type":"chatPhotoInfo","small":{},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}}}}}"#,
+                file(file_id, false)
+            ),
+        );
+    }
+    assert_eq!(downloads(&recorder, 91), 1);
+    assert_eq!(downloads(&recorder, 92), 1);
+    let extra_for = |recorder: &RecordingSender, id: i32| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+            .find(|v| v["@type"] == "downloadFile" && v["file_id"] == id)
+            .and_then(|v| v["@extra"].as_str().map(str::to_string))
+            .expect("downloadFile extra")
+    };
+    // 91: TDLib accepts (`downloadFile` answers the active file at once),
+    // then stops the download without completing it.
+    let accepted = file(91, true).replacen(
+        "{",
+        &format!(r#"{{"@extra":"{}","#, extra_for(&recorder, 91)),
+        1,
+    );
+    ingest(&mut driver, &accepted);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"updateFile","file":{}}}"#, file(91, true)),
+    );
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"updateFile","file":{}}}"#, file(91, false)),
+    );
+    // 92: TDLib refuses the request.
+    let extra = extra_for(&recorder, 92);
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"FILE_ID_INVALID"}}"#
+        ),
+    );
+    for _ in 0..3 {
+        ingest(
+            &mut driver,
+            r#"{"@type":"updateChatTitle","chat_id":7,"title":"c"}"#,
+        );
+    }
+    assert_eq!(downloads(&recorder, 91), 1, "stopped download not re-sent");
+    assert_eq!(downloads(&recorder, 92), 1, "refused download not re-sent");
+    // The user can still ask for the file explicitly.
+    assert!(
+        driver
+            .download_user_file(FileId(91), None)
+            .unwrap()
+            .is_some()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn select_channel_fetches_supergroup_profile_and_full_info() {
     // Parity slice: opening a channel sends `getSupergroup` (for the
     // header @username) and `getSupergroupFullInfo` (description,
@@ -837,5 +930,69 @@ fn driver_sends_photo_and_document_from_picked_paths() {
     );
     assert!(!sink.rendered().contains("CANARY_PHOTO"));
     let _ = std::fs::remove_dir_all(&pick_dir);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn history_paging_keeps_going_on_short_pages_and_stops_without_progress() {
+    // `getChatHistory` (schema 1.8.67, line 11821): "the number of returned
+    // messages is chosen by TDLib and can be smaller than the specified
+    // limit" — a short page is not the end. A page that brings nothing
+    // older than `from_message_id` (offset 0 starts "from exactly the
+    // message from_message_id") is: re-sending the same request would
+    // return the same page forever.
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: String| {
+        driver
+            .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let page = |extra: &str, ids: &[i64]| {
+        let messages: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"id":{id},"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"@type":"messages","@extra":"{extra}","total_count":{},"messages":[{}]}}"#,
+            ids.len(),
+            messages.join(",")
+        )
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#.into(),
+    );
+    driver.select_chat(ChatId(7)).unwrap();
+    let first = sent_request(&recorder, "getChatHistory");
+    assert_eq!(first["from_message_id"], 0);
+    // TDLib's usual first answer: just the last message.
+    ingest(&mut driver, page(first["@extra"].as_str().unwrap(), &[300]));
+    assert!(!driver.session.histories[&7].loaded_complete);
+    driver
+        .fetch_history()
+        .unwrap()
+        .expect("short page pages on");
+    let second = sent_request(&recorder, "getChatHistory");
+    assert_eq!(second["from_message_id"], 300);
+    ingest(
+        &mut driver,
+        page(second["@extra"].as_str().unwrap(), &[300, 200, 100]),
+    );
+    assert!(!driver.session.histories[&7].loaded_complete);
+    driver.fetch_history().unwrap().expect("progress pages on");
+    let third = sent_request(&recorder, "getChatHistory");
+    assert_eq!(third["from_message_id"], 100);
+    // Only the boundary message again: nothing older exists.
+    ingest(&mut driver, page(third["@extra"].as_str().unwrap(), &[100]));
+    assert!(driver.session.histories[&7].loaded_complete);
+    assert_eq!(driver.fetch_history().unwrap(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }

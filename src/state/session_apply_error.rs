@@ -1095,6 +1095,9 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404 {
             self.chats_exhausted = true;
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadArchiveChats) && err.code == 404 {
+            self.archive_chats_exhausted = true;
+        }
         // Parity slice: folder `loadChats` paging ends the same way
         // as the main list — a 404 marks that folder exhausted.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadFolderChats)
@@ -1376,6 +1379,9 @@ impl Session {
             // the user must not show rows here.
             if self.user_downloads.contains(&file_id) {
                 self.failed_downloads.insert(file_id);
+            } else {
+                // A refused automatic download is not retried per ingest.
+                self.stalled_auto_downloads.insert(file_id);
             }
             self.unstick_download(file_id);
         }
