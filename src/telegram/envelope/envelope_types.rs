@@ -233,6 +233,9 @@ pub enum EnvelopePayload {
         /// lines 3627 / 9692). Refreshed by `updateChatBlockList`
         /// (schema line 10594); drives the row-menu Block/Unblock label.
         blocked: bool,
+        /// `chat.positions` (schema 1.8.67, line 3594) — the chat's
+        /// positions in the chat lists it is already placed in.
+        positions: Vec<ChatPositionUpdate>,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {

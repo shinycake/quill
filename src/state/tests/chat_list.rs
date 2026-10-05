@@ -362,6 +362,9 @@ fn folder_position_membership_and_order() {
 
 #[test]
 fn folder_membership_add_remove() {
+    // Folder rows follow `chatPosition`s only: `updateChatAddedToList` /
+    // `updateChatRemovedFromList` describe `chat.chat_lists`, which may
+    // disagree with positions (schema 1.8.67, line 3595).
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     apply_json(
@@ -376,13 +379,6 @@ fn folder_membership_add_remove() {
         &sink,
         r#"{"@type":"updateChatAddedToList","chat_id":5,"chat_list":{"@type":"chatListFolder","chat_folder_id":3}}"#,
     );
-    assert!(session.ordered_folder_chats(3).iter().any(|c| c.id.0 == 5));
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        r#"{"@type":"updateChatPosition","chat_id":5,"position":{"@type":"chatPosition","list":{"@type":"chatListFolder","chat_folder_id":3},"order":"0","is_pinned":false}}"#,
-    );
     assert!(session.ordered_folder_chats(3).is_empty());
     apply_json(
         &mut session,
@@ -390,11 +386,19 @@ fn folder_membership_add_remove() {
         &sink,
         r#"{"@type":"updateChatPosition","chat_id":5,"position":{"@type":"chatPosition","list":{"@type":"chatListFolder","chat_folder_id":3},"order":"9","is_pinned":false}}"#,
     );
+    assert!(session.ordered_folder_chats(3).iter().any(|c| c.id.0 == 5));
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateChatRemovedFromList","chat_id":5,"chat_list":{"@type":"chatListFolder","chat_folder_id":3}}"#,
+    );
+    assert!(session.ordered_folder_chats(3).iter().any(|c| c.id.0 == 5));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatPosition","chat_id":5,"position":{"@type":"chatPosition","list":{"@type":"chatListFolder","chat_folder_id":3},"order":"0","is_pinned":false}}"#,
     );
     assert!(session.ordered_folder_chats(3).is_empty());
 }
@@ -837,4 +841,92 @@ fn cl2_mark_all_read_and_clear_recents_errors_surface() {
         session.chat_action_error.as_deref(),
         Some("could not clear recent searches (error 500)")
     );
+}
+
+#[test]
+fn chat_list_membership_updates_do_not_move_chat_positions() {
+    // `chat.chat_lists` (schema 1.8.67, line 3595): "A chat can have a
+    // non-zero position in a chat list even if it doesn't belong to the
+    // chat list and have no position in a chat list even if it belongs to
+    // the chat list". Telegram X keeps `chat.chatLists` separate from
+    // `chat.positions` (`Tdlib.updateChatAddedToList`).
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for id in [4, 5] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"c{id}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+            ),
+        );
+    }
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatPosition","chat_id":4,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"5","is_pinned":false}}"#,
+    );
+    // Removal from `chat_lists` leaves the positioned row in place.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatRemovedFromList","chat_id":4,"chat_list":{"@type":"chatListMain"}}"#,
+    );
+    let ids: Vec<i64> = session.ordered_chats().iter().map(|c| c.id.0).collect();
+    assert_eq!(ids, vec![4]);
+    // Membership without a position is not a row (no order to sort by).
+    for list in [
+        r#"{"@type":"chatListMain"}"#,
+        r#"{"@type":"chatListArchive"}"#,
+        r#"{"@type":"chatListFolder","chat_folder_id":3}"#,
+    ] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"updateChatAddedToList","chat_id":5,"chat_list":{list}}}"#),
+        );
+    }
+    let ids: Vec<i64> = session.ordered_chats().iter().map(|c| c.id.0).collect();
+    assert_eq!(ids, vec![4]);
+    assert!(session.ordered_archived_chats().is_empty());
+    assert!(session.ordered_folder_chats(3).is_empty());
+}
+
+#[test]
+fn new_chat_positions_place_the_chat_in_its_lists() {
+    // `updateNewChat` / a `chat` answer carries `chat.positions`; Telegram
+    // X adds every non-zero position to its list (`Tdlib.updateNewChat`).
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":11,"title":"pinned","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"90","is_pinned":true},{"@type":"chatPosition","list":{"@type":"chatListFolder","chat_folder_id":2},"order":"40","is_pinned":false}]}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":12,"title":"archived","type":{"@type":"chatTypePrivate","user_id":12},"unread_count":0,"positions":[{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"30","is_pinned":false}]}}"#,
+    );
+    let main: Vec<i64> = session.ordered_chats().iter().map(|c| c.id.0).collect();
+    assert_eq!(main, vec![11]);
+    assert!(session.chats.get(&11).unwrap().is_pinned);
+    let archive: Vec<i64> = session
+        .ordered_archived_chats()
+        .iter()
+        .map(|c| c.id.0)
+        .collect();
+    assert_eq!(archive, vec![12]);
+    let folder: Vec<i64> = session
+        .ordered_folder_chats(2)
+        .iter()
+        .map(|c| c.id.0)
+        .collect();
+    assert_eq!(folder, vec![11]);
 }

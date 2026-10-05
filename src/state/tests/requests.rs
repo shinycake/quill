@@ -307,7 +307,7 @@ fn chat_title_and_unread_updates() {
         &mut session,
         &seq,
         &sink,
-        r#"{"@type":"updateChatAddedToList","chat_id":4,"chat_list":{"@type":"chatListMain"}}"#,
+        r#"{"@type":"updateChatPosition","chat_id":4,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"3","is_pinned":false}}"#,
     );
     let chat = session.chats.get(&4).unwrap();
     assert_eq!(chat.title, "new title");
@@ -318,7 +318,7 @@ fn chat_title_and_unread_updates() {
         &mut session,
         &seq,
         &sink,
-        r#"{"@type":"updateChatRemovedFromList","chat_id":4,"chat_list":{"@type":"chatListMain"}}"#,
+        r#"{"@type":"updateChatPosition","chat_id":4,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#,
     );
     assert!(!session.chats.get(&4).unwrap().in_main_list);
 }

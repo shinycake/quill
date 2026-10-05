@@ -115,32 +115,47 @@ impl Session {
                 unread_reaction_count,
                 can_be_reported,
                 blocked,
-            } => self.apply_update_new_chat(
-                chat_id,
-                title,
-                kind,
-                unread_count,
-                last_read_inbox_message_id,
-                last_read_outbox_message_id,
-                notification_settings,
-                draft,
-                photo,
-                can_send_basic_messages,
-                permissions,
-                can_be_deleted_for_all_users,
-                can_be_deleted_only_for_self,
-                is_marked_as_unread,
-                message_auto_delete_time,
-                video_chat,
-                has_welcome_messages,
-                unread_mention_count,
-                unread_reaction_count,
-                can_be_reported,
-                blocked,
-                pending,
-                extra,
-                seq,
-            ),
+                positions,
+            } => {
+                self.apply_update_new_chat(
+                    chat_id,
+                    title,
+                    kind,
+                    unread_count,
+                    last_read_inbox_message_id,
+                    last_read_outbox_message_id,
+                    notification_settings,
+                    draft,
+                    photo,
+                    can_send_basic_messages,
+                    permissions,
+                    can_be_deleted_for_all_users,
+                    can_be_deleted_only_for_self,
+                    is_marked_as_unread,
+                    message_auto_delete_time,
+                    video_chat,
+                    has_welcome_messages,
+                    unread_mention_count,
+                    unread_reaction_count,
+                    can_be_reported,
+                    blocked,
+                    pending,
+                    extra,
+                    seq,
+                );
+                // `chat.positions`: place the chat in every list it already
+                // has a non-zero position in, like Telegram X
+                // (`Tdlib.updateNewChat` → `TdlibChatList.onUpdateNewChat`).
+                // Additive only — an empty set never evicts a position that
+                // arrived first (TDLib reports later changes separately).
+                let placed = positions.iter().any(|pos| pos.order != 0);
+                for pos in positions.into_iter().filter(|pos| pos.order != 0) {
+                    self.apply_position_fields(pos);
+                }
+                if placed {
+                    self.rebuild_main_order();
+                }
+            }
             // Parity slice: `updateChatPhoto` — swap the cached small
             // photo file id (the chat list re-renders avatars from it).
             EnvelopePayload::UpdateChatPhoto { chat_id, photo } => {
@@ -850,36 +865,17 @@ impl Session {
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .last_read_outbox_message_id = last_read_outbox_message_id;
             }
-            EnvelopePayload::UpdateChatAddedToList { chat_id, list } => {
-                let chat = self
-                    .chats
-                    .entry(chat_id.0)
-                    .or_insert_with(|| placeholder_chat(chat_id));
-                match list {
-                    ChatList::Main => chat.in_main_list = true,
-                    ChatList::Archive => chat.in_archive = true,
-                    ChatList::Folder(folder_id) => {
-                        // Membership is confirmed; the position (with order)
-                        // arrives separately via `updateChatPosition`.
-                        chat.folder_positions.entry(folder_id).or_insert(0);
-                    }
-                    _ => {}
-                }
-                self.rebuild_main_order();
-            }
-            EnvelopePayload::UpdateChatRemovedFromList { chat_id, list } => {
-                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                    match list {
-                        ChatList::Main => chat.in_main_list = false,
-                        ChatList::Archive => chat.in_archive = false,
-                        ChatList::Folder(folder_id) => {
-                            chat.folder_positions.remove(&folder_id);
-                        }
-                        _ => {}
-                    }
-                    self.rebuild_main_order();
-                }
-            }
+            // `updateChatAddedToList` / `updateChatRemovedFromList` track
+            // `chat.chat_lists`, which is *not* list placement: "A chat can
+            // have a non-zero position in a chat list even if it doesn't
+            // belong to the chat list and have no position in a chat list
+            // even if it belongs to the chat list" (schema 1.8.67, line
+            // 3595). Rows come only from positions (`updateChatPosition` /
+            // the full sets on last-message and draft updates), as in
+            // Telegram X, which keeps `chat.chatLists` apart from
+            // `chat.positions` (`Tdlib.updateChatAddedToList`).
+            EnvelopePayload::UpdateChatAddedToList { .. }
+            | EnvelopePayload::UpdateChatRemovedFromList { .. } => {}
             EnvelopePayload::UpdateChatLastMessage {
                 chat_id,
                 last_message,
