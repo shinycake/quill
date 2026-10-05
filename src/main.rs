@@ -4,12 +4,12 @@ mod ui;
 // Phase 1 (kit adoption): embed only the icons the UI needs, composed
 // with the kit's default set, instead of the full 1800-icon Lucide catalog.
 // (AtSign: the chat-row @ mention badge; kit Phase 5 adds the composer
-// icon buttons: attach, emoji/stickers, voice/video record, send.)
+// icon buttons: attach, emoji/stickers, voice/video record, send; chat
+// rows add pinned, read receipt and muted glyphs.)
 #[cfg(feature = "ui")]
 gpui_kit::assets::icon_assets!(
     QuillIcons,
     [
-        ChevronsUp,
         X,
         TextSearch,
         RotateCcw,
@@ -18,7 +18,10 @@ gpui_kit::assets::icon_assets!(
         FaceSlightlySmiling,
         Mic,
         Video,
-        Send
+        Send,
+        Pin,
+        CheckCheck,
+        BellOff
     ]
 );
 

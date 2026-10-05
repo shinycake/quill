@@ -27,6 +27,7 @@ pub(super) enum NavigationAction {
     ChatFolders,
     SharedMedia,
     ExportChat,
+    NewStory,
     Appearance,
     Privacy,
     TwoFa,
@@ -78,6 +79,7 @@ impl QuillApp {
                     self.start_chat_export(chat, cx);
                 }
             }
+            NavigationAction::NewStory => self.open_story_composer(window, cx),
             NavigationAction::Saved => {
                 self.open_saved_messages(window, cx);
             }
@@ -289,6 +291,7 @@ impl QuillApp {
             .dropdown_menu(move |mut menu, _, _| {
                 for (label, action) in [
                     ("Saved Messages", NavigationAction::Saved),
+                    ("New story", NavigationAction::NewStory),
                     ("New group", NavigationAction::Group),
                     ("New supergroup", NavigationAction::Supergroup),
                     ("New channel", NavigationAction::Channel),

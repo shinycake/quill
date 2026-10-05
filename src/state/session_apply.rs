@@ -904,10 +904,16 @@ impl Session {
                         message.author_signature.as_deref(),
                         &chat.title,
                     );
+                    chat.last_message = Some(ChatLastMessage {
+                        id: message.id,
+                        date: message.date,
+                        is_outgoing: message.is_outgoing,
+                    });
                 } else {
                     chat.last_preview = String::new();
                     chat.last_preview_style = ChatPreviewStyle::default();
                     chat.last_preview_sender = String::new();
+                    chat.last_message = None;
                 }
                 // `positions` is the full set of lists this chat belongs to.
                 self.replace_main_list_from_positions(chat_id, &positions);

@@ -60,6 +60,15 @@ pub fn message_time_hhmm(unix: i32) -> Option<String> {
     (unix > 0).then(|| crate::local_time::hhmm(&crate::local_time::civil_local(i64::from(unix))))
 }
 
+/// The chat-list row's view of `chat.last_message`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChatLastMessage {
+    pub id: MessageId,
+    /// Unix seconds.
+    pub date: i32,
+    pub is_outgoing: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatSummary {
     pub id: ChatId,
@@ -94,6 +103,9 @@ pub struct ChatSummary {
     /// for own messages, the author signature for signed channel posts,
     /// else the chat title — the list doesn't parse `sender_id`).
     pub last_preview_sender: String,
+    /// Identity, date and direction of `chat.last_message` for the row's
+    /// timestamp and outgoing receipt; `None` for an empty chat.
+    pub last_message: Option<ChatLastMessage>,
     /// Senders with an active `chatActionTyping` (`updateChatAction`).
     pub typing_senders: Vec<MessageSender>,
     /// Senders with an active `chatActionChoosingSticker` (`updateChatAction`).
@@ -224,6 +236,21 @@ pub struct VideoChatInfo {
 }
 
 impl ChatSummary {
+    /// Delivery state of the last message when it is outgoing: read once
+    /// the peer's read cursor reaches it.
+    pub fn last_message_receipt(&self) -> OutboxReceipt {
+        match self.last_message {
+            Some(last) if last.is_outgoing => {
+                if last.id.0 <= self.last_read_outbox_message_id.0 {
+                    OutboxReceipt::Read
+                } else {
+                    OutboxReceipt::Sent
+                }
+            }
+            _ => OutboxReceipt::None,
+        }
+    }
+
     pub fn supported(&self) -> bool {
         self.kind.is_supported_chat()
     }
