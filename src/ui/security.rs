@@ -1588,7 +1588,7 @@ impl QuillApp {
 
 /// Per-row destructive action: danger-colored text without a filled
 /// background (fills are reserved for the final confirmation).
-fn quiet_danger(cx: &App) -> ButtonCustomVariant {
+pub(super) fn quiet_danger(cx: &App) -> ButtonCustomVariant {
     ButtonCustomVariant::new(cx)
         .color(gpui_kit::transparent_black())
         .foreground(cx.theme().danger)
