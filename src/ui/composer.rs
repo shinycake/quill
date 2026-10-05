@@ -1486,6 +1486,7 @@ impl QuillApp {
             || self.pending_edit.is_some()
             || !self.pending_attachments.is_empty()
             || self.command_menu_open
+            || !self.mention_menu_items(cx).is_empty()
         {
             return false;
         }
@@ -1639,5 +1640,117 @@ impl QuillApp {
         }
         let text = self.composer.read(cx).value().to_string();
         self.save_chat_draft(chat_id, &text, None, false, cx);
+    }
+}
+
+impl QuillApp {
+    /// The composer's `@` suggestions as `(user_id, name, username)`:
+    /// group members matching the `@query` being typed.
+    pub(super) fn mention_menu_items(&self, cx: &Context<Self>) -> Vec<(i64, String, String)> {
+        let text = self.composer.read(cx).value().to_string();
+        if quill::composer::mention_trigger(&text).is_none() {
+            return Vec::new();
+        }
+        let Some(session) = self.session() else {
+            return Vec::new();
+        };
+        let Some(search) = session
+            .mention_search
+            .as_ref()
+            .filter(|search| Some(search.chat_id) == session.open_chat)
+        else {
+            return Vec::new();
+        };
+        search
+            .user_ids
+            .iter()
+            .filter_map(|id| session.user(*id))
+            .take(8)
+            .map(|user| (user.id, user.display_name(), user.username.clone()))
+            .collect()
+    }
+
+    /// Track the `@query` at the composer's end: search the open group's
+    /// members for it, or drop the suggestions when there is none.
+    pub(super) fn sync_mention_menu(&mut self, cx: &mut Context<Self>) {
+        let text = self.composer.read(cx).value().to_string();
+        let query = quill::composer::mention_trigger(&text).map(str::to_string);
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let before = live
+            .driver
+            .session
+            .mention_search
+            .as_ref()
+            .map(|s| s.query.clone());
+        let _ = live.driver.search_mentions(query.as_deref());
+        if before != query {
+            self.mention_selected = 0;
+            cx.notify();
+        }
+    }
+
+    /// Esc / blur: drop the suggestions. True when they were showing.
+    pub(super) fn close_mention_menu(&mut self, cx: &mut Context<Self>) -> bool {
+        let showing = !self.mention_menu_items(cx).is_empty();
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.mention_search = None;
+        }
+        if showing {
+            cx.notify();
+        }
+        showing
+    }
+
+    /// Up/Down through the suggestions (wrapping). True when consumed.
+    pub(super) fn step_mention_menu(&mut self, delta: i32, cx: &mut Context<Self>) -> bool {
+        let rows = self.mention_menu_items(cx).len();
+        if rows == 0 {
+            return false;
+        }
+        self.mention_selected =
+            (self.mention_selected as i32 + delta).rem_euclid(rows as i32) as usize;
+        cx.notify();
+        true
+    }
+
+    /// Enter / Tab: complete the highlighted suggestion. True when consumed.
+    pub(super) fn pick_mention_selection(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let items = self.mention_menu_items(cx);
+        if items.is_empty() {
+            return false;
+        }
+        let index = self.mention_selected.min(items.len() - 1);
+        self.pick_mention_index(index, window, cx);
+        true
+    }
+
+    pub(super) fn pick_mention_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((user_id, name, username)) = self.mention_menu_items(cx).into_iter().nth(index)
+        else {
+            return;
+        };
+        let text = self.composer.read(cx).value().to_string();
+        let completed = quill::composer::complete_mention(&text, user_id, &username, &name);
+        self.composer.update(cx, |input, cx| {
+            input.set_value(&completed, window, cx);
+            input.focus(window, cx);
+        });
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.mention_search = None;
+        }
+        self.sync_composer_typing(&completed);
+        self.mention_selected = 0;
+        cx.notify();
     }
 }

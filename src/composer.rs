@@ -709,6 +709,36 @@ pub fn parse_format_markup(text: &str) -> (String, Vec<ComposerEntity>) {
     (parser.out, parser.entities)
 }
 
+/// The `@name` being typed at the end of the composer: the text after an
+/// `@` that starts a word, made of letters, digits and `_` only. `Some("")`
+/// right after a bare `@`; `None` once a space or other character follows.
+pub fn mention_trigger(text: &str) -> Option<&str> {
+    let at = text.rfind('@')?;
+    let query = &text[at + 1..];
+    let starts_word = text[..at]
+        .chars()
+        .next_back()
+        .is_none_or(char::is_whitespace);
+    let name_chars = query.chars().all(|c| c.is_alphanumeric() || c == '_');
+    (starts_word && name_chars && query.chars().count() <= 32).then_some(query)
+}
+
+/// Replace the trailing `@query` with a mention of the chosen user: their
+/// `@username` when they have one, else a `tg://user?id=` link around the
+/// name (TDLib turns it into a mention-name entity). Ends with a space.
+pub fn complete_mention(text: &str, user_id: i64, username: &str, name: &str) -> String {
+    let Some(query) = mention_trigger(text) else {
+        return text.to_string();
+    };
+    let head = &text[..text.len() - query.len() - 1];
+    if username.is_empty() {
+        let name = name.replace(['[', ']'], "");
+        format!("{head}[{name}](tg://user?id={user_id}) ")
+    } else {
+        format!("{head}@{username} ")
+    }
+}
+
 /// M1: apply a formatting action to `range` (UTF-8 byte range; snapped to
 /// char boundaries). Returns the new text and the new selection: the
 /// wrapped region for a selection, the cursor between markers when empty.
@@ -1390,6 +1420,34 @@ pub fn find_urls(text: &str) -> Vec<String> {
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .collect()
+}
+
+#[cfg(test)]
+mod mention_tests {
+    use super::*;
+
+    #[test]
+    fn mention_trigger_needs_a_word_start_and_name_chars() {
+        assert_eq!(mention_trigger("hi @al"), Some("al"));
+        assert_eq!(mention_trigger("@"), Some(""));
+        assert_eq!(mention_trigger("mail@host"), None);
+        assert_eq!(mention_trigger("hi @al "), None);
+        assert_eq!(mention_trigger("hi @al-x"), None);
+        assert_eq!(mention_trigger("no at"), None);
+    }
+
+    #[test]
+    fn complete_mention_prefers_username_then_name_link() {
+        assert_eq!(
+            complete_mention("hi @al", 7, "alice", "Alice"),
+            "hi @alice "
+        );
+        assert_eq!(
+            complete_mention("hi @al", 7, "", "Al [x]"),
+            "hi [Al x](tg://user?id=7) "
+        );
+        assert_eq!(complete_mention("plain", 7, "alice", "Alice"), "plain");
+    }
 }
 
 #[cfg(test)]

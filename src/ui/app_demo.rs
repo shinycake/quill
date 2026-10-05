@@ -357,6 +357,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — received album and own-sent album".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyMentions => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — @ member suggestions".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadySponsored => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1132,9 +1138,11 @@ impl QuillApp {
                     InputEvent::Blur => {
                         this.close_command_menu(cx);
                         this.close_inline_results(cx);
+                        this.close_mention_menu(cx);
                     }
                     _ => {
                         this.sync_command_menu(cx);
+                        this.sync_mention_menu(cx);
                         this.sync_inline_mode(cx);
                         // parity:platform-spellcheck: cheap re-check of
                         // the draft (suggestions stay cached until the
@@ -1152,6 +1160,8 @@ impl QuillApp {
                     ) {
                         if this.pick_inline_result_selection(window, cx) {
                             // Enter was consumed by the inline results.
+                        } else if this.pick_mention_selection(window, cx) {
+                            // Enter completed the highlighted mention.
                         } else if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
                         } else if !text.trim().is_empty() {
@@ -1366,6 +1376,7 @@ impl QuillApp {
             group_call_composer,
             command_menu_open: false,
             command_menu_selected: 0,
+            mention_selected: 0,
             inline_results_open: false,
             inline_results_selected: 0,
             inline_query_token: 0,
@@ -1725,7 +1736,7 @@ impl QuillApp {
         app.demo_setup_bots_profile(demo, window, cx);
 
         let menu_app = cx.weak_entity();
-        cx.intercept_keystrokes(move |event, _window, cx| {
+        cx.intercept_keystrokes(move |event, window, cx| {
             // Shortcut capture owns the key. This interceptor is registered
             // first so it observes `keybinding_capture` before the capture
             // handler clears it.
@@ -1758,18 +1769,28 @@ impl QuillApp {
             let handled = match event.keystroke.key.as_str() {
                 "escape" => menu_app
                     .update(cx, |this, cx| {
-                        this.close_inline_results(cx) || this.close_command_menu(cx)
+                        this.close_inline_results(cx)
+                            || this.close_mention_menu(cx)
+                            || this.close_command_menu(cx)
                     })
                     .unwrap_or(false),
                 "up" => menu_app
                     .update(cx, |this, cx| {
-                        this.step_inline_results(-1, cx) || this.step_command_menu(-1, cx)
+                        this.step_inline_results(-1, cx)
+                            || this.step_mention_menu(-1, cx)
+                            || this.step_command_menu(-1, cx)
                     })
                     .unwrap_or(false),
                 "down" => menu_app
                     .update(cx, |this, cx| {
-                        this.step_inline_results(1, cx) || this.step_command_menu(1, cx)
+                        this.step_inline_results(1, cx)
+                            || this.step_mention_menu(1, cx)
+                            || this.step_command_menu(1, cx)
                     })
+                    .unwrap_or(false),
+                // Tab completes the highlighted `@` suggestion.
+                "tab" => menu_app
+                    .update(cx, |this, cx| this.pick_mention_selection(window, cx))
                     .unwrap_or(false),
                 _ => false,
             };
