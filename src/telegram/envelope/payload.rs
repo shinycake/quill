@@ -431,17 +431,27 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             })
         }
         "availableReactions" => {
-            let reactions = value
-                .get("top_reactions")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(parse_story_available_reaction)
-                        .collect()
-                })
-                .unwrap_or_default();
-            Ok(EnvelopePayload::StoryAvailableReactions { reactions })
+            let list = |key: &str| -> Vec<_> {
+                value
+                    .get(key)
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(parse_story_available_reaction)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            Ok(EnvelopePayload::StoryAvailableReactions {
+                reactions: list("top_reactions"),
+                recent: list("recent_reactions"),
+                popular: list("popular_reactions"),
+                allow_custom_emoji: value
+                    .get("allow_custom_emoji")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
         }
         // Phase 9.3: `canPostStory` answer — one of the
         // `canPostStoryResult*` variants (TDLib 1.8.67, `schema/td_api.tl:8535`

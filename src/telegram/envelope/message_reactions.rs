@@ -82,6 +82,14 @@ impl MessageReactions {
             reaction.is_chosen && reaction.reaction_type.emoji_text() == Some(emoji)
         })
     }
+
+    /// Whether the current user chose the custom-emoji reaction `id`.
+    pub fn chosen_custom_emoji(&self, id: i64) -> bool {
+        self.reactions.iter().any(|reaction| {
+            reaction.is_chosen
+                && matches!(reaction.reaction_type, ReactionType::CustomEmoji { custom_emoji_id } if custom_emoji_id == id)
+        })
+    }
 }
 
 /// `messageInteractionInfo` (TDLib 1.8.67). `reply_info` stays out of this slice.

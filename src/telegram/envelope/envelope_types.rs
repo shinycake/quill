@@ -1336,6 +1336,12 @@ pub enum EnvelopePayload {
     /// it in `Session::story_available_reactions` for the viewer picker.
     StoryAvailableReactions {
         reactions: Vec<StoryAvailableReactionView>,
+        /// `recent_reactions` / `popular_reactions` and
+        /// `allow_custom_emoji` — used by the message reaction picker
+        /// (`getMessageAvailableReactions` answers the same type).
+        recent: Vec<StoryAvailableReactionView>,
+        popular: Vec<StoryAvailableReactionView>,
+        allow_custom_emoji: bool,
     },
     /// Phase 9.3: `canPostStory` answer (TDLib 1.8.67,
     /// `schema/td_api.tl:8535` – `td_api.tl:8553`). The reducer honors it

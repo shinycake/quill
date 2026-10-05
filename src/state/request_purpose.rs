@@ -88,6 +88,16 @@ pub enum RequestPurpose {
     /// loaded window's newest message, while the window does not reach the
     /// chat's latest message (`HistoryState::has_newer`).
     GetHistoryNewer,
+    /// `getStickerSet` for the composer's emoji/sticker panel library
+    /// (`Session::media_library`), one per installed set as its section
+    /// comes into view.
+    LoadLibrarySet {
+        set_id: i64,
+    },
+    /// `getMessageAvailableReactions` for the message reaction picker.
+    GetMessageAvailableReactions {
+        message_id: i64,
+    },
     /// `searchChatMembers` for the composer's `@` suggestions.
     SearchMentionMembers,
     /// `editMessageText` / `editMessageCaption`. Response is `message`.
