@@ -454,6 +454,10 @@ impl QuillApp {
             });
         let selected =
             self.session().and_then(|s| s.open_info_panel) == Some(InfoPanelTarget::User(user_id));
+        let online = self
+            .session()
+            .and_then(|s| s.user(user_id))
+            .is_some_and(|user| !user.is_bot && user.status.is_online());
         div()
             .id(("contact-row", user_id as u64))
             .px_2()
@@ -477,7 +481,12 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(chat_avatar(&name, photo.as_deref(), 32.))
+                    .child(super::chat_row::with_presence_dot(
+                        chat_avatar(&name, photo.as_deref(), 32.),
+                        online,
+                        10.,
+                        cx,
+                    ))
                     .child(
                         div()
                             .flex()
@@ -487,7 +496,11 @@ impl QuillApp {
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_color(if online {
+                                        cx.theme().primary
+                                    } else {
+                                        cx.theme().muted_foreground
+                                    })
                                     .child(status),
                             ),
                     ),
