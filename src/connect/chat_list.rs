@@ -275,8 +275,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Parity slice: `addChatToList` with `chatListFolder` (schema 1.8.67
-    /// lines 13352 + 3524). Membership confirms via `updateChatPosition` /
-    /// added-to-list updates, like archive.
+    /// lines 13352 + 3524). The row appears via `updateChatPosition`,
+    /// like archive.
     pub fn add_chat_to_folder(
         &mut self,
         chat_id: ChatId,

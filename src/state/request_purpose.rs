@@ -249,7 +249,7 @@ pub enum RequestPurpose {
     /// refetched from the authoritative answer (never optimistic).
     DisconnectAllWebsites,
     /// `addChatToList` (`chatListArchive` or `chatListMain`). Response is `ok`;
-    /// list membership via position / added-to-list updates.
+    /// the row moves via position updates.
     AddChatToList,
     /// `sendChatAction` (`chatActionTyping` / `chatActionCancel` /
     /// `chatActionRecordingVoiceNote`). Response is `ok`.
@@ -720,7 +720,7 @@ pub enum RequestPurpose {
     DeleteChatHistory,
     /// Slice CL1: `deleteChatHistory` with `remove_from_chat_list: true`
     /// (the chat-list "Delete chat", Telegram X `Tdlib.deleteChat`).
-    /// Response is `ok`; the row drops via `updateChatRemovedFromList`.
+    /// Response is `ok`; the row drops via its position update (order 0).
     RemoveChatFromList,
     /// Slice CL2: `setPinnedChats` (schema 1.8.67, line 13681).
     /// Response is `ok`; the new pinned order arrives via

@@ -80,16 +80,16 @@ pub struct ChatSummary {
     pub order: i64,
     pub is_pinned: bool,
     pub in_main_list: bool,
-    /// `chatListArchive` membership (`updateChatPosition` / add-remove-from-list).
+    /// `chatListArchive` placement (a non-zero `chatPosition`; the
+    /// add/remove-from-list updates track `chat.chat_lists`, not rows).
     pub in_archive: bool,
     pub archive_order: i64,
     pub archive_is_pinned: bool,
     /// `chatListFolder` membership: folder id → TDLib order
-    /// (`updateChatPosition` / `updateChatLastMessage` positions /
-    /// add-remove-from-list). Order 0 means membership confirmed but order
-    /// not yet known (from `updateChatAddedToList` before the position
-    /// arrives); sorting treats 0 as last. `is_pinned` is not tracked —
-    /// pinned folder chats already sort first by order.
+    /// (`updateNewChat` / `updateChatPosition` / `updateChatLastMessage` /
+    /// `updateChatDraftMessage` positions; order 0 removes the entry).
+    /// `is_pinned` is not tracked — pinned folder chats already sort first
+    /// by order.
     pub folder_positions: BTreeMap<i32, i64>,
     /// `chat.notification_settings` / `updateChatNotificationSettings`.
     pub notification_settings: ChatNotificationSettings,
