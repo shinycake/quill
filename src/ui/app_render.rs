@@ -23,6 +23,7 @@ impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Rows the history list painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
+        let status_toast = self.status_toast_visible(cx);
         let menu_open = self.message_menu.is_some() || self.chat_menu.is_some();
         if menu_open && !self.context_menu_was_open {
             self.context_menu_previous_focus = window.focused(cx);
@@ -491,18 +492,54 @@ impl Render for QuillApp {
                     )
                 },
             )
-            .when(!self.status_note.is_empty(), |this| {
+            // Screenshot demos keep their caption as a fixed footer line.
+            .when(
+                self.live.is_none() && !self.status_note.is_empty(),
+                |this| {
+                    this.child(
+                        div()
+                            .id("status-line")
+                            .flex_none()
+                            .min_h(px(24.))
+                            .px_3()
+                            .role(Role::Label)
+                            .aria_label(self.status_note.clone())
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(self.status_note.clone()),
+                    )
+                },
+            )
+            // Live: the latest status note is a transient toast floating
+            // above the composer — no layout shift, no click capture, gone
+            // after a few seconds.
+            .when(status_toast, |this| {
                 this.child(
                     div()
-                        .id("status-line")
-                        .flex_none()
-                        .min_h(px(24.))
-                        .px_3()
-                        .role(Role::Label)
-                        .aria_label(self.status_note.clone())
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(self.status_note.clone()),
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(px(84.))
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .id("status-toast")
+                                .role(Role::Label)
+                                .aria_label(self.status_note.clone())
+                                .max_w(px(520.))
+                                .px_3()
+                                .py_1p5()
+                                .rounded_full()
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .bg(cx.theme().popover)
+                                .text_color(cx.theme().popover_foreground)
+                                .shadow_md()
+                                .text_sm()
+                                .truncate()
+                                .child(self.status_note.clone()),
+                        ),
                 )
             })
             .when(
@@ -592,4 +629,53 @@ impl Render for QuillApp {
                 this.child(overlay)
             })
     }
+}
+
+impl QuillApp {
+    /// Whether the live status toast shows this frame. A new note restarts
+    /// its timer and schedules the re-render that hides it; failures stay
+    /// up longer than confirmations.
+    fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.live.is_none() || self.status_note.is_empty() {
+            return false;
+        }
+        if self.status_note != self.status_seen {
+            self.status_seen = self.status_note.clone();
+            self.status_shown_at = Some(std::time::Instant::now());
+            let duration = status_toast_duration(&self.status_note);
+            let shown = self.status_note.clone();
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(duration).await;
+                let _ = this.update(cx, |this, cx| {
+                    // Expired and unchanged: clear it, so the same message
+                    // set again later (a repeated failure) shows again.
+                    if this.status_note == shown {
+                        this.status_note.clear();
+                        this.status_seen.clear();
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        self.status_shown_at
+            .is_some_and(|at| at.elapsed() < status_toast_duration(&self.status_note))
+    }
+}
+
+/// How long a status note stays on screen.
+fn status_toast_duration(note: &str) -> std::time::Duration {
+    let lower = note.to_lowercase();
+    let failure = [
+        "fail",
+        "could not",
+        "couldn't",
+        "can't",
+        "cannot",
+        "error",
+        "offline",
+    ]
+    .iter()
+    .any(|word| lower.contains(word));
+    std::time::Duration::from_millis(if failure { 6000 } else { 3000 })
 }

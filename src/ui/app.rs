@@ -157,6 +157,10 @@ pub struct QuillApp {
     pub(super) connection_generation: u64,
     pub(super) live: Option<LiveConnect>,
     pub(super) status_note: String,
+    /// The `status_note` text the toast last showed, and when it appeared:
+    /// a changed note restarts the toast's timer.
+    pub(super) status_seen: String,
+    pub(super) status_shown_at: Option<std::time::Instant>,
     /// Slice auth-logout-warning: the startup credentials, kept so a
     /// `logOut`-driven Closed can restart the live connection and return
     /// the user to the login screen (same sensitivity class as the

@@ -1441,6 +1441,8 @@ impl QuillApp {
             connection_generation: 0,
             live,
             status_note,
+            status_seen: String::new(),
+            status_shown_at: None,
             demo_auth_inputs: matches!(
                 demo,
                 Some(
