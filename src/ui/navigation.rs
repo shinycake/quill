@@ -277,8 +277,9 @@ impl QuillApp {
     pub(super) fn main_navigation_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.entity().downgrade();
         Button::new("main-menu")
-            .label("☰")
+            .icon(gpui_kit::assets::IconName::Menu)
             .ghost()
+            .tooltip("Menu")
             .accessibility_label("Main menu")
             .on_click(|event, window, cx| {
                 if matches!(event, ClickEvent::Keyboard(_)) {

@@ -936,9 +936,16 @@ impl QuillApp {
             .chain(folders.iter().map(|(id, _)| Some(*id)))
             .collect();
         bar.selected_index(selected)
+            // Many folders: the strip scrolls, tabs truncate long names, and
+            // an overflow menu lists every tab by its full name.
+            .underline()
+            .menu(true)
+            .max_width(px(140.))
             .suffix(
                 Button::new("folder-manage")
-                    .label("⋯")
+                    .icon(gpui_kit::assets::IconName::Settings)
+                    .small()
+                    .tooltip("Chat folders")
                     .accessibility_label("Manage chat folders")
                     .ghost()
                     .on_click(move |_, _, cx| {
