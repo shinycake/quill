@@ -1273,7 +1273,7 @@ impl Session {
                     message_ids
                 };
                 let history = self.histories.entry(chat_id.0).or_default();
-                for id in message_ids {
+                for id in message_ids.iter().copied() {
                     // Permanent or "became inaccessible": either way the
                     // row must not come back from a stale page.
                     history.remove(id, true);
@@ -1286,6 +1286,15 @@ impl Session {
                         )
                     {
                         self.chat_search.jump = ChatSearchJump::Missing { message_id: id };
+                    }
+                }
+                // Parity slice 4: the topic view reads only
+                // `topic_histories`, so deletions must reach its rows too.
+                for ((topic_chat_id, _), topic) in self.topic_histories.iter_mut() {
+                    if *topic_chat_id == chat_id.0 {
+                        for id in &message_ids {
+                            topic.messages.remove(&id.0);
+                        }
                     }
                 }
             }
