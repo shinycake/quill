@@ -1655,21 +1655,17 @@ impl QuillApp {
                 let run_start = inputs.run_start;
                 div()
                     .when(run_start, |this| this.pt_2())
-                    .when(highlighted || selected_forward, |this| {
-                        this.rounded_lg()
-                            .border_2()
-                            .border_color(if selected_forward {
-                                success()
-                            } else {
-                                accent()
-                            })
-                            .px_1()
+                    // Jump target, forward selection and failed sends tint
+                    // the whole row instead of outlining it: no border or
+                    // padding, so the row never shifts as the state flips.
+                    .rounded_md()
+                    .when(highlighted, |this| {
+                        this.bg(cx.theme().primary.opacity(0.12))
                     })
-                    // M1: failed sends get a red outline so the retry
-                    // affordance is visible (`updateMessageSendFailed`).
-                    .when(failed, |this| {
-                        this.rounded_lg().border_1().border_color(danger()).px_1()
-                    })
+                    .when(selected_forward, |this| this.bg(cx.theme().selection))
+                    // M1: failed sends stay visibly marked so the retry
+                    // affordance is noticed (`updateMessageSendFailed`).
+                    .when(failed, |this| this.bg(cx.theme().danger.opacity(0.08)))
                     // M1: right-click opens the message context menu at
                     // the click position (window coordinates).
                     .on_mouse_down(
