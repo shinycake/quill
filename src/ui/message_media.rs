@@ -134,11 +134,13 @@ pub(super) fn photo_display_path(
     files: &HashMap<i32, ParsedFile>,
     roots: &[PathBuf],
 ) -> Option<PathBuf> {
+    // Sharpest downloaded size first: the bubble frame is up to 360pt
+    // wide (720px on Retina), well past the ≤320px "m" thumbnail.
     let mut ids = Vec::new();
-    if let Some(size) = photo.thumb_size() {
+    if let Some(size) = photo.largest_size() {
         ids.push(size.file_id);
     }
-    if let Some(size) = photo.largest_size() {
+    if let Some(size) = photo.thumb_size() {
         ids.push(size.file_id);
     }
     for id in ids {
@@ -198,6 +200,25 @@ pub(super) fn file_is_downloading(
             .is_some_and(|f| f.local.is_downloading_active)
 }
 
+/// Display frame for a photo/GIF/video in a bubble: the media's aspect
+/// ratio fitted into at most 360×400 (and at least 120 on the short
+/// side), so pictures are never cropped to a fixed strip and the
+/// not-yet-downloaded placeholder already has the final size — the row
+/// keeps its height when the file arrives.
+pub(super) fn media_frame(width: i32, height: i32) -> (Pixels, Pixels) {
+    const MAX_W: f32 = 360.;
+    const MAX_H: f32 = 400.;
+    const MIN_SIDE: f32 = 120.;
+    if width <= 0 || height <= 0 {
+        return (px(260.), px(180.));
+    }
+    let (w, h) = (width as f32, height as f32);
+    let scale = (MAX_W / w).min(MAX_H / h);
+    let (w, h) = (w * scale, h * scale);
+    // Very wide/tall media: keep a usable short side (cropped by Cover).
+    (px(w.max(MIN_SIDE)), px(h.max(MIN_SIDE)))
+}
+
 pub(super) fn photo_attachment(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
@@ -212,15 +233,19 @@ pub(super) fn photo_attachment(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let open_id = photo.open_file_id().unwrap_or(FileId(0));
+    let (frame_w, frame_h) = photo
+        .largest_size()
+        .or_else(|| photo.thumb_size())
+        .map(|size| media_frame(size.width, size.height))
+        .unwrap_or_else(|| media_frame(0, 0));
     if !photo.is_secret
         && !photo.has_spoiler
         && let Some(path) = photo_display_path(photo, files, media_roots)
     {
         return img(path)
             .id(("photo-img", row_id))
-            .mt_2()
-            .w(px(240.))
-            .h(px(140.))
+            .w(frame_w)
+            .h(frame_h)
             .rounded_md()
             .object_fit(ObjectFit::Cover)
             .when_some(viewer, |this, (chat_id, message_id)| {
@@ -232,10 +257,10 @@ pub(super) fn photo_attachment(
                         this.open_media_viewer(chat_id, message_id, cx);
                     }))
             })
-            .with_fallback(|| {
+            .with_fallback(move || {
                 div()
-                    .w(px(240.))
-                    .h(px(140.))
+                    .w(frame_w)
+                    .h(frame_h)
                     .rounded_md()
                     .bg(fill_muted())
                     .flex()
@@ -270,9 +295,8 @@ pub(super) fn photo_attachment(
     let has_viewer_open = viewer_open.is_some();
     div()
         .id(("photo-ph", row_id))
-        .mt_2()
-        .w(px(240.))
-        .h(px(88.))
+        .w(frame_w)
+        .h(frame_h)
         .rounded_md()
         .bg(fill_muted())
         .flex()
@@ -344,17 +368,18 @@ pub(super) fn animation_attachment(
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = animation.is_secret || animation.has_spoiler;
+    let (frame_w, frame_h) = media_frame(animation.width, animation.height);
     let picture = if !blocked && let Some(path) = visual {
         img(path)
             .id(("gif-img", row_id))
-            .w(px(240.))
-            .h(px(140.))
+            .w(frame_w)
+            .h(frame_h)
             .rounded_md()
             .object_fit(ObjectFit::Cover)
-            .with_fallback(|| {
+            .with_fallback(move || {
                 div()
-                    .w(px(240.))
-                    .h(px(140.))
+                    .w(frame_w)
+                    .h(frame_h)
                     .rounded_md()
                     .bg(accent_strong())
                     .into_any_element()
@@ -375,8 +400,8 @@ pub(super) fn animation_attachment(
         };
         div()
             .id(("gif-ph", row_id))
-            .w(px(240.))
-            .h(px(140.))
+            .w(frame_w)
+            .h(frame_h)
             .rounded_md()
             .bg(accent_strong())
             .flex()
@@ -387,7 +412,6 @@ pub(super) fn animation_attachment(
     };
     div()
         .id(("gif-row", row_id))
-        .mt_2()
         .flex()
         .flex_col()
         .gap_1()
@@ -462,17 +486,18 @@ pub(super) fn video_attachment(
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = video.is_secret || video.has_spoiler;
+    let (frame_w, frame_h) = media_frame(video.width, video.height);
     let picture = if !blocked && let Some(path) = visual {
         img(path)
             .id(("video-img", row_id))
-            .w(px(240.))
-            .h(px(140.))
+            .w(frame_w)
+            .h(frame_h)
             .rounded_md()
             .object_fit(ObjectFit::Cover)
-            .with_fallback(|| {
+            .with_fallback(move || {
                 div()
-                    .w(px(240.))
-                    .h(px(140.))
+                    .w(frame_w)
+                    .h(frame_h)
                     .rounded_md()
                     .bg(success_bg())
                     .into_any_element()
@@ -490,8 +515,8 @@ pub(super) fn video_attachment(
         };
         div()
             .id(("video-ph", row_id))
-            .w(px(240.))
-            .h(px(140.))
+            .w(frame_w)
+            .h(frame_h)
             .rounded_md()
             .bg(success_bg())
             .flex()
@@ -502,7 +527,6 @@ pub(super) fn video_attachment(
     };
     div()
         .id(("video-row", row_id))
-        .mt_2()
         .flex()
         .flex_col()
         .gap_1()
@@ -690,7 +714,7 @@ pub(super) fn video_note_attachment(
             .size(px(200.))
             .rounded(px(100.))
             .object_fit(ObjectFit::Cover)
-            .with_fallback(|| {
+            .with_fallback(move || {
                 div()
                     .size(px(200.))
                     .rounded(px(100.))
@@ -1128,7 +1152,7 @@ pub(super) fn audio_row(
             .h(px(56.))
             .rounded_md()
             .object_fit(ObjectFit::Cover)
-            .with_fallback(|| {
+            .with_fallback(move || {
                 div()
                     .w(px(56.))
                     .h(px(56.))

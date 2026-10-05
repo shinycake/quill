@@ -48,7 +48,7 @@ pub(super) fn game_card(
     if game.photo.sizes.is_empty() {
         card = card.child(div().text_2xl().child("🎮"));
     } else {
-        card = card.child(photo_attachment(
+        card = card.child(div().mt_2().child(photo_attachment(
             row_id,
             &game.photo,
             files,
@@ -57,7 +57,7 @@ pub(super) fn game_card(
             None,
             None,
             cx,
-        ));
+        )));
     }
     let title = game.title.trim();
     card = card.child(div().text_sm().font_semibold().child(if title.is_empty() {

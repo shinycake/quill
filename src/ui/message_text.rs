@@ -384,6 +384,8 @@ pub(super) fn message_chrome(
             .map(|(name, photo)| kit_avatar_element(&name, photo.as_deref(), px(32.))),
         footer: message_footer(date, pending, receipt),
         footer_inline: false,
+        footer_overlay: false,
+        media_led: false,
         actions: None,
     }
 }

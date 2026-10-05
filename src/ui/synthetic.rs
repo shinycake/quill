@@ -213,6 +213,10 @@ pub(crate) struct MessageChrome {
     /// (`rich_text_reserving`), so the footer overlays the last text line
     /// instead of taking a line of its own.
     pub footer_inline: bool,
+    /// The bubble ends with a picture: paint the footer on it as a pill.
+    pub footer_overlay: bool,
+    /// Media-led bubble: thin inset instead of text padding.
+    pub media_led: bool,
     /// Hover-revealed control in the bubble's top-right corner (message
     /// actions). Right-click opens the same menu.
     pub actions: Option<AnyElement>,
@@ -304,6 +308,8 @@ fn message_bubble_with_quote(
         avatar,
         footer,
         footer_inline,
+        footer_overlay,
+        media_led,
         actions,
     } = chrome;
     let group: SharedString = format!("message-row-{}", row.id).into();
@@ -374,7 +380,19 @@ fn message_bubble_with_quote(
         // cap still applies on narrow panes.
         .max_w(px(560.))
         .line_height(relative(1.4))
+        .when(media_led && !look.plain, |this| this.p_1())
         .map(|this| match footer {
+            Some(footer) if footer_overlay => this.child(
+                div()
+                    .absolute()
+                    .right(px(10.))
+                    .bottom(px(10.))
+                    .px_1p5()
+                    .rounded_full()
+                    .bg(gpui_kit::black().opacity(0.45))
+                    .text_color(gpui_kit::white())
+                    .child(footer),
+            ),
             Some(footer) if footer_inline => {
                 this.child(div().absolute().right(px(12.)).bottom(px(7.)).child(footer))
             }
