@@ -1359,6 +1359,7 @@ impl QuillApp {
                     .id(("media-viewer-img", row_id))
                     .w(px(zoom_w))
                     .h(px(zoom_h))
+                    .aspect_ratio(px(zoom_w) / px(zoom_h))
                     .object_fit(ObjectFit::Contain)
                     .with_fallback(move || {
                         div()

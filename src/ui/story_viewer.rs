@@ -1104,6 +1104,7 @@ impl QuillApp {
                                 .id(("story-custom-emoji-img", id as u64))
                                 .w(px(36.))
                                 .h(px(36.))
+                                .aspect_ratio(px(36.) / px(36.))
                                 .flex_shrink_0()
                                 .object_fit(ObjectFit::Contain)
                                 .with_fallback(|| div().text_2xl().child("✨").into_any_element())
@@ -1194,6 +1195,7 @@ impl QuillApp {
                             .id(("story-chosen-custom-emoji", id as u64))
                             .w(px(28.))
                             .h(px(28.))
+                            .aspect_ratio(px(28.) / px(28.))
                             .object_fit(ObjectFit::Contain)
                             .with_fallback(|| div().text_xl().child("✨").into_any_element())
                             .into_any_element(),
@@ -1659,6 +1661,7 @@ impl QuillApp {
                 .id(("story-viewer-img", item.story_id as u64))
                 .w(px(360.))
                 .h(px(640.))
+                .aspect_ratio(px(360.) / px(640.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
                 .bg(bg_deep())

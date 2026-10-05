@@ -421,6 +421,7 @@ impl QuillApp {
                 .id(("info-panel-photo", user_id as u64))
                 .w(px(96.))
                 .h(px(96.))
+                .aspect_ratio(px(96.) / px(96.))
                 .rounded_full()
                 .object_fit(ObjectFit::Cover)
                 .into_any_element(),

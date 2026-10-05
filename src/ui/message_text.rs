@@ -80,7 +80,7 @@ pub(super) fn apply_ready_preview_cards(
         )
     };
     let embedded = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":102,"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{text},"link_preview":{{"@type":"linkPreview","url":"https://video.example/watch","display_url":"video.example","site_name":"Vids","title":"Clip","description":{{"@type":"formattedText","text":"","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeEmbeddedVideoPlayer","url":"https://video.example/embed/1","thumbnail":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}},"duration":95,"width":640,"height":360}},"has_large_media":false,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":2}},"link_preview_options":null}}}}}}"#,
+        r#"{{"@type":"updateNewMessage","message":{{"id":102,"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{text},"link_preview":{{"@type":"linkPreview","url":"https://video.example/watch","display_url":"video.example","site_name":"Vids","title":"Clip","description":{{"@type":"formattedText","text":"","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeEmbeddedVideoPlayer","url":"https://video.example/embed/1","thumbnail":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}},"duration":95,"width":640,"height":360}},"has_large_media":true,"show_large_media":true,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":2}},"link_preview_options":null}}}}}}"#,
         text = mk_text(
             "watch https://video.example/watch",
             "https://video.example/watch"
@@ -598,6 +598,7 @@ fn paint_text_run(
             .id(format!("{run_id}-emoji"))
             .w(edge)
             .h(edge)
+            .aspect_square()
             .object_fit(ObjectFit::Contain)
             .with_fallback(move || div().child(fallback_text.clone()).into_any_element());
         // A custom emoji inside a link keeps the link (role + click); the
@@ -1615,6 +1616,7 @@ pub(super) fn preview_thumb(
             .id(("link-preview-img", row_id))
             .w(w)
             .h(h)
+            .aspect_ratio(w / h)
             .rounded_md()
             .object_fit(ObjectFit::Cover)
             .flex_shrink_0()

@@ -645,6 +645,7 @@ impl QuillApp {
             .child(match still {
                 Some(path) => img(path)
                     .size(px(CUSTOM_EMOJI_SIZE))
+                    .aspect_square()
                     .object_fit(ObjectFit::Contain)
                     .into_any_element(),
                 None => div().text_size(px(22.)).child(fallback).into_any_element(),
@@ -894,6 +895,7 @@ impl QuillApp {
                             .map(|path| {
                                 img(path)
                                     .size(px(24.))
+                                    .aspect_square()
                                     .object_fit(ObjectFit::Contain)
                                     .into_any_element()
                             })

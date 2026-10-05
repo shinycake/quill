@@ -302,6 +302,7 @@ pub(super) fn photo_attachment(
             .id(("photo-img", row_id))
             .w(frame_w)
             .h(frame_h)
+            .aspect_ratio(frame_w / frame_h)
             .rounded_md()
             .object_fit(ObjectFit::Cover)
             .when_some(viewer, |this, (chat_id, message_id)| {
@@ -465,6 +466,7 @@ pub(super) fn animation_attachment(
             .id(("gif-img", row_id))
             .w(frame_w)
             .h(frame_h)
+            .aspect_ratio(frame_w / frame_h)
             .rounded_md()
             .object_fit(ObjectFit::Cover)
             .with_fallback(move || {
@@ -603,6 +605,7 @@ pub(super) fn video_attachment(
             .id(("video-img", row_id))
             .w(frame_w)
             .h(frame_h)
+            .aspect_ratio(frame_w / frame_h)
             .rounded_md()
             .object_fit(ObjectFit::Cover)
             .with_fallback(move || {
@@ -977,6 +980,7 @@ pub(super) fn sticker_attachment(
             .mt_2()
             .w(px(128.))
             .h(px(128.))
+            .aspect_ratio(px(128.) / px(128.))
             .object_fit(ObjectFit::Contain)
             .into_any_element();
     }
@@ -994,6 +998,7 @@ pub(super) fn sticker_attachment(
             .mt_2()
             .w(px(128.))
             .h(px(128.))
+            .aspect_ratio(px(128.) / px(128.))
             .object_fit(ObjectFit::Contain)
             .with_fallback(move || {
                 div()
@@ -1009,27 +1014,33 @@ pub(super) fn sticker_attachment(
             })
             .into_any_element();
     }
+    // Until the image lands: the sticker's emoji, faded, in a box the size
+    // of the sticker itself so the row doesn't jump when it arrives.
     let downloading_now = file_is_downloading(display_id, files, downloading);
     let label = if downloading_now {
-        format!("{} — downloading…", sticker_label(sticker))
-    } else if display_id.0 == 0 {
-        sticker_label(sticker)
+        format!("{} — downloading", sticker_label(sticker))
     } else {
-        format!("{} — not downloaded", sticker_label(sticker))
+        sticker_label(sticker)
+    };
+    let glyph = if sticker.emoji.is_empty() {
+        "🙂".to_string()
+    } else {
+        sticker.emoji.clone()
     };
     div()
         .id(("sticker-ph", row_id))
         .mt_2()
-        .w(px(128.))
-        .h(px(88.))
-        .rounded_md()
-        .bg(fill_muted())
+        .size(px(128.))
+        .flex_none()
+        .rounded_lg()
+        .bg(fill_muted().opacity(0.5))
         .flex()
         .items_center()
         .justify_center()
-        .when(display_id.0 != 0, |this| {
+        .role(gpui_kit::Role::Image)
+        .aria_label(label)
+        .when(display_id.0 != 0 && !downloading_now, |this| {
             this.role(gpui_kit::Role::Button)
-                .aria_label("Download sticker")
                 .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
@@ -1037,7 +1048,12 @@ pub(super) fn sticker_attachment(
                     this.request_media_download(display_id, None, cx);
                 }))
         })
-        .child(div().text_xs().text_color(text_bright()).child(label))
+        .child(
+            div()
+                .text_size(px(56.))
+                .opacity(if downloading_now { 0.35 } else { 0.6 })
+                .child(glyph),
+        )
         .into_any_element()
 }
 

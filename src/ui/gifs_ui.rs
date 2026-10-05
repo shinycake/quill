@@ -84,6 +84,7 @@ impl QuillApp {
                     .id(SharedString::from(cell_id.clone()))
                     .w(px(96.))
                     .h(px(72.))
+                    .aspect_ratio(px(96.) / px(72.))
                     .rounded_md()
                     .object_fit(ObjectFit::Cover)
                     .role(gpui_kit::Role::Button)

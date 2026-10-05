@@ -168,3 +168,27 @@ fn message_reaction_options_parse_and_custom_emoji_reactions_toggle() {
         .unwrap();
     assert_eq!(h.sent("removeMessageReaction").len(), 1);
 }
+
+/// TDLib downloads stickers, thumbnails and profile photos into the
+/// database directory; the display sandbox must accept them there.
+#[test]
+fn media_roots_cover_tdlib_database_caches() {
+    let h = Harness::ready();
+    let roots = h.driver.tdlib_media_roots();
+    let database = h.driver.paths.tdlib_database.clone();
+    let stickers = database.join("stickers");
+    std::fs::create_dir_all(&stickers).unwrap();
+    let sticker = stickers.join("1.webp");
+    std::fs::write(&sticker, b"RIFF").unwrap();
+    let shown = crate::local_path::sandboxed_display_path(sticker.to_str().unwrap(), &roots);
+    assert!(
+        shown.is_some(),
+        "sticker under the database dir is displayable"
+    );
+    // The database itself stays outside the sandbox.
+    std::fs::create_dir_all(&database).unwrap();
+    let db = database.join("db.sqlite");
+    std::fs::write(&db, b"x").unwrap();
+    assert!(crate::local_path::sandboxed_display_path(db.to_str().unwrap(), &roots).is_none());
+    assert!(roots.contains(&h.driver.tdlib_files().to_path_buf()));
+}

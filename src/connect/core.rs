@@ -12,7 +12,13 @@ use crate::telegram::requests::{
     close_request, get_authorization_state, load_archive_chats, load_chats, log_out,
 };
 use std::collections::{HashMap, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// TDLib's media cache folders inside the database directory (TDLib
+/// `FileType` directories for stickers, thumbnails, profile photos and
+/// wallpapers).
+const TDLIB_DATABASE_MEDIA_DIRS: [&str; 4] =
+    ["stickers", "thumbnails", "profile_photos", "wallpapers"];
 use std::sync::{Arc, Mutex};
 
 /// Status note for a rich AI answer. Create / fix / rewrite must not share
@@ -71,6 +77,19 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn tdlib_files(&self) -> &Path {
         &self.paths.tdlib_files
+    }
+
+    /// Every folder TDLib downloads displayable media into. Besides
+    /// `files_directory`, TDLib keeps stickers, thumbnails, profile photos
+    /// and wallpapers under the database directory, as part of its cache.
+    pub fn tdlib_media_roots(&self) -> Vec<PathBuf> {
+        let mut roots = vec![self.paths.tdlib_files.clone()];
+        roots.extend(
+            TDLIB_DATABASE_MEDIA_DIRS
+                .iter()
+                .map(|dir| self.paths.tdlib_database.join(dir)),
+        );
+        roots
     }
 
     /// Kick the JSON client so authorization updates start flowing.
