@@ -122,9 +122,8 @@ pub struct QuillApp {
     pub(super) inline_results_selected: usize,
     pub(super) inline_query_token: u64,
     pub(super) inline_query_armed: Option<(String, String)>,
-    pub(super) emoji_picker_open: bool,
-    pub(super) emoji_category: usize,
-    pub(super) emoji_visible_count: usize,
+    /// The composer's emoji / sticker / GIF popover.
+    pub(super) media_panel: super::media_panel::MediaPanel,
     pub(super) emoji_status_hours_input: Entity<TextareaState>,
     pub(super) emoji_set_search_input: Entity<TextareaState>,
     pub(super) emoji_search_input: Entity<TextareaState>,
