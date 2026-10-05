@@ -39,7 +39,8 @@ gpui_kit::assets::icon_assets!(
         Timer,
         Play,
         Pause,
-        ArrowDown
+        ArrowDown,
+        FolderOpen
     ]
 );
 

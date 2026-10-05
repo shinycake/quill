@@ -347,6 +347,7 @@ impl QuillApp {
                     archived,
                     selecting,
                     checked,
+                    self.session().is_some_and(|s| s.chat_peer_online(chat)),
                     // Slice chatlist-list-style: Settings → Appearance.
                     ChatListRowStyle::new(
                         self.appearance.preview_lines,
@@ -444,6 +445,8 @@ pub(super) fn session_chat_row(
     // of opening the chat, and shows the check circle.
     selecting: bool,
     checked: bool,
+    // A private chat whose user is online: a dot on the avatar.
+    online: bool,
     // Slice chatlist-list-style: preview line count, media icons, and
     // formatted preview (Settings → Appearance → Chat list rows).
     row_style: ChatListRowStyle,
@@ -584,7 +587,25 @@ pub(super) fn session_chat_row(
                 // Slice CL3: the select-mode check circle precedes the
                 // avatar while multi-select is active.
                 .when(selecting, |this| this.child(select_check(id, checked)))
-                .child(chat_avatar(&title, photo_path, CHAT_ROW_AVATAR))
+                .child(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .child(chat_avatar(&title, photo_path, CHAT_ROW_AVATAR))
+                        .when(online, |this| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .right(px(0.))
+                                    .bottom(px(1.))
+                                    .size(px(13.))
+                                    .rounded_full()
+                                    .border_2()
+                                    .border_color(cx.theme().sidebar)
+                                    .bg(cx.theme().success),
+                            )
+                        }),
+                )
                 .child(
                     div()
                         .flex()

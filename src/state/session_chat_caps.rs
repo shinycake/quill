@@ -122,6 +122,18 @@ impl Session {
         Some((members, online))
     }
 
+    /// A private chat's user is online right now (bots and the account's
+    /// own chat excluded): the chat list draws a dot on its avatar.
+    pub fn chat_peer_online(&self, chat: &ChatSummary) -> bool {
+        let crate::telegram::envelope::ChatKind::Private { user_id } = chat.kind else {
+            return false;
+        };
+        Some(user_id.0) != self.my_user_id
+            && self
+                .user(user_id.0)
+                .is_some_and(|user| !user.is_bot && user.status.is_online())
+    }
+
     pub fn user(&self, user_id: i64) -> Option<&ParsedUser> {
         self.users.get(&user_id)
     }

@@ -3,7 +3,6 @@
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
 use super::*;
-use gpui_kit::component::button::*;
 use gpui_kit::component::progress::ProgressCircle;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::*;
@@ -784,6 +783,9 @@ pub(super) fn transcription_row(
     }
 }
 
+/// Round video message diameter.
+const VIDEO_NOTE_DIAMETER: f32 = 220.;
+
 pub(super) fn video_note_attachment(
     chat_id: ChatId,
     message_id: MessageId,
@@ -799,7 +801,6 @@ pub(super) fn video_note_attachment(
     let row_id = message_id.0 as u64;
     let play_id = note.play_file_id().unwrap_or(FileId(0));
     let thumb_id = note.thumb_file_id().unwrap_or(FileId(0));
-    let play_label = if playing { "Pause" } else { "Play" };
     let duration = format_voice_duration(note.duration);
     let visual = if playing {
         frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
@@ -821,131 +822,133 @@ pub(super) fn video_note_attachment(
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = note.is_secret;
     let unseen = !outgoing && !note.is_viewed && !playing;
-    let badge = if playing {
-        "Video note · playing"
-    } else if unseen {
-        "New · Video note"
-    } else {
-        "Video note"
-    };
-    let ring = if playing {
-        success()
-    } else if unseen {
-        accent()
-    } else {
-        text_muted()
-    };
-    let picture = if !blocked && let Some(path) = visual {
-        img(path)
+    let has_visual = !blocked && visual.is_some();
+    let picture = match visual.filter(|_| !blocked) {
+        // GPUI clips overflow to rectangles: the image and the placeholder
+        // round themselves.
+        Some(path) => img(path)
             .id(("video-note-img", row_id))
-            .size(px(200.))
-            .rounded(px(100.))
+            .size_full()
+            .rounded_full()
             .object_fit(ObjectFit::Cover)
-            .with_fallback(move || {
+            .with_fallback(|| {
                 div()
-                    .size(px(200.))
-                    .rounded(px(100.))
-                    .bg(success_bg())
+                    .size_full()
+                    .rounded_full()
+                    .bg(fill_muted())
                     .into_any_element()
             })
-            .into_any_element()
-    } else {
-        let label = if blocked {
-            "Video note".to_string()
-        } else if downloading_now {
-            "Video note — downloading…".into()
-        } else if note.length > 0 {
-            format!("Video note {} — not downloaded", note.length)
-        } else {
-            "Video note — not downloaded".into()
-        };
-        div()
-            .id(("video-note-ph", row_id))
-            .size(px(200.))
-            .rounded(px(100.))
-            .bg(success_bg())
+            .into_any_element(),
+        None => div()
+            .size_full()
+            .rounded_full()
+            .bg(fill_muted())
             .flex()
             .items_center()
             .justify_center()
-            .px_2()
-            .child(
-                div()
-                    .text_xs()
-                    .text_center()
-                    .text_color(text_on_fill())
-                    .child(label),
-            )
-            .into_any_element()
+            .when(blocked, |this| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(text_muted())
+                        .child("Video message"),
+                )
+            })
+            .into_any_element(),
+    };
+    let disc = if downloading_now && !has_visual {
+        MediaDisc::Progress(download_fraction(play_id, files))
+    } else if playing {
+        MediaDisc::Pause
+    } else {
+        MediaDisc::Play
     };
     let viewed = note.is_viewed;
+    let toggle = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
+        if blocked {
+            return;
+        }
+        this.toggle_video_playback(
+            message_id,
+            play_id,
+            "video/mp4".into(),
+            0,
+            if viewed { None } else { Some(chat_id) },
+            cx,
+        );
+    };
+    let diameter = px(VIDEO_NOTE_DIAMETER);
     div()
         .id(("video-note", row_id))
-        .mt_2()
         .flex()
         .flex_col()
         .gap_1()
+        .when(outgoing, |this| this.items_end())
         .child(
             div()
+                .id(("video-note-circle", row_id))
                 .relative()
-                .size(px(200.))
-                .rounded(px(100.))
+                .size(diameter)
+                .rounded_full()
                 .overflow_hidden()
-                .border_2()
-                .border_color(ring)
+                .group(MEDIA_VISUAL_GROUP)
+                // An unseen incoming note carries an accent ring.
+                .when(unseen, |this| {
+                    this.border_2().border_color(cx.theme().primary)
+                })
+                .role(gpui_kit::Role::Button)
+                .aria_label(if playing {
+                    "Pause video message"
+                } else {
+                    "Play video message"
+                })
+                .tab_index(0)
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| toggle(this, cx)))
                 .child(picture)
+                .when(!blocked, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(media_disc(("video-note-disc", row_id), disc).when(
+                                playing,
+                                |disc| {
+                                    disc.invisible()
+                                        .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible())
+                                },
+                            )),
+                    )
+                })
                 .child(
                     div()
                         .absolute()
-                        .top(px(72.))
-                        .left(px(16.))
-                        .w(px(168.))
+                        .bottom(px(14.))
+                        .left_0()
+                        .right_0()
                         .flex()
                         .justify_center()
                         .child(
                             div()
-                                .px_1()
-                                .rounded_sm()
-                                .bg(bg_deep())
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .px_1p5()
+                                .rounded_md()
+                                .bg(gpui_kit::black().opacity(0.5))
                                 .text_xs()
-                                .text_color(text_bright())
-                                .child(badge),
-                        ),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .bottom(px(28.))
-                        .left(px(16.))
-                        .w(px(168.))
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .px_1()
-                                .rounded_sm()
-                                .bg(bg_deep())
-                                .text_xs()
-                                .text_color(text_bright())
-                                .child(duration),
+                                .text_color(gpui_kit::white())
+                                .child(duration)
+                                .when(unseen, |this| {
+                                    this.child(
+                                        div().size(px(5.)).rounded_full().bg(gpui_kit::white()),
+                                    )
+                                }),
                         ),
                 ),
-        )
-        .child(
-            Button::new(format!("video-note-play-{row_id}"))
-                .label(play_label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if blocked {
-                        return;
-                    }
-                    this.toggle_video_playback(
-                        message_id,
-                        play_id,
-                        "video/mp4".into(),
-                        0,
-                        if viewed { None } else { Some(chat_id) },
-                        cx,
-                    );
-                })),
         )
         // MED2: transcription under the play button (schema 1.8.67
         // `speechRecognitionResult` on `videoNote`).
