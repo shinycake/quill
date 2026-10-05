@@ -224,6 +224,12 @@ pub struct HistoryState {
     pub viewed: HashSet<i64>,
     /// In-flight `viewMessages` ids. Cleared on send failure or TDLib error so we can retry.
     pub viewing: HashSet<i64>,
+    /// Ids the UI reported as shown (`ConnectDriver::view_messages`) that
+    /// have not been sent to `viewMessages` yet.
+    pub visible: BTreeSet<i64>,
+    /// The UI has reported visible rows this open generation; from then on
+    /// only reported rows are viewed (before that, only the newest row).
+    pub visible_reported: bool,
 }
 
 impl HistoryState {

@@ -477,6 +477,43 @@ fn view_messages_tdlib_error_releases_in_flight_ids() {
 }
 
 #[test]
+fn reported_visible_messages_survive_a_view_error() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(1));
+    for id in [4, 5] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}}}"#
+            ),
+        );
+    }
+    assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(5)]);
+    assert!(!session.report_visible_messages(ChatId(2), &[MessageId(4)]));
+    assert!(session.report_visible_messages(ChatId(1), &[MessageId(4)]));
+    assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(4)]);
+    let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), &[MessageId(4)]);
+    assert!(session.message_ids_to_view(ChatId(1)).is_empty());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"x","@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(4)]);
+    // Re-opening the chat starts over from the newest message.
+    session.open_chat(ChatId(1));
+    assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(5)]);
+}
+
+#[test]
 fn secret_photo_is_not_auto_thumbed() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
