@@ -532,7 +532,18 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
     // settings: give this process a throwaway data root.
     let demo_root = std::env::temp_dir().join(format!("quill-demo-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&demo_root);
-    quill::settings::use_isolated_app_root(demo_root);
+    quill::settings::use_isolated_app_root(demo_root.clone());
+    // `QUILL_DEMO_THEME=dark` captures any fixture in the dark theme (the
+    // default follows the system appearance).
+    if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("dark") {
+        let paths =
+            quill::settings::AccountPaths::for_root(&demo_root, &quill::ids::AccountKey::primary());
+        let _ = std::fs::create_dir_all(&paths.root);
+        let _ = std::fs::write(
+            paths.root.join("appearance_prefs.json"),
+            br#"{"theme":"dark","auto_night":"off"}"#,
+        );
+    }
     let marker = out_dir.join(match kind {
         ScreenshotDemo::NeedTdjson => ".quill-ready-need-tdjson",
         ScreenshotDemo::WaitPhone => ".quill-ready-wait-phone",
