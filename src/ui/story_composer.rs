@@ -488,6 +488,7 @@ impl QuillApp {
                 .id("story-composer-preview")
                 .w(px(180.))
                 .h(px(240.))
+                .aspect_ratio(px(180.) / px(240.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
                 .bg(bg_deep())

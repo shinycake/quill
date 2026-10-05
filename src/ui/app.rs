@@ -856,7 +856,7 @@ impl QuillApp {
 
     pub(super) fn media_display_roots(&self) -> Vec<PathBuf> {
         let primary = if let Some(live) = self.live.as_ref() {
-            vec![live.driver.tdlib_files().to_path_buf()]
+            live.driver.tdlib_media_roots()
         } else if self.demo_session.is_some() {
             vec![demo_media_allowlist()]
         } else {

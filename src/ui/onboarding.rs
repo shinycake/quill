@@ -139,6 +139,7 @@ impl QuillApp {
                     .child(
                         img(ImageSource::from(image))
                             .size(px(208.))
+                            .aspect_square()
                             .object_fit(ObjectFit::Contain),
                     )
                     .into_any_element(),

@@ -16,10 +16,10 @@ downloaded, so they always fell back to plain emoji.
 - Chips under messages render emoji and custom-emoji reactions alike
   (`HistoryMessage::reaction_chips`). Custom glyphs come from the
   `getCustomEmojiStickers` cache.
-- The driver now downloads the image files of resolved custom emoji that the
-  open chat uses (`Session::open_chat_custom_emoji_files`). This covers
-  message text, reactions and the picker. It fixes custom emoji in message
-  text too.
+- The driver now downloads the image files of custom-emoji reactions and of
+  the custom emoji the picker offers (`Session::open_chat_custom_emoji_files`).
+  Custom emoji in message text were already downloaded by
+  `thumb_file_ids_to_download`.
 - Single-codepoint emoji get U+FE0F for display, so TDLib's "❤" draws in
   colour.
 - The old `pending_react` picker panel is removed.

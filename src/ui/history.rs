@@ -288,6 +288,7 @@ pub(super) fn album_tile(
                             .id(("album-photo", row_id))
                             .w(px(part.width as f32))
                             .h(px(part.height as f32))
+                            .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
                             .object_fit(ObjectFit::Cover)
                             .with_fallback(|| {
                                 div()
@@ -343,6 +344,7 @@ pub(super) fn album_tile(
                     .id(("album-video", row_id))
                     .w(px(part.width as f32))
                     .h(px(part.height as f32))
+                    .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
                     .object_fit(ObjectFit::Cover)
                     .with_fallback(|| div().size_full().bg(success_bg()).into_any_element())
                     .into_any_element()
@@ -1171,6 +1173,7 @@ fn custom_emoji_chip_glyph(
     match (path, sticker) {
         (Some(path), _) => img(path)
             .size(px(size))
+            .aspect_square()
             .object_fit(ObjectFit::Contain)
             .into_any_element(),
         (None, Some(item)) if !item.emoji.is_empty() => {

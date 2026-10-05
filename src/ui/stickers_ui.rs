@@ -134,6 +134,7 @@ impl QuillApp {
                 .id(SharedString::from(cell_id.clone()))
                 .w(px(72.))
                 .h(px(72.))
+                .aspect_ratio(px(72.) / px(72.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
                 .with_fallback({

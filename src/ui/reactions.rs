@@ -148,6 +148,7 @@ impl QuillApp {
             ReactionChoice::CustomEmoji(id) => match self.custom_emoji_still(*id) {
                 Some(path) => img(path)
                     .size(px(size))
+                    .aspect_square()
                     .object_fit(ObjectFit::Contain)
                     .into_any_element(),
                 None => {

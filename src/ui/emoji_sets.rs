@@ -229,6 +229,7 @@ impl QuillApp {
                     img(path)
                         .w(px(32.))
                         .h(px(32.))
+                        .aspect_ratio(px(32.) / px(32.))
                         .object_fit(ObjectFit::Contain)
                         .into_any_element()
                 } else {
@@ -414,6 +415,7 @@ impl QuillApp {
                     img(path)
                         .w(px(56.))
                         .h(px(56.))
+                        .aspect_ratio(px(56.) / px(56.))
                         .object_fit(ObjectFit::Contain)
                         .into_any_element()
                 } else {

@@ -1805,6 +1805,7 @@ impl QuillApp {
                 Some(image) => img(ImageSource::from(image))
                     .w(px(200.))
                     .h(px(200.))
+                    .aspect_ratio(px(200.) / px(200.))
                     .object_fit(ObjectFit::Contain)
                     .into_any_element(),
                 None => div()
