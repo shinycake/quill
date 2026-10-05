@@ -32,6 +32,26 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
+/// Everything the history rows are derived from, compared across renders
+/// so unchanged rows aren't rebuilt (typing in the composer or a scroll
+/// re-render used to snapshot and rebuild every loaded message).
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct HistoryRowsKey {
+    list: &'static str,
+    chat: Option<i64>,
+    topic: Option<i32>,
+    /// Any change to the loaded messages (`HistoryMessages::revision`).
+    messages_revision: u64,
+    /// Any applied TDLib update (chat read state, users, quoted messages).
+    session_revision: u64,
+    window_epoch: u64,
+    unread_anchor: Option<MessageId>,
+    highlight: Option<MessageId>,
+    ui: u64,
+    /// Local day: "Today"/"Yesterday" labels roll over at midnight.
+    today: i64,
+}
+
 /// Rows before the end of a window that stops short of the latest
 /// message at which the next newer page is requested.
 const NEWER_PREFETCH_ROWS: usize = 8;
@@ -785,12 +805,8 @@ impl QuillApp {
         let gate = open.and_then(|id| {
             session.and_then(|s| s.chats.get(&id.0).and_then(|c| c.kind.gate_reason()))
         });
-        let messages: Vec<HistoryMessage> = open
-            .and_then(|id| session.and_then(|s| s.histories.get(&id.0)))
-            .map(|h| h.ordered().into_iter().cloned())
-            .into_iter()
-            .flatten()
-            .collect();
+        let main_history = open.and_then(|id| session.and_then(|s| s.histories.get(&id.0)));
+        let main_empty = main_history.is_none_or(|h| h.messages.is_empty());
         // kit Phase 3: owned — `history_message_list` takes `&mut self`,
         // so the chat summary can't borrow the session here.
         let chat: Option<ChatSummary> =
@@ -821,13 +837,46 @@ impl QuillApp {
         let is_forum = chat.as_ref().is_some_and(|c| c.is_forum_chat());
         let open_topic = session.and_then(|s| s.open_topic);
         let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
-        let topic_messages: Vec<HistoryMessage> = match (open, open_topic) {
-            (Some(id), Some(topic_id)) => session
-                .and_then(|s| s.topic_histories.get(&(id.0, topic_id)))
+        let topic_history = match (open, open_topic) {
+            (Some(id), Some(topic_id)) => {
+                session.and_then(|s| s.topic_histories.get(&(id.0, topic_id)))
+            }
+            _ => None,
+        };
+        let topic_empty = topic_history.is_none_or(|h| h.messages.is_empty());
+        // Rebuild the history rows only when something that feeds them
+        // changed; otherwise skip snapshotting the messages altogether.
+        let ui_hash = self.history_rows_ui_hash();
+        let today = quill::local_time::civil_local(quill::local_time::now_unix()).day_number();
+        let rows_input = |list: &'static str, history: Option<&quill::state::HistoryState>| {
+            let key = ui_hash.map(|ui| HistoryRowsKey {
+                list,
+                chat: open.map(|chat| chat.0),
+                topic: open_topic,
+                messages_revision: history.map_or(0, |h| h.messages.revision()),
+                session_revision: session.map_or(0, |s| s.revision),
+                window_epoch: history.map_or(0, |h| h.window_epoch),
+                unread_anchor: history.and_then(|h| h.unread_anchor),
+                highlight: highlight_id,
+                ui,
+                today,
+            });
+            let reuse = key.is_some() && key == self.history_rows_key;
+            let messages = (!reuse).then(|| {
+                history
+                    .map(|h| h.ordered().into_iter().cloned().collect())
+                    .unwrap_or_default()
+            });
+            (key, messages)
+        };
+        let (main_key, main_messages) = rows_input("session-history", main_history);
+        // Topic views page their own history type; they always rebuild.
+        let topic_key: Option<HistoryRowsKey> = None;
+        let topic_messages = Some(
+            topic_history
                 .map(|h| h.ordered().into_iter().cloned().collect())
                 .unwrap_or_default(),
-            _ => Vec::new(),
-        };
+        );
         div()
             .id("conversation-history")
             .flex()
@@ -891,7 +940,7 @@ impl QuillApp {
                 // Phase 5.1: per-topic history — same history component,
                 // fed from the topic history store (`searchChatMessages`
                 // with `topic_id`).
-                if topic_messages.is_empty() {
+                if topic_empty {
                     pane_placeholder(
                         "No messages in this topic yet",
                         "No messages in this topic yet.",
@@ -899,7 +948,7 @@ impl QuillApp {
                     )
                     .into_any_element()
                 } else {
-                    self.history_message_list(
+                    let list = self.history_message_list(
                         "topic-history",
                         topic_messages,
                         chat.as_ref(),
@@ -907,9 +956,11 @@ impl QuillApp {
                         highlight_id,
                         media_roots,
                         cx,
-                    )
+                    );
+                    self.history_rows_key = topic_key;
+                    list
                 }
-            } else if messages.is_empty() {
+            } else if main_empty {
                 // Phase S1: an empty secret chat shows TGX's end-to-end
                 // encryption explainer (MessagesHolder TYPE_SECRET_CHAT_INFO:
                 // "Secret Chats" + EncryptedDescription1-4) instead of the
@@ -920,8 +971,8 @@ impl QuillApp {
                 // kit Phase 9: no history entry yet means the first
                 // getChatHistory batch is still in flight — show skeleton
                 // message rows instead of the empty placeholder.
-                let history_loading = open
-                    .is_some_and(|id| session.is_some_and(|s| !s.histories.contains_key(&id.0)));
+                let history_loading =
+                    open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
                 if history_loading {
                     history_skeleton().into_any_element()
                 } else if is_secret {
@@ -935,16 +986,54 @@ impl QuillApp {
                     .into_any_element()
                 }
             } else {
-                self.history_message_list(
+                let list = self.history_message_list(
                     "session-history",
-                    messages,
+                    main_messages,
                     chat.as_ref(),
                     &sender_name,
                     highlight_id,
                     media_roots,
                     cx,
-                )
+                );
+                self.history_rows_key = main_key;
+                list
             })
+    }
+
+    /// The part of the history row inputs that lives in the app rather than
+    /// the session (forward selection, paused playback positions, playback
+    /// settings), hashed for `HistoryRowsKey`. `None` while something plays
+    /// — rows then carry per-frame state and rebuild every render.
+    fn history_rows_ui_hash(&self) -> Option<u64> {
+        use std::hash::{Hash, Hasher};
+        // Demo fixtures mutate chats and users without `Session::apply`
+        // (no revision bump): they always rebuild, except the stress
+        // fixture used for profiling.
+        if self.live.is_none() && super::demo::demo_stress_size().is_none() {
+            return None;
+        }
+        if self.active_playback_id().is_some()
+            || self.playing_animation.is_some()
+            || self.playing_video.is_some()
+        {
+            return None;
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.pending_forward
+            .as_ref()
+            .map(|draft| (draft.from_chat_id.0, &draft.message_ids))
+            .hash(&mut hasher);
+        let mut positions: Vec<(i64, u64)> = self
+            .playback_positions
+            .iter()
+            .map(|(id, secs)| (id.0, secs.to_bits()))
+            .collect();
+        positions.sort_unstable();
+        positions.hash(&mut hasher);
+        self.playback_speed.to_bits().hash(&mut hasher);
+        self.playback_volume.to_bits().hash(&mut hasher);
+        self.playback_error.hash(&mut hasher);
+        Some(hasher.finish())
     }
 
     /// kit Phase 3: the shared history row list used by both chat history
@@ -957,7 +1046,9 @@ impl QuillApp {
     pub(super) fn history_message_list(
         &mut self,
         id: &'static str,
-        messages: Vec<HistoryMessage>,
+        // `None`: nothing feeding the rows changed since the last build
+        // (`HistoryRowsKey`) — keep `history_rows` and the scroller as is.
+        messages: Option<Vec<HistoryMessage>>,
         chat: Option<&ChatSummary>,
         sender_name: &str,
         highlight_id: Option<MessageId>,
@@ -986,390 +1077,393 @@ impl QuillApp {
             .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
             .unwrap_or((None, false, 0));
         let unread_count = chat.map_or(0, |chat| chat.unread_count);
-        let mut divider_placed = false;
-        let mut first_unread = |message: &HistoryMessage| {
-            let first = !divider_placed
-                && !message.is_outgoing
-                && unread_anchor.is_some_and(|anchor| message.id.0 > anchor.0);
-            divider_placed |= first;
-            first
-        };
-        let groups = quill::album::group_media_albums(
-            &messages,
-            |message| message.media_album_id,
-            |message| message.is_outgoing,
-            |message| quill::album::is_album_media(&message.content),
-        );
-        let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
-        let is_group = matches!(
-            chat.map(|summary| &summary.kind),
-            Some(
-                ChatKind::BasicGroup { .. }
-                    | ChatKind::Supergroup {
-                        is_channel: false,
-                        ..
-                    }
-            )
-        );
-        // Sender of each row (first item for albums): a run is consecutive
-        // rows from one sender. The name heads a run; the avatar sits
-        // beside its last row, with a spacer keeping earlier rows aligned.
-        let identities: Vec<(bool, Option<MessageSender>)> = groups
-            .iter()
-            .map(|group| match group {
-                quill::album::HistoryGroup::Album { messages, .. } => messages
-                    .first()
-                    .map(|m| (m.is_outgoing, m.sender))
-                    .unwrap_or((false, None)),
-                quill::album::HistoryGroup::Single(message) => {
-                    (message.is_outgoing, message.sender)
-                }
-            })
-            .collect();
-        // Each group's span over `messages` (album id, item count): the
-        // rows below take the messages by value instead of cloning them.
-        let spans: Vec<(Option<i64>, usize)> = groups
-            .iter()
-            .map(|group| match group {
-                quill::album::HistoryGroup::Album { album_id, messages } => {
-                    (Some(*album_id), messages.len())
-                }
-                quill::album::HistoryGroup::Single(_) => (None, 1),
-            })
-            .collect();
-        drop(groups);
-        let mut owned = messages.into_iter();
-        let mut previous = None;
-        let mut row_chrome = |message: &HistoryMessage, continues: bool| {
-            let identity = (message.is_outgoing, message.sender);
-            let service = matches!(
-                message.content,
-                MessageContent::ScreenshotTaken | MessageContent::ChatJoinFromCommunity { .. }
+        if let Some(messages) = messages {
+            let mut divider_placed = false;
+            let mut first_unread = |message: &HistoryMessage| {
+                let first = !divider_placed
+                    && !message.is_outgoing
+                    && unread_anchor.is_some_and(|anchor| message.id.0 > anchor.0);
+                divider_placed |= first;
+                first
+            };
+            let groups = quill::album::group_media_albums(
+                &messages,
+                |message| message.media_album_id,
+                |message| message.is_outgoing,
+                |message| quill::album::is_album_media(&message.content),
             );
-            let show_sender = previous != Some(identity);
-            previous = Some(identity);
-            let accent = match message.sender {
-                Some(MessageSender::User { user_id }) => session
-                    .and_then(|s| s.user(user_id))
-                    .map(|u| u.accent_color_id),
-                // Chats carry no parsed name color: derive one from the id
-                // the way Telegram assigns defaults.
-                Some(MessageSender::Chat { chat_id }) => Some(chat_id.rem_euclid(7) as i32),
-                None => None,
-            };
-            let name = match message.sender {
-                Some(MessageSender::User { user_id }) => session
-                    .and_then(|s| s.user(user_id))
-                    .map(|u| u.display_name()),
-                Some(MessageSender::Chat { chat_id }) => session
-                    .and_then(|s| s.chats.get(&chat_id))
-                    .map(|c| c.title.clone()),
-                None => None,
-            }
-            .unwrap_or_else(|| {
-                if is_group {
-                    "Member".into()
-                } else {
-                    sender_name.to_string()
+            let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
+            let is_group = matches!(
+                chat.map(|summary| &summary.kind),
+                Some(
+                    ChatKind::BasicGroup { .. }
+                        | ChatKind::Supergroup {
+                            is_channel: false,
+                            ..
+                        }
+                )
+            );
+            // Sender of each row (first item for albums): a run is consecutive
+            // rows from one sender. The name heads a run; the avatar sits
+            // beside its last row, with a spacer keeping earlier rows aligned.
+            let identities: Vec<(bool, Option<MessageSender>)> = groups
+                .iter()
+                .map(|group| match group {
+                    quill::album::HistoryGroup::Album { messages, .. } => messages
+                        .first()
+                        .map(|m| (m.is_outgoing, m.sender))
+                        .unwrap_or((false, None)),
+                    quill::album::HistoryGroup::Single(message) => {
+                        (message.is_outgoing, message.sender)
+                    }
+                })
+                .collect();
+            // Each group's span over `messages` (album id, item count): the
+            // rows below take the messages by value instead of cloning them.
+            let spans: Vec<(Option<i64>, usize)> = groups
+                .iter()
+                .map(|group| match group {
+                    quill::album::HistoryGroup::Album { album_id, messages } => {
+                        (Some(*album_id), messages.len())
+                    }
+                    quill::album::HistoryGroup::Single(_) => (None, 1),
+                })
+                .collect();
+            drop(groups);
+            let mut owned = messages.into_iter();
+            let mut previous = None;
+            let mut row_chrome = |message: &HistoryMessage, continues: bool| {
+                let identity = (message.is_outgoing, message.sender);
+                let service = matches!(
+                    message.content,
+                    MessageContent::ScreenshotTaken | MessageContent::ChatJoinFromCommunity { .. }
+                );
+                let show_sender = previous != Some(identity);
+                previous = Some(identity);
+                let accent = match message.sender {
+                    Some(MessageSender::User { user_id }) => session
+                        .and_then(|s| s.user(user_id))
+                        .map(|u| u.accent_color_id),
+                    // Chats carry no parsed name color: derive one from the id
+                    // the way Telegram assigns defaults.
+                    Some(MessageSender::Chat { chat_id }) => Some(chat_id.rem_euclid(7) as i32),
+                    None => None,
+                };
+                let name = match message.sender {
+                    Some(MessageSender::User { user_id }) => session
+                        .and_then(|s| s.user(user_id))
+                        .map(|u| u.display_name()),
+                    Some(MessageSender::Chat { chat_id }) => session
+                        .and_then(|s| s.chats.get(&chat_id))
+                        .map(|c| c.title.clone()),
+                    None => None,
                 }
-            });
-            let sender =
-                (!message.is_outgoing && (service || (is_group && show_sender))).then(|| {
-                    SenderLabel {
-                        name: name.clone(),
-                        accent: accent.filter(|_| is_group),
+                .unwrap_or_else(|| {
+                    if is_group {
+                        "Member".into()
+                    } else {
+                        sender_name.to_string()
                     }
                 });
-            let receipt = if message.is_outgoing {
-                chat.map(|summary| summary.outbox_receipt(message))
-                    .unwrap_or(OutboxReceipt::Sent)
-            } else {
-                OutboxReceipt::None
-            };
-            let photo = match message.sender {
-                Some(MessageSender::User { user_id }) => {
-                    session.and_then(|s| s.user_photo_path(user_id))
-                }
-                Some(MessageSender::Chat { chat_id }) => {
-                    session.and_then(|s| s.chat_photo_path(ChatId(chat_id)))
-                }
-                None => None,
-            }
-            .and_then(|path| sandboxed_display_path(path, &media_roots));
-            let sender_avatar = (!message.is_outgoing && is_group).then(|| {
-                if continues {
-                    // Spacer: same column width, no avatar.
-                    (String::new(), None)
+                let sender =
+                    (!message.is_outgoing && (service || (is_group && show_sender))).then(|| {
+                        SenderLabel {
+                            name: name.clone(),
+                            accent: accent.filter(|_| is_group),
+                        }
+                    });
+                let receipt = if message.is_outgoing {
+                    chat.map(|summary| summary.outbox_receipt(message))
+                        .unwrap_or(OutboxReceipt::Sent)
                 } else {
-                    (name, photo)
+                    OutboxReceipt::None
+                };
+                let photo = match message.sender {
+                    Some(MessageSender::User { user_id }) => {
+                        session.and_then(|s| s.user_photo_path(user_id))
+                    }
+                    Some(MessageSender::Chat { chat_id }) => {
+                        session.and_then(|s| s.chat_photo_path(ChatId(chat_id)))
+                    }
+                    None => None,
                 }
-            });
-            (sender, receipt, sender_avatar, show_sender)
-        };
-        let now = quill::local_time::civil_local(quill::local_time::now_unix());
-        let mut previous_day: Option<i64> = None;
-        let mut day_label = |date: i32| {
-            if date <= 0 {
-                return None;
-            }
-            let civil = quill::local_time::civil_local(i64::from(date));
-            let day = civil.day_number();
-            (previous_day.replace(day) != Some(day))
-                .then(|| quill::local_time::day_label(&civil, &now))
-        };
-        for (index, (album, len)) in spans.into_iter().enumerate() {
-            let continues = identities
-                .get(index + 1)
-                .is_some_and(|next| Some(next) == identities.get(index));
-            match album {
-                Some(album_id) => {
-                    let album_messages: Vec<HistoryMessage> = owned.by_ref().take(len).collect();
-                    // Same chrome rule as single rows, from the first item.
-                    let (sender, receipt, sender_avatar, _) = album_messages
-                        .first()
-                        .map(|message| row_chrome(message, continues))
-                        .unwrap_or((None, OutboxReceipt::None, None, false));
-                    let day_label = album_messages.first().and_then(|m| day_label(m.date));
-                    let unread_divider = album_messages.first().is_some_and(&mut first_unread);
-                    rows.push(HistoryRow::Album {
-                        album_id,
-                        messages: album_messages,
-                        sender,
-                        receipt,
-                        sender_avatar,
-                        day_label,
-                        unread_divider,
-                    })
-                }
-                None => {
-                    let Some(message) = owned.next() else {
-                        break;
-                    };
-                    let (sender, receipt, sender_avatar, run_start) =
-                        row_chrome(&message, continues);
-                    // Phase 4.6: audio/voice rows get a seek-bar view model.
-                    let seek_bar = match &message.content {
-                        MessageContent::VoiceNote(note) => {
-                            Some(self.seek_bar_view(message.id, f64::from(note.duration)))
-                        }
-                        MessageContent::Audio(audio) => {
-                            Some(self.seek_bar_view(message.id, f64::from(audio.duration)))
-                        }
-                        _ => None,
-                    };
-                    let animation_playing = self.playing_animation == Some(message.id);
-                    let animation_frame = if animation_playing {
-                        self.animation_frames
-                            .get(self.animation_frame)
-                            .cloned()
-                            .or_else(|| self.animation_frames.first().cloned())
+                .and_then(|path| sandboxed_display_path(path, &media_roots));
+                let sender_avatar = (!message.is_outgoing && is_group).then(|| {
+                    if continues {
+                        // Spacer: same column width, no avatar.
+                        (String::new(), None)
                     } else {
-                        None
-                    };
-                    let video_playing = self.playing_video == Some(message.id);
-                    let video_frame = if video_playing {
-                        self.video_frames
-                            .get(self.video_frame)
-                            .cloned()
-                            .or_else(|| self.video_frames.first().cloned())
-                    } else {
-                        None
-                    };
-                    rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
-                        sender,
-                        receipt,
-                        sender_avatar,
-                        highlighted: highlight_id == Some(message.id),
-                        run_start: run_start && index > 0,
-                        day_label: day_label(message.date),
-                        unread_divider: first_unread(&message),
-                        selected_forward: self
-                            .pending_forward
-                            .as_ref()
-                            .is_some_and(|draft| draft.contains(message.id)),
-                        quote_preview: session.and_then(|s| s.reply_quote_preview(&message)),
-                        forward_from: message
-                            .forward_info
-                            .as_ref()
-                            .and_then(|info| session.map(|s| s.forward_from_label(info))),
-                        seek_bar,
-                        animation_playing,
-                        animation_frame,
-                        video_playing,
-                        video_frame,
-                        is_secret,
-                        message,
-                    })));
+                        (name, photo)
+                    }
+                });
+                (sender, receipt, sender_avatar, show_sender)
+            };
+            let now = quill::local_time::civil_local(quill::local_time::now_unix());
+            let mut previous_day: Option<i64> = None;
+            let mut day_label = |date: i32| {
+                if date <= 0 {
+                    return None;
+                }
+                let civil = quill::local_time::civil_local(i64::from(date));
+                let day = civil.day_number();
+                (previous_day.replace(day) != Some(day))
+                    .then(|| quill::local_time::day_label(&civil, &now))
+            };
+            for (index, (album, len)) in spans.into_iter().enumerate() {
+                let continues = identities
+                    .get(index + 1)
+                    .is_some_and(|next| Some(next) == identities.get(index));
+                match album {
+                    Some(album_id) => {
+                        let album_messages: Vec<HistoryMessage> =
+                            owned.by_ref().take(len).collect();
+                        // Same chrome rule as single rows, from the first item.
+                        let (sender, receipt, sender_avatar, _) = album_messages
+                            .first()
+                            .map(|message| row_chrome(message, continues))
+                            .unwrap_or((None, OutboxReceipt::None, None, false));
+                        let day_label = album_messages.first().and_then(|m| day_label(m.date));
+                        let unread_divider = album_messages.first().is_some_and(&mut first_unread);
+                        rows.push(HistoryRow::Album {
+                            album_id,
+                            messages: album_messages,
+                            sender,
+                            receipt,
+                            sender_avatar,
+                            day_label,
+                            unread_divider,
+                        })
+                    }
+                    None => {
+                        let Some(message) = owned.next() else {
+                            break;
+                        };
+                        let (sender, receipt, sender_avatar, run_start) =
+                            row_chrome(&message, continues);
+                        // Phase 4.6: audio/voice rows get a seek-bar view model.
+                        let seek_bar = match &message.content {
+                            MessageContent::VoiceNote(note) => {
+                                Some(self.seek_bar_view(message.id, f64::from(note.duration)))
+                            }
+                            MessageContent::Audio(audio) => {
+                                Some(self.seek_bar_view(message.id, f64::from(audio.duration)))
+                            }
+                            _ => None,
+                        };
+                        let animation_playing = self.playing_animation == Some(message.id);
+                        let animation_frame = if animation_playing {
+                            self.animation_frames
+                                .get(self.animation_frame)
+                                .cloned()
+                                .or_else(|| self.animation_frames.first().cloned())
+                        } else {
+                            None
+                        };
+                        let video_playing = self.playing_video == Some(message.id);
+                        let video_frame = if video_playing {
+                            self.video_frames
+                                .get(self.video_frame)
+                                .cloned()
+                                .or_else(|| self.video_frames.first().cloned())
+                        } else {
+                            None
+                        };
+                        rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
+                            sender,
+                            receipt,
+                            sender_avatar,
+                            highlighted: highlight_id == Some(message.id),
+                            run_start: run_start && index > 0,
+                            day_label: day_label(message.date),
+                            unread_divider: first_unread(&message),
+                            selected_forward: self
+                                .pending_forward
+                                .as_ref()
+                                .is_some_and(|draft| draft.contains(message.id)),
+                            quote_preview: session.and_then(|s| s.reply_quote_preview(&message)),
+                            forward_from: message
+                                .forward_info
+                                .as_ref()
+                                .and_then(|info| session.map(|s| s.forward_from_label(info))),
+                            seek_bar,
+                            animation_playing,
+                            animation_frame,
+                            video_playing,
+                            video_frame,
+                            is_secret,
+                            message,
+                        })));
+                    }
                 }
             }
-        }
-        // kit Phase 3: stash the per-render shared inputs, then sync the
-        // scroller state with the new row list.
-        self.history_shared = HistoryShared { media_roots };
-        let count = rows.len();
-        let (first, last) = (
-            rows.first().and_then(HistoryRow::first_id),
-            rows.last().and_then(HistoryRow::last_id),
-        );
-        // The list caches each row's measured height. A row can grow in
-        // place — a photo finishes downloading (placeholder → image), a
-        // message is edited, reactions arrive — and would then be clipped,
-        // so remeasure rows whose inputs changed. File readiness affects
-        // any media row, so a change there remeasures every row.
-        let media_signature = self
-            .session()
-            .map(|s| {
-                (
-                    s.files
-                        .values()
-                        .filter(|file| file.usable_path().is_some())
-                        .count(),
-                    s.downloading.len(),
-                )
-            })
-            .unwrap_or_default();
-        if self.history_key == Some(history_key)
-            && count == self.history_rows.len()
-            && count == self.history_scroller.read(cx).item_count()
-        {
-            if media_signature != self.history_media_signature {
-                self.history_scroller
-                    .update(cx, |state, cx| state.remeasure(cx));
-            } else {
-                let changed: Vec<usize> = rows
-                    .iter()
-                    .zip(&self.history_rows)
-                    .enumerate()
-                    .filter(|(_, (new, old))| !new.renders_like(old))
-                    .map(|(ix, _)| ix)
-                    .collect();
-                if !changed.is_empty() {
-                    self.history_scroller.update(cx, |state, cx| {
-                        for ix in changed {
-                            let _ = state.remeasure_items(ix..ix + 1, cx);
-                        }
-                    });
-                }
-            }
-        }
-        self.history_media_signature = media_signature;
-        if self.history_key != Some(history_key) || self.history_window_epoch != window_epoch {
-            // A new or replaced window anchors once its rows are in.
-            self.history_window_epoch = window_epoch;
-            self.history_anchor_pending = true;
-        }
-        if self.history_key != Some(history_key) {
-            // New chat/topic (or first render): reset; the anchor below
-            // picks the position.
-            self.history_key = Some(history_key);
-            // Message ids are chat-local: a stale highlight id in the new
-            // chat must not suppress its search-jump scroll.
-            self.last_highlight = None;
-            self.history_scroller.update(cx, |state, cx| {
-                state.reset(count, cx);
-            });
-        } else if count != self.history_scroller.read(cx).item_count() {
-            let prev_count = self.history_scroller.read(cx).item_count();
-            match (first, last, self.history_ends) {
-                (Some(_), _, Some((prev_first, _)))
-                    if first == Some(prev_first) && count > prev_count =>
-                {
-                    // New messages appended at the tail — tail-follow keeps
-                    // the view pinned when the user is at the bottom. A
-                    // newer page must not be skipped that way: keep the old
-                    // last row in view and read on from there.
-                    let added = count.saturating_sub(prev_count);
-                    let newer_page = self.history_had_newer;
-                    self.history_scroller.update(cx, |state, cx| {
-                        let following = state.is_following_tail();
-                        state.append(added, cx);
-                        if newer_page && following {
-                            state.scroll_to_item(prev_count.saturating_sub(1), cx);
-                        }
-                    });
-                }
-                (_, Some(_), Some((_, prev_last)))
-                    if last == Some(prev_last) && count > prev_count =>
-                {
-                    // Older history prepended — the visible anchor stays.
-                    let added = count.saturating_sub(prev_count);
-                    self.history_scroller.update(cx, |state, cx| {
-                        state.prepend(added, cx);
-                    });
-                }
-                _ => {
-                    // Shrink or reorder (delete/edit): splice preserves the
-                    // scroll anchor (reset() would yank to the top and arm
-                    // tail-follow); stay at the tail only if the user was
-                    // following it.
-                    let follow = self.history_scroller.read(cx).is_following_tail();
-                    self.history_scroller.update(cx, |state, cx| {
-                        state.splice(0..prev_count, count, cx);
-                        if follow {
-                            state.scroll_to_end(cx);
-                        }
-                    });
-                }
-            }
-        } else if let (Some(first), Some(last)) = (first, last)
-            && self.history_ends != Some((first, last))
-        {
-            // Same row count but row identity changed (e.g. a second album
-            // photo turned a Single row into a taller Album row): cached
-            // measured heights are stale, so remeasure. This converges —
-            // history_ends is updated below — and must not run
-            // unconditionally or remeasure's notify() would loop.
-            self.history_scroller.update(cx, |state, cx| {
-                state.remeasure(cx);
-            });
-        }
-        self.history_ends = match (first, last) {
-            (Some(first), Some(last)) => Some((first, last)),
-            _ => None,
-        };
-        self.history_rows = rows;
-        self.history_had_newer = has_newer;
-        // A new or replaced window: start at the jump target, else at the
-        // "Unread messages" divider, else at the bottom.
-        if self.history_anchor_pending && !self.history_rows.is_empty() {
-            self.history_anchor_pending = false;
-            let highlighted = highlight_id.and_then(|target| {
-                self.history_rows
-                    .iter()
-                    .position(|row| row.contains(target))
-            });
-            if highlighted.is_some() {
-                self.last_highlight = highlight_id;
-            }
-            let target = highlighted.or_else(|| {
-                self.history_rows
-                    .iter()
-                    .position(HistoryRow::unread_divider)
-                    // A little context above the divider.
-                    .map(|ix| ix.saturating_sub(1))
-            });
-            self.history_scroller.update(cx, |state, cx| match target {
-                Some(ix) => {
-                    state.scroll_to_item(ix, cx);
-                }
-                None => state.scroll_to_end(cx),
-            });
-        }
-        // Chat-search jump: scroll the highlight into view once per new
-        // `highlight_id` (current code only outlined the message).
-        if highlight_id != self.last_highlight {
-            self.last_highlight = highlight_id;
-            if let Some(target) = highlight_id
-                && let Some(ix) = self
-                    .history_rows
-                    .iter()
-                    .position(|row| row.contains(target))
+            // kit Phase 3: sync the scroller state with the new row list.
+            let count = rows.len();
+            let (first, last) = (
+                rows.first().and_then(HistoryRow::first_id),
+                rows.last().and_then(HistoryRow::last_id),
+            );
+            // The list caches each row's measured height. A row can grow in
+            // place — a photo finishes downloading (placeholder → image), a
+            // message is edited, reactions arrive — and would then be clipped,
+            // so remeasure rows whose inputs changed. File readiness affects
+            // any media row, so a change there remeasures every row.
+            let media_signature = self
+                .session()
+                .map(|s| {
+                    (
+                        s.files
+                            .values()
+                            .filter(|file| file.usable_path().is_some())
+                            .count(),
+                        s.downloading.len(),
+                    )
+                })
+                .unwrap_or_default();
+            if self.history_key == Some(history_key)
+                && count == self.history_rows.len()
+                && count == self.history_scroller.read(cx).item_count()
             {
+                if media_signature != self.history_media_signature {
+                    self.history_scroller
+                        .update(cx, |state, cx| state.remeasure(cx));
+                } else {
+                    let changed: Vec<usize> = rows
+                        .iter()
+                        .zip(&self.history_rows)
+                        .enumerate()
+                        .filter(|(_, (new, old))| !new.renders_like(old))
+                        .map(|(ix, _)| ix)
+                        .collect();
+                    if !changed.is_empty() {
+                        self.history_scroller.update(cx, |state, cx| {
+                            for ix in changed {
+                                let _ = state.remeasure_items(ix..ix + 1, cx);
+                            }
+                        });
+                    }
+                }
+            }
+            self.history_media_signature = media_signature;
+            if self.history_key != Some(history_key) || self.history_window_epoch != window_epoch {
+                // A new or replaced window anchors once its rows are in.
+                self.history_window_epoch = window_epoch;
+                self.history_anchor_pending = true;
+            }
+            if self.history_key != Some(history_key) {
+                // New chat/topic (or first render): reset; the anchor below
+                // picks the position.
+                self.history_key = Some(history_key);
+                // Message ids are chat-local: a stale highlight id in the new
+                // chat must not suppress its search-jump scroll.
+                self.last_highlight = None;
                 self.history_scroller.update(cx, |state, cx| {
-                    state.scroll_to_item(ix, cx);
+                    state.reset(count, cx);
+                });
+            } else if count != self.history_scroller.read(cx).item_count() {
+                let prev_count = self.history_scroller.read(cx).item_count();
+                match (first, last, self.history_ends) {
+                    (Some(_), _, Some((prev_first, _)))
+                        if first == Some(prev_first) && count > prev_count =>
+                    {
+                        // New messages appended at the tail — tail-follow keeps
+                        // the view pinned when the user is at the bottom. A
+                        // newer page must not be skipped that way: keep the old
+                        // last row in view and read on from there.
+                        let added = count.saturating_sub(prev_count);
+                        let newer_page = self.history_had_newer;
+                        self.history_scroller.update(cx, |state, cx| {
+                            let following = state.is_following_tail();
+                            state.append(added, cx);
+                            if newer_page && following {
+                                state.scroll_to_item(prev_count.saturating_sub(1), cx);
+                            }
+                        });
+                    }
+                    (_, Some(_), Some((_, prev_last)))
+                        if last == Some(prev_last) && count > prev_count =>
+                    {
+                        // Older history prepended — the visible anchor stays.
+                        let added = count.saturating_sub(prev_count);
+                        self.history_scroller.update(cx, |state, cx| {
+                            state.prepend(added, cx);
+                        });
+                    }
+                    _ => {
+                        // Shrink or reorder (delete/edit): splice preserves the
+                        // scroll anchor (reset() would yank to the top and arm
+                        // tail-follow); stay at the tail only if the user was
+                        // following it.
+                        let follow = self.history_scroller.read(cx).is_following_tail();
+                        self.history_scroller.update(cx, |state, cx| {
+                            state.splice(0..prev_count, count, cx);
+                            if follow {
+                                state.scroll_to_end(cx);
+                            }
+                        });
+                    }
+                }
+            } else if let (Some(first), Some(last)) = (first, last)
+                && self.history_ends != Some((first, last))
+            {
+                // Same row count but row identity changed (e.g. a second album
+                // photo turned a Single row into a taller Album row): cached
+                // measured heights are stale, so remeasure. This converges —
+                // history_ends is updated below — and must not run
+                // unconditionally or remeasure's notify() would loop.
+                self.history_scroller.update(cx, |state, cx| {
+                    state.remeasure(cx);
                 });
             }
+            self.history_ends = match (first, last) {
+                (Some(first), Some(last)) => Some((first, last)),
+                _ => None,
+            };
+            self.history_rows = rows;
+            self.history_had_newer = has_newer;
+            // A new or replaced window: start at the jump target, else at the
+            // "Unread messages" divider, else at the bottom.
+            if self.history_anchor_pending && !self.history_rows.is_empty() {
+                self.history_anchor_pending = false;
+                let highlighted = highlight_id.and_then(|target| {
+                    self.history_rows
+                        .iter()
+                        .position(|row| row.contains(target))
+                });
+                if highlighted.is_some() {
+                    self.last_highlight = highlight_id;
+                }
+                let target = highlighted.or_else(|| {
+                    self.history_rows
+                        .iter()
+                        .position(HistoryRow::unread_divider)
+                        // A little context above the divider.
+                        .map(|ix| ix.saturating_sub(1))
+                });
+                self.history_scroller.update(cx, |state, cx| match target {
+                    Some(ix) => {
+                        state.scroll_to_item(ix, cx);
+                    }
+                    None => state.scroll_to_end(cx),
+                });
+            }
+            // Chat-search jump: scroll the highlight into view once per new
+            // `highlight_id` (current code only outlined the message).
+            if highlight_id != self.last_highlight {
+                self.last_highlight = highlight_id;
+                if let Some(target) = highlight_id
+                    && let Some(ix) = self
+                        .history_rows
+                        .iter()
+                        .position(|row| row.contains(target))
+                {
+                    self.history_scroller.update(cx, |state, cx| {
+                        state.scroll_to_item(ix, cx);
+                    });
+                }
+            }
         }
+        self.history_shared = HistoryShared { media_roots };
+        let count = self.history_rows.len();
         // kit Phase 3: only visible rows render. Row 0 becoming visible
         // pages older history (the driver dedupes in-flight requests and
         // reports exhaustion; the loader notifies only when a request was

@@ -26,6 +26,22 @@ impl ChatSummary {
 }
 
 impl Session {
+    /// The open history has nothing to show yet because its first page is
+    /// still on the way (no entry yet, or an empty window with a page in
+    /// flight) — the UI shows a skeleton rather than "No messages".
+    pub fn history_loading(&self, chat_id: ChatId) -> bool {
+        match self.histories.get(&chat_id.0) {
+            None => true,
+            Some(history) => {
+                history.messages.is_empty()
+                    && !self
+                        .requests
+                        .ids_for_chat(&WINDOW_PURPOSES, chat_id)
+                        .is_empty()
+            }
+        }
+    }
+
     /// Replace `chat_id`'s loaded window with an empty one. In-flight pages
     /// for the old window are marked stale and dropped when they answer.
     pub fn reset_history_window(&mut self, chat_id: ChatId) {
