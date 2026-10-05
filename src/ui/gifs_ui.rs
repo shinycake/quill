@@ -2,9 +2,9 @@
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::pressable::PressableDiv;
-use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -59,6 +59,7 @@ impl QuillApp {
             .map(|session| session.files.clone())
             .unwrap_or_default();
         let roots = self.media_display_roots();
+        let (cx_muted, cx_muted_fg) = (cx.theme().muted, cx.theme().muted_foreground);
         let mut grid = div().id("gif-grid").flex().flex_wrap().gap_2();
         for (index, animation) in panel.visible_animations().iter().enumerate() {
             let file_id = animation.file_id;
@@ -99,8 +100,8 @@ impl QuillApp {
                                 .w(px(96.))
                                 .h(px(72.))
                                 .rounded_md()
-                                .bg(accent_strong())
-                                .text_color(text_on_fill())
+                                .bg(cx_muted)
+                                .text_color(cx_muted_fg)
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -115,8 +116,9 @@ impl QuillApp {
                     .w(px(96.))
                     .h(px(72.))
                     .rounded_md()
-                    .bg(accent_strong())
-                    .text_color(text_on_fill())
+                    .bg(cx.theme().muted)
+                    .text_color(cx.theme().muted_foreground)
+                    .text_xs()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -136,24 +138,40 @@ impl QuillApp {
                 s.requests.has_purpose(RequestPurpose::AddSavedAnimation)
                     || s.requests.has_purpose(RequestPurpose::RemoveSavedAnimation)
             });
+            // Save / unsave lives in the tile's context menu (like sticker
+            // favorites) instead of a text button under every tile.
+            let owner = cx.entity().downgrade();
             grid = grid.child(
-                div().flex().flex_col().gap_1().child(cell).child(
-                    Button::new(format!("gif-saved-action-{}", file_id.0))
-                        .label(if saved { "Remove saved" } else { "Save GIF" })
-                        .disabled(pending)
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if saved {
-                                this.open_group_confirm(
-                                    ChatId(0),
-                                    GroupConfirmAction::RemoveSavedGif { file_id },
-                                    cx,
-                                );
+                div()
+                    .id(SharedString::from(format!(
+                        "gif-cell-{index}-{}",
+                        file_id.0
+                    )))
+                    .child(cell)
+                    .context_menu(move |menu, _, _| {
+                        let owner = owner.clone();
+                        menu.item(
+                            PopupMenuItem::new(if saved {
+                                "Remove from saved GIFs"
                             } else {
-                                this.save_gif_pick(file_id, cx);
-                            }
-                        })),
-                ),
+                                "Save GIF"
+                            })
+                            .disabled(pending)
+                            .on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    if saved {
+                                        this.open_group_confirm(
+                                            ChatId(0),
+                                            GroupConfirmAction::RemoveSavedGif { file_id },
+                                            cx,
+                                        );
+                                    } else {
+                                        this.save_gif_pick(file_id, cx);
+                                    }
+                                });
+                            }),
+                        )
+                    }),
             );
         }
         if panel.search_mode && !panel.search_next_offset.is_empty() {
@@ -179,18 +197,19 @@ impl QuillApp {
             );
         }
         let status = if panel.loading || panel.search_loading {
-            "Loading GIFs…"
+            Some("Loading GIFs…")
         } else if panel.search_failed && panel.search_mode && panel.search_bot_username.is_empty() {
-            "GIF search is not available yet. Try again after connecting."
+            Some("GIF search is not available yet. Try again after connecting.")
         } else if panel.failed || panel.search_mode && panel.search_failed {
-            "Could not update GIFs. Try the action again."
+            Some("Could not update GIFs. Try the action again.")
         } else if panel.visible_animations().is_empty() && panel.search_mode {
-            "No GIFs found."
+            Some("No GIFs found.")
         } else if panel.animations.is_empty() && !panel.search_mode {
-            "No saved GIFs."
+            Some("No saved GIFs yet. Right-click a GIF to save it.")
         } else {
-            "Tap a GIF to send it."
+            None
         };
+        let searching = panel.search_mode;
         div()
             .id("gif-picker")
             .max_h(px(420.))
@@ -222,13 +241,8 @@ impl QuillApp {
             )
             .child(
                 div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(status),
-            )
-            .child(
-                div()
                     .flex()
+                    .items_center()
                     .gap_2()
                     .child(
                         Textarea::new(&self.gif_search_input)
@@ -238,24 +252,31 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("gif-search-submit")
-                            .label("Search")
+                            .icon(gpui_kit::assets::IconName::Search)
+                            .ghost()
+                            .tooltip("Search GIFs")
+                            .accessibility_label("Search GIFs")
                             .on_click(cx.listener(|this, _, _, cx| this.search_gif_picker(cx))),
                     ),
             )
             .child(
                 div()
                     .flex()
-                    .gap_2()
+                    .gap_1()
                     .child(
                         Button::new("gif-saved-tab")
                             .label("Saved")
                             .ghost()
+                            .small()
+                            .selected(!searching)
                             .on_click(cx.listener(|this, _, _, cx| this.show_saved_gifs(cx))),
                     )
                     .child(
                         Button::new("gif-trending-tab")
                             .label("Trending")
                             .ghost()
+                            .small()
+                            .selected(searching)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.gif_search_input
                                     .update(cx, |input, cx| input.set_value("", window, cx));
@@ -268,6 +289,14 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .child(format!("GIF search: {}", panel.search_provider)),
+                )
+            })
+            .when_some(status, |body, status| {
+                body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(status),
                 )
             })
             .child(emojis)
