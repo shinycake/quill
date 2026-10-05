@@ -1813,6 +1813,7 @@ impl QuillApp {
         let counts: Option<String> = self.story_viewer_counts();
         div()
             .id("story-viewer-overlay")
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -1824,6 +1825,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("story-viewer-backdrop")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()

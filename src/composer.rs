@@ -336,6 +336,7 @@ impl ComposerEdit {
             | MessageContent::Invoice(_)
             | MessageContent::PaymentSuccessful(_)
             | MessageContent::PaymentReceived(_)
+            | MessageContent::Service(_)
             | MessageContent::Unsupported { .. } => return None,
         };
         Some(Self {

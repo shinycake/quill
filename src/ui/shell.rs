@@ -17,7 +17,7 @@ pub(super) fn title_bar(
 ) -> impl IntoElement {
     let title = match mode {
         PaneMode::Synthetic => "Quill — synthetic chat",
-        PaneMode::Connecting if live => "Quill — live TDLib",
+        PaneMode::Connecting if live => "Quill — connecting",
         PaneMode::Connecting => "Quill — connecting",
         PaneMode::Ready if live => "Quill — chats",
         PaneMode::Ready => "Quill — chats (demo)",
@@ -449,8 +449,21 @@ impl Render for QuillShell {
         div()
             .size_full()
             .child(self.app.clone())
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
+            .when(self.open_dialog.is_some(), |this| {
+                // Kit dialog contents paint at priority 10. Occlude the app immediately below them.
+                this.child(
+                    deferred(
+                        anchored().position(point(px(0.), px(0.))).child(
+                            div()
+                                .id("dialog-hit-test-barrier")
+                                .w(window.viewport_size().width)
+                                .h(window.viewport_size().height)
+                                .occlude(),
+                        ),
+                    )
+                    .with_priority(9),
+                )
+            })
     }
 }
 

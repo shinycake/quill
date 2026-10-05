@@ -383,11 +383,19 @@ pub(super) fn message_chrome(
         avatar: sender_avatar
             .map(|(name, photo)| kit_avatar_element(&name, photo.as_deref(), px(32.))),
         footer: message_footer(date, pending, receipt),
+        footer_inline: false,
+        actions: None,
     }
 }
 
-/// Monospace family for `code` / `pre` entity runs (Phase 4.1). The generic
-/// family resolves through the platform font stack (fontconfig on Linux).
+/// Monospace family for `code` / `pre` entity runs (Phase 4.1). macOS has
+/// no generic `monospace` alias, so name its system face; elsewhere the
+/// generic family resolves through the platform font stack.
+#[cfg(target_os = "macos")]
+pub(super) const MONO_FONT: &str = "Menlo";
+#[cfg(target_os = "windows")]
+pub(super) const MONO_FONT: &str = "Consolas";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(super) const MONO_FONT: &str = "monospace";
 
 /// Custom emoji ids in `entities` → downloaded sticker image paths, via the
@@ -552,16 +560,12 @@ fn quote_block(
     let key = (msg_key.0, msg_key.1, (start as u64) | (1 << 63), is_caption);
     let expanded = revealed.contains(&key);
     let collapsible = quote_collapses(&quote_text);
-    let mut runs_row = div()
-        .id(format!("msg-quote-runs-{}-{start}", msg_key.1))
-        .flex()
-        .flex_wrap()
-        .gap_0();
-    if collapsible && !expanded {
+    let shown: Vec<TextRun> = if collapsible && !expanded {
         // Truncate to the first QUOTE_COLLAPSE_LINES lines, keeping each
         // run's own styling on the visible portion.
         let mut remaining = collapsed_quote_len(&quote_text);
-        for (offset, run) in group.iter().enumerate() {
+        let mut shown = Vec::new();
+        for run in group {
             if remaining == 0 {
                 break;
             }
@@ -569,31 +573,23 @@ fn quote_block(
             remaining -= shown_len;
             let mut shown_run = run.clone();
             shown_run.text.truncate(shown_len);
-            runs_row = runs_row.child(paint_text_run(
-                &shown_run,
-                start + offset,
-                msg_key,
-                is_caption,
-                revealed,
-                emoji_paths,
-                font,
-                cx,
-            ));
+            shown.push(shown_run);
         }
+        shown
     } else {
-        for (offset, run) in group.iter().enumerate() {
-            runs_row = runs_row.child(paint_text_run(
-                run,
-                start + offset,
-                msg_key,
-                is_caption,
-                revealed,
-                emoji_paths,
-                font,
-                cx,
-            ));
-        }
-    }
+        group.to_vec()
+    };
+    let runs_row = inline_paragraph(
+        &shown,
+        start,
+        msg_key,
+        is_caption,
+        revealed,
+        emoji_paths,
+        font,
+        None,
+        cx,
+    );
     let mut block = div()
         .id(format!("msg-quote-{}-{start}", msg_key.1))
         .w_full()
@@ -646,23 +642,65 @@ pub(super) fn rich_text_line(
     emoji_paths: &HashMap<i64, PathBuf>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    rich_text_reserving(
+        text,
+        entities,
+        msg_key,
+        is_caption,
+        revealed,
+        font,
+        emoji_paths,
+        None,
+        cx,
+    )
+}
+
+/// `rich_text_line`, optionally ending the last paragraph with `reserve`
+/// of invisible trailing space. The bubble paints its time/receipt footer
+/// over that space: the footer shares the last line when it fits and
+/// moves to its own line when it doesn't, without measuring text.
+pub(super) fn rich_text_reserving(
+    text: &str,
+    entities: &[TextEntity],
+    msg_key: (i64, u64),
+    is_caption: bool,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    font: Pixels,
+    emoji_paths: &HashMap<i64, PathBuf>,
+    reserve: Option<Pixels>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
     let runs = styled_runs(text, entities);
-    let mut line = div()
+    let mut column = div()
         .id(("msg-rich-text", msg_key.1 * 2 + is_caption as u64))
         .text_size(font)
         .flex()
-        .flex_wrap()
-        .gap_0();
+        .flex_col()
+        .min_w_0();
+    // Paragraph = maximal stretch of inline runs; quotes and `pre` blocks
+    // break the flow and render as their own blocks.
     let mut index = 0;
     while index < runs.len() {
-        let run = &runs[index];
-        if run.text.is_empty() {
-            index += 1;
+        let start = index;
+        if runs[index].style.quote {
+            while index < runs.len() && runs[index].style.quote {
+                index += 1;
+            }
+            column = column.child(quote_block(
+                &runs[start..index],
+                start,
+                msg_key,
+                is_caption,
+                revealed,
+                emoji_paths,
+                font,
+                cx,
+            ));
             continue;
         }
-        if !run.style.quote {
-            line = line.child(paint_text_run(
-                run,
+        if runs[index].style.pre {
+            column = column.child(paint_text_run(
+                &runs[index],
                 index,
                 msg_key,
                 is_caption,
@@ -674,26 +712,191 @@ pub(super) fn rich_text_line(
             index += 1;
             continue;
         }
-        // Consecutive quote runs form one blockquote: nested styles (e.g.
-        // bold inside the quote) split the runs but stay one visual block.
-        let start = index;
-        let mut end = start;
-        while end < runs.len() && runs[end].style.quote {
-            end += 1;
+        while index < runs.len() && !runs[index].style.quote && !runs[index].style.pre {
+            index += 1;
         }
-        line = line.child(quote_block(
-            &runs[start..end],
+        let last = index == runs.len();
+        column = column.child(inline_paragraph(
+            &runs[start..index],
             start,
             msg_key,
             is_caption,
             revealed,
             emoji_paths,
             font,
+            reserve.filter(|_| last),
             cx,
         ));
-        index = end;
     }
-    line.into_any_element()
+    if let Some(reserve) = reserve
+        && runs
+            .last()
+            .is_none_or(|run| run.style.quote || run.style.pre)
+    {
+        // Text ending in a block: the footer gets a line of its own.
+        column = column.child(div().h(font * 1.2).w(reserve));
+    }
+    column.into_any_element()
+}
+
+/// Clickable span inside an inline paragraph.
+#[derive(Clone)]
+enum InlineAction {
+    Link(String),
+    RevealSpoiler((i64, u64, u64, bool)),
+}
+
+/// One flowing paragraph of inline runs as a single `StyledText`, so
+/// mixed formatting wraps like prose (a bold word mid-sentence stays on
+/// its line). Paragraphs with resolved custom-emoji images keep the
+/// per-run layout: images cannot live inside a text run.
+fn inline_paragraph(
+    runs: &[TextRun],
+    first_index: usize,
+    msg_key: (i64, u64),
+    is_caption: bool,
+    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    emoji_paths: &HashMap<i64, PathBuf>,
+    font: Pixels,
+    reserve: Option<Pixels>,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let has_emoji_image = runs.iter().any(|run| {
+        run.custom_emoji_id
+            .is_some_and(|id| emoji_paths.contains_key(&id))
+    });
+    if has_emoji_image {
+        let mut row = div()
+            .id(format!(
+                "msg-runs-{}-{}-{first_index}",
+                msg_key.1, is_caption as u8
+            ))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_0();
+        for (offset, run) in runs.iter().enumerate() {
+            row = row.child(paint_text_run(
+                run,
+                first_index + offset,
+                msg_key,
+                is_caption,
+                revealed,
+                emoji_paths,
+                font,
+                cx,
+            ));
+        }
+        if let Some(reserve) = reserve {
+            row = row.child(div().w(reserve).h(font));
+        }
+        return row.into_any_element();
+    }
+    let mut text = String::new();
+    let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
+    let mut mono: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
+    let mut click_ranges = Vec::new();
+    let mut actions = Vec::new();
+    for (offset, run) in runs.iter().enumerate() {
+        if run.text.is_empty() {
+            continue;
+        }
+        let range = text.len()..text.len() + run.text.len();
+        text.push_str(&run.text);
+        let style = &run.style;
+        let key = (
+            msg_key.0,
+            msg_key.1,
+            (first_index + offset) as u64,
+            is_caption,
+        );
+        let hidden = style.spoiler && !revealed.contains(&key);
+        let mut highlight = HighlightStyle::default();
+        if style.bold {
+            highlight.font_weight = Some(FontWeight::BOLD);
+        }
+        if style.italic {
+            highlight.font_style = Some(FontStyle::Italic);
+        }
+        if style.underline {
+            highlight.underline = Some(UnderlineStyle {
+                thickness: px(1.),
+                ..Default::default()
+            });
+        }
+        if style.strikethrough {
+            highlight.strikethrough = Some(StrikethroughStyle {
+                thickness: px(1.),
+                ..Default::default()
+            });
+        }
+        if style.code {
+            highlight.background_color = Some(fill_muted().into());
+            mono.push((range.clone(), MONO_FONT.into()));
+        }
+        if let Some(href) = &run.href {
+            highlight.color = Some(accent_info().into());
+            click_ranges.push(range.clone());
+            actions.push(InlineAction::Link(href.clone()));
+        }
+        if hidden {
+            // Opaque until clicked: text and background share one color.
+            highlight.color = Some(fill_muted().into());
+            highlight.background_color = Some(fill_muted().into());
+            click_ranges.retain(|existing| existing != &range);
+            actions.truncate(click_ranges.len());
+            click_ranges.push(range.clone());
+            actions.push(InlineAction::RevealSpoiler(key));
+        }
+        if highlight != HighlightStyle::default() {
+            highlights.push((range, highlight));
+        }
+    }
+    let label = text.clone();
+    if let Some(reserve) = reserve {
+        // Em spaces track the font size, so `reserve / font` of them span
+        // the footer's width at any text size.
+        let count = (reserve / font).ceil().max(1.) as usize;
+        let range = text.len()..text.len() + count * '\u{2003}'.len_utf8();
+        text.extend(std::iter::repeat_n('\u{2003}', count));
+        highlights.push((
+            range,
+            HighlightStyle {
+                color: Some(gpui_kit::transparent_black()),
+                ..Default::default()
+            },
+        ));
+    }
+    let styled = StyledText::new(text)
+        .with_highlights(highlights)
+        .with_font_family_overrides(mono);
+    let owner = cx.entity().downgrade();
+    let paragraph = InteractiveText::new(
+        format!("msg-par-{}-{}-{first_index}", msg_key.1, is_caption as u8),
+        styled,
+    )
+    .on_click(click_ranges, move |ix, _, cx| {
+        let Some(action) = actions.get(ix).cloned() else {
+            return;
+        };
+        let _ = owner.update(cx, |this, cx| match action {
+            InlineAction::Link(href) => this.open_message_url(&href, cx),
+            InlineAction::RevealSpoiler(key) => {
+                this.spoiler_revealed.insert(key);
+                cx.notify();
+            }
+        });
+    });
+    div()
+        .id(format!(
+            "msg-par-wrap-{}-{}-{first_index}",
+            msg_key.1, is_caption as u8
+        ))
+        .role(Role::Label)
+        .aria_label(label)
+        .min_w_0()
+        .child(paragraph)
+        .into_any_element()
 }
 
 /// Phase 4.1: plain/link message text (with optional link-preview card).
@@ -711,6 +914,9 @@ pub(super) fn message_text_block(
     // Settings → Appearance: message font size.
     font: Pixels,
     big_emoji: bool,
+    // Trailing space for the bubble's inline time footer (see
+    // `rich_text_reserving`); only when the text is the bubble's last part.
+    reserve: Option<Pixels>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = msg_key.1;
@@ -724,7 +930,16 @@ pub(super) fn message_text_block(
     } else {
         font
     };
-    let line = rich_text_line(
+    let above = text
+        .link_preview
+        .as_ref()
+        .is_some_and(|preview| preview.show_above_text);
+    let card_below = !above
+        && text
+            .link_preview
+            .as_ref()
+            .is_some_and(|preview| preview.has_card());
+    let line = rich_text_reserving(
         &text.text,
         &text.entities,
         msg_key,
@@ -732,6 +947,7 @@ pub(super) fn message_text_block(
         revealed,
         font,
         &custom_emoji_paths(&text.entities, custom_emoji, files, media_roots),
+        reserve.filter(|_| !card_below),
         cx,
     );
     let card = text.link_preview.as_ref().and_then(|preview| {
@@ -739,10 +955,6 @@ pub(super) fn message_text_block(
             .has_card()
             .then(|| link_preview_card(row_id, preview, files, downloading, media_roots, font, cx))
     });
-    let above = text
-        .link_preview
-        .as_ref()
-        .is_some_and(|preview| preview.show_above_text);
     let has_text = !text.text.is_empty();
     let mut block = div().id(("msg-text-block", row_id)).flex().flex_col();
     if above {
@@ -1322,31 +1534,9 @@ pub(super) fn preview_thumb(
         .into_any_element()
 }
 
-/// M1: `YYYY-MM-DD HH:MM` (UTC) from a unix timestamp, stdlib only — no
-/// chrono dependency for one label. UTC is stated explicitly rather than
-/// pretending at a local timezone the stdlib cannot compute.
+/// Full local timestamp (`28 September 2026, 21:42`).
 pub(super) fn format_unix_date_time(unix: i64) -> String {
-    // Days since epoch → civil date (Howard Hinnant's algorithm).
-    let days = unix.div_euclid(86400);
-    let secs_of_day = unix.rem_euclid(86400);
-    let z = days + 719468;
-    let era = z.div_euclid(146097);
-    let doe = z.rem_euclid(146097);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if m <= 2 { y + 1 } else { y };
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
-        year,
-        m,
-        d,
-        secs_of_day / 3600,
-        (secs_of_day % 3600) / 60
-    )
+    quill::local_time::full_stamp(&quill::local_time::civil_local(unix))
 }
 
 pub(super) fn reply_quote_strip(

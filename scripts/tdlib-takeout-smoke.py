@@ -14,6 +14,7 @@ def execute(method):
 
 unknown = execute("quillIntentionallyUnknownMethod")
 assert unknown["@type"] == "error" and "Unknown class" in unknown["message"], unknown
-known = execute("getQuillSavedContacts")
-assert known["@type"] == "error" and "synchronously" in known["message"], known
-print("PASS: compiled saved-contact request recognized; account and network unused")
+for method in ["getQuillSavedContacts", "getQuillTakeoutMessageRanges"]:
+    known = execute(method)
+    assert known["@type"] == "error" and "synchronously" in known["message"], (method, known)
+print("PASS: compiled contact and message-range requests recognized; account and network unused")

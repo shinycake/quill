@@ -931,7 +931,7 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("Sent to TDLib only — never logged"),
+                .child("Sent securely to Telegram."),
         )
         .child(self.twofa_form_buttons(cx, TwofaView::Enable, "Set password"))
     }
@@ -975,7 +975,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Sent to TDLib only — never logged"),
+                    .child("Sent securely to Telegram."),
             )
             .child(self.twofa_form_buttons(cx, TwofaView::Change, "Change password"))
     }
@@ -1012,7 +1012,7 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("Sent to TDLib only — never logged"),
+                .child("Sent securely to Telegram."),
         )
         .child(self.twofa_form_buttons(cx, TwofaView::Disable, "Turn off"))
     }

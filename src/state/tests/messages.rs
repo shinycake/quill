@@ -9,6 +9,7 @@ fn effective_preview_prefers_ephemeral_content() {
     // ephemeral content instead of the regular content (schema 1.8.67,
     // line 3161).
     let parsed = ParsedMessage {
+        sender: None,
         id: MessageId(602),
         chat_id: ChatId(14),
         date: 0,
@@ -68,6 +69,7 @@ fn update_message_content_refreshes_scheduled_entry() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.scheduled_messages.push(ParsedMessage {
+        sender: None,
         id: MessageId(70),
         chat_id: ChatId(7),
         date: 0,
@@ -327,9 +329,13 @@ fn chat_action_typing_then_cancel() {
 }
 
 #[test]
-fn message_time_hhmm_formats_utc_and_rejects_missing() {
-    // 2026-09-28 21:42:00 UTC.
-    assert_eq!(message_time_hhmm(1790631720).as_deref(), Some("21:42"));
+fn message_time_hhmm_formats_local_and_rejects_missing() {
+    // 2026-09-28 21:42:00 UTC, in whatever zone the test host uses.
+    let local = crate::local_time::civil_local(1790631720);
+    assert_eq!(
+        message_time_hhmm(1790631720),
+        Some(format!("{:02}:{:02}", local.hour, local.minute))
+    );
     assert_eq!(message_time_hhmm(0), None);
     assert_eq!(message_time_hhmm(-5), None);
 }
@@ -1121,4 +1127,20 @@ fn validated_order_info_selects_first_shipping() {
     assert_eq!(validated.order_info_id, "oid1");
     assert_eq!(validated.shipping_options.len(), 2);
     assert_eq!(session.payment_shipping_id.as_deref(), Some("ship1"));
+}
+
+#[test]
+fn sender_identity_survives_history_and_search() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":710,"chat_id":11,"sender_id":{"@type":"messageSenderUser","user_id":42},"content":{"@type":"messageText","text":{"text":"Hello","entities":[]}}}}"#,
+    );
+    let message = &session.histories[&11].messages[&710];
+    assert_eq!(message.sender, Some(MessageSender::User { user_id: 42 }));
+    let searched = SearchMessageHit::from_parsed(&crate::telegram::envelope::parse_message(&serde_json::json!({"id":711,"chat_id":11,"sender_id":{"@type":"messageSenderChat","chat_id":99},"content":{"@type":"messageText","text":{"text":"Hello","entities":[]}}})).unwrap()).into_history();
+    assert_eq!(searched.sender, Some(MessageSender::Chat { chat_id: 99 }));
 }

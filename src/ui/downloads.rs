@@ -28,12 +28,54 @@ impl QuillApp {
             self.status_note = match result {
                 Ok(Some(_)) => "downloading…".into(),
                 Ok(None) => "already local or in progress".into(),
-                Err(_) => "could not download".into(),
+                Err(_) => {
+                    self.clear_pending_media_playback(file_id);
+                    "Could not download. Please try again.".into()
+                }
             };
         } else if self.demo_session.is_some() {
             self.status_note = "demo — addFileToDownloads runs with live TDLib".into();
         }
         cx.notify();
+    }
+
+    fn clear_pending_media_playback(&mut self, file_id: FileId) {
+        self.pending_gif_play.take_if(|(_, id, _)| *id == file_id);
+        self.pending_video_play
+            .take_if(|(_, id, ..)| *id == file_id);
+        self.pending_audio_play.take_if(|(_, id, _)| *id == file_id);
+        self.pending_voice_play
+            .take_if(|(_, _, id, ..)| *id == file_id);
+        self.viewer_pending_play.take_if(|(_, id)| *id == file_id);
+    }
+
+    pub(super) fn discard_stopped_media_playback(&mut self, cx: &mut Context<Self>) {
+        let failed: Vec<_> = [
+            self.pending_gif_play.as_ref().map(|(_, id, _)| *id),
+            self.pending_video_play.as_ref().map(|(_, id, ..)| *id),
+            self.pending_audio_play.as_ref().map(|(_, id, _)| *id),
+            self.viewer_pending_play.map(|(_, id)| id),
+            self.pending_voice_play.map(|(_, _, id, ..)| id),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|id| {
+            self.session().is_some_and(|s| {
+                s.failed_downloads.contains(&id.0)
+                    || (s.file(*id).and_then(|f| f.usable_path()).is_none()
+                        && !s.downloading.contains(&id.0)
+                        && !s.requests.has_download(*id)
+                        && !s.file(*id).is_some_and(|f| f.local.is_downloading_active))
+            })
+        })
+        .collect();
+        if !failed.is_empty() {
+            for file_id in failed {
+                self.clear_pending_media_playback(file_id);
+            }
+            self.status_note = "Download stopped. Press Play to try again.".into();
+            cx.notify();
+        }
     }
 
     /// MED3: open a fully-downloaded file with the system viewer
@@ -74,7 +116,10 @@ impl QuillApp {
     pub(super) fn cancel_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.cancel_download(file_id) {
-                Ok(true) => "download canceled".into(),
+                Ok(true) => {
+                    self.clear_pending_media_playback(file_id);
+                    "Download canceled.".into()
+                }
                 Ok(false) => "nothing to cancel".into(),
                 Err(_) => "could not cancel the download".into(),
             };

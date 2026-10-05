@@ -49,7 +49,6 @@ impl QuillApp {
         let delete_confirm =
             DeleteConfirm::for_message(chat_id, message_id, message.is_outgoing, message.pending);
         let pinned = message.is_pinned;
-        let silent_pin = self.composer_silent;
 
         let mut panel = div()
             .id("message-menu-panel")
@@ -99,29 +98,59 @@ impl QuillApp {
                 cx.notify();
             });
         }
-        item!("menu-forward", "Forward", this, window, cx, {
-            this.begin_forward_one(chat_id, message_id, message.pending, window, cx);
-            this.message_menu = None;
-            cx.notify();
-        });
-        if pinned {
-            item!("menu-unpin", "Unpin", this, _window, cx, {
-                this.unpin_message(chat_id, message_id, cx);
+        if message.can_react() {
+            item!("menu-react", "Add reaction", this, _window, cx, {
+                this.message_menu = None;
+                this.open_reaction_picker(chat_id, message_id, cx);
+            });
+        }
+        let is_secret = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        if !is_secret
+            && quill::composer::ForwardDraft::from_message(chat_id, message_id, message.pending)
+                .is_some()
+        {
+            item!("menu-forward", "Forward", this, window, cx, {
+                this.begin_forward_one(chat_id, message_id, message.pending, window, cx);
                 this.message_menu = None;
                 cx.notify();
             });
-        } else {
-            item!("menu-pin", "Pin", this, _window, cx, {
-                this.pin_message(chat_id, message_id, silent_pin, cx);
+            item!("menu-select", "Select", this, _window, cx, {
+                this.toggle_forward_select(chat_id, message_id, message.pending, cx);
                 this.message_menu = None;
                 cx.notify();
             });
         }
-        item!("menu-share", "Share link", this, _window, cx, {
-            this.share_message_link(chat_id, message_id, cx);
-            this.message_menu = None;
-            cx.notify();
-        });
+        if let Some(edit) = quill::composer::ComposerEdit::from_own_content(
+            chat_id,
+            message_id,
+            message.is_outgoing,
+            message.pending,
+            &message.content,
+        ) {
+            item!("menu-edit", "Edit", this, window, cx, {
+                this.begin_edit(edit.clone(), window, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
+        if message.can_pin() {
+            let label = if pinned { "Unpin" } else { "Pin" };
+            item!("menu-toggle-pin", label, this, _window, cx, {
+                this.toggle_pin_message(chat_id, message_id, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
+        if !is_secret {
+            item!("menu-share", "Copy message link", this, _window, cx, {
+                this.share_message_link(chat_id, message_id, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
         // B4: stopPoll (schema 1.8.67 line 12953) — TGX `StopPollWarn`
         // shows Stop Poll / Stop Quiz only for open polls with
         // `messageProperties.can_be_edited` (schema line 12951); client
@@ -174,6 +203,8 @@ impl QuillApp {
         }
         div()
             .id("message-menu-overlay")
+            .track_focus(&self.context_menu_focus)
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -182,6 +213,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("message-menu-backdrop")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()
@@ -193,12 +225,12 @@ impl QuillApp {
                     })),
             )
             .child(
-                div()
-                    .absolute()
-                    .left(menu.position.x)
-                    .top(menu.position.y)
+                anchored()
+                    .position(menu.position)
+                    .snap_to_window_with_margin(px(8.))
                     .child(panel),
             )
+            .focus_trap("message-menu-focus", &self.context_menu_focus)
             .into_any_element()
     }
 
@@ -398,6 +430,7 @@ impl QuillApp {
             .child(body);
         div()
             .id("chat-preview-overlay")
+            .occlude()
             .absolute()
             .inset_0()
             // The release that ends the long press lands here (the
@@ -619,6 +652,8 @@ impl QuillApp {
         });
         div()
             .id("chat-menu-overlay")
+            .track_focus(&self.context_menu_focus)
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -627,6 +662,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("chat-menu-backdrop")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()
@@ -638,12 +674,12 @@ impl QuillApp {
                     })),
             )
             .child(
-                div()
-                    .absolute()
-                    .left(menu.position.x)
-                    .top(menu.position.y)
+                anchored()
+                    .position(menu.position)
+                    .snap_to_window_with_margin(px(8.))
                     .child(panel),
             )
+            .focus_trap("chat-menu-focus", &self.context_menu_focus)
             .into_any_element()
     }
 
@@ -663,6 +699,7 @@ impl QuillApp {
         Some(
             div()
                 .id("instant-view-overlay")
+                .occlude()
                 .absolute()
                 .inset_0()
                 .bg(bg_deep())

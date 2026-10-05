@@ -184,6 +184,7 @@ mod tests {
     fn text_message(id: i64, text: &str) -> ParsedMessage {
         // Minimal ParsedMessage: only the fields the projection reads.
         ParsedMessage {
+            sender: None,
             id: MessageId(id),
             chat_id: ChatId(7),
             date: 1_700_000_000,

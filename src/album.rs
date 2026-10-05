@@ -522,6 +522,7 @@ mod tests {
         use crate::state::HistoryMessage;
         use crate::telegram::envelope::TextContent;
         let message = |id: i64, album: i64| HistoryMessage {
+            sender: None,
             id: MessageId(id),
             chat_id: ChatId(1),
             is_outgoing: false,

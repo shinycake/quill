@@ -27,7 +27,7 @@ fn replay_channel_ungated_in_chat_list() {
     assert!(chat.is_channel());
     assert!(chat.kind.gate_reason().is_none());
     assert_eq!(chat.title, "Demo channel");
-    assert_eq!(chat.sidebar_preview(), "cloud chat");
+    assert_eq!(chat.sidebar_preview(), "No messages yet");
 }
 
 /// Phase 2.2: broadcast posts render with the channel as author and live

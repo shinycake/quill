@@ -46,9 +46,9 @@ pub(super) fn search_result_row(
 pub(super) fn chat_search_jump_note(session: &Session) -> String {
     match session.chat_search.jump {
         ChatSearchJump::None => String::new(),
-        ChatSearchJump::Loading { .. } => "loading around message…".into(),
-        ChatSearchJump::Ready { message_id } => format!("jumped to {}", message_id.0),
-        ChatSearchJump::Missing { .. } => "message deleted or inaccessible".into(),
+        ChatSearchJump::Loading { .. } => "Loading message…".into(),
+        ChatSearchJump::Ready { .. } => String::new(),
+        ChatSearchJump::Missing { .. } => "This message is unavailable.".into(),
     }
 }
 
@@ -132,11 +132,18 @@ impl QuillApp {
         }
         self.search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        window.focus(&self.focus_sidebar, cx);
         self.status_note = "search closed".into();
         cx.notify();
     }
 
     pub(super) fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.message_menu.is_some() || self.chat_menu.is_some() {
+            self.message_menu = None;
+            self.chat_menu = None;
+            cx.notify();
+            return;
+        }
         // Slice CL: the peek preview is the most transient layer —
         // Escape dismisses it before anything else.
         if self.chat_preview.is_some() || self.preview_press.is_some() {
@@ -377,6 +384,8 @@ impl QuillApp {
         }
         self.chat_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
         self.status_note = "in-chat search closed".into();
         cx.notify();
     }

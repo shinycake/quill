@@ -1,7 +1,7 @@
 //! new_with_demo constructor (slimmed), demo_seed_for seed table, demo_pending_attachments.
 
 use super::app::{ChatListFilter, QuillApp};
-use super::connect_ui::{ConnectUiStatus, bootstrap_connect};
+use super::connect_ui::ConnectUiStatus;
 use super::demo::{
     demo_media_allowlist, seed_ready_animated_emoji_session, seed_ready_chats_session,
     seed_ready_custom_emoji_session, seed_ready_downloads_session, seed_ready_media_session,
@@ -916,7 +916,7 @@ impl QuillApp {
         let submit_on_enter = chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Message — Enter sends, Shift+Enter newline. IME Enter must not send.")
+                .placeholder("Message")
                 .auto_grow(2, 6)
                 .submit_on_enter(submit_on_enter)
         });
@@ -1121,8 +1121,10 @@ impl QuillApp {
             window,
             |this, state, event: &InputEvent, window, cx| {
                 let text = state.read(cx).value().to_string();
-                this.sync_composer_typing(&text);
-                this.note_open_draft(true, cx);
+                if matches!(event, InputEvent::Change) {
+                    this.sync_composer_typing(&text);
+                    this.note_open_draft(true, cx);
+                }
                 // Phase 3.3: the `/` menu tracks the composer text (Blur
                 // dismisses it); Enter picks the highlighted command
                 // instead of sending while the menu is open.
@@ -1253,7 +1255,11 @@ impl QuillApp {
             window,
             |this, state, event: &InputEvent, window, cx| {
                 let text = state.read(cx).value().to_string();
-                this.sync_search_query(&text, cx);
+                match event {
+                    InputEvent::Change => this.sync_search_query(&text, cx),
+                    InputEvent::Focus if !this.search_is_open() => this.open_search_ui(window, cx),
+                    _ => {}
+                }
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
@@ -1271,7 +1277,9 @@ impl QuillApp {
             window,
             |this, state, event: &InputEvent, window, cx| {
                 let text = state.read(cx).value().to_string();
-                this.sync_chat_search_query(&text, cx);
+                if matches!(event, InputEvent::Change) {
+                    this.sync_chat_search_query(&text, cx);
+                }
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
@@ -1311,7 +1319,12 @@ impl QuillApp {
                 }
                 (status, None, note, auth)
             }
-            None => bootstrap_connect(credentials.clone()),
+            None => (
+                ConnectUiStatus::Live,
+                None,
+                "Connecting to Telegram…".into(),
+                AuthorizationState::WaitTdlibParameters,
+            ),
         };
 
         let pending_attachments = demo_pending_attachments(demo);
@@ -1336,6 +1349,7 @@ impl QuillApp {
             history_shared: HistoryShared::default(),
             history_key: None,
             history_ends: None,
+            history_media_signature: (0, 0),
             last_highlight: None,
             group_call_composer,
             command_menu_open: false,
@@ -1413,7 +1427,11 @@ impl QuillApp {
             story_privacy_sent: false,
             auth_demo,
             focus_sidebar: cx.focus_handle(),
+            context_menu_focus: cx.focus_handle(),
+            context_menu_was_open: false,
+            context_menu_previous_focus: None,
             connect_status,
+            connection_generation: 0,
             live,
             status_note,
             demo_auth_inputs: matches!(
@@ -1540,6 +1558,7 @@ impl QuillApp {
             playing_voice: None,
             playing_audio: None,
             pending_audio_play: None,
+            pending_voice_play: None,
             voice_player: None,
             playback_clock: None,
             playback_path: None,
@@ -1700,6 +1719,26 @@ impl QuillApp {
             let capturing = menu_app
                 .update(cx, |this, _| this.keybinding_capture_active())
                 .unwrap_or(false);
+            if !capturing {
+                let menu_handled = menu_app
+                    .update(cx, |this, cx| {
+                        if this.message_menu.is_none() && this.chat_menu.is_none() {
+                            return false;
+                        }
+                        if event.keystroke.key == "escape" {
+                            this.message_menu = None;
+                            this.chat_menu = None;
+                            cx.notify();
+                            return true;
+                        }
+                        super::keybindings::context_menu_captures_key(&event.keystroke)
+                    })
+                    .unwrap_or(false);
+                if menu_handled {
+                    cx.stop_propagation();
+                    return;
+                }
+            }
             if capturing || event.keystroke.modifiers.modified() {
                 return;
             }
@@ -1748,8 +1787,29 @@ impl QuillApp {
                 .ok();
         })
         .detach();
-        if app.live.is_some() {
-            app.spawn_poll_loop(cx);
+        let notification_app = cx.weak_entity();
+        cx.on_system_notification_response(move |response, cx| {
+            let Some((account, chat)) = response.tag.rsplit_once(":chat:") else {
+                return;
+            };
+            let Ok(chat_id) = chat.parse::<i64>() else {
+                return;
+            };
+            let _ = notification_app.update(cx, |this, cx| {
+                if this
+                    .session()
+                    .is_none_or(|s| account != format!("account:{}", s.account.0))
+                {
+                    return;
+                }
+                if let Ok(mut clicks) = this.notify_clicks.lock() {
+                    clicks.push(quill::ids::ChatId(chat_id));
+                }
+                cx.notify();
+            });
+        });
+        if demo.is_none() {
+            app.start_connection(cx);
         }
         // Settings → Appearance: apply the persisted prefs (theme +
         // accent) before the first frame, then re-evaluate auto-night

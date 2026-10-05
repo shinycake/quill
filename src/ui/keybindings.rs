@@ -590,16 +590,15 @@ fn app_menus() -> Vec<Menu> {
         Copy as CopyAction, Cut as CutAction, Paste as PasteAction, Redo as RedoAction,
         SelectAll as SelectAllAction, Undo as UndoAction,
     };
-    let file_items = {
-        let mut items = vec![MenuItem::action("Close Window", CloseWindow)];
-        // HIG: on macOS Quit lives in the app menu, not File.
-        #[cfg(not(target_os = "macos"))]
-        {
-            items.push(MenuItem::separator());
-            items.push(MenuItem::action("Quit Quill", QuitApp));
-        }
-        items
-    };
+    // HIG: on macOS Quit lives in the app menu, not File.
+    #[cfg(target_os = "macos")]
+    let file_items = vec![MenuItem::action("Close Window", CloseWindow)];
+    #[cfg(not(target_os = "macos"))]
+    let file_items = vec![
+        MenuItem::action("Close Window", CloseWindow),
+        MenuItem::separator(),
+        MenuItem::action("Quit Quill", QuitApp),
+    ];
     let mut menus = Vec::new();
     // HIG: on macOS Quit lives in the app menu, not File.
     #[cfg(target_os = "macos")]
@@ -648,6 +647,22 @@ pub fn setup_app_menus(cx: &mut App) {
     GlobalState::global_mut(cx).set_app_menus(owned);
 }
 
+// Context menus own typing and chat shortcuts; native focus traversal and
+// activation still work, as do macOS window commands.
+pub(super) fn context_menu_captures_key(key: &Keystroke) -> bool {
+    if key.modifiers.platform && matches!(key.key.as_str(), "q" | "w" | "m") {
+        return false;
+    }
+    if !key.modifiers.control
+        && !key.modifiers.platform
+        && !key.modifiers.alt
+        && matches!(key.key.as_str(), "tab" | "enter" | "space")
+    {
+        return false;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     // NOTE: explicit imports, not `use super::*` — `gpui_kit::*` re-exports
@@ -656,8 +671,9 @@ mod tests {
     use super::{
         Action, KeybindingConflict, Keystroke, Modifiers, QuitApp, REBINDABLE_ACTIONS,
         canonical_event_chord, capture_active, close_appearance_capture, conflict_message,
-        default_bindings, fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict,
-        keybinding_for, resolve_keybindings, same_chord,
+        context_menu_captures_key, default_bindings, fixed_keystrokes,
+        invalidate_account_keybindings, keybinding_conflict, keybinding_for, resolve_keybindings,
+        same_chord,
     };
     use quill::settings::CustomKeybinding;
 
@@ -927,5 +943,29 @@ mod tests {
             })
             .is_none()
         );
+    }
+    #[test]
+    fn context_menu_owns_chat_keys_but_preserves_focus_and_window_commands() {
+        for (key, platform, captured) in [
+            ("a", false, true),
+            ("enter", true, true),
+            ("k", true, true),
+            ("tab", false, false),
+            ("enter", false, false),
+            ("q", true, false),
+            ("w", true, false),
+        ] {
+            assert_eq!(
+                context_menu_captures_key(&Keystroke {
+                    key: key.into(),
+                    key_char: None,
+                    modifiers: Modifiers {
+                        platform,
+                        ..Modifiers::none()
+                    },
+                }),
+                captured
+            );
+        }
     }
 }

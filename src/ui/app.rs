@@ -73,6 +73,9 @@ pub struct QuillApp {
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) history_ends: Option<(MessageId, MessageId)>,
+    /// (ready files, downloading files) at the last history render; a
+    /// change remeasures the virtualized rows (media grew in place).
+    pub(super) history_media_signature: (usize, usize),
     /// kit Phase 3: last chat-search highlight the scroller jumped to —
     /// avoids re-scrolling every frame while the highlight is set.
     pub(super) last_highlight: Option<MessageId>,
@@ -127,7 +130,11 @@ pub struct QuillApp {
     pub(super) forward_search_input: Entity<TextareaState>,
     pub(super) auth_demo: AuthorizationState,
     pub(super) focus_sidebar: FocusHandle,
+    pub(super) context_menu_focus: FocusHandle,
+    pub(super) context_menu_was_open: bool,
+    pub(super) context_menu_previous_focus: Option<FocusHandle>,
     pub(super) connect_status: ConnectUiStatus,
+    pub(super) connection_generation: u64,
     pub(super) live: Option<LiveConnect>,
     pub(super) status_note: String,
     /// Slice auth-logout-warning: the startup credentials, kept so a
@@ -461,6 +468,7 @@ pub struct QuillApp {
     pub(super) playing_audio: Option<MessageId>,
     /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
     pub(super) pending_audio_play: Option<(MessageId, FileId, f64)>,
+    pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
     pub(super) voice_player: Option<Child>,
     /// Active audio/voice track's playback clock (playing or paused-with-offset).
     /// `Some` exactly when `playing_voice` or `playing_audio` is `Some` (Phase 4.6).

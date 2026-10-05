@@ -2,8 +2,7 @@
 
 use super::app::QuillApp;
 use super::app::{ChatListFilter, PaneMode};
-use super::auth_ui::auth_action_note;
-use super::chat_row::initials_avatar;
+use super::chat_row::chat_avatar;
 use super::chat_row::{
     ChatListItem, chat_list_caption, chat_list_empty_state, chat_list_skeleton_row,
     chat_row_height, chat_row_tags, static_chat_row,
@@ -406,7 +405,7 @@ impl QuillApp {
                 .driver
                 .select_chat(chat_id);
             self.status_note = match result {
-                Ok(_) => "chat selected".into(),
+                Ok(_) => "".into(),
                 Err(_) => "could not open chat".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -734,6 +733,20 @@ impl QuillApp {
             .session()
             .map(|s| s.ordered_story_tray().into_iter().cloned().collect())
             .unwrap_or_default();
+        if entries.is_empty() {
+            return div()
+                .px_3()
+                .py_1()
+                .child(
+                    Button::new("story-tray-add")
+                        .label("Create a story")
+                        .ghost()
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.open_story_composer(window, cx)),
+                        ),
+                )
+                .into_any_element();
+        }
         let mut row = div()
             .id("story-tray")
             .flex()
@@ -761,7 +774,7 @@ impl QuillApp {
                             .rounded_full()
                             .p(px(2.))
                             .border_2()
-                            .border_color(cx.theme().accent)
+                            .border_color(cx.theme().primary)
                             .child(
                                 div()
                                     .w(px(40.))
@@ -771,11 +784,11 @@ impl QuillApp {
                                     .items_center()
                                     .justify_center()
                                     .text_xl()
-                                    .text_color(cx.theme().accent)
+                                    .text_color(cx.theme().primary)
                                     .child("+"),
                             ),
                     )
-                    .child(div().text_xs().child("Post"))
+                    .child(div().text_xs().child("New story"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_story_composer(window, cx);
                     })),
@@ -788,6 +801,12 @@ impl QuillApp {
                 .and_then(|s| s.chats.get(&chat_id))
                 .map(|chat| chat.title.clone())
                 .unwrap_or_else(|| format!("Chat {chat_id}"));
+            let photo = self
+                .session()
+                .and_then(|s| s.chat_photo_path(ChatId(chat_id)))
+                .and_then(|path| {
+                    quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
+                });
             let latest_story = entry
                 .stories
                 .iter()
@@ -798,7 +817,7 @@ impl QuillApp {
                 div()
                     .id(("story-tray-item", chat_id as u64))
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Open stories for chat {chat_id}"))
+                    .aria_label(format!("Open stories for {title}"))
                     .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
@@ -817,7 +836,7 @@ impl QuillApp {
                             } else {
                                 cx.theme().border
                             })
-                            .child(initials_avatar(&title, 40.0)),
+                            .child(chat_avatar(&title, photo.as_deref(), 40.0)),
                     )
                     .child(div().text_xs().max_w(px(60.)).child(title))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -896,7 +915,7 @@ impl QuillApp {
             .unwrap_or_default();
         let weak = cx.weak_entity();
         // Tab slots: Main, the folders, then the two category filters.
-        let mut bar = TabBar::new("folder-tabs").child(Tab::new().label("Main"));
+        let mut bar = TabBar::new("folder-tabs").child(Tab::new().label("All"));
         for (_, name) in &folders {
             bar = bar.child(Tab::new().label(name.clone()));
         }
@@ -1684,8 +1703,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(auth.body.clone()),
-            )
-            .child(auth_action_note(auth, &self.connect_status));
+            );
         list = list.when(
             matches!(auth.action, quill::auth::AuthAction::Register) && self.live.is_some(),
             |this| this.child(self.registration_form(cx)),

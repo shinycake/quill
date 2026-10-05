@@ -103,8 +103,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the persistent file-download list (`addFileToDownloads`) so it can
     /// be paused/resumed/cancelled through the list API. Tracked in
     /// `Session::user_downloads` (surfaces in the downloads manager).
-    /// `origin` is the (chat, message) the file belongs to — `(0, 0)` when
-    /// unknown (e.g. manager retry).
+    /// `origin` is the (chat, message) the file belongs to. Cached history resolves missing origins;
+    /// files without a source message use `downloadFile`.
     pub fn download_user_file(
         &mut self,
         file_id: FileId,
@@ -116,17 +116,59 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.should_download(file_id) {
             return Ok(None);
         }
+        let origin = origin
+            .filter(|(chat, message)| chat.0 != 0 && *message > 0)
+            .or_else(|| {
+                self.session
+                    .histories
+                    .values()
+                    .flat_map(|history| history.messages.values())
+                    .find(|message| {
+                        message.id.0 > 0
+                            && match &message.content {
+                                crate::telegram::envelope::MessageContent::Photo(photo) => {
+                                    photo.sizes.iter().any(|size| size.file_id == file_id)
+                                }
+                                crate::telegram::envelope::MessageContent::Video(media) => {
+                                    media.file_id == file_id
+                                }
+                                crate::telegram::envelope::MessageContent::Animation(media) => {
+                                    media.file_id == file_id
+                                }
+                                crate::telegram::envelope::MessageContent::Document(media) => {
+                                    media.file_id == file_id
+                                }
+                                crate::telegram::envelope::MessageContent::Audio(media) => {
+                                    media.file_id == file_id
+                                }
+                                crate::telegram::envelope::MessageContent::VoiceNote(media) => {
+                                    media.file_id == file_id
+                                }
+                                crate::telegram::envelope::MessageContent::VideoNote(media) => {
+                                    media.file_id == file_id
+                                }
+                                _ => false,
+                            }
+                    })
+                    .map(|message| (message.chat_id, message.id.0))
+            });
         let extra = self.session.request_download(file_id);
         self.session.begin_download(file_id);
-        self.session.user_downloads.insert(file_id.0);
-        let (chat_id, message_id) = origin.unwrap_or((ChatId(0), 0));
-        match self.sender.send_json(&add_file_to_downloads_request(
-            extra,
-            file_id,
-            chat_id,
-            MessageId(message_id),
-            USER_DOWNLOAD_PRIORITY,
-        )) {
+        let request = if let Some((chat_id, message_id)) = origin {
+            self.session.user_downloads.insert(file_id.0);
+            add_file_to_downloads_request(
+                extra,
+                file_id,
+                chat_id,
+                MessageId(message_id),
+                USER_DOWNLOAD_PRIORITY,
+            )
+        } else {
+            // Picker stickers and thumbnails have no source message. TDLib's
+            // persistent download list requires one; use the direct file API.
+            download_file_request(extra, file_id, USER_DOWNLOAD_PRIORITY)
+        };
+        match self.sender.send_json(&request) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);

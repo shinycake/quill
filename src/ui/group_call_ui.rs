@@ -416,6 +416,7 @@ impl QuillApp {
         // Backdrop, like the 1:1 call overlay.
         div()
             .id("group-call-overlay")
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -427,6 +428,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("group-call-backdrop")
+                    .occlude()
                     .absolute()
                     .top_0()
                     .left_0()

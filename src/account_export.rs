@@ -235,7 +235,7 @@ impl Worker {
             "manifest-started.json",
             &json!({"complete":false,"include_media":self.media}),
         )?;
-        self.write("README.json",&json!({"description":"Raw TDLib JSON records, one object per line. Chats include all accessible main and archived histories, newest first. users.jsonl resolves contacts and message sender users. Saved stories and profile music are separate files. media.jsonl maps TDLib file identifiers to numeric files. Protected, expired and unavailable media is reported rather than bypassed. Partial exports never have complete:true in manifest.json."}))?;
+        self.write("README.json",&json!({"description":"Raw TDLib JSON records, one object per line. Chats include all accessible main and archived histories, newest first. users.jsonl resolves contacts and message sender users. Saved stories, profile music and server-selected takeout message ranges are separate files. media.jsonl maps TDLib file identifiers to numeric files. Protected, expired and unavailable media is reported rather than bypassed. Partial exports never have complete:true in manifest.json."}))?;
         let me = self.query(json!({"@type":"getMe"}))?;
         let user_id = me["id"]
             .as_i64()
@@ -270,6 +270,11 @@ impl Worker {
         self.saved_contacts_exported = saved_contacts["@type"] == "quillSavedContacts"
             && saved_contacts["contacts"].is_array();
         self.write("saved-contacts.json", &saved_contacts)?;
+        // These are Telegram's server-selected partitions, retained separately
+        // until the native range-scoped history path is implemented. Errors are
+        // retained as errors, never converted into an empty successful range list.
+        let ranges = self.raw(json!({"@type":"getQuillTakeoutMessageRanges"}))?;
+        self.write("message-ranges.json", &ranges)?;
         for (method, field, name) in [
             ("getUserProfilePhotos", "photos", "profile-photos.jsonl"),
             ("getUserProfileAudios", "audios", "profile-audios.jsonl"),
@@ -345,6 +350,16 @@ impl Worker {
             let ids = value["chat_ids"]
                 .as_array()
                 .ok_or_else(|| io::Error::other("Missing chat identifiers"))?;
+            chats.extend(ids.iter().filter_map(Value::as_i64));
+        }
+        // TDLib keeps recently inactive channels outside either visible list.
+        // Retain its raw answer even when it cannot offer any history, then
+        // export every chat it does expose through the normal history path.
+        let inactive = self.raw(json!({"@type":"getInactiveSupergroupChats"}))?;
+        self.write("inactive-supergroup-chats.json", &inactive)?;
+        if inactive["@type"] == "chats"
+            && let Some(ids) = inactive["chat_ids"].as_array()
+        {
             chats.extend(ids.iter().filter_map(Value::as_i64));
         }
         let mut metadata = private_file(&self.output.join("chats.jsonl"))?;
@@ -495,6 +510,13 @@ mod tests {
                             json!({"@type":"error","code":400,"message":"TAKEOUT_INIT_DELAY_3600"})
                         }
                     }
+                    "getQuillTakeoutMessageRanges" => {
+                        if saved_contacts_available {
+                            json!({"@type":"quillTakeoutMessageRanges","ranges":[{"min_id":1,"max_id":100,"future_range_field":true}]})
+                        } else {
+                            json!({"@type":"error","code":400,"message":"TAKEOUT_INIT_DELAY_3600"})
+                        }
+                    }
                     "getUserProfilePhotos" => json!({"@type":"chatPhotos","photos":[]}),
                     "getUserProfileAudios" => {
                         if request["offset"] == 0 {
@@ -528,6 +550,9 @@ mod tests {
                         } else {
                             json!({"@type":"chats","chat_ids":[1]})
                         }
+                    }
+                    "getInactiveSupergroupChats" => {
+                        json!({"@type":"chats","chat_ids":[-3]})
                     }
                     "getChat" => json!({"@type":"chat","id":request["chat_id"],"title":"Fixture"}),
                     "getChatHistory" => {
@@ -576,6 +601,17 @@ mod tests {
                 manifest["limitations"].as_array().unwrap().len(),
                 if saved_contacts_available { 1 } else { 2 }
             );
+            let ranges = std::fs::read_to_string(folder.join("message-ranges.json")).unwrap();
+            assert!(ranges.contains(if saved_contacts_available {
+                "future_range_field"
+            } else {
+                "TAKEOUT_INIT_DELAY_3600"
+            }));
+            assert!(
+                methods
+                    .iter()
+                    .any(|method| method == "getQuillTakeoutMessageRanges")
+            );
             let saved = std::fs::read_to_string(folder.join("saved-contacts.json")).unwrap();
             assert!(saved.contains(if saved_contacts_available {
                 "future_contact_field"
@@ -587,8 +623,8 @@ mod tests {
                     .label()
                     .starts_with("Export finished with limitations:")
             );
-            assert_eq!(manifest["messages"], 2);
-            assert_eq!(manifest["protected_items_skipped"], 3);
+            assert_eq!(manifest["messages"], 3);
+            assert_eq!(manifest["protected_items_skipped"], 4);
             let stories = std::fs::read_to_string(folder.join("stories.jsonl")).unwrap();
             assert_eq!(stories.lines().count(), 2);
             assert!(
@@ -610,7 +646,7 @@ mod tests {
                     .count(),
                 2
             );
-            for name in ["chat-1.jsonl", "chat--2.jsonl"] {
+            for name in ["chat-1.jsonl", "chat--2.jsonl", "chat--3.jsonl"] {
                 let contents = std::fs::read_to_string(folder.join(name)).unwrap();
                 assert_eq!(contents.lines().count(), 1);
                 assert!(contents.contains("future_content"));
@@ -620,7 +656,12 @@ mod tests {
                     .iter()
                     .filter(|m| m.as_str() == "getChatHistory")
                     .count(),
-                6
+                9
+            );
+            assert!(
+                std::fs::read_to_string(folder.join("inactive-supergroup-chats.json"))
+                    .unwrap()
+                    .contains("-3")
             );
             assert_eq!(
                 std::fs::read(folder.join("media/4")).unwrap(),

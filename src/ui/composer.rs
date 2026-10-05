@@ -6,6 +6,7 @@ use super::message_text::rich_block_element;
 use super::scheduled::format_schedule_delay;
 use super::*;
 use gpui_kit::component::button::*;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::{
@@ -736,48 +737,51 @@ impl QuillApp {
             .gap_1()
             .px_1()
             .py_1();
-        for (id, label, name, action) in [
-            ("fmt-bold", "B", "Bold", FormatAction::Bold),
-            ("fmt-italic", "I", "Italic", FormatAction::Italic),
-            ("fmt-underline", "U", "Underline", FormatAction::Underline),
-            (
-                "fmt-strike",
-                "S",
-                "Strikethrough",
-                FormatAction::Strikethrough,
-            ),
-            ("fmt-code", "</>", "Inline code", FormatAction::Code),
-            ("fmt-pre", "{ }", "Code block", FormatAction::Pre),
-            ("fmt-spoiler", "◼", "Spoiler", FormatAction::Spoiler),
-            ("fmt-quote", "❝", "Block quote", FormatAction::BlockQuote),
-            (
-                "fmt-link",
-                "🔗",
-                "Insert link",
-                FormatAction::Link(String::new()),
-            ),
-        ] {
-            row = row.child(
-                Button::new(id)
-                    .label(label)
-                    .accessibility_label(name)
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.apply_composer_format(action.clone(), window, cx);
-                    })),
-            );
-        }
+        let owner = cx.entity().downgrade();
+        row = row.child(
+            Button::new("composer-format-menu")
+                .label("Aa")
+                .ghost()
+                .tooltip("Formatting")
+                .accessibility_label("Formatting")
+                .on_click(|event, window, cx| {
+                    if matches!(event, ClickEvent::Keyboard(_)) {
+                        window.dispatch_action(
+                            Box::new(gpui_kit::base::actions::Confirm { secondary: false }),
+                            cx,
+                        );
+                    }
+                })
+                .dropdown_menu(move |mut menu, _, _| {
+                    for (name, action) in [
+                        ("Bold", FormatAction::Bold),
+                        ("Italic", FormatAction::Italic),
+                        ("Underline", FormatAction::Underline),
+                        ("Strikethrough", FormatAction::Strikethrough),
+                        ("Inline code", FormatAction::Code),
+                        ("Code block", FormatAction::Pre),
+                        ("Spoiler", FormatAction::Spoiler),
+                        ("Block quote", FormatAction::BlockQuote),
+                        ("Insert link", FormatAction::Link(String::new())),
+                    ] {
+                        let owner = owner.clone();
+                        menu =
+                            menu.item(PopupMenuItem::new(name).on_click(move |_, window, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.apply_composer_format(action.clone(), window, cx)
+                                });
+                            }));
+                    }
+                    let owner = owner.clone();
+                    menu.item(PopupMenuItem::new("Clear formatting").on_click(
+                        move |_, window, cx| {
+                            let _ =
+                                owner.update(cx, |this, cx| this.clear_composer_format(window, cx));
+                        },
+                    ))
+                }),
+        );
         row = row
-            .child(
-                Button::new("fmt-clear")
-                    .label("✕")
-                    .accessibility_label("Clear formatting")
-                    .ghost()
-                    .tooltip("Clear formatting")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.clear_composer_format(window, cx);
-                    })),
-            )
             .child(
                 Button::new("send-silent")
                     .label(if self.composer_silent {
@@ -1145,45 +1149,6 @@ impl QuillApp {
             window,
             cx,
         );
-    }
-
-    /// M1: pin a message (context menu). `silent` rides the silent-send
-    /// toggle (`pinChatMessage.disable_notification`, schema 1.8.67 line
-    /// 13559) — the Telegram convention for channel pins.
-    pub(super) fn pin_message(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        silent: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.pin_chat_message(chat_id, message_id, silent) {
-                Ok(_) => "pinning…".into(),
-                Err(_) => "could not pin".into(),
-            };
-        } else {
-            self.status_note = "no live connection".into();
-        }
-        cx.notify();
-    }
-
-    /// M1: unpin a message (context menu).
-    pub(super) fn unpin_message(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.unpin_chat_message(chat_id, message_id) {
-                Ok(_) => "unpinning…".into(),
-                Err(_) => "could not unpin".into(),
-            };
-        } else {
-            self.status_note = "no live connection".into();
-        }
-        cx.notify();
     }
 
     /// M1: unpin every pinned message in the chat (`unpinAllChatMessages`,

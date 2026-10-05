@@ -1,42 +1,11 @@
 //! auth screens (phone/code/password/QR).
 
 use super::app::QuillApp;
-use super::connect_ui::ConnectUiStatus;
 use gpui_kit::*;
-use quill::auth::{AuthAction, AuthView};
 use quill::telegram::envelope::AuthorizationState;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use zeroize::Zeroize;
-pub(super) fn auth_action_note(
-    auth: &AuthView,
-    connect_status: &ConnectUiStatus,
-) -> impl IntoElement {
-    let gate = match connect_status {
-        ConnectUiStatus::NeedCredentials => "need credentials",
-        ConnectUiStatus::NeedTdjson => "need tdjson",
-        ConnectUiStatus::RestoreBlocked(_) => "restore blocked",
-        ConnectUiStatus::DemoWaitPhone => "demo wait-phone",
-        ConnectUiStatus::DemoWaitCode => "demo wait-code",
-        ConnectUiStatus::DemoWaitPassword => "demo wait-password",
-        ConnectUiStatus::DemoWaitQr => "demo wait-qr",
-        ConnectUiStatus::DemoReadyChats => "demo ready-chats",
-        ConnectUiStatus::Live => "live TDLib",
-    };
-    let label = match &auth.action {
-        AuthAction::UnsupportedHalt { reason } => format!("Blocked: {reason}"),
-        AuthAction::Ready => format!("Ready ({gate})"),
-        AuthAction::Register => "Review registration and terms".into(),
-        AuthAction::EnterEmail => format!("Email entry ({gate})"),
-        AuthAction::EnterPhone => format!("Phone entry ({gate})"),
-        AuthAction::EnterCode => format!("Code entry ({gate})"),
-        AuthAction::EnterPassword => format!("Password entry ({gate})"),
-        AuthAction::ProvideParameters => format!("Sending TDLib parameters ({gate})"),
-        other => format!("{other:?} ({gate})"),
-    };
-    div().text_xs().child(label)
-}
-
 impl QuillApp {
     pub(super) fn cycle_auth(&mut self, cx: &mut Context<Self>) {
         if self.live.is_some() {

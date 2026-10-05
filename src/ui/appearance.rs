@@ -90,8 +90,8 @@ impl QuillApp {
     /// overridden by auto-night while active) and push it into the
     /// gpui-component global Theme. `Theme::change` resets the whole
     /// palette, so the accent override is re-applied after every mode
-    /// change, and `Theme::sync_base` mirrors the mutated fields (incl.
-    /// accent) into the Base layer. Only notifies when the (mode,
+    /// change, and `Theme::update` re-derives tokens and the Base layer
+    /// projection from it. Only notifies when the (mode,
     /// accent, high-contrast) triple actually changed — the minute tick
     /// calls this and must be free when idle.
     ///
@@ -132,13 +132,15 @@ impl QuillApp {
         }
         set_theme_mode(mode, None, cx);
         set_high_contrast(hc);
-        if accent != 0 {
-            Theme::global_mut(cx).colors.accent = Hsla::from(rgb(accent));
-        }
-        // The accent mutation touches fields the Base layer mirrors
-        // (scrollbar styles, semantic tokens, text-view defaults) — they
-        // only reach the Base layer once Theme::sync_base runs.
-        Theme::sync_base(cx);
+        let primary = if accent == 0 {
+            Hsla::from(super::chat_theme::accent_strong())
+        } else {
+            Hsla::from(rgb(accent))
+        };
+        // `Theme::update` re-derives the renderable tokens from `colors`,
+        // re-projects the Base layer and refreshes windows. Mutating
+        // `global_mut` alone would leave primary buttons on the old accent.
+        Theme::update(cx, |theme| theme.colors.primary = primary);
         self.appearance_applied = Some((mode, accent, hc));
         cx.notify();
     }
@@ -291,8 +293,7 @@ impl QuillApp {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(
-                            "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language, startup and keyboard shortcuts. \
-                             Changes apply immediately (language applies after restart) and are saved on this device.",
+                            "Customize how Quill looks and feels. Changes are saved on this device.",
                         ),
                 );
                 body = body.child(this.appearance_theme_section(cx));
@@ -397,8 +398,12 @@ impl QuillApp {
             .py_1()
             .rounded_md()
             .border_1()
-            .border_color(if selected { theme.accent } else { theme.border })
-            .when(selected, |this| this.bg(theme.accent.opacity(0.15)))
+            .border_color(if selected {
+                theme.primary
+            } else {
+                theme.border
+            })
+            .when(selected, |this| this.bg(theme.primary.opacity(0.15)))
             .role(gpui_kit::Role::Button)
             .aria_label(label.clone())
             .tab_index(0)

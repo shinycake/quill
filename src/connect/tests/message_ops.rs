@@ -1155,6 +1155,7 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
     seed_ready_alice(&mut driver, &seq, &dyn_sink);
     // A scheduled send lives in `session.scheduled_messages`, not history.
     driver.session.scheduled_messages.push(ParsedMessage {
+        sender: None,
         id: MessageId(70),
         chat_id: ChatId(7),
         date: 0,

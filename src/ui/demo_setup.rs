@@ -67,7 +67,7 @@ use super::story_viewer::{apply_ready_stories, apply_ready_story_viewers};
 use super::*;
 use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, ForwardDraft};
-use quill::ids::{ChatId, MessageId};
+use quill::ids::{ChatId, FileId, MessageId};
 use quill::settings::ThemeChoice;
 use quill::state::{InfoPanelTarget, SearchStatus};
 use quill::story_composer::{StoryExpiry, StoryPrivacy};
@@ -377,6 +377,26 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if demo == Some(ScreenshotDemo::ReadyDownloads) {
+            // Exercise failed playback recovery without a network request.
+            self.pending_gif_play = Some((MessageId(205), FileId(26), String::new()));
+            self.pending_video_play = Some((MessageId(205), FileId(26), String::new(), 0, None));
+            self.pending_audio_play = Some((MessageId(205), FileId(26), 1.));
+            self.viewer_pending_play = Some((MessageId(205), FileId(26)));
+            self.pending_voice_play = Some((ChatId(11), MessageId(205), FileId(26), false, 1.));
+            self.discard_stopped_media_playback(cx);
+            assert!(
+                self.pending_gif_play.is_none()
+                    && self.pending_video_play.is_none()
+                    && self.pending_audio_play.is_none()
+                    && self.viewer_pending_play.is_none()
+                    && self.pending_voice_play.is_none()
+            );
+            self.pending_audio_play = Some((MessageId(204), FileId(24), 1.));
+            self.discard_stopped_media_playback(cx);
+            assert!(self.pending_audio_play.is_some());
+            self.pending_audio_play = None;
+        }
         if matches!(
             demo,
             Some(ScreenshotDemo::ReadyStickers | ScreenshotDemo::ReadyStickerPlayback)
@@ -399,6 +419,22 @@ impl QuillApp {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_voice(session, &self.demo_sink, &self.demo_seq);
             }
+            // One Play request must survive the download and start the note.
+            let local = self.demo_session.as_ref().unwrap().files[&82].clone();
+            let mut waiting = local.clone();
+            waiting.local.path.clear();
+            waiting.local.is_downloading_completed = false;
+            self.demo_session
+                .as_mut()
+                .unwrap()
+                .files
+                .insert(82, waiting);
+            self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
+            assert!(self.pending_voice_play.is_some());
+            self.demo_session.as_mut().unwrap().files.insert(82, local);
+            self.resume_pending_voice(cx);
+            assert!(self.pending_voice_play.is_none() && self.playing_voice == Some(MessageId(91)));
+            self.stop_voice_playback();
             let bars = vec![4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14];
             self.voice_capture = Some(VoiceCapture::preview(
                 demo_media_allowlist().join("demo-voice.ogg"),

@@ -1554,6 +1554,12 @@ impl Session {
                 // channel. Pause state is tracked only for user-initiated
                 // (listed) downloads; completion mirrors the `updateFile`
                 // path (recent list + unstick).
+                // The idle file update can precede the list's pause event.
+                // A later authoritative list update restores that transfer.
+                if (is_paused || complete_date != 0) && self.failed_downloads.remove(&file_id) {
+                    self.user_downloads.insert(file_id);
+                    self.downloading.insert(file_id);
+                }
                 if complete_date != 0 {
                     self.record_completed_user_download(file_id);
                     self.unstick_download(file_id);

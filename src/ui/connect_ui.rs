@@ -1,9 +1,9 @@
 //! connection status UI.
 
 use quill::auth::view_for;
-use quill::connect::{ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_live_connect};
+use quill::connect::{ConnectBlocker, ConnectGate, evaluate_gate, start_prepared_live_connect};
 use quill::credentials::TelegramCredentials;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::diagnostics::MemorySink;
 use quill::platform::live_secret_store;
 use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
@@ -27,86 +27,93 @@ pub enum ConnectUiStatus {
     Live,
 }
 
-pub(super) fn bootstrap_connect(
+fn prepare_startup(
     credentials: Option<TelegramCredentials>,
-) -> (
-    ConnectUiStatus,
-    Option<LiveConnect>,
-    String,
-    AuthorizationState,
-) {
-    let auth_demo = AuthorizationState::WaitPhoneNumber;
-    match evaluate_gate(credentials.is_some()) {
-        ConnectGate::Blocked(ConnectBlocker::MissingCredentials) => (
-            ConnectUiStatus::NeedCredentials,
-            None,
-            ConnectBlocker::MissingCredentials.user_message().into(),
-            auth_demo,
-        ),
-        ConnectGate::Blocked(ConnectBlocker::MissingTdjson) => (
-            ConnectUiStatus::NeedTdjson,
-            None,
-            ConnectBlocker::MissingTdjson.user_message().into(),
-            auth_demo,
-        ),
-        ConnectGate::Blocked(other) => (
-            ConnectUiStatus::RestoreBlocked(other.user_message()),
-            None,
-            other.user_message().into(),
-            auth_demo,
-        ),
-        ConnectGate::Ready { .. } => {
-            let Some(credentials) = credentials else {
-                return (
-                    ConnectUiStatus::NeedCredentials,
-                    None,
-                    ConnectBlocker::MissingCredentials.user_message().into(),
-                    auth_demo,
-                );
-            };
-            let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
-            let store = live_secret_store();
-            match start_live_connect(credentials, store.as_ref(), sink) {
-                Ok(live) => (
-                    ConnectUiStatus::Live,
-                    Some(live),
-                    "TDLib connected — waiting for authorization updates".into(),
-                    auth_demo,
-                ),
-                Err(ConnectBlocker::MissingTdjson) => (
-                    ConnectUiStatus::NeedTdjson,
-                    None,
-                    ConnectBlocker::MissingTdjson.user_message().into(),
-                    auth_demo,
-                ),
-                Err(err) => (
-                    ConnectUiStatus::RestoreBlocked(err.user_message()),
-                    None,
-                    err.user_message().into(),
-                    auth_demo,
-                ),
-            }
-        }
+) -> Result<(TelegramCredentials, quill::connect::PreparedConnect), ConnectBlocker> {
+    if let ConnectGate::Blocked(blocker) = evaluate_gate(credentials.is_some()) {
+        return Err(blocker);
     }
+    let credentials = credentials.ok_or(ConnectBlocker::MissingCredentials)?;
+    let root = quill::settings::safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
+    let prepared = quill::connect::prepare_connect(
+        &root,
+        quill::settings::active_account(&root),
+        live_secret_store().as_ref(),
+        &credentials,
+    )?;
+    Ok((credentials, prepared))
 }
 
 pub(super) fn live_status_for(auth: &AuthorizationState) -> String {
     match auth {
-        AuthorizationState::WaitTdlibParameters => {
-            "TDLib connected — waiting for authorization updates".into()
-        }
+        AuthorizationState::WaitTdlibParameters => "Connecting to Telegram…".into(),
         AuthorizationState::WaitPhoneNumber => "enter phone number".into(),
         AuthorizationState::WaitCode { .. } => "enter the verification code from Telegram".into(),
         AuthorizationState::WaitPassword { .. } => {
             "enter your two-step verification password".into()
         }
-        AuthorizationState::Ready => "signed in — cloud + secret chats".into(),
+        AuthorizationState::Ready => "".into(),
         AuthorizationState::WaitOtherDeviceConfirmation { .. } => {
-            "confirm on another device (QR payload is not logged)".into()
+            "Confirm the sign-in on another device.".into()
         }
         AuthorizationState::LoggingOut => "signing out".into(),
-        AuthorizationState::Closing => "TDLib is closing".into(),
+        AuthorizationState::Closing => "Closing…".into(),
         AuthorizationState::Closed => "session closed".into(),
         other => view_for(other).body,
+    }
+}
+
+impl super::app::QuillApp {
+    pub(super) fn start_connection(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        self.connection_generation += 1;
+        let generation = self.connection_generation;
+        let credentials = self.credentials.clone();
+        self.connect_status = ConnectUiStatus::Live;
+        self.auth_demo = AuthorizationState::WaitTdlibParameters;
+        self.status_note = "Connecting to Telegram…".into();
+        let connect = cx
+            .background_executor()
+            .spawn(async move { prepare_startup(credentials) });
+        cx.spawn(async move |this, cx| {
+            let prepared = connect.await;
+            let _ = this.update(cx, |this, cx| {
+                if generation != this.connection_generation {
+                    return;
+                }
+                let result = prepared.and_then(|(credentials, prepared)| {
+                    start_prepared_live_connect(credentials, prepared, Arc::new(MemorySink::new()))
+                });
+                match result {
+                    Ok(live) => this.live = Some(live),
+                    Err(blocker) => {
+                        this.auth_demo = AuthorizationState::WaitPhoneNumber;
+                        this.connect_status = match blocker {
+                            ConnectBlocker::MissingCredentials => ConnectUiStatus::NeedCredentials,
+                            ConnectBlocker::MissingTdjson => ConnectUiStatus::NeedTdjson,
+                            _ => ConnectUiStatus::RestoreBlocked(blocker.user_message()),
+                        };
+                        this.status_note = blocker.user_message().into();
+                    }
+                }
+                this.reload_account_keybindings(cx);
+                if this.live.is_some() {
+                    this.spawn_poll_loop(cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn preparation_without_credentials_does_not_open_keychain_or_a_client() {
+        assert!(matches!(
+            super::prepare_startup(None),
+            Err(quill::connect::ConnectBlocker::MissingCredentials)
+        ));
     }
 }

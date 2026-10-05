@@ -86,6 +86,11 @@ impl Session {
         self.files.get(&file_id)?.usable_path()
     }
 
+    pub fn user_photo_path(&self, user_id: i64) -> Option<&str> {
+        let file_id = self.users.get(&user_id)?.photo_small_file_id;
+        self.files.get(&file_id)?.usable_path()
+    }
+
     /// Parity slice: `chat.photo.small` file ids for every known chat that
     /// still needs a download — the driver's chat-list avatar hook. Like
     /// the history-thumb hook, this is deduped by `should_download`
@@ -95,6 +100,12 @@ impl Session {
         self.chats
             .values()
             .filter_map(|chat| chat.photo_file_id)
+            .chain(
+                self.users
+                    .values()
+                    .map(|user| user.photo_small_file_id)
+                    .filter(|id| *id != 0),
+            )
             .filter(|id| self.should_download(FileId(*id)))
             .map(FileId)
             .collect()
