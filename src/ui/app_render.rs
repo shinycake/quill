@@ -442,20 +442,48 @@ impl Render for QuillApp {
                     )
                 },
             )
-            .child(
-                div()
-                    .id("quill-shell")
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.sidebar(&auth, show_phone, show_code, show_password, show_qr, cx))
-                    .child(self.conversation(cx))
-                    // Phase 6: user / group info panel beside the conversation.
-                    .when_some(self.info_panel(cx), |this, panel| this.child(panel))
-                    // MED3: downloads manager panel beside the conversation.
-                    .when_some(self.downloads_panel(cx), |this, panel| this.child(panel))
-                    // Slice media-shared-gallery: shared-media gallery panel.
-                    .when_some(self.shared_media_panel(cx), |this, panel| this.child(panel)),
+            .when(
+                self.pane_mode() == super::app::PaneMode::Connecting,
+                |this| {
+                    // Sign-in replaces the chat layout until the account is ready.
+                    this.child(div().flex_1().min_h_0().child(self.onboarding(
+                        &auth,
+                        show_phone,
+                        show_code,
+                        show_password,
+                        show_qr,
+                        cx,
+                    )))
+                },
+            )
+            .when(
+                self.pane_mode() != super::app::PaneMode::Connecting,
+                |this| {
+                    this.child(
+                        div()
+                            .id("quill-shell")
+                            .flex()
+                            .flex_1()
+                            .min_h_0()
+                            .child(self.sidebar(
+                                &auth,
+                                show_phone,
+                                show_code,
+                                show_password,
+                                show_qr,
+                                cx,
+                            ))
+                            .child(self.conversation(cx))
+                            // Phase 6: user / group info panel beside the conversation.
+                            .when_some(self.info_panel(cx), |this, panel| this.child(panel))
+                            // MED3: downloads manager panel beside the conversation.
+                            .when_some(self.downloads_panel(cx), |this, panel| this.child(panel))
+                            // Slice media-shared-gallery: shared-media gallery panel.
+                            .when_some(self.shared_media_panel(cx), |this, panel| {
+                                this.child(panel)
+                            }),
+                    )
+                },
             )
             .when(!self.status_note.is_empty(), |this| {
                 this.child(

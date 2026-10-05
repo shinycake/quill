@@ -156,8 +156,8 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("submit-recovery-code")
-                                .label("Submit recovery code")
-                                .ghost()
+                                .label("Continue")
+                                .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.submit_recovery_code(window, cx);
                                 })),
@@ -181,13 +181,9 @@ impl QuillApp {
                 )
         } else {
             div()
-                .child(
-                    div()
-                        .mt_2()
-                        .font_semibold()
-                        .text_sm()
-                        .child("Two-step password"),
-                )
+                .flex()
+                .flex_col()
+                .gap_3()
                 .child(
                     Input::new(&self.password_input)
                         .aria_label("Two-step verification password")
@@ -195,36 +191,25 @@ impl QuillApp {
                         .h(px(40.)),
                 )
                 .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Sent securely to Telegram."),
+                    Button::new("submit-password")
+                        .label("Continue")
+                        .primary()
+                        .w_full()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_password(window, cx);
+                        })),
                 )
-                .child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            Button::new("submit-password")
-                                .label("Submit password")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.submit_password(window, cx);
-                                })),
-                        )
-                        .when(has_recovery_email, |this| {
-                            this.child(
-                                Button::new("forgot-password")
-                                    .label("Forgot password?")
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.request_password_recovery(window, cx);
-                                    })),
-                            )
-                        }),
-                )
+                .when(has_recovery_email, |this| {
+                    this.child(
+                        Button::new("forgot-password")
+                            .label("Forgot password?")
+                            .ghost()
+                            .w_full()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.request_password_recovery(window, cx);
+                            })),
+                    )
+                })
         }
     }
 }

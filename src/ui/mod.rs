@@ -88,6 +88,7 @@ mod message_text;
 mod navigation;
 mod notification_settings;
 mod notifications;
+mod onboarding;
 mod payments;
 mod polls;
 mod pressable;
