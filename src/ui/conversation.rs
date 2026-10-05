@@ -788,6 +788,21 @@ impl QuillApp {
                         })
                         // Non-default send options as clearable chips; the
                         // schedule picker opens above the input.
+                        // Pickers open directly above the input, next to the
+                        // buttons that summon them.
+                        .when(self.pending_react.is_some(), |this| {
+                            this.child(self.reaction_picker_panel(cx))
+                        })
+                        .when(self.emoji_picker_open, |this| {
+                            this.child(self.emoji_picker_panel(cx))
+                        })
+                        .when(self.gif_panel_open(), |this| {
+                            this.child(self.gif_picker_panel(cx))
+                        })
+                        .when(
+                            self.sticker_panel_open() && !self.sticker_settings_open,
+                            |this| this.child(self.sticker_picker_panel(cx)),
+                        )
                         .when(self.schedule_popup_open, |this| {
                             this.child(self.schedule_popup(cx))
                         })
@@ -1019,19 +1034,6 @@ impl QuillApp {
                 this.child(self.forward_picker_panel(cx))
             })
             .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))
-            .when(self.pending_react.is_some(), |this| {
-                this.child(self.reaction_picker_panel(cx))
-            })
-            .when(self.emoji_picker_open, |this| {
-                this.child(self.emoji_picker_panel(cx))
-            })
-            .when(self.gif_panel_open(), |this| {
-                this.child(self.gif_picker_panel(cx))
-            })
-            .when(
-                self.sticker_panel_open() && !self.sticker_settings_open,
-                |this| this.child(self.sticker_picker_panel(cx)),
-            )
             .when(chat_search_open, |this| {
                 this.child(self.chat_search_bar(cx))
             })

@@ -7,6 +7,7 @@ use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -402,7 +403,7 @@ impl QuillApp {
             .gap_1()
             .max_h(px(96.))
             .overflow_y_scroll();
-        let mut tabs = div().flex().flex_wrap().gap_1();
+        let mut tabs = div().flex().flex_wrap().items_center().gap_1();
         for (tab, label) in [
             (StickerTab::Installed, "Installed"),
             (StickerTab::Recent, "Recent"),
@@ -413,50 +414,17 @@ impl QuillApp {
         ] {
             tabs = tabs.child(
                 Button::new(format!("sticker-tab-{tab:?}"))
-                    .label(if panel.tab == tab {
-                        format!("{label} · open")
-                    } else {
-                        label.into()
-                    })
+                    .label(label)
                     .ghost()
+                    .small()
+                    .selected(panel.tab == tab)
                     .on_click(cx.listener(move |this, _, _, cx| this.select_sticker_tab(tab, cx))),
             );
         }
-        if panel.tab == StickerTab::Recent {
-            tabs = tabs.child(
-                Button::new("clear-recent-stickers")
-                    .label("Clear recent")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| this.clear_recent_stickers(cx))),
-            );
-        }
-        let mut suggest_modes = div().flex().flex_wrap().gap_1().child("Suggest by emoji:");
         let mode = self
             .session()
             .map(|s| s.media_prefs.sticker_suggest_mode)
             .unwrap_or_default();
-        use quill::sticker_suggest::StickerSuggestMode;
-        for (value, label) in [
-            (
-                StickerSuggestMode::InstalledAndRecommended,
-                "Installed + recommended",
-            ),
-            (StickerSuggestMode::InstalledOnly, "Only installed"),
-            (StickerSuggestMode::None, "None"),
-        ] {
-            suggest_modes = suggest_modes.child(
-                Button::new(format!("sticker-suggest-{value:?}"))
-                    .label(if mode == value {
-                        format!("{label} · selected")
-                    } else {
-                        label.into()
-                    })
-                    .ghost()
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.set_sticker_suggest_mode(value, cx)),
-                    ),
-            );
-        }
         let query = panel.search_query.to_lowercase();
         let mut seen = std::collections::HashSet::new();
         let visible_sets: Vec<_> = match panel.tab {
@@ -480,32 +448,78 @@ impl QuillApp {
             .filter(|set| !set.is_installed)
             .map(|set| set.id)
             .collect();
-        if !batch_ids.is_empty() {
-            tabs = tabs.child(
-                Button::new("install-displayed-sticker-sets")
-                    .label(format!("Install {} displayed sets", batch_ids.len()))
-                    .disabled(!panel.batch_pending.is_empty())
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.batch_install_sticker_sets(&batch_ids, cx)
-                    })),
-            );
-        }
-        if panel.tab == StickerTab::Installed && !panel.sets.is_empty() {
-            tabs = tabs.child(
-                Button::new("remove-installed-sticker-sets")
-                    .label("Remove all installed")
-                    .disabled(!panel.batch_pending.is_empty())
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.open_group_confirm(
-                            ChatId(0),
-                            GroupConfirmAction::RemoveInstalledStickerSets,
-                            cx,
-                        );
-                    })),
-            );
-        }
+        let batch_idle = panel.batch_pending.is_empty();
+        let can_remove_all = panel.tab == StickerTab::Installed && !panel.sets.is_empty();
+        let on_recent = panel.tab == StickerTab::Recent && !panel.recent.is_empty();
+        // Panel management lives in an overflow menu so the picker stays a
+        // picker: emoji suggestions, clear recent, batch install/remove.
+        let owner = cx.entity().downgrade();
+        let more_menu = Button::new("sticker-panel-more")
+            .icon(IconName::Ellipsis)
+            .ghost()
+            .small()
+            .tooltip("Sticker options")
+            .accessibility_label("Sticker options")
+            .dropdown_menu(move |mut menu, _, _| {
+                use quill::sticker_suggest::StickerSuggestMode;
+                menu = menu.label("Suggest stickers by emoji");
+                for (value, label) in [
+                    (
+                        StickerSuggestMode::InstalledAndRecommended,
+                        "Installed and recommended",
+                    ),
+                    (StickerSuggestMode::InstalledOnly, "Installed only"),
+                    (StickerSuggestMode::None, "Off"),
+                ] {
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new(label).checked(mode == value).on_click(
+                        move |_, _, cx| {
+                            let _ = owner
+                                .update(cx, |this, cx| this.set_sticker_suggest_mode(value, cx));
+                        },
+                    ));
+                }
+                menu = menu.separator();
+                if on_recent {
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new("Clear recent stickers").on_click(
+                        move |_, _, cx| {
+                            let _ = owner.update(cx, |this, cx| this.clear_recent_stickers(cx));
+                        },
+                    ));
+                }
+                if !batch_ids.is_empty() {
+                    let owner = owner.clone();
+                    let ids = batch_ids.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(format!("Add {} sets shown", ids.len()))
+                            .disabled(!batch_idle)
+                            .on_click(move |_, _, cx| {
+                                let ids = ids.clone();
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.batch_install_sticker_sets(&ids, cx)
+                                });
+                            }),
+                    );
+                }
+                if can_remove_all {
+                    let owner = owner.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new("Remove all installed sets…")
+                            .disabled(!batch_idle)
+                            .on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.open_group_confirm(
+                                        ChatId(0),
+                                        GroupConfirmAction::RemoveInstalledStickerSets,
+                                        cx,
+                                    );
+                                });
+                            }),
+                    );
+                }
+                menu
+            });
         for set in &visible_sets {
             let set_id = set.id;
             let selected = panel.selected_set_id == Some(set_id);
@@ -516,32 +530,17 @@ impl QuillApp {
             };
             let row = div()
                 .id(format!("sticker-set-drag-{set_id}"))
-                .flex()
-                .items_center()
-                .gap_1()
                 .child(
                     Button::new(format!("sticker-set-{set_id}"))
-                        .label(format!(
-                            "{title} · {} stickers{}",
-                            set.size,
-                            if selected { " · open" } else { "" }
-                        ))
+                        .label(title.clone())
                         .ghost()
+                        .small()
+                        .selected(selected)
+                        .tooltip(format!("{} stickers", set.size))
                         .on_click(
                             cx.listener(move |this, _, _, cx| this.select_sticker_set(set_id, cx)),
                         ),
                 )
-                .child(self.sticker_set_action(set, "row", cx))
-                .when(set.is_installed, |row| {
-                    row.child(
-                        Button::new(format!("archive-set-{set_id}"))
-                            .label("Archive")
-                            .ghost()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.archive_sticker_set(set_id, cx)
-                            })),
-                    )
-                })
                 .when(panel.tab == StickerTab::Installed, |row| {
                     row.cursor_move()
                         .on_drag(
@@ -578,18 +577,26 @@ impl QuillApp {
             let file_id = sticker.file_id;
             let cell = self.sticker_cell(sticker, "pick", cx);
             let favorite = panel.favorites.iter().any(|item| item.file_id == file_id);
+            let owner = cx.entity().downgrade();
             grid = grid.child(
-                div().flex().flex_col().gap_1().child(cell).child(
-                    Button::new(format!(
-                        "sticker-favorite-{}-{}",
-                        sticker.set_id, sticker.id
-                    ))
-                    .label(if favorite { "Unfavorite" } else { "Favorite" })
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.favorite_sticker(file_id, !favorite, cx)
-                    })),
-                ),
+                div()
+                    .id(format!("sticker-cell-{}-{}", sticker.set_id, sticker.id))
+                    .child(cell)
+                    .context_menu(move |menu, _, _| {
+                        let owner = owner.clone();
+                        menu.item(
+                            PopupMenuItem::new(if favorite {
+                                "Remove from favorites"
+                            } else {
+                                "Add to favorites"
+                            })
+                            .on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.favorite_sticker(file_id, !favorite, cx)
+                                });
+                            }),
+                        )
+                    }),
             );
         }
         if panel.tab == StickerTab::Search
@@ -614,7 +621,25 @@ impl QuillApp {
                         .font_semibold()
                         .child(format!("{} · {} stickers", set.title, set.size)),
                 )
-                .child(self.sticker_set_action(set, "preview", cx));
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(self.sticker_set_action(set, "preview", cx))
+                        .when(set.is_installed, |row| {
+                            let set_id = set.id;
+                            row.child(
+                                Button::new(format!("archive-set-{set_id}"))
+                                    .label("Archive")
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.archive_sticker_set(set_id, cx)
+                                    })),
+                            )
+                        }),
+                );
             if panel.tab == StickerTab::Search {
                 preview = preview.child(
                     Button::new("sticker-search-back")
@@ -639,40 +664,37 @@ impl QuillApp {
                 || panel.tab == StickerTab::Search
                     && session.requests.has_purpose(RequestPurpose::SearchStickers)
         });
-        let status = if loading_tab || panel.loading_set {
-            "Loading stickers…".to_string()
+        // Only states worth reading: loading, failure, and empty views.
+        let status: Option<String> = if loading_tab || panel.loading_set {
+            Some("Loading stickers…".into())
         } else if panel.failed {
-            "Could not update stickers. Try the action again.".into()
+            Some("Couldn't update stickers. Try again.".into())
         } else {
             match panel.tab {
                 StickerTab::Installed if panel.sets.is_empty() => {
-                    "No sticker sets installed.".into()
+                    Some("No sticker sets yet.".into())
                 }
-                StickerTab::Installed => format!(
-                    "{} sets installed · Drag sets to reorder. Tap a sticker to send it.",
-                    panel.sets.len()
-                ),
                 StickerTab::Archived if panel.archived.is_empty() => {
-                    "No archived sticker sets.".into()
+                    Some("No archived sticker sets.".into())
                 }
-                StickerTab::Archived => "Restore a set to use it again.".into(),
-                StickerTab::Recent if panel.recent.is_empty() => "No recent stickers.".into(),
+                StickerTab::Recent if panel.recent.is_empty() => {
+                    Some("Stickers you send appear here.".into())
+                }
                 StickerTab::Favorites if panel.favorites.is_empty() => {
-                    "No favorite stickers. Add one from an installed set.".into()
+                    Some("Right-click a sticker to add it to favorites.".into())
                 }
                 StickerTab::Trending if panel.trending.is_empty() => {
-                    "No trending sticker sets.".into()
+                    Some("No trending sticker sets.".into())
                 }
-                StickerTab::Trending => "Select a trending set to preview its stickers.".into(),
                 StickerTab::Search if panel.search_query.is_empty() => {
-                    "Search by emoji, title or keyword.".into()
+                    Some("Search by emoji, title or keyword.".into())
                 }
                 StickerTab::Search
                     if panel.found_stickers.is_empty() && visible_sets.is_empty() =>
                 {
-                    "No stickers found.".into()
+                    Some("No stickers found.".into())
                 }
-                _ => "Tap a sticker to send it.".into(),
+                _ => None,
             }
         };
         div()
@@ -692,24 +714,30 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_semibold().child("Stickers"))
+                    .gap_2()
+                    .child(tabs)
                     .child(
-                        Button::new("close-sticker-picker")
-                            .label("Close")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_sticker_panel(cx);
-                            })),
+                        div().flex().items_center().gap_1().child(more_menu).child(
+                            Button::new("close-sticker-picker")
+                                .icon(gpui_kit::assets::IconName::X)
+                                .ghost()
+                                .small()
+                                .tooltip("Close stickers")
+                                .accessibility_label("Close stickers")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_sticker_panel(cx);
+                                })),
+                        ),
                     ),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(status),
-            )
-            .child(tabs)
-            .child(suggest_modes)
+            .when_some(status, |body, status| {
+                body.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(status),
+                )
+            })
             .when(panel.batch_total > 0, |body| {
                 body.child(div().text_sm().child(format!(
                     "Batch: {} of {} updated · {} pending · {} failed",

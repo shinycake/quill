@@ -140,7 +140,10 @@ impl QuillApp {
                     .child(div().font_semibold().child("React"))
                     .child(
                         Button::new("close-reaction-picker")
-                            .label("Close")
+                            .icon(gpui_kit::assets::IconName::X)
+                            .small()
+                            .tooltip("Close reactions")
+                            .accessibility_label("Close reactions")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_reaction_picker(cx);
