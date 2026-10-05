@@ -7,6 +7,9 @@ actions!(
     [
         FocusSidebar,
         FocusComposer,
+        /// Open the next / previous chat in the visible list.
+        NextChat,
+        PrevChat,
         LoadOlder,
         OpenSearch,
         OpenChatSearch,

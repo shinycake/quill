@@ -1830,3 +1830,36 @@ impl QuillApp {
         .into_any_element()
     }
 }
+
+impl QuillApp {
+    /// Keyboard chat navigation: open the chat `step` rows away from the
+    /// open one in the list as currently shown (folder, filter and archive
+    /// state included), wrapping at the ends. With no chat open, starts
+    /// at the top.
+    pub(super) fn step_open_chat(
+        &mut self,
+        step: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ids: Vec<ChatId> = self
+            .chat_list_items
+            .iter()
+            .filter_map(|item| match item {
+                ChatListItem::Chat { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let open = self.session().and_then(|s| s.open_chat);
+        let len = ids.len() as isize;
+        let next = match open.and_then(|open| ids.iter().position(|id| *id == open)) {
+            Some(index) => (index as isize + step).rem_euclid(len),
+            None if step >= 0 => 0,
+            None => len - 1,
+        };
+        self.select_listed_chat(ids[next as usize], window, cx);
+    }
+}
