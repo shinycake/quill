@@ -329,9 +329,13 @@ fn chat_action_typing_then_cancel() {
 }
 
 #[test]
-fn message_time_hhmm_formats_utc_and_rejects_missing() {
-    // 2026-09-28 21:42:00 UTC.
-    assert_eq!(message_time_hhmm(1790631720).as_deref(), Some("21:42"));
+fn message_time_hhmm_formats_local_and_rejects_missing() {
+    // 2026-09-28 21:42:00 UTC, in whatever zone the test host uses.
+    let local = crate::local_time::civil_local(1790631720);
+    assert_eq!(
+        message_time_hhmm(1790631720),
+        Some(format!("{:02}:{:02}", local.hour, local.minute))
+    );
     assert_eq!(message_time_hhmm(0), None);
     assert_eq!(message_time_hhmm(-5), None);
 }

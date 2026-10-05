@@ -73,6 +73,9 @@ pub struct QuillApp {
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) history_ends: Option<(MessageId, MessageId)>,
+    /// (ready files, downloading files) at the last history render; a
+    /// change remeasures the virtualized rows (media grew in place).
+    pub(super) history_media_signature: (usize, usize),
     /// kit Phase 3: last chat-search highlight the scroller jumped to —
     /// avoids re-scrolling every frame while the highlight is set.
     pub(super) last_highlight: Option<MessageId>,

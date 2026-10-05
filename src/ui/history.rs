@@ -16,11 +16,11 @@ use super::message_payments::{
 use super::message_poll::poll_body;
 use super::message_text::{
     caption_above_media, message_chrome, message_rich_block, message_text_block, reply_quote_strip,
-    rich_text_line,
+    rich_text_reserving,
 };
 use super::pressable::PressableDiv;
 use super::statistics::format_view_count;
-use super::synthetic::{BubbleLook, session_bubble_quoted, session_bubble_rich};
+use super::synthetic::{BubbleLook, footer_reserve, session_bubble_quoted, session_bubble_rich};
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::skeleton::Skeleton;
@@ -578,11 +578,15 @@ pub(super) fn session_history_row(
     let chat_id = message.chat_id;
     let message_id = message.id;
     let more_btn = Button::new(format!("message-actions-{}", message_id.0))
-        .label("•••")
-        .ghost()
-        .when(message.is_outgoing && !look.plain, |button| {
-            button.custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
-        })
+        .icon(IconName::Ellipsis)
+        .xsmall()
+        .rounded_full()
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(cx.theme().background.opacity(0.85))
+                .foreground(cx.theme().foreground)
+                .hover(cx.theme().background),
+        )
         .tooltip("Message actions")
         .accessibility_label("Message actions")
         .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
@@ -677,41 +681,6 @@ pub(super) fn session_history_row(
         }
         row
     });
-    // M2: ephemeral content replaces the regular content for rendering
-    // (bot-built flows show the ephemeral variant to the current user).
-    let text_body = match effective_content(&message.content, message.ephemeral.as_ref()) {
-        MessageContent::Text(text) => Some(message_text_block(
-            (message.chat_id.0, message.id.0 as u64),
-            text,
-            files,
-            downloading,
-            media_roots,
-            session
-                .as_ref()
-                .map(|s| s.emoji.custom_emoji_stickers.as_slice())
-                .unwrap_or(&[]),
-            revealed,
-            // Settings → Appearance: message font size.
-            look.font,
-            session.is_none_or(|s| s.media_prefs.big_emoji),
-            cx,
-        )),
-        // Slice bots-games: the game card is the message's primary
-        // content (thumbnail/title/text/description + Play/Scores).
-        MessageContent::Game(game) => Some(game_card(
-            message.chat_id,
-            message.id,
-            game,
-            session,
-            files,
-            downloading,
-            media_roots,
-            revealed,
-            look.font,
-            cx,
-        )),
-        _ => None,
-    };
     let extra_media = match effective_content(&message.content, message.ephemeral.as_ref()) {
         MessageContent::Photo(photo) => Some(photo_attachment(
             message.id.0 as u64,
@@ -873,12 +842,58 @@ pub(super) fn session_history_row(
             .text_color(warning_text())
             .child(label)
     });
+    // A time footer exists and nothing renders after the body/caption: the
+    // footer can share its last line instead of taking a row of its own.
+    let tail_empty = keyboard.is_none()
+        && self_destruct_badge.is_none()
+        && auto_delete_chip.is_none()
+        && views_footer.is_none()
+        && author_signature_line.is_none()
+        && chip_row.is_none();
+    let reserve_footer = tail_empty && message.date > 0;
+    // M2: ephemeral content replaces the regular content for rendering
+    // (bot-built flows show the ephemeral variant to the current user).
+    let text_body = match effective_content(&message.content, message.ephemeral.as_ref()) {
+        MessageContent::Text(text) => Some(message_text_block(
+            (message.chat_id.0, message.id.0 as u64),
+            text,
+            files,
+            downloading,
+            media_roots,
+            session
+                .as_ref()
+                .map(|s| s.emoji.custom_emoji_stickers.as_slice())
+                .unwrap_or(&[]),
+            revealed,
+            // Settings → Appearance: message font size.
+            look.font,
+            session.is_none_or(|s| s.media_prefs.big_emoji),
+            reserve_footer.then(|| footer_reserve(message.is_outgoing)),
+            cx,
+        )),
+        // Slice bots-games: the game card is the message's primary
+        // content (thumbnail/title/text/description + Play/Scores).
+        MessageContent::Game(game) => Some(game_card(
+            message.chat_id,
+            message.id,
+            game,
+            session,
+            files,
+            downloading,
+            media_roots,
+            revealed,
+            look.font,
+            cx,
+        )),
+        _ => None,
+    };
     // MED4: caption element + position (`show_caption_above_media`,
     // schema 1.8.67 lines 6117/6128). Above → bubble body; below →
     // inside `extra` right after the media (the previous code always
     // rendered the caption above the media).
     let caption_above_el: Option<AnyElement>;
     let caption_below_el: Option<AnyElement>;
+    let caption_reserved: bool;
     {
         let caption: Option<(&str, &[TextEntity])> = match &message.content {
             MessageContent::Photo(photo) => (!photo.caption.is_empty())
@@ -897,8 +912,9 @@ pub(super) fn session_history_row(
                 .then_some((audio.caption.as_str(), audio.caption_entities.as_slice())),
             _ => None,
         };
+        let below = !caption_above_media(&message.content);
         let el = caption.map(|(caption_text, caption_entities)| {
-            rich_text_line(
+            rich_text_reserving(
                 caption_text,
                 caption_entities,
                 (message.chat_id.0, message.id.0 as u64),
@@ -908,9 +924,11 @@ pub(super) fn session_history_row(
                 look.font,
                 // Captions don't resolve custom emoji in this slice (text fallback).
                 &HashMap::new(),
+                (below && reserve_footer).then(|| footer_reserve(message.is_outgoing)),
                 cx,
             )
         });
+        caption_reserved = below && reserve_footer && el.is_some();
         if caption_above_media(&message.content) {
             caption_above_el = el;
             caption_below_el = None;
@@ -919,9 +937,13 @@ pub(super) fn session_history_row(
             caption_below_el = el;
         }
     }
+    let extra_is_empty =
+        extra_media.is_none() && caption_below_el.is_none() && tail_empty && keyboard.is_none();
     let extra = Some(
         div()
             .id(("bubble-extra", message.id.0 as u64))
+            .flex()
+            .flex_col()
             .when_some(extra_media, |this, media| this.child(media))
             // MED4: caption below the media.
             .when_some(caption_below_el, |this, el| this.child(el))
@@ -931,19 +953,33 @@ pub(super) fn session_history_row(
             .when_some(views_footer, |this, footer| this.child(footer))
             .when_some(author_signature_line, |this, line| this.child(line))
             .when_some(chip_row, |this, chips| this.child(chips))
-            .child(div().flex().justify_end().child(more_btn))
             .into_any_element(),
-    );
+    )
+    .filter(|_| !extra_is_empty);
     // kit Phase 4: the shared kit-shell chrome, built fresh per divergent
     // branch below (`MessageChrome` isn't `Clone` — it holds elements).
-    let chrome = || {
-        message_chrome(
+    // The text body reserved trailing footer space (mirrors the condition
+    // in `message_text_block`: a link card below the text ends the bubble).
+    let text_reserved = reserve_footer
+        && matches!(
+            effective_content(&message.content, message.ephemeral.as_ref()),
+            MessageContent::Text(text)
+                if !text.link_preview.as_ref().is_some_and(|preview| {
+                    !preview.show_above_text && preview.has_card()
+                })
+        );
+    let mut more_btn = Some(more_btn);
+    let mut chrome = |footer_inline: bool| {
+        let mut chrome = message_chrome(
             sender.clone(),
             receipt,
             sender_avatar.clone(),
             message.date,
             message.pending,
-        )
+        );
+        chrome.footer_inline = footer_inline;
+        chrome.actions = more_btn.take().map(IntoElement::into_any_element);
+        chrome
     };
     // M2: `messageRichMessage` (schema 1.8.67, line 5143) renders its
     // `pageBlock*` list as a block stack; ephemeral content wins here too.
@@ -963,7 +999,7 @@ pub(super) fn session_history_row(
     if let Some(rich_body) = rich_body {
         return session_bubble_rich(
             message.id.0 as u64,
-            chrome(),
+            chrome(false),
             message.is_outgoing,
             rich_body,
             extra,
@@ -975,7 +1011,7 @@ pub(super) fn session_history_row(
     if let Some(text_body) = text_body {
         return session_bubble_rich(
             message.id.0 as u64,
-            chrome(),
+            chrome(text_reserved && extra_is_empty),
             message.is_outgoing,
             text_body,
             extra,
@@ -990,7 +1026,7 @@ pub(super) fn session_history_row(
     if let Some(caption_el) = caption_above_el {
         return session_bubble_rich(
             message.id.0 as u64,
-            chrome(),
+            chrome(false),
             message.is_outgoing,
             caption_el,
             extra,
@@ -1001,7 +1037,7 @@ pub(super) fn session_history_row(
     }
     session_bubble_quoted(
         message.id.0 as u64,
-        chrome(),
+        chrome(caption_reserved),
         String::new(),
         message.is_outgoing,
         extra,

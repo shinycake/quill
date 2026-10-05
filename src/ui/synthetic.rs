@@ -206,9 +206,22 @@ pub(crate) struct MessageChrome {
     /// Incoming sender avatar → kit `Message` avatar slot. `None` where the
     /// sender can't be identified (groups) — never invented.
     pub avatar: Option<AnyElement>,
-    /// `HH:MM` + delivery checkmarks → kit `MessageFooter` (below the
-    /// bubble, right-aligned). `None` hides the footer.
+    /// `HH:MM` + delivery checkmarks, painted inside the bubble at its
+    /// bottom-right corner. `None` hides the footer.
     pub footer: Option<AnyElement>,
+    /// The body already ends with trailing space reserved for the footer
+    /// (`rich_text_reserving`), so the footer overlays the last text line
+    /// instead of taking a line of its own.
+    pub footer_inline: bool,
+    /// Hover-revealed control in the bubble's top-right corner (message
+    /// actions). Right-click opens the same menu.
+    pub actions: Option<AnyElement>,
+}
+
+/// Width the time/receipt footer needs inside a bubble (`21:44 ✓✓` at
+/// `text_xs` plus breathing room). Outgoing rows carry delivery marks.
+pub(crate) fn footer_reserve(outgoing: bool) -> Pixels {
+    if outgoing { px(62.) } else { px(46.) }
 }
 
 pub(crate) fn session_bubble_quoted(
@@ -290,7 +303,10 @@ fn message_bubble_with_quote(
         sender,
         avatar,
         footer,
+        footer_inline,
+        actions,
     } = chrome;
+    let group: SharedString = format!("message-row-{}", row.id).into();
     let alignment = if row.outgoing {
         component::message::MessageAlignment::End
     } else {
@@ -352,7 +368,31 @@ fn message_bubble_with_quote(
                     ),
             )
         })
-        .when_some(extra, |this, el| this.child(el));
+        .when_some(extra, |this, el| this.child(el))
+        .relative()
+        // Long lines stay readable on wide windows; the bubble's own 80%
+        // cap still applies on narrow panes.
+        .max_w(px(560.))
+        .line_height(relative(1.4))
+        .map(|this| match footer {
+            Some(footer) if footer_inline => {
+                this.child(div().absolute().right(px(12.)).bottom(px(7.)).child(footer))
+            }
+            Some(footer) => this.child(div().flex().justify_end().mt_0p5().child(footer)),
+            None => this,
+        })
+        .when_some(actions, |this, actions| {
+            let group = group.clone();
+            this.child(
+                div()
+                    .absolute()
+                    .top(px(4.))
+                    .right(px(4.))
+                    .invisible()
+                    .group_hover(group, |style| style.visible())
+                    .child(actions),
+            )
+        });
     let mut bubble = component::bubble::Bubble::new()
         .alignment(alignment)
         .content(bubble_content);
@@ -377,17 +417,11 @@ fn message_bubble_with_quote(
     if let Some(avatar) = avatar {
         message = message.avatar(avatar);
     }
-    if let Some(footer) = footer {
-        message = message.footer(
-            component::message::MessageFooter::new()
-                .justify_end()
-                .child(footer),
-        );
-    }
     div()
         .id(("row", row.id))
+        .group(group)
         .w_full()
-        .py_1()
+        .py_0p5()
         .child(message)
         .into_any_element()
 }

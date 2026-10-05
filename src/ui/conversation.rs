@@ -1277,6 +1277,17 @@ impl QuillApp {
                 (!message.is_outgoing && is_group && show_sender).then_some((name, photo));
             (sender, receipt, sender_avatar)
         };
+        let now = quill::local_time::civil_local(quill::local_time::now_unix());
+        let mut previous_day: Option<i64> = None;
+        let mut day_label = |date: i32| {
+            if date <= 0 {
+                return None;
+            }
+            let civil = quill::local_time::civil_local(i64::from(date));
+            let day = civil.day_number();
+            (previous_day.replace(day) != Some(day))
+                .then(|| quill::local_time::day_label(&civil, &now))
+        };
         for group in groups {
             match group {
                 quill::album::HistoryGroup::Album { album_id, messages } => {
@@ -1287,12 +1298,14 @@ impl QuillApp {
                         .first()
                         .map(&mut row_chrome)
                         .unwrap_or((None, OutboxReceipt::None, None));
+                    let day_label = album_messages.first().and_then(|m| day_label(m.date));
                     rows.push(HistoryRow::Album {
                         album_id,
                         messages: album_messages,
                         sender,
                         receipt,
                         sender_avatar,
+                        day_label,
                     })
                 }
                 quill::album::HistoryGroup::Single(message) => {
@@ -1331,6 +1344,7 @@ impl QuillApp {
                         receipt,
                         sender_avatar,
                         highlighted: highlight_id == Some(message.id),
+                        day_label: day_label(message.date),
                         selected_forward: self
                             .pending_forward
                             .as_ref()
@@ -1363,6 +1377,44 @@ impl QuillApp {
             rows.first().and_then(HistoryRow::first_id),
             rows.last().and_then(HistoryRow::last_id),
         );
+        // The list caches each row's measured height. A row can grow in
+        // place — a photo finishes downloading (placeholder → image), a
+        // message is edited, reactions arrive — and would then be clipped,
+        // so remeasure rows whose inputs changed. File readiness affects
+        // any media row, so a change there remeasures every row.
+        let media_signature = (
+            self.history_shared
+                .files
+                .values()
+                .filter(|file| file.usable_path().is_some())
+                .count(),
+            self.history_shared.downloading.len(),
+        );
+        if self.history_key == Some(history_key)
+            && count == self.history_rows.len()
+            && count == self.history_scroller.read(cx).item_count()
+        {
+            if media_signature != self.history_media_signature {
+                self.history_scroller
+                    .update(cx, |state, cx| state.remeasure(cx));
+            } else {
+                let changed: Vec<usize> = rows
+                    .iter()
+                    .zip(&self.history_rows)
+                    .enumerate()
+                    .filter(|(_, (new, old))| !new.renders_like(old))
+                    .map(|(ix, _)| ix)
+                    .collect();
+                if !changed.is_empty() {
+                    self.history_scroller.update(cx, |state, cx| {
+                        for ix in changed {
+                            let _ = state.remeasure_items(ix..ix + 1, cx);
+                        }
+                    });
+                }
+            }
+        }
+        self.history_media_signature = media_signature;
         if self.history_key != Some(history_key) {
             // New chat/topic (or first render): reset and show the tail.
             self.history_key = Some(history_key);
@@ -1494,6 +1546,19 @@ impl QuillApp {
         let Some(row) = self.history_rows.get(ix) else {
             return div().into_any_element();
         };
+        let element = self.render_history_row_body(row, cx);
+        match row.day_label() {
+            Some(label) => div()
+                .flex()
+                .flex_col()
+                .child(day_separator(label, cx))
+                .child(element)
+                .into_any_element(),
+            None => element,
+        }
+    }
+
+    fn render_history_row_body(&self, row: &HistoryRow, cx: &mut Context<Self>) -> AnyElement {
         let shared = &self.history_shared;
         // Settings → Appearance: font size + bubble/plain style.
         let look = self.bubble_look(cx);
@@ -1504,6 +1569,7 @@ impl QuillApp {
                 sender,
                 receipt,
                 sender_avatar,
+                ..
             } => {
                 let refs: Vec<&HistoryMessage> = messages.iter().collect();
                 album_history_row(
@@ -1644,4 +1710,22 @@ impl QuillApp {
             }
         }
     }
+}
+
+/// Centered local-day pill between history rows ("Today", "12 March").
+fn day_separator(label: &str, cx: &App) -> impl IntoElement {
+    div().w_full().flex().justify_center().pt_3().pb_1().child(
+        div()
+            .id(SharedString::from(format!("day-{label}")))
+            .px_3()
+            .py_0p5()
+            .rounded_full()
+            .bg(cx.theme().secondary)
+            .text_xs()
+            .font_medium()
+            .text_color(cx.theme().secondary_foreground)
+            .role(Role::Heading)
+            .aria_label(SharedString::from(label.to_string()))
+            .child(label.to_string()),
+    )
 }
