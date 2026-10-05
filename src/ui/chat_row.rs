@@ -55,11 +55,13 @@ pub(super) fn chat_preview_line(
 /// (main list or archive) or the collapsible archive section header.
 #[derive(Clone)]
 pub(super) enum ChatListItem {
-    // Boxed: `ChatSummary` is large; the other variants are tiny
-    // (clippy `large_enum_variant`).
+    // Ids only: rows look their chat up when rendered, so building the
+    // list never clones thousands of summaries.
     Chat {
-        chat: Box<ChatSummary>,
+        id: ChatId,
         archived: bool,
+        /// Declared virtual-list height (tags/preview-line aware).
+        height: Pixels,
     },
     ArchiveHeader {
         count: usize,
@@ -298,7 +300,10 @@ impl QuillApp {
                 .text_color(cx.theme().muted_foreground)
                 .child("No archived chats.")
                 .into_any_element(),
-            Some(ChatListItem::Chat { chat, archived }) => {
+            Some(ChatListItem::Chat { id, archived, .. }) => {
+                let Some(chat) = self.session().and_then(|s| s.chats.get(&id.0)) else {
+                    return div().into_any_element();
+                };
                 let open = self.session().and_then(|s| s.open_chat);
                 let selected = open == Some(chat.id);
                 // Parity slice: folder names + tags flag for chat-row chips.
@@ -344,7 +349,7 @@ impl QuillApp {
                         && chat.is_pinned
                 };
                 session_chat_row(
-                    &chat,
+                    chat,
                     selected,
                     &folder_names,
                     show_folder_tags,

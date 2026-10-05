@@ -1,19 +1,70 @@
 //! Path sandbox: display only under allowed roots; send only via explicit user pick.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, Mutex, OnceLock};
 
 /// Canonicalize `candidate` and return it only if it is an existing file under an allowed root.
 ///
 /// Roots may be directories (`tdlib_files`, demo fixtures) or an explicit file allowlist.
 /// Symlinks that resolve outside a root are rejected.
+///
+/// Renders ask for every visible image's path each frame, so verdicts are
+/// memoized for [`VERDICT_TTL`] (a symlink swapped in afterwards is caught
+/// on the next check) and root canonicalizations for the process.
 pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Option<PathBuf> {
     if candidate.is_empty() {
         return None;
     }
+    let key = (candidate.to_owned(), roots_key(allowed_roots));
+    let now = std::time::Instant::now();
+    if let Ok(cache) = VERDICTS.lock()
+        && let Some((at, verdict)) = cache.get(&key)
+        && now.duration_since(*at) < VERDICT_TTL
+    {
+        return verdict.clone();
+    }
+    let verdict = sandboxed_display_path_uncached(candidate, allowed_roots);
+    if let Ok(mut cache) = VERDICTS.lock() {
+        if cache.len() > 8192 {
+            cache.retain(|_, (at, _)| now.duration_since(*at) < VERDICT_TTL);
+        }
+        cache.insert(key, (now, verdict.clone()));
+    }
+    verdict
+}
+
+const VERDICT_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
+type VerdictCache = HashMap<(String, u64), (std::time::Instant, Option<PathBuf>)>;
+static VERDICTS: LazyLock<Mutex<VerdictCache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static CANONICAL_ROOTS: LazyLock<Mutex<HashMap<PathBuf, PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn roots_key(roots: &[PathBuf]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    roots.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn canonical_root(root: &Path) -> Option<PathBuf> {
+    if let Ok(cache) = CANONICAL_ROOTS.lock()
+        && let Some(canon) = cache.get(root)
+    {
+        return Some(canon.clone());
+    }
+    let canon = std::fs::canonicalize(root).ok()?;
+    if let Ok(mut cache) = CANONICAL_ROOTS.lock() {
+        cache.insert(root.to_path_buf(), canon.clone());
+    }
+    Some(canon)
+}
+
+fn sandboxed_display_path_uncached(candidate: &str, allowed_roots: &[PathBuf]) -> Option<PathBuf> {
     let file = canonical_file(Path::new(candidate))?;
     for root in allowed_roots {
-        let Ok(root_canon) = std::fs::canonicalize(root) else {
+        let Some(root_canon) = canonical_root(root) else {
             continue;
         };
         if file == root_canon || file.starts_with(&root_canon) {
@@ -21,6 +72,23 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
         }
     }
     None
+}
+
+static ENSURED_DIRS: LazyLock<Mutex<HashSet<PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// [`secure_create_dir`] once per process (and again after
+/// [`sweep_media_caches`] removes the caches). Render paths call this for
+/// the frame-cache roots every frame.
+pub fn ensure_private_dir(path: &Path) {
+    if ENSURED_DIRS.lock().is_ok_and(|set| set.contains(path)) {
+        return;
+    }
+    if secure_create_dir(path).is_ok()
+        && let Ok(mut set) = ENSURED_DIRS.lock()
+    {
+        set.insert(path.to_path_buf());
+    }
 }
 
 /// Validate a path the user explicitly picked for sending.
@@ -85,7 +153,9 @@ pub(crate) fn cache_temp_dir() -> PathBuf {
     }
     #[cfg(not(test))]
     {
-        std::env::temp_dir()
+        // Render paths resolve cache roots every frame; read `TMPDIR` once.
+        static TEMP: OnceLock<PathBuf> = OnceLock::new();
+        TEMP.get_or_init(std::env::temp_dir).clone()
     }
 }
 
@@ -104,6 +174,16 @@ pub(crate) fn lock_shared_media_cache() -> std::sync::MutexGuard<'static, ()> {
 /// directories are regenerable scratch. Sweeps the whole parent without
 /// reading the account scope, so a startup sweep can never poison it.
 pub fn sweep_media_caches() {
+    // Cached directory and canonicalization facts no longer hold.
+    if let Ok(mut set) = ENSURED_DIRS.lock() {
+        set.clear();
+    }
+    if let Ok(mut cache) = CANONICAL_ROOTS.lock() {
+        cache.clear();
+    }
+    if let Ok(mut cache) = VERDICTS.lock() {
+        cache.clear();
+    }
     let _ = std::fs::remove_dir_all(cache_temp_dir().join("quill-media-cache"));
     for legacy in [
         "quill-gif-frames",
