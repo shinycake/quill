@@ -570,6 +570,8 @@ pub fn formatted_to_rich_text(text: &str, entities: &[ComposerEntity]) -> Value 
             crate::composer::FormatKind::Code | crate::composer::FormatKind::Pre => {
                 json!({ "@type": "richTextFixed", "text": plain(run) })
             }
+            // Rich text has no custom-emoji node: the fallback emoji stays.
+            crate::composer::FormatKind::CustomEmoji => plain(run),
             crate::composer::FormatKind::TextUrl => {
                 if entity.url == run {
                     plain(run)
@@ -1020,6 +1022,12 @@ fn markup_preview_text(text: &str) -> (String, Vec<TextEntity>) {
                     }
                 }
                 crate::composer::FormatKind::TextUrl => TextEntityKind::TextUrl { url: entity.url },
+                crate::composer::FormatKind::CustomEmoji => TextEntityKind::CustomEmoji {
+                    custom_emoji_id: entity
+                        .url
+                        .strip_prefix("tg://emoji?id=")
+                        .and_then(|id| id.parse().ok())?,
+                },
                 crate::composer::FormatKind::BlockQuote => return None,
             };
             Some(TextEntity {

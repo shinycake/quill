@@ -1074,10 +1074,30 @@ impl Session {
                     self.story_tray.remove(&story.poster_chat_id);
                 }
             }
-            EnvelopePayload::StoryAvailableReactions { reactions } => {
-                // Phase 9.2: `getStoryAvailableReactions` answer — the
-                // viewer picker options.
-                self.story_available_reactions = Some(reactions);
+            EnvelopePayload::StoryAvailableReactions {
+                reactions,
+                recent,
+                popular,
+                allow_custom_emoji,
+            } => {
+                if let Some(pending) = pending
+                    && let RequestPurpose::GetMessageAvailableReactions { message_id } =
+                        pending.purpose
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.accept_message_reaction_options(
+                        chat_id,
+                        MessageId(message_id),
+                        reactions,
+                        recent,
+                        popular,
+                        allow_custom_emoji,
+                    );
+                } else {
+                    // Phase 9.2: `getStoryAvailableReactions` answer — the
+                    // viewer picker options.
+                    self.story_available_reactions = Some(reactions);
+                }
             }
             EnvelopePayload::StoryInteractions { interactions } => {
                 // Phase 9.5: a `getStoryInteractions` page — honored only
@@ -1702,7 +1722,11 @@ impl Session {
                 title,
                 ..
             } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetEmojiSet)
+                if let Some(RequestPurpose::LoadLibrarySet { set_id }) = pending.map(|p| p.purpose)
+                {
+                    self.remember_files(&files);
+                    self.accept_library_set(set_id, stickers);
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetEmojiSet)
                     && self.emoji.selected_set_id == Some(id)
                 {
                     self.remember_files(&files);

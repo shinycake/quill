@@ -123,6 +123,14 @@ pub fn format_entity_json(entity: &ComposerEntity) -> Value {
             "@type": "textEntityTypeTextUrl",
             "url": entity.url,
         }),
+        FormatKind::CustomEmoji => json!({
+            "@type": "textEntityTypeCustomEmoji",
+            // int64 ids travel as strings.
+            "custom_emoji_id": entity
+                .url
+                .strip_prefix("tg://emoji?id=")
+                .unwrap_or_default(),
+        }),
     };
     json!({
         "@type": "textEntity",
@@ -663,6 +671,55 @@ pub fn get_chat_scheduled_messages(extra: RequestId, chat_id: ChatId) -> String 
 /// `reactionTypeEmoji` (TDLib 1.8.67). Paid reactions stay out —
 ///
 /// `setStoryReaction` can't set them (schema comment, `td_api.tl:13809`).
+/// `getMessageAvailableReactions chat_id message_id row_size` — the
+/// reactions a message's picker may offer (`availableReactions`).
+pub fn get_message_available_reactions(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    row_size: i32,
+) -> String {
+    json!({
+        "@type": "getMessageAvailableReactions",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "row_size": row_size,
+    })
+    .to_string()
+}
+
+/// `addMessageReaction` / `removeMessageReaction` with an already-built
+/// `ReactionType` value (emoji or custom emoji).
+pub fn set_message_reaction(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    reaction_type: Value,
+    add: bool,
+) -> String {
+    if add {
+        json!({
+            "@type": "addMessageReaction",
+            "@extra": extra.as_extra(),
+            "chat_id": chat_id.0,
+            "message_id": message_id.0,
+            "reaction_type": reaction_type,
+            "is_big": false,
+            "update_recent_reactions": true,
+        })
+    } else {
+        json!({
+            "@type": "removeMessageReaction",
+            "@extra": extra.as_extra(),
+            "chat_id": chat_id.0,
+            "message_id": message_id.0,
+            "reaction_type": reaction_type,
+        })
+    }
+    .to_string()
+}
+
 pub fn reaction_type_emoji(emoji: &str) -> Value {
     json!({
         "@type": "reactionTypeEmoji",

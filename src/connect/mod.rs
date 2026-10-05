@@ -16,6 +16,8 @@ mod groups;
 mod live;
 mod marketplace;
 mod media;
+mod media_library;
+pub use media_library::REACTION_STRIP_SIZE;
 mod message_actions;
 mod messages;
 mod moderation;

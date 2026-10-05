@@ -636,6 +636,9 @@ pub enum FormatKind {
     Spoiler,
     BlockQuote,
     TextUrl,
+    /// `![😀](tg://emoji?id=…)` — a custom emoji over its fallback emoji
+    /// (`url` keeps the `tg://emoji?id=` link).
+    CustomEmoji,
 }
 
 /// M1: one parsed entity. Offsets are UTF-16 code units — the units TDLib
@@ -875,6 +878,10 @@ impl<'a> MarkupParser<'a> {
                 i = consumed;
                 continue;
             }
+            if let Some(consumed) = self.try_custom_emoji(i) {
+                i = consumed;
+                continue;
+            }
             if let Some(consumed) = self.try_link(i) {
                 i = consumed;
                 continue;
@@ -961,6 +968,31 @@ impl<'a> MarkupParser<'a> {
             language,
         });
         Some(i + 3 + body_start + close_rel + 3)
+    }
+
+    /// `![emoji](tg://emoji?id=N)` — Telegram's markup for a custom emoji.
+    fn try_custom_emoji(&mut self, i: usize) -> Option<usize> {
+        let rest = &self.text[i..];
+        let after_bang = rest.strip_prefix("![")?;
+        let close_bracket = after_bang.find("](")?;
+        let fallback = &after_bang[..close_bracket];
+        let after_paren = &after_bang[close_bracket + 2..];
+        let close_paren = after_paren.find(')')?;
+        let url = &after_paren[..close_paren];
+        let id = url.strip_prefix("tg://emoji?id=")?;
+        if fallback.is_empty() || id.is_empty() || id.parse::<i64>().is_err() {
+            return None;
+        }
+        let entity_start = self.out16;
+        self.push_str(fallback);
+        self.entities.push(ComposerEntity {
+            offset: entity_start,
+            length: self.out16 - entity_start,
+            kind: FormatKind::CustomEmoji,
+            url: url.to_string(),
+            language: String::new(),
+        });
+        Some(i + 2 + close_bracket + 2 + close_paren + 1)
     }
 
     /// `[label](url)` — label stays plain (no nesting).
@@ -1420,6 +1452,33 @@ pub fn find_urls(text: &str) -> Vec<String> {
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .collect()
+}
+
+/// Composer markup for a custom emoji: Telegram's `![fallback](tg://emoji?id=N)`.
+pub fn custom_emoji_markup(fallback: &str, custom_emoji_id: i64) -> String {
+    let fallback = if fallback.is_empty() { "⭐" } else { fallback };
+    format!("![{fallback}](tg://emoji?id={custom_emoji_id})")
+}
+
+#[cfg(test)]
+mod custom_emoji_markup_tests {
+    use super::*;
+
+    #[test]
+    fn custom_emoji_markup_parses_to_an_entity_over_the_fallback() {
+        let text = format!("hi {}!", custom_emoji_markup("😀", 5368324170671202286));
+        let (plain, entities) = parse_format_markup(&text);
+        assert_eq!(plain, "hi 😀!");
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].kind, FormatKind::CustomEmoji);
+        assert_eq!(entities[0].offset, 3);
+        assert_eq!(entities[0].length, 2);
+        assert_eq!(entities[0].url, "tg://emoji?id=5368324170671202286");
+        // Not a numeric id: never a custom emoji (the plain link rule may
+        // still apply to the bracketed part).
+        let (_, entities) = parse_format_markup("![x](tg://emoji?id=abc)");
+        assert!(entities.iter().all(|e| e.kind != FormatKind::CustomEmoji));
+    }
 }
 
 #[cfg(test)]

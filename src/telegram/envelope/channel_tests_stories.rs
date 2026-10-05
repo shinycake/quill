@@ -521,7 +521,7 @@ fn available_reactions_parsed_with_custom_emoji_and_paid_kinds() {
     let json = r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"123"},"needs_premium":true},{"@type":"availableReaction","type":{"@type":"reactionTypePaid"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::StoryAvailableReactions { reactions } => {
+        EnvelopePayload::StoryAvailableReactions { reactions, .. } => {
             assert_eq!(reactions.len(), 4);
             assert_eq!(
                 reactions[0].kind,
