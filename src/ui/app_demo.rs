@@ -1562,7 +1562,7 @@ impl QuillApp {
             pending_forward: None,
             forward_picker_open: false,
             forward_result: None,
-            pending_react: None,
+            reactions_expanded: false,
             mute_menu_open: false,
             ttl_picker_open: false,
             group_call_title_dialog: None,

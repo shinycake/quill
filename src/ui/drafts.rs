@@ -113,12 +113,6 @@ impl QuillApp {
             self.pending_forward = None;
             self.forward_picker_open = false;
         }
-        if self
-            .pending_react
-            .is_some_and(|(react_chat, _)| react_chat != chat_id)
-        {
-            self.pending_react = None;
-        }
         // Phase 3.3: the `/` menu never survives a chat switch.
         self.command_menu_open = false;
         self.command_menu_selected = 0;

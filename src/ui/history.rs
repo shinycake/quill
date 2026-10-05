@@ -238,12 +238,14 @@ fn message_actions_button(
         .tooltip("Message actions")
         .accessibility_label("Message actions")
         .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-            this.message_menu = Some(MessageMenuState {
-                chat_id,
-                message_id,
-                position: event.position(),
-            });
-            cx.notify();
+            this.open_message_menu(
+                MessageMenuState {
+                    chat_id,
+                    message_id,
+                    position: event.position(),
+                },
+                cx,
+            );
         }))
 }
 
@@ -626,7 +628,7 @@ pub(super) fn session_history_row(
         .author_signature
         .clone()
         .filter(|_| message.forward_info.is_none());
-    let chips = message.emoji_reaction_chips();
+    let chips = message.reaction_chips();
     let chip_row = (!chips.is_empty()).then(|| {
         let mut row = div()
             .id(("reaction-chips", message_id.0 as u64))
@@ -635,20 +637,35 @@ pub(super) fn session_history_row(
             .gap_1()
             .mt_1();
         for (index, chip) in chips.into_iter().enumerate() {
-            let Some(label) = chip.chip_label() else {
+            let Some(choice) = quill::state::ReactionChoice::from_type(&chip.reaction_type) else {
                 continue;
             };
-            let emoji = chip.reaction_type.emoji_text().unwrap_or("").to_string();
+            let count = chip.total_count;
             let chosen = chip.is_chosen;
+            let glyph: AnyElement = match &choice {
+                quill::state::ReactionChoice::Emoji(emoji) => div()
+                    .child(super::reactions::emoji_presentation(emoji))
+                    .into_any_element(),
+                quill::state::ReactionChoice::CustomEmoji(id) => {
+                    custom_emoji_chip_glyph(*id, session, files, media_roots)
+                }
+            };
+            let label = match &choice {
+                quill::state::ReactionChoice::Emoji(emoji) => format!("{emoji} {count}"),
+                quill::state::ReactionChoice::CustomEmoji(_) => format!("Custom emoji {count}"),
+            };
             row = row.child(
                 div()
                     .id(("reaction-chip", message_id.0 as u64 * 64 + index as u64))
+                    .flex()
+                    .items_center()
+                    .gap_1()
                     .px_2()
                     .py_1()
-                    .rounded_md()
+                    .rounded_full()
                     .text_xs()
                     .role(gpui_kit::Role::Button)
-                    .aria_label(label.clone())
+                    .aria_label(label)
                     .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
@@ -665,9 +682,10 @@ pub(super) fn session_history_row(
                             .border_color(text_muted())
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_emoji_reaction(chat_id, message_id, emoji.clone(), cx);
+                        this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
                     }))
-                    .child(label),
+                    .child(glyph)
+                    .child(count.to_string()),
             );
         }
         row
@@ -1127,5 +1145,41 @@ impl QuillApp {
             }
             PaneMode::Connecting => {}
         }
+    }
+}
+
+/// A custom-emoji reaction's image inside a chip; its fallback emoji (or a
+/// blank disc) until the sticker resolves and downloads.
+fn custom_emoji_chip_glyph(
+    id: i64,
+    session: Option<&Session>,
+    files: &HashMap<i32, ParsedFile>,
+    media_roots: &[PathBuf],
+) -> AnyElement {
+    let size = super::reactions::CHIP_GLYPH;
+    let sticker = session.and_then(|s| {
+        s.emoji
+            .custom_emoji_stickers
+            .iter()
+            .find(|item| item.custom_emoji_id == Some(id))
+    });
+    let path = sticker
+        .and_then(|item| item.display_file_id())
+        .and_then(|file| files.get(&file.0))
+        .and_then(|file| file.usable_path())
+        .and_then(|path| sandboxed_display_path(path, media_roots));
+    match (path, sticker) {
+        (Some(path), _) => img(path)
+            .size(px(size))
+            .object_fit(ObjectFit::Contain)
+            .into_any_element(),
+        (None, Some(item)) if !item.emoji.is_empty() => {
+            div().child(item.emoji.clone()).into_any_element()
+        }
+        _ => div()
+            .size(px(size))
+            .rounded_full()
+            .bg(text_muted().opacity(0.3))
+            .into_any_element(),
     }
 }
