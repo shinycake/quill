@@ -237,10 +237,6 @@ pub struct QuillApp {
     pub(super) composer_scheduling: ComposerScheduling,
     /// M1: the schedule picker popup above the composer.
     pub(super) schedule_popup_open: bool,
-    /// kit Phase 5: the attach menu above the composer input row (the
-    /// paperclip icon button toggles it; the attach options used to be a
-    /// permanent labeled-button row).
-    pub(super) attach_menu_open: bool,
     /// parity:platform-spellcheck: the spellcheck engine (wordlist +
     /// user words, loaded once at startup).
     pub(super) spellchecker: quill::spellcheck::SpellChecker,

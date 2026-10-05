@@ -1473,7 +1473,6 @@ impl QuillApp {
             composer_preview_token: 0,
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
-            attach_menu_open: false,
             scheduled_dialog_open: false,
             rich_editor_open: false,
             message_menu: None,
