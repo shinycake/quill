@@ -1349,6 +1349,7 @@ impl QuillApp {
             history_shared: HistoryShared::default(),
             history_key: None,
             history_ends: None,
+            history_media_signature: (0, 0),
             last_highlight: None,
             group_call_composer,
             command_menu_open: false,

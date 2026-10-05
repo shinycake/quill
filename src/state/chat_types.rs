@@ -54,19 +54,10 @@ pub fn outgoing_status_label(pending: bool, receipt: OutboxReceipt) -> &'static 
     }
 }
 
-/// kit Phase 4: compact `HH:MM` in-bubble timestamp for a TDLib `date`
-/// (unix seconds). UTC rather than local time: the sandbox/CI clock's
-/// local zone is not the user's, and the existing `format_unix_date_time`
-/// UI helper is UTC too. Returns `None` for `0`/negative (date absent).
+/// Compact local `HH:MM` timestamp for a TDLib `date` (unix seconds).
+/// Returns `None` for `0`/negative (date absent).
 pub fn message_time_hhmm(unix: i32) -> Option<String> {
-    if unix <= 0 {
-        return None;
-    }
-    let mins = unix as i64 / 60;
-    let day_minutes = mins.rem_euclid(24 * 60);
-    let hh = day_minutes / 60;
-    let mm = day_minutes % 60;
-    Some(format!("{hh:02}:{mm:02}"))
+    (unix > 0).then(|| crate::local_time::hhmm(&crate::local_time::civil_local(i64::from(unix))))
 }
 
 #[derive(Debug, Clone)]

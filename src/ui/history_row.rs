@@ -21,6 +21,9 @@ pub(crate) struct HistoryRowInputs {
     /// outgoing — never invented.
     pub(crate) sender_avatar: Option<(String, Option<PathBuf>)>,
     pub(crate) highlighted: bool,
+    /// Local-day separator rendered above the row ("Today", "Monday",
+    /// "12 March") when this row starts a new day.
+    pub(crate) day_label: Option<String>,
     pub(crate) selected_forward: bool,
     pub(crate) quote_preview: Option<String>,
     pub(crate) forward_from: Option<String>,
@@ -48,10 +51,47 @@ pub(crate) enum HistoryRow {
         sender: Option<String>,
         receipt: OutboxReceipt,
         sender_avatar: Option<(String, Option<PathBuf>)>,
+        day_label: Option<String>,
     },
 }
 
 impl HistoryRow {
+    pub(crate) fn day_label(&self) -> Option<&str> {
+        match self {
+            HistoryRow::Single(inputs) => inputs.day_label.as_deref(),
+            HistoryRow::Album { day_label, .. } => day_label.as_deref(),
+        }
+    }
+
+    /// Same rendered inputs as `other` (height-relevant comparison for the
+    /// virtualized list). Playback frames are excluded: they never change
+    /// a row's size.
+    pub(crate) fn renders_like(&self, other: &HistoryRow) -> bool {
+        match (self, other) {
+            (HistoryRow::Single(a), HistoryRow::Single(b)) => {
+                a.message == b.message
+                    && a.sender == b.sender
+                    && a.receipt == b.receipt
+                    && a.quote_preview == b.quote_preview
+                    && a.forward_from == b.forward_from
+                    && a.day_label == b.day_label
+            }
+            (
+                HistoryRow::Album {
+                    messages: a,
+                    sender: sa,
+                    ..
+                },
+                HistoryRow::Album {
+                    messages: b,
+                    sender: sb,
+                    ..
+                },
+            ) => a == b && sa == sb && self.day_label() == other.day_label(),
+            _ => false,
+        }
+    }
+
     pub(crate) fn first_id(&self) -> Option<MessageId> {
         match self {
             HistoryRow::Single(inputs) => Some(inputs.message.id),
