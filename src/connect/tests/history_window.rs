@@ -242,3 +242,16 @@ fn last_editable_message_is_the_newest_own_message_of_a_tail_window() {
     h.driver.session.histories.get_mut(&7).unwrap().has_newer = true;
     assert!(h.driver.session.last_editable_message(ChatId(7)).is_none());
 }
+
+#[test]
+fn chat_peer_online_follows_the_private_user_status() {
+    fn h_chat(h: &Harness) -> crate::state::ChatSummary {
+        h.driver.session.chats.get(&7).unwrap().clone()
+    }
+    let mut h = Harness::with_unread_chat();
+    assert!(!h.driver.session.chat_peer_online(&h_chat(&h)));
+    h.ingest(r#"{"@type":"updateUser","user":{"@type":"user","id":7,"first_name":"Alice","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOnline","expires":1900000000}}}"#);
+    assert!(h.driver.session.chat_peer_online(&h_chat(&h)));
+    h.ingest(r#"{"@type":"updateUserStatus","user_id":7,"status":{"@type":"userStatusOffline","was_online":1700000000}}"#);
+    assert!(!h.driver.session.chat_peer_online(&h_chat(&h)));
+}
