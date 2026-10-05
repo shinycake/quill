@@ -735,6 +735,7 @@ pub(super) fn session_history_row(
         )),
         MessageContent::Audio(audio) => Some(audio_row(
             message.id,
+            message.is_outgoing,
             audio,
             files,
             downloading,
