@@ -514,6 +514,11 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
 
     let (kind, out_dir) = demo;
     let _ = std::fs::create_dir_all(&out_dir);
+    // Fixtures must be deterministic and must never touch the user's real
+    // settings: give this process a throwaway data root.
+    let demo_root = std::env::temp_dir().join(format!("quill-demo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&demo_root);
+    quill::settings::use_isolated_app_root(demo_root);
     let marker = out_dir.join(match kind {
         ScreenshotDemo::NeedTdjson => ".quill-ready-need-tdjson",
         ScreenshotDemo::WaitPhone => ".quill-ready-wait-phone",
