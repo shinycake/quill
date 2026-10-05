@@ -1203,3 +1203,76 @@ impl QuillApp {
             )
     }
 }
+
+impl QuillApp {
+    /// The `@` suggestions above the composer: avatar, name, @username.
+    pub(super) fn mention_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let items = self.mention_menu_items(cx);
+        if items.is_empty() {
+            return None;
+        }
+        let selected = self.mention_selected.min(items.len() - 1);
+        let mut list = div()
+            .id("mention-menu")
+            .role(gpui_kit::Role::ListBox)
+            .aria_label("Mention suggestions")
+            .flex()
+            .flex_col()
+            .max_w(px(440.))
+            .mx_4()
+            .mb_2()
+            .p_1()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().popover)
+            .shadow_md();
+        for (index, (user_id, name, username)) in items.into_iter().enumerate() {
+            let photo = self
+                .session()
+                .and_then(|s| s.user_photo_path(user_id))
+                .and_then(|path| {
+                    quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
+                });
+            let label = if username.is_empty() {
+                name.clone()
+            } else {
+                format!("{name} @{username}")
+            };
+            list = list.child(
+                div()
+                    .id(("mention-item", index as u64))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .role(gpui_kit::Role::ListBoxOption)
+                    .aria_label(label)
+                    .cursor_pointer()
+                    .when(index == selected, |this| this.bg(cx.theme().selection))
+                    .hover(|style| style.bg(cx.theme().accent))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.pick_mention_index(index, window, cx);
+                    }))
+                    .child(super::message_text::kit_avatar_element(
+                        &name,
+                        photo.as_deref(),
+                        px(28.),
+                    ))
+                    .child(div().text_sm().font_medium().truncate().child(name))
+                    .when(!username.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .truncate()
+                                .child(format!("@{username}")),
+                        )
+                    }),
+            );
+        }
+        Some(list.into_any_element())
+    }
+}

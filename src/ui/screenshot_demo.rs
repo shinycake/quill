@@ -121,6 +121,8 @@ pub enum ScreenshotDemo {
     ReadyDrafts,
     /// Received photo album plus an own-sent album and a multi-attach composer.
     ReadyAlbums,
+    /// The composer's `@` member suggestions.
+    ReadyMentions,
     /// Channel sponsored / recommended rows + report flow (injected, no live Telegram).
     /// Fixture/proof surface only; the channel opens normally in live use.
     ReadySponsored,

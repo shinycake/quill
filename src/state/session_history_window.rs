@@ -25,7 +25,44 @@ impl ChatSummary {
     }
 }
 
+/// The composer's `@` member suggestions for one chat and query.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MentionSearch {
+    pub chat_id: ChatId,
+    pub query: String,
+    /// Matching members (users only, excluding the current user), in
+    /// TDLib's order.
+    pub user_ids: Vec<i64>,
+    /// The in-flight `searchChatMembers`; answers for any other request
+    /// (an older query) are dropped.
+    pub request: Option<RequestId>,
+}
+
 impl Session {
+    /// Apply a `searchChatMembers` answer to the current `@` search.
+    pub(crate) fn apply_mention_members(
+        &mut self,
+        request: RequestId,
+        members: &[crate::telegram::envelope::ParsedChatMember],
+    ) {
+        let me = self.my_user_id;
+        let Some(search) = self
+            .mention_search
+            .as_mut()
+            .filter(|s| s.request == Some(request))
+        else {
+            return;
+        };
+        search.request = None;
+        search.user_ids = members
+            .iter()
+            .filter_map(|member| match member.member_id {
+                MessageSender::User { user_id } if Some(user_id) != me => Some(user_id),
+                _ => None,
+            })
+            .collect();
+    }
+
     /// The open history has nothing to show yet because its first page is
     /// still on the way (no entry yet, or an empty window with a page in
     /// flight) — the UI shows a skeleton rather than "No messages".

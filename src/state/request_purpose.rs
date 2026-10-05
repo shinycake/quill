@@ -88,6 +88,8 @@ pub enum RequestPurpose {
     /// loaded window's newest message, while the window does not reach the
     /// chat's latest message (`HistoryState::has_newer`).
     GetHistoryNewer,
+    /// `searchChatMembers` for the composer's `@` suggestions.
+    SearchMentionMembers,
     /// `editMessageText` / `editMessageCaption`. Response is `message`.
     EditMessage,
     /// `deleteMessages`. Response is `ok`; rows leave via `updateDeleteMessages`.

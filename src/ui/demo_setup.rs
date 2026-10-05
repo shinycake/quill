@@ -1242,6 +1242,39 @@ impl QuillApp {
             });
             self.status_note = "screenshot demo — received album · own album".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyMentions)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                    self.demo_sink.clone();
+                for (id, first, last, username) in [
+                    (901, "Ada", "Lovelace", "ada"),
+                    (902, "Alan", "Turing", ""),
+                    (903, "Grace", "Hopper", "grace"),
+                ] {
+                    let json = format!(
+                        r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":{{"@type":"usernames","active_usernames":["{username}"],"disabled_usernames":[],"editable_username":"{username}","collectible_usernames":[]}},"accent_color_id":{},"type":{{"@type":"userTypeRegular"}},"status":{{"@type":"userStatusRecently"}}}}}}"#,
+                        id % 7
+                    );
+                    if let Some(owned) =
+                        quill::telegram::client::copy_and_parse(&json, &self.demo_seq, &dyn_sink)
+                    {
+                        session.apply(owned);
+                    }
+                }
+                // Demo chat A (11) is the chat the fixture opens.
+                session.mention_search = Some(quill::state::MentionSearch {
+                    chat_id: session.open_chat.unwrap_or(ChatId(11)),
+                    query: "a".into(),
+                    user_ids: vec![901, 902, 903],
+                    request: None,
+                });
+            }
+            self.composer.update(cx, |input, cx| {
+                input.set_value("Thanks @a", window, cx);
+            });
+            self.status_note = "screenshot demo — @ member suggestions".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyDrafts)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

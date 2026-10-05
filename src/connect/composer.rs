@@ -284,3 +284,62 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 }
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// The composer's `@query` for the open chat changed: search its members
+    /// (groups only; private chats and channels have no one to mention).
+    /// `None` clears the suggestions.
+    pub fn search_mentions(&mut self, query: Option<&str>) -> Result<(), ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat else {
+            self.session.mention_search = None;
+            return Ok(());
+        };
+        let is_group = self.session.chats.get(&chat_id.0).is_some_and(|chat| {
+            matches!(
+                chat.kind,
+                crate::telegram::envelope::ChatKind::BasicGroup { .. }
+                    | crate::telegram::envelope::ChatKind::Supergroup {
+                        is_channel: false,
+                        ..
+                    }
+            )
+        });
+        let Some(query) = query.filter(|_| is_group) else {
+            self.session.mention_search = None;
+            return Ok(());
+        };
+        if self
+            .session
+            .mention_search
+            .as_ref()
+            .is_some_and(|s| s.chat_id == chat_id && s.query == query)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SearchMentionMembers, Some(chat_id));
+        let previous = self.session.mention_search.take();
+        self.session.mention_search = Some(crate::state::MentionSearch {
+            chat_id,
+            query: query.to_string(),
+            // Keep showing the previous matches while the new query loads.
+            user_ids: previous
+                .filter(|s| s.chat_id == chat_id)
+                .map(|s| s.user_ids)
+                .unwrap_or_default(),
+            request: Some(extra),
+        });
+        if let Err(err) = self
+            .sender
+            .send_json(&crate::telegram::requests::search_chat_members(
+                extra, chat_id, query, 20,
+            ))
+        {
+            self.session.requests.take(extra);
+            self.session.mention_search = None;
+            return Err(err);
+        }
+        Ok(())
+    }
+}
