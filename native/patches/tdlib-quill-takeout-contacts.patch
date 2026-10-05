@@ -82,7 +82,7 @@ index 1eee0b2..23726b6 100644
  
    void on_request(uint64 id, td_api::changeImportedContacts &request);
 diff --git a/td/telegram/UserManager.cpp b/td/telegram/UserManager.cpp
-index 57d2065..d4d0b51 100644
+index 57d2065..9c417c2 100644
 --- a/td/telegram/UserManager.cpp
 +++ b/td/telegram/UserManager.cpp
 @@ -114,6 +114,154 @@
@@ -240,7 +240,7 @@ index 57d2065..d4d0b51 100644
  class GetContactsQuery final : public Td::ResultHandler {
   public:
    void send(int64 hash) {
-@@ -8385,6 +8533,16 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
+@@ -8385,6 +8533,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
    }
  }
  
@@ -251,6 +251,7 @@ index 57d2065..d4d0b51 100644
 +
 +void UserManager::get_quill_takeout_message_ranges(
 +    Promise<td_api::object_ptr<td_api::quillTakeoutMessageRanges>> &&promise) {
++  TRY_STATUS_PROMISE(promise, G()->close_status());
 +  td_->create_handler<InitQuillRangesTakeoutQuery>(std::move(promise))->send();
 +}
 +
