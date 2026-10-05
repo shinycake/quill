@@ -4,6 +4,7 @@ use super::app::QuillApp;
 use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::component::button::*;
+use gpui_kit::component::progress::ProgressCircle;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -219,6 +220,62 @@ pub(super) fn media_frame(width: i32, height: i32) -> (Pixels, Pixels) {
     (px(w.max(MIN_SIDE)), px(h.max(MIN_SIDE)))
 }
 
+/// Hover group for a media frame: the pause disc shows only on hover
+/// while the clip plays.
+const MEDIA_VISUAL_GROUP: &str = "media-visual";
+
+/// What the round status disc centered on a photo/video/GIF frame shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum MediaDisc {
+    Download,
+    /// Downloading — the fraction once TDLib knows the total size.
+    Progress(Option<f32>),
+    Play,
+    Pause,
+}
+
+/// Telegram-style status disc: a dark translucent circle holding a
+/// download arrow, a progress ring, or play/pause.
+pub(super) fn media_disc(id: impl Into<ElementId>, state: MediaDisc) -> Stateful<Div> {
+    let inner: AnyElement = match state {
+        MediaDisc::Progress(fraction) => ProgressCircle::new("media-disc-ring")
+            .size(px(34.))
+            .color(gpui_kit::white())
+            .loading(fraction.is_none())
+            .value(fraction.unwrap_or(0.) * 100.)
+            .accessibility_label("Downloading")
+            .into_any_element(),
+        MediaDisc::Download | MediaDisc::Play | MediaDisc::Pause => {
+            let icon = match state {
+                MediaDisc::Download => gpui_kit::assets::IconName::ArrowDown,
+                MediaDisc::Pause => gpui_kit::assets::IconName::Pause,
+                _ => gpui_kit::assets::IconName::Play,
+            };
+            Icon::new(icon)
+                .size(px(22.))
+                .text_color(gpui_kit::white())
+                .into_any_element()
+        }
+    };
+    div()
+        .id(id)
+        .size(px(48.))
+        .flex_none()
+        .rounded_full()
+        .bg(gpui_kit::black().opacity(0.5))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(inner)
+}
+
+/// Download fraction of `file_id`, when TDLib reported a total.
+fn download_fraction(file_id: FileId, files: &HashMap<i32, ParsedFile>) -> Option<f32> {
+    files
+        .get(&file_id.0)
+        .and_then(ParsedFile::download_progress)
+}
+
 pub(super) fn photo_attachment(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
@@ -276,13 +333,8 @@ pub(super) fn photo_attachment(
         .get(&open_id.0)
         .and_then(|f| f.usable_path())
         .is_some();
-    let status = if photo.is_secret || photo.has_spoiler {
-        photo.placeholder_label(downloading_now, ready)
-    } else if downloading_now {
-        "Downloading…".into()
-    } else {
-        "Click to load".into()
-    };
+    // Secret and spoiler photos keep a text label; the rest show a disc.
+    let status = photo.placeholder_label(downloading_now, ready);
     let viewable = !photo.is_secret && !photo.has_spoiler;
     let viewer_open = viewable.then_some(viewer).flatten();
     let has_viewer_open = viewer_open.is_some();
@@ -342,20 +394,33 @@ pub(super) fn photo_attachment(
                     }))
             },
         )
-        .child(
-            div()
-                .text_xs()
-                .when(has_preview, |this| {
-                    // Over the preview: a legible pill.
-                    this.px_2()
-                        .py_0p5()
-                        .rounded_full()
-                        .bg(gpui_kit::black().opacity(0.45))
-                        .text_color(gpui_kit::white())
-                })
-                .when(!has_preview, |this| this.text_color(text_bright()))
-                .child(status),
-        )
+        .map(|this| {
+            if viewable {
+                this.child(media_disc(
+                    ("photo-disc", row_id),
+                    if downloading_now {
+                        MediaDisc::Progress(download_fraction(open_id, files))
+                    } else {
+                        MediaDisc::Download
+                    },
+                ))
+            } else {
+                this.child(
+                    div()
+                        .text_xs()
+                        .when(has_preview, |this| {
+                            // Over the preview: a legible pill.
+                            this.px_2()
+                                .py_0p5()
+                                .rounded_full()
+                                .bg(gpui_kit::black().opacity(0.45))
+                                .text_color(gpui_kit::white())
+                        })
+                        .when(!has_preview, |this| this.text_color(text_bright()))
+                        .child(status),
+                )
+            }
+        })
         .into_any_element()
 }
 
@@ -413,29 +478,20 @@ pub(super) fn animation_attachment(
             })
             .into_any_element()
     } else {
-        let label = if blocked {
-            "GIF".to_string()
-        } else if downloading_now {
-            "GIF — downloading…".into()
-        } else if animation.width > 0 && animation.height > 0 {
-            format!(
-                "GIF {}×{} — not downloaded",
-                animation.width, animation.height
-            )
-        } else {
-            "GIF — not downloaded".into()
-        };
         div()
             .id(("gif-ph", row_id))
             .w(frame_w)
             .h(frame_h)
             .rounded_md()
-            .bg(accent_strong())
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(div().text_xs().text_color(text_on_fill()).child(label))
+            .bg(fill_muted())
             .into_any_element()
+    };
+    let gif_disc = if downloading_now && !playing {
+        MediaDisc::Progress(download_fraction(play_id, files))
+    } else if playing {
+        MediaDisc::Pause
+    } else {
+        MediaDisc::Play
     };
     div()
         .id(("gif-row", row_id))
@@ -443,31 +499,60 @@ pub(super) fn animation_attachment(
         .flex_col()
         .gap_1()
         .child(
-            div().relative().child(picture).child(
-                div()
-                    .absolute()
-                    .top_1()
-                    .left_1()
-                    .px_1()
-                    .rounded_sm()
-                    .bg(bg_deep())
-                    .text_xs()
-                    .text_color(text_bright())
-                    .child(if playing { "GIF · playing" } else { "GIF" }),
-            ),
-        )
-        .child(
-            Button::new(format!("gif-play-{row_id}"))
-                .label(play_label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if blocked {
-                        return;
-                    }
-                    if let Some((chat_id, sponsored_id)) = sponsored {
-                        this.click_sponsored_message(chat_id, sponsored_id, true, cx);
-                    }
-                    this.toggle_animation_playback(message_id, play_id, mime.clone(), cx);
-                })),
+            div()
+                .id(("gif-visual", row_id))
+                .relative()
+                .group(MEDIA_VISUAL_GROUP)
+                .child(picture)
+                .child(
+                    div()
+                        .absolute()
+                        .top_1()
+                        .left_1()
+                        .px_1p5()
+                        .rounded_md()
+                        .bg(gpui_kit::black().opacity(0.5))
+                        .text_xs()
+                        .text_color(gpui_kit::white())
+                        .child("GIF"),
+                )
+                .when(!blocked, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                media_disc(("gif-disc", row_id), gif_disc)
+                                    .role(gpui_kit::Role::Button)
+                                    .aria_label(play_label)
+                                    .cursor_pointer()
+                                    .when(playing, |disc| {
+                                        disc.invisible()
+                                            .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible())
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        if let Some((chat_id, sponsored_id)) = sponsored {
+                                            this.click_sponsored_message(
+                                                chat_id,
+                                                sponsored_id,
+                                                true,
+                                                cx,
+                                            );
+                                        }
+                                        this.toggle_animation_playback(
+                                            message_id,
+                                            play_id,
+                                            mime.clone(),
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                    )
+                }),
         )
         .into_any_element()
 }
@@ -531,26 +616,26 @@ pub(super) fn video_attachment(
             })
             .into_any_element()
     } else {
-        let label = if blocked {
-            "Video".to_string()
-        } else if downloading_now {
-            "Video — downloading…".into()
-        } else if video.width > 0 && video.height > 0 {
-            format!("Video {}×{} — not downloaded", video.width, video.height)
-        } else {
-            "Video — not downloaded".into()
-        };
         div()
             .id(("video-ph", row_id))
             .w(frame_w)
             .h(frame_h)
             .rounded_md()
-            .bg(success_bg())
+            .bg(fill_muted())
             .flex()
             .items_center()
             .justify_center()
-            .child(div().text_xs().text_color(text_on_fill()).child(label))
+            .when(blocked, |this| {
+                this.child(div().text_xs().text_color(text_muted()).child("Video"))
+            })
             .into_any_element()
+    };
+    let video_disc = if downloading_now && !playing {
+        MediaDisc::Progress(download_fraction(play_id, files))
+    } else if playing {
+        MediaDisc::Pause
+    } else {
+        MediaDisc::Play
     };
     div()
         .id(("video-row", row_id))
@@ -575,52 +660,61 @@ pub(super) fn video_attachment(
                             this.open_media_viewer(chat_id, message_id, cx);
                         }))
                 })
+                .group(MEDIA_VISUAL_GROUP)
                 .child(picture)
-                .child(
-                    div()
-                        .absolute()
-                        .top_1()
-                        .left_1()
-                        .px_1()
-                        .rounded_sm()
-                        .bg(bg_deep())
-                        .text_xs()
-                        .text_color(text_bright())
-                        .child(if playing { "Video · playing" } else { "Video" }),
-                )
                 .child(
                     div()
                         .absolute()
                         .bottom_1()
                         .left_1()
-                        .px_1()
-                        .rounded_sm()
-                        .bg(bg_deep())
+                        .px_1p5()
+                        .rounded_md()
+                        .bg(gpui_kit::black().opacity(0.5))
                         .text_xs()
-                        .text_color(text_bright())
+                        .text_color(gpui_kit::white())
                         .child(duration),
                 )
+                .when(!blocked, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                media_disc(("video-disc", row_id), video_disc)
+                                    .role(gpui_kit::Role::Button)
+                                    .aria_label(play_label)
+                                    .cursor_pointer()
+                                    .when(playing, |disc| {
+                                        disc.invisible()
+                                            .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible())
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        // The frame around the disc opens the viewer.
+                                        cx.stop_propagation();
+                                        if let Some((chat_id, sponsored_id)) = sponsored {
+                                            this.click_sponsored_message(
+                                                chat_id,
+                                                sponsored_id,
+                                                true,
+                                                cx,
+                                            );
+                                        }
+                                        this.toggle_video_playback(
+                                            message_id,
+                                            play_id,
+                                            mime.clone(),
+                                            start_timestamp,
+                                            None,
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                    )
+                })
         })
-        .child(
-            Button::new(format!("video-play-{row_id}"))
-                .label(play_label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if blocked {
-                        return;
-                    }
-                    if let Some((chat_id, sponsored_id)) = sponsored {
-                        this.click_sponsored_message(chat_id, sponsored_id, true, cx);
-                    }
-                    this.toggle_video_playback(
-                        message_id,
-                        play_id,
-                        mime.clone(),
-                        start_timestamp,
-                        None,
-                        cx,
-                    );
-                })),
-        )
         .into_any_element()
 }
 
