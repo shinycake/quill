@@ -39,21 +39,27 @@ impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
         let generation = self.connection_generation;
         cx.spawn(async move |this, cx| {
+            // Adaptive cadence: drain quickly while updates are flowing,
+            // back off when idle so a quiet app doesn't wake 25×/s.
+            const BUSY: Duration = Duration::from_millis(10);
+            const IDLE_MAX: Duration = Duration::from_millis(120);
+            let mut delay = Duration::from_millis(40);
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(40))
-                    .await;
-                let cont = this
+                cx.background_executor().timer(delay).await;
+                let step = this
                     .update(cx, |this, cx| {
                         if generation != this.connection_generation {
-                            return false;
+                            return None;
                         }
-                        this.poll_live(cx);
-                        this.live.is_some()
+                        let busy = this.poll_live(cx);
+                        this.live.is_some().then_some(busy)
                     })
-                    .unwrap_or(false);
-                if !cont {
-                    break;
+                    .ok()
+                    .flatten();
+                match step {
+                    None => break,
+                    Some(true) => delay = BUSY,
+                    Some(false) => delay = (delay * 2).clamp(BUSY, IDLE_MAX),
                 }
             }
         })
@@ -82,11 +88,14 @@ impl QuillApp {
         self.keybindings_applied = true;
     }
 
-    pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) {
+    /// Drain and apply everything TDLib has queued. Returns whether
+    /// anything arrived, so the poll loop can stay fast during bursts and
+    /// back off while idle.
+    pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) -> bool {
         self.poll_device_qr(cx);
         self.apply_pending_keybindings(cx);
         let Some(live) = self.live.as_mut() else {
-            return;
+            return false;
         };
         let prev_auth = live.driver.session.auth.clone();
         let mut progressed = live
@@ -371,6 +380,7 @@ impl QuillApp {
         if logged_out {
             self.restart_live_connection(cx);
         }
+        progressed || send_failed
     }
 
     /// Slice auth-logout-warning: drop the logged-out client and start a
