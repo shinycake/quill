@@ -94,6 +94,34 @@ impl Session {
     }
 
     /// Phase 6: cached user object, if an `updateUser` has been seen.
+    /// The group/channel header's counts: members (full info when loaded,
+    /// else the base group object) and members online (opened groups
+    /// only). `None` for private chats.
+    pub fn group_member_counts(&self, chat: &ChatSummary) -> Option<(i32, i32)> {
+        use crate::telegram::envelope::ChatKind;
+        let members = match chat.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => self
+                .supergroup_full_infos
+                .get(&supergroup_id)
+                .map(|info| info.member_count)
+                .filter(|count| *count > 0)
+                .or_else(|| self.supergroup_member_counts.get(&supergroup_id).copied())
+                .unwrap_or(0),
+            ChatKind::BasicGroup { basic_group_id } => self
+                .basic_group_member_counts
+                .get(&basic_group_id)
+                .copied()
+                .unwrap_or(0),
+            _ => return None,
+        };
+        let online = self
+            .chat_online_counts
+            .get(&chat.id.0)
+            .copied()
+            .unwrap_or(0);
+        Some((members, online))
+    }
+
     pub fn user(&self, user_id: i64) -> Option<&ParsedUser> {
         self.users.get(&user_id)
     }

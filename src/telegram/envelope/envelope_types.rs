@@ -554,10 +554,23 @@ pub enum EnvelopePayload {
     /// supergroup is a forum (`chatTypeSupergroup` has no forum flag).
     /// Parity slice: the first active username (`supergroup.usernames`,
     /// schema 1.8.67 lines 2746/2372) feeds the channel/supergroup header.
+    /// `updateBasicGroup` — only `basicGroup.member_count` is kept (the
+    /// header's "N members").
+    UpdateBasicGroup {
+        basic_group_id: i64,
+        member_count: i32,
+    },
+    /// `updateChatOnlineMemberCount` — sent for opened groups.
+    UpdateChatOnlineMemberCount {
+        chat_id: i64,
+        online_member_count: i32,
+    },
     UpdateSupergroup {
         supergroup_id: i64,
         is_forum: bool,
         username: String,
+        /// `supergroup.member_count` — may be 0 until full info is known.
+        member_count: i32,
         /// Phase A1: own `chatMemberStatus*` (`supergroup.status`, schema
         /// 1.8.67 line 2746 — "Current user status in the supergroup or
         /// channel"). Drives slow-mode bypass (admins/creators are exempt).

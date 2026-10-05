@@ -1436,8 +1436,22 @@ impl Session {
             // response (gated on the pending purpose). Parity slice: the
             // first active username is cached alongside, for the
             // channel/supergroup header.
+            EnvelopePayload::UpdateBasicGroup {
+                basic_group_id,
+                member_count,
+            } => {
+                self.basic_group_member_counts
+                    .insert(basic_group_id, member_count);
+            }
+            EnvelopePayload::UpdateChatOnlineMemberCount {
+                chat_id,
+                online_member_count,
+            } => {
+                self.chat_online_counts.insert(chat_id, online_member_count);
+            }
             EnvelopePayload::UpdateSupergroup {
                 supergroup_id,
+                member_count,
                 is_forum,
                 username,
                 status,
@@ -1452,26 +1466,32 @@ impl Session {
                 is_broadcast_group,
                 sign_messages,
                 show_message_sender,
-            } => self.apply_update_supergroup(
-                supergroup_id,
-                is_forum,
-                username,
-                status,
-                can_restrict_members,
-                can_invite_users,
-                can_promote_members,
-                can_manage_tags,
-                can_manage_topics,
-                can_change_info,
-                can_send_welcome_messages,
-                join_by_request,
-                is_broadcast_group,
-                sign_messages,
-                show_message_sender,
-                pending,
-                extra,
-                seq,
-            ),
+            } => {
+                if member_count > 0 {
+                    self.supergroup_member_counts
+                        .insert(supergroup_id, member_count);
+                }
+                self.apply_update_supergroup(
+                    supergroup_id,
+                    is_forum,
+                    username,
+                    status,
+                    can_restrict_members,
+                    can_invite_users,
+                    can_promote_members,
+                    can_manage_tags,
+                    can_manage_topics,
+                    can_change_info,
+                    can_send_welcome_messages,
+                    join_by_request,
+                    is_broadcast_group,
+                    sign_messages,
+                    show_message_sender,
+                    pending,
+                    extra,
+                    seq,
+                );
+            }
             EnvelopePayload::Supergroup {
                 supergroup_id,
                 is_forum,

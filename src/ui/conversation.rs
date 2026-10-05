@@ -85,22 +85,25 @@ impl QuillApp {
         let extras: Option<SupergroupHeaderExtras> = actions.and_then(|(chat_id, _, _, _)| {
             let session = self.session()?;
             let chat = session.chats.get(&chat_id.0)?;
-            let (supergroup_id, is_channel) = match chat.kind {
+            let (members, online) = session.group_member_counts(chat)?;
+            let (is_channel, username) = match chat.kind {
                 ChatKind::Supergroup {
                     supergroup_id,
                     is_channel,
-                } => (supergroup_id, is_channel),
-                _ => return None,
+                } => (
+                    is_channel,
+                    session
+                        .supergroup_username(supergroup_id)
+                        .filter(|name| !name.is_empty())
+                        .map(|name| name.to_string()),
+                ),
+                _ => (false, None),
             };
-            let full = session.supergroup_full_infos.get(&supergroup_id).cloned();
-            let username = session
-                .supergroup_username(supergroup_id)
-                .filter(|name| !name.is_empty())
-                .map(|name| name.to_string());
             Some(SupergroupHeaderExtras {
                 is_channel,
                 username,
-                member_count: full.as_ref().map(|info| info.member_count),
+                member_count: (members > 0).then_some(members),
+                online_count: online,
                 discussion_chat_id: session.discussion_chat_id(chat_id),
             })
         });
@@ -146,12 +149,18 @@ impl QuillApp {
         let meta_line = extras.as_ref().and_then(|ex| {
             let mut meta: Vec<String> = Vec::new();
             if let Some(count) = ex.member_count.filter(|count| *count > 0) {
-                let noun = if ex.is_channel {
-                    "subscribers"
-                } else {
-                    "members"
+                let noun = match (ex.is_channel, count) {
+                    (true, 1) => "subscriber",
+                    (true, _) => "subscribers",
+                    (false, 1) => "member",
+                    (false, _) => "members",
                 };
-                meta.push(format!("{} {noun}", compact_count(count)));
+                let mut line = format!("{} {noun}", compact_count(count));
+                // Groups: "N members, M online" (yourself alone isn't news).
+                if !ex.is_channel && ex.online_count > 1 {
+                    line.push_str(&format!(", {} online", compact_count(ex.online_count)));
+                }
+                meta.push(line);
             }
             if let Some(username) = &ex.username {
                 meta.push(format!("@{username}"));
