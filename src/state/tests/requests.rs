@@ -185,6 +185,53 @@ fn cache_eviction_is_not_permanent() {
 }
 
 #[test]
+fn cache_eviction_does_not_punch_holes_in_loaded_history() {
+    // `from_cache` deletions only drop TDLib's in-memory copy ("can
+    // possibly be retrieved again", schema 1.8.67, line 10699); Telegram X
+    // ignores them (`Tdlib.updateMessagesDeleted`). Removing the rows would
+    // leave a hole that `fetch_history` (which pages from the oldest row)
+    // never refills.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(1));
+    for id in [10, 11, 12] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m{id}","entities":[]}}}}}}}}"#
+            ),
+        );
+    }
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateDeleteMessages","chat_id":1,"message_ids":[11],"is_permanent":false,"from_cache":true}"#,
+    );
+    let ids: Vec<i64> = session
+        .histories
+        .get(&1)
+        .unwrap()
+        .messages
+        .keys()
+        .copied()
+        .collect();
+    assert_eq!(ids, vec![10, 11, 12]);
+    // A real (permanent) deletion still removes and tombstones the row.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateDeleteMessages","chat_id":1,"message_ids":[11],"is_permanent":true,"from_cache":false}"#,
+    );
+    let history = session.histories.get(&1).unwrap();
+    assert!(!history.messages.contains_key(&11));
+    assert!(history.is_tombstone(MessageId(11)));
+}
+
+#[test]
 fn load_chats_404_marks_exhaustion() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

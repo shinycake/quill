@@ -1262,15 +1262,21 @@ impl Session {
                 is_permanent,
                 from_cache,
             } => {
+                // `from_cache`: TDLib only dropped its in-memory copy; the
+                // messages "can possibly be retrieved again" (schema 1.8.67,
+                // line 10699). Telegram X ignores these
+                // (`Tdlib.updateMessagesDeleted`); dropping the rows here
+                // would punch holes that oldest-first paging never refills.
+                let message_ids = if from_cache && !is_permanent {
+                    Vec::new()
+                } else {
+                    message_ids
+                };
                 let history = self.histories.entry(chat_id.0).or_default();
                 for id in message_ids {
-                    if is_permanent {
-                        history.remove(id, true);
-                    } else if from_cache {
-                        history.remove(id, false);
-                    } else {
-                        history.remove(id, true);
-                    }
+                    // Permanent or "became inaccessible": either way the
+                    // row must not come back from a stale page.
+                    history.remove(id, true);
                     if is_permanent
                         && matches!(
                             self.chat_search.jump,
