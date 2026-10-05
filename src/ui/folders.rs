@@ -870,7 +870,9 @@ impl QuillApp {
                     .child(div().font_semibold().child("Chat folders"))
                     .child(
                         Button::new("close-folder-menu")
-                            .label("Close")
+                            .icon(gpui_kit::assets::IconName::X)
+                            .tooltip("Close")
+                            .accessibility_label("Close")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_folder_menu(cx);

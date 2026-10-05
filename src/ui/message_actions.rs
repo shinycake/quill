@@ -715,14 +715,18 @@ impl QuillApp {
                         .border_b_1()
                         .border_color(border())
                         .child(div().text_sm().font_medium().child("Instant View"))
-                        .child(Button::new("instant-view-close").label("Close").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                if let Some(live) = this.live.as_mut() {
-                                    live.driver.session.instant_view = None;
-                                }
-                                cx.notify();
-                            }),
-                        )),
+                        .child(
+                            Button::new("instant-view-close")
+                                .icon(gpui_kit::assets::IconName::X)
+                                .tooltip("Close")
+                                .accessibility_label("Close")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(live) = this.live.as_mut() {
+                                        live.driver.session.instant_view = None;
+                                    }
+                                    cx.notify();
+                                })),
+                        ),
                 )
                 .child(
                     div()

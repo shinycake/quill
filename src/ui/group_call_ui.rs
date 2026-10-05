@@ -1025,7 +1025,9 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("group-call-invite-close")
-                            .label("Close")
+                            .icon(gpui_kit::assets::IconName::X)
+                            .tooltip("Close")
+                            .accessibility_label("Close")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.group_call_invite_open = false;

@@ -137,12 +137,17 @@ impl QuillApp {
                                 this.set_media_pref(|p| p.recent_emoji.clear(), cx)
                             })),
                     )
-                    .child(Button::new("emoji-close").label("Close").ghost().on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.emoji_picker_open = false;
-                            cx.notify();
-                        }),
-                    )),
+                    .child(
+                        Button::new("emoji-close")
+                            .icon(gpui_kit::assets::IconName::X)
+                            .tooltip("Close")
+                            .accessibility_label("Close")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.emoji_picker_open = false;
+                                cx.notify();
+                            })),
+                    ),
             )
             .child(Textarea::new(&self.emoji_search_input).aria_label("Search emoji"))
             .child(tabs)

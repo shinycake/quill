@@ -554,10 +554,11 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .child(
+                // One row: field, position, older/newer, close.
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap_1()
                     .child(
                         div().id("chat-search-field").flex_1().child(
                             Textarea::new(&self.chat_search_input)
@@ -565,44 +566,45 @@ impl QuillApp {
                                 .h(px(36.)),
                         ),
                     )
-                    .child(
-                        Button::new("chat-search-close")
-                            .label("Close")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.close_chat_search_ui(window, cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
+                    .when(!position.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .px_1()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(position),
+                        )
+                    })
                     .child(
                         Button::new("chat-search-older")
-                            .label("Older")
+                            .icon(gpui_kit::assets::IconName::ChevronUp)
                             .ghost()
+                            .tooltip("Older match")
+                            .accessibility_label("Older match")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.chat_search_older(cx);
                             })),
                     )
                     .child(
                         Button::new("chat-search-newer")
-                            .label("Newer")
+                            .icon(gpui_kit::assets::IconName::ChevronDown)
                             .ghost()
+                            .tooltip("Newer match")
+                            .accessibility_label("Newer match")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.chat_search_newer(cx);
                             })),
                     )
-                    .when(!position.is_empty(), |this| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(position),
-                        )
-                    }),
+                    .child(
+                        Button::new("chat-search-close")
+                            .icon(gpui_kit::assets::IconName::X)
+                            .tooltip("Close search")
+                            .accessibility_label("Close search")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_chat_search_ui(window, cx);
+                            })),
+                    ),
             )
             .child(
                 div()

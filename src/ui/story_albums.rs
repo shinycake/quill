@@ -1173,7 +1173,9 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("story-page-close")
-                                    .label("Close")
+                                    .icon(gpui_kit::assets::IconName::X)
+                                    .tooltip("Close")
+                                    .accessibility_label("Close")
                                     .ghost()
                                     .text_color(rgb(0xffffff))
                                     .on_click(cx.listener(|this, _, _, cx| {
