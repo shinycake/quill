@@ -1369,7 +1369,10 @@ impl QuillApp {
                             .child(self.calls_list(cx)),
                     );
                 } else {
-                    list = list.child(self.folder_tabs_with_community_banner(cx));
+                    // Searching spans every chat: the folder tabs step aside.
+                    if !self.search_is_open() {
+                        list = list.child(self.folder_tabs_with_community_banner(cx));
+                    }
                     list = list.child(self.sidebar_search_field(cx));
                     if self.new_secret_picker_open {
                         list = list.child(self.new_secret_picker_panel(cx));
@@ -1377,7 +1380,9 @@ impl QuillApp {
                     // Phase 9.1/9.3: tdesktop-style active-stories tray above
                     // the chat rows (leading "+" tile opens the story
                     // composer); omitted for the contacts tab.
-                    list = list.child(self.story_tray(cx));
+                    if !self.search_is_open() {
+                        list = list.child(self.story_tray(cx));
+                    }
                     if self.search_is_open() {
                         list = list.child(self.search_results(cx));
                     } else {
