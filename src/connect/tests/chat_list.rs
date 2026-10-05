@@ -1273,3 +1273,42 @@ fn select_chat_closes_previous_and_does_not_mark_unread_locally() {
     assert!(!sink.rendered().contains("Alice"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn every_open_chat_is_closed_when_leaving_it() {
+    // `openChat` / `closeChat` must pair (schema 1.8.67: "Informs TDLib
+    // that the chat is opened/closed by the user"); Telegram X sends
+    // `CloseChat` for every chat it opened (`Tdlib.openChat` /
+    // `Tdlib.closeChatImpl` track `openedChats`). A chat whose type is not
+    // known yet is still opened, so it must be closed.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    for json in [
+        r#"{"@type":"updateChatPosition","chat_id":9,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"5","is_pinned":false}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    driver.select_chat(ChatId(9)).unwrap();
+    driver.select_chat(ChatId(8)).unwrap();
+    let opened_9 = recorder
+        .snapshot()
+        .iter()
+        .filter(|j| j.contains("\"@type\":\"openChat\"") && j.contains("\"chat_id\":9"))
+        .count();
+    let closed_9 = recorder
+        .snapshot()
+        .iter()
+        .filter(|j| j.contains("\"@type\":\"closeChat\"") && j.contains("\"chat_id\":9"))
+        .count();
+    assert_eq!(opened_9, 1);
+    assert_eq!(closed_9, 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

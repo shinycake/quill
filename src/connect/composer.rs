@@ -175,14 +175,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(prev) = self.session.open_chat else {
             return Ok(());
         };
-        if !self
-            .session
-            .chats
-            .get(&prev.0)
-            .is_some_and(|chat| chat.supported())
-        {
-            return Ok(());
-        }
+        // No `supported()` gate: `select_chat` sends `openChat` for every
+        // chat, so every opened chat gets its paired `closeChat` (Telegram
+        // X `Tdlib.closeChatImpl`).
         let extra = self.session.request(RequestPurpose::CloseChat, Some(prev));
         self.sender.send_json(&close_chat(extra, prev))?;
         Ok(())
