@@ -519,7 +519,9 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child("Video message")
                     })
-                    .when(!video, |this| this.child(waveform_row(0, &bars))),
+                    .when(!video, |this| {
+                        this.child(waveform_row(0, &bars, accent().into(), 1.0))
+                    }),
             )
             .child(self.record_bar_actions(cx))
     }

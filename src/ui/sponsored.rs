@@ -143,6 +143,7 @@ pub(super) fn sponsored_message_row(
         MessageContent::Document(doc) => Some(document_chip(
             row_id,
             doc,
+            false,
             files,
             downloading,
             failed,

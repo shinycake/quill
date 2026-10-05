@@ -17,7 +17,7 @@ use gpui_kit::component::*;
 use gpui_kit::gpui::StyleRefinement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::AttachmentKind;
+
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::local_path::sandboxed_display_path;
@@ -497,19 +497,6 @@ impl QuillApp {
             .when_some(self.call_busy_banner(cx), |this, banner| this.child(banner))
             .when(composer.is_some(), |this| {
                 let show_attach = matches!(mode, PaneMode::Ready) && self.pending_edit.is_none();
-                let chips: Vec<String> = if show_attach {
-                    self.pending_attachments
-                        .iter()
-                        .map(|att| match att.kind {
-                            AttachmentKind::Photo => format!("Photo · {}", att.file_name),
-                            AttachmentKind::Document => format!("Document · {}", att.file_name),
-                            AttachmentKind::Video => format!("Video · {}", att.file_name),
-                            AttachmentKind::VideoNote => format!("Video note · {}", att.file_name),
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
                 this.child(
                     div()
                         .id("composer-file-drop")
@@ -530,162 +517,10 @@ impl QuillApp {
                         .when(self.recording_active(), |this| {
                             this.child(self.record_bar(cx))
                         })
-                        // kit Phase 5: the attach menu — the attach options
-                        // live behind the paperclip icon button in the
-                        // input row instead of a permanent button row.
-                        .when(show_attach && self.attach_menu_open, |box_| {
-                            box_.child(
-                                div()
-                                    .id("composer-attach-menu")
-                                    .flex()
-                                    .flex_wrap()
-                                    .gap_2()
-                                    .items_center()
-                                    .child(
-                                        Button::new("attach-photo").label("Attach photo").on_click(
-                                            cx.listener(|this, _, _, cx| {
-                                                this.attach_local(AttachmentKind::Photo, cx);
-                                            }),
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new("attach-file").label("Attach file").on_click(
-                                            cx.listener(|this, _, _, cx| {
-                                                this.attach_local(AttachmentKind::Document, cx);
-                                            }),
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new("attach-video").label("Attach video").on_click(
-                                            cx.listener(|this, _, _, cx| {
-                                                this.attach_local(AttachmentKind::Video, cx);
-                                            }),
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new("attach-video-note")
-                                            .label("Video note")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.attach_local(AttachmentKind::VideoNote, cx);
-                                            })),
-                                    )
-                                    .child(if polls_allowed {
-                                        Button::new("open-poll-dialog")
-                                            .label("Poll")
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.open_poll_dialog(window, cx);
-                                            }))
-                                            .into_any_element()
-                                    } else {
-                                        // B4: clear notice when the server
-                                        // disallows polls
-                                        // (`chatPermissions.can_send_polls`,
-                                        // schema 1.8.67 line 1070).
-                                        div()
-                                            .text_xs()
-                                            .text_color(warning_orange())
-                                            .child("Polls restricted in this chat")
-                                            .into_any_element()
-                                    })
-                                    .child(Button::new("open-emoji").label("Emoji").on_click(
-                                        cx.listener(|this, _, _, cx| {
-                                            this.emoji_picker_open = !this.emoji_picker_open;
-                                            cx.notify();
-                                        }),
-                                    ))
-                                    .child(
-                                        Button::new("open-gifs")
-                                            .label(if self.gif_panel_open() {
-                                                "GIFs open"
-                                            } else {
-                                                "GIFs"
-                                            })
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.toggle_gif_panel(cx);
-                                            })),
-                                    )
-                                    .when(!self.pending_attachments.is_empty(), |row| {
-                                        row.child(
-                                            Button::new("clear-attach").label("Clear").on_click(
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.clear_attachment(cx);
-                                                }),
-                                            ),
-                                        )
-                                    })
-                                    // MED1: album grouping toggle + "remember
-                                    // grouping" (TGX `RememberAlbumSetting`).
-                                    .when(self.pending_attachments.len() >= 2, |row| {
-                                        let grouped = self.composer_group_media_effective();
-                                        let remember = self
-                                            .session()
-                                            .map(|s| s.media_prefs.remember_media_grouping)
-                                            .unwrap_or(false);
-                                        row.child(
-                                            Button::new("composer-group-media")
-                                                .label(if grouped {
-                                                    "Grouped ✓"
-                                                } else {
-                                                    "Ungrouped"
-                                                })
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.toggle_composer_group_media(cx);
-                                                })),
-                                        )
-                                        .child(
-                                            Button::new("composer-remember-grouping")
-                                                .label(if remember {
-                                                    "Remember: on"
-                                                } else {
-                                                    "Remember: off"
-                                                })
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.toggle_remember_media_grouping(cx);
-                                                })),
-                                        )
-                                    })
-                                    // Phase B3: self-destruct timer picker —
-                                    // only for photo/video in private chats
-                                    // (the only combination TDLib accepts
-                                    // `self_destruct_type` for).
-                                    .when(self.self_destruct_picker_visible(), |row| {
-                                        let label = self.self_destruct_button_label();
-                                        row.child(
-                                            Button::new("self-destruct-cycle")
-                                                .label(label)
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.cycle_composer_self_destruct(cx);
-                                                })),
-                                        )
-                                    }),
-                            )
-                        })
-                        .when(!chips.is_empty(), |this| {
-                            let album = chips.len() >= 2;
-                            let mut row =
-                                div().id("composer-attach-chip").flex().flex_wrap().gap_2();
-                            for (index, label) in chips.into_iter().enumerate() {
-                                row = row.child(
-                                    div()
-                                        .id(("composer-attach-item", index as u64))
-                                        .px_3()
-                                        .py_2()
-                                        .rounded_md()
-                                        .border_1()
-                                        .border_color(text_muted())
-                                        .bg(bg_subtle())
-                                        .child(div().text_sm().font_medium().child(label))
-                                        .child(div().text_xs().text_color(text_primary()).child(
-                                            if album {
-                                                "album · picked locally"
-                                            } else {
-                                                "ready to send · picked locally"
-                                            },
-                                        )),
-                                );
-                            }
-                            this.child(row)
-                        })
+                        .when(
+                            show_attach && !self.pending_attachments.is_empty(),
+                            |this| this.child(self.composer_attachment_tray(cx)),
+                        )
                         .when_some(self.forward_result.clone(), |this, result| {
                             this.child(self.forward_success_banner(&result, cx))
                         })
@@ -825,36 +660,22 @@ impl QuillApp {
                                 .items_end()
                                 .gap_2()
                                 .when(show_attach, |row| {
-                                    row.child(
-                                        Button::new("composer-attach")
-                                            .icon(IconName::Paperclip)
-                                            .ghost()
-                                            .tooltip(if self.attach_menu_open {
-                                                "Close attach menu"
-                                            } else {
-                                                "Attach"
-                                            })
-                                            .accessibility_label("Attach")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.attach_menu_open = !this.attach_menu_open;
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("composer-emoji")
-                                            .icon(IconName::FaceSlightlySmiling)
-                                            .ghost()
-                                            .tooltip(if self.sticker_panel_open() {
-                                                "Close stickers"
-                                            } else {
-                                                "Stickers"
-                                            })
-                                            .accessibility_label("Stickers")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.toggle_sticker_panel(cx);
-                                            })),
-                                    )
-                                    .child(self.format_menu_button(cx))
+                                    row.child(self.attach_menu_button(polls_allowed, cx))
+                                        .child(
+                                            Button::new("composer-emoji")
+                                                .icon(IconName::FaceSlightlySmiling)
+                                                .ghost()
+                                                .tooltip(if self.sticker_panel_open() {
+                                                    "Close stickers"
+                                                } else {
+                                                    "Stickers"
+                                                })
+                                                .accessibility_label("Stickers")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.toggle_sticker_panel(cx);
+                                                })),
+                                        )
+                                        .child(self.format_menu_button(cx))
                                 })
                                 .child(
                                     div().flex_1().min_w_0().child(

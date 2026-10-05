@@ -30,7 +30,16 @@ gpui_kit::assets::icon_assets!(
         AudioLines,
         Lock,
         UserPlus,
-        UserX
+        UserX,
+        Image,
+        Film,
+        File,
+        ChartBar,
+        SquarePlay,
+        Timer,
+        Play,
+        Pause,
+        ArrowDown
     ]
 );
 

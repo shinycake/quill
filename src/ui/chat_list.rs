@@ -328,8 +328,6 @@ impl QuillApp {
         self.flush_leaving_draft(cx);
         // Phase B4: the TTL picker belongs to the previous chat.
         self.ttl_picker_open = false;
-        // kit Phase 5: the attach menu belongs to the previous chat too.
-        self.attach_menu_open = false;
         if self
             .pending_reply
             .as_ref()

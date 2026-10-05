@@ -4,6 +4,7 @@ use super::app::QuillApp;
 use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::component::button::*;
+use gpui_kit::component::progress::ProgressCircle;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -219,6 +220,62 @@ pub(super) fn media_frame(width: i32, height: i32) -> (Pixels, Pixels) {
     (px(w.max(MIN_SIDE)), px(h.max(MIN_SIDE)))
 }
 
+/// Hover group for a media frame: the pause disc shows only on hover
+/// while the clip plays.
+const MEDIA_VISUAL_GROUP: &str = "media-visual";
+
+/// What the round status disc centered on a photo/video/GIF frame shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum MediaDisc {
+    Download,
+    /// Downloading — the fraction once TDLib knows the total size.
+    Progress(Option<f32>),
+    Play,
+    Pause,
+}
+
+/// Telegram-style status disc: a dark translucent circle holding a
+/// download arrow, a progress ring, or play/pause.
+pub(super) fn media_disc(id: impl Into<ElementId>, state: MediaDisc) -> Stateful<Div> {
+    let inner: AnyElement = match state {
+        MediaDisc::Progress(fraction) => ProgressCircle::new("media-disc-ring")
+            .size(px(34.))
+            .color(gpui_kit::white())
+            .loading(fraction.is_none())
+            .value(fraction.unwrap_or(0.) * 100.)
+            .accessibility_label("Downloading")
+            .into_any_element(),
+        MediaDisc::Download | MediaDisc::Play | MediaDisc::Pause => {
+            let icon = match state {
+                MediaDisc::Download => gpui_kit::assets::IconName::ArrowDown,
+                MediaDisc::Pause => gpui_kit::assets::IconName::Pause,
+                _ => gpui_kit::assets::IconName::Play,
+            };
+            Icon::new(icon)
+                .size(px(22.))
+                .text_color(gpui_kit::white())
+                .into_any_element()
+        }
+    };
+    div()
+        .id(id)
+        .size(px(48.))
+        .flex_none()
+        .rounded_full()
+        .bg(gpui_kit::black().opacity(0.5))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(inner)
+}
+
+/// Download fraction of `file_id`, when TDLib reported a total.
+fn download_fraction(file_id: FileId, files: &HashMap<i32, ParsedFile>) -> Option<f32> {
+    files
+        .get(&file_id.0)
+        .and_then(ParsedFile::download_progress)
+}
+
 pub(super) fn photo_attachment(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
@@ -276,13 +333,8 @@ pub(super) fn photo_attachment(
         .get(&open_id.0)
         .and_then(|f| f.usable_path())
         .is_some();
-    let status = if photo.is_secret || photo.has_spoiler {
-        photo.placeholder_label(downloading_now, ready)
-    } else if downloading_now {
-        "Downloading…".into()
-    } else {
-        "Click to load".into()
-    };
+    // Secret and spoiler photos keep a text label; the rest show a disc.
+    let status = photo.placeholder_label(downloading_now, ready);
     let viewable = !photo.is_secret && !photo.has_spoiler;
     let viewer_open = viewable.then_some(viewer).flatten();
     let has_viewer_open = viewer_open.is_some();
@@ -342,20 +394,33 @@ pub(super) fn photo_attachment(
                     }))
             },
         )
-        .child(
-            div()
-                .text_xs()
-                .when(has_preview, |this| {
-                    // Over the preview: a legible pill.
-                    this.px_2()
-                        .py_0p5()
-                        .rounded_full()
-                        .bg(gpui_kit::black().opacity(0.45))
-                        .text_color(gpui_kit::white())
-                })
-                .when(!has_preview, |this| this.text_color(text_bright()))
-                .child(status),
-        )
+        .map(|this| {
+            if viewable {
+                this.child(media_disc(
+                    ("photo-disc", row_id),
+                    if downloading_now {
+                        MediaDisc::Progress(download_fraction(open_id, files))
+                    } else {
+                        MediaDisc::Download
+                    },
+                ))
+            } else {
+                this.child(
+                    div()
+                        .text_xs()
+                        .when(has_preview, |this| {
+                            // Over the preview: a legible pill.
+                            this.px_2()
+                                .py_0p5()
+                                .rounded_full()
+                                .bg(gpui_kit::black().opacity(0.45))
+                                .text_color(gpui_kit::white())
+                        })
+                        .when(!has_preview, |this| this.text_color(text_bright()))
+                        .child(status),
+                )
+            }
+        })
         .into_any_element()
 }
 
@@ -413,29 +478,20 @@ pub(super) fn animation_attachment(
             })
             .into_any_element()
     } else {
-        let label = if blocked {
-            "GIF".to_string()
-        } else if downloading_now {
-            "GIF — downloading…".into()
-        } else if animation.width > 0 && animation.height > 0 {
-            format!(
-                "GIF {}×{} — not downloaded",
-                animation.width, animation.height
-            )
-        } else {
-            "GIF — not downloaded".into()
-        };
         div()
             .id(("gif-ph", row_id))
             .w(frame_w)
             .h(frame_h)
             .rounded_md()
-            .bg(accent_strong())
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(div().text_xs().text_color(text_on_fill()).child(label))
+            .bg(fill_muted())
             .into_any_element()
+    };
+    let gif_disc = if downloading_now && !playing {
+        MediaDisc::Progress(download_fraction(play_id, files))
+    } else if playing {
+        MediaDisc::Pause
+    } else {
+        MediaDisc::Play
     };
     div()
         .id(("gif-row", row_id))
@@ -443,31 +499,60 @@ pub(super) fn animation_attachment(
         .flex_col()
         .gap_1()
         .child(
-            div().relative().child(picture).child(
-                div()
-                    .absolute()
-                    .top_1()
-                    .left_1()
-                    .px_1()
-                    .rounded_sm()
-                    .bg(bg_deep())
-                    .text_xs()
-                    .text_color(text_bright())
-                    .child(if playing { "GIF · playing" } else { "GIF" }),
-            ),
-        )
-        .child(
-            Button::new(format!("gif-play-{row_id}"))
-                .label(play_label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if blocked {
-                        return;
-                    }
-                    if let Some((chat_id, sponsored_id)) = sponsored {
-                        this.click_sponsored_message(chat_id, sponsored_id, true, cx);
-                    }
-                    this.toggle_animation_playback(message_id, play_id, mime.clone(), cx);
-                })),
+            div()
+                .id(("gif-visual", row_id))
+                .relative()
+                .group(MEDIA_VISUAL_GROUP)
+                .child(picture)
+                .child(
+                    div()
+                        .absolute()
+                        .top_1()
+                        .left_1()
+                        .px_1p5()
+                        .rounded_md()
+                        .bg(gpui_kit::black().opacity(0.5))
+                        .text_xs()
+                        .text_color(gpui_kit::white())
+                        .child("GIF"),
+                )
+                .when(!blocked, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                media_disc(("gif-disc", row_id), gif_disc)
+                                    .role(gpui_kit::Role::Button)
+                                    .aria_label(play_label)
+                                    .cursor_pointer()
+                                    .when(playing, |disc| {
+                                        disc.invisible()
+                                            .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible())
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        if let Some((chat_id, sponsored_id)) = sponsored {
+                                            this.click_sponsored_message(
+                                                chat_id,
+                                                sponsored_id,
+                                                true,
+                                                cx,
+                                            );
+                                        }
+                                        this.toggle_animation_playback(
+                                            message_id,
+                                            play_id,
+                                            mime.clone(),
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                    )
+                }),
         )
         .into_any_element()
 }
@@ -531,26 +616,26 @@ pub(super) fn video_attachment(
             })
             .into_any_element()
     } else {
-        let label = if blocked {
-            "Video".to_string()
-        } else if downloading_now {
-            "Video — downloading…".into()
-        } else if video.width > 0 && video.height > 0 {
-            format!("Video {}×{} — not downloaded", video.width, video.height)
-        } else {
-            "Video — not downloaded".into()
-        };
         div()
             .id(("video-ph", row_id))
             .w(frame_w)
             .h(frame_h)
             .rounded_md()
-            .bg(success_bg())
+            .bg(fill_muted())
             .flex()
             .items_center()
             .justify_center()
-            .child(div().text_xs().text_color(text_on_fill()).child(label))
+            .when(blocked, |this| {
+                this.child(div().text_xs().text_color(text_muted()).child("Video"))
+            })
             .into_any_element()
+    };
+    let video_disc = if downloading_now && !playing {
+        MediaDisc::Progress(download_fraction(play_id, files))
+    } else if playing {
+        MediaDisc::Pause
+    } else {
+        MediaDisc::Play
     };
     div()
         .id(("video-row", row_id))
@@ -575,52 +660,61 @@ pub(super) fn video_attachment(
                             this.open_media_viewer(chat_id, message_id, cx);
                         }))
                 })
+                .group(MEDIA_VISUAL_GROUP)
                 .child(picture)
-                .child(
-                    div()
-                        .absolute()
-                        .top_1()
-                        .left_1()
-                        .px_1()
-                        .rounded_sm()
-                        .bg(bg_deep())
-                        .text_xs()
-                        .text_color(text_bright())
-                        .child(if playing { "Video · playing" } else { "Video" }),
-                )
                 .child(
                     div()
                         .absolute()
                         .bottom_1()
                         .left_1()
-                        .px_1()
-                        .rounded_sm()
-                        .bg(bg_deep())
+                        .px_1p5()
+                        .rounded_md()
+                        .bg(gpui_kit::black().opacity(0.5))
                         .text_xs()
-                        .text_color(text_bright())
+                        .text_color(gpui_kit::white())
                         .child(duration),
                 )
+                .when(!blocked, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                media_disc(("video-disc", row_id), video_disc)
+                                    .role(gpui_kit::Role::Button)
+                                    .aria_label(play_label)
+                                    .cursor_pointer()
+                                    .when(playing, |disc| {
+                                        disc.invisible()
+                                            .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible())
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        // The frame around the disc opens the viewer.
+                                        cx.stop_propagation();
+                                        if let Some((chat_id, sponsored_id)) = sponsored {
+                                            this.click_sponsored_message(
+                                                chat_id,
+                                                sponsored_id,
+                                                true,
+                                                cx,
+                                            );
+                                        }
+                                        this.toggle_video_playback(
+                                            message_id,
+                                            play_id,
+                                            mime.clone(),
+                                            start_timestamp,
+                                            None,
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                    )
+                })
         })
-        .child(
-            Button::new(format!("video-play-{row_id}"))
-                .label(play_label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if blocked {
-                        return;
-                    }
-                    if let Some((chat_id, sponsored_id)) = sponsored {
-                        this.click_sponsored_message(chat_id, sponsored_id, true, cx);
-                    }
-                    this.toggle_video_playback(
-                        message_id,
-                        play_id,
-                        mime.clone(),
-                        start_timestamp,
-                        None,
-                        cx,
-                    );
-                })),
-        )
         .into_any_element()
 }
 
@@ -636,14 +730,20 @@ pub(super) fn transcription_row(
     chat_id: ChatId,
     message_id: MessageId,
     transcription: &Option<SpeechRecognition>,
+    accent: Hsla,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    let row = message_id.0 as u64;
     match transcription {
         None => div()
             .child(
-                Button::new(format!("transcribe-{row}", row = message_id.0))
-                    .label("Transcribe")
-                    .tooltip("Send speech-recognition request to Telegram")
+                inline_link(("transcribe", row), "Transcribe", accent)
+                    .tooltip(|window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(
+                            "Send speech-recognition request to Telegram",
+                        )
+                        .build(window, cx)
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.request_transcription(chat_id, message_id, cx);
                     })),
@@ -651,7 +751,7 @@ pub(super) fn transcription_row(
             .into_any_element(),
         Some(SpeechRecognition::Pending { partial_text }) => div()
             .text_xs()
-            .text_color(text_muted())
+            .opacity(0.7)
             .child(if partial_text.is_empty() {
                 "Transcribing…".to_string()
             } else {
@@ -659,26 +759,26 @@ pub(super) fn transcription_row(
             })
             .into_any_element(),
         Some(SpeechRecognition::Text { text }) => div()
-            .text_xs()
-            .text_color(text_bright())
+            .text_sm()
             .child(format!("“{text}”"))
             .into_any_element(),
         Some(SpeechRecognition::Error { message }) => div()
             .flex()
-            .flex_col()
-            .gap_1()
+            .flex_wrap()
+            .items_center()
+            .gap_2()
+            .text_xs()
             .child(
                 div()
-                    .text_xs()
-                    .text_color(danger())
+                    .opacity(0.7)
                     .child(format!("Transcription failed: {message}")),
             )
             .child(
-                Button::new(format!("transcribe-retry-{row}", row = message_id.0))
-                    .label("Retry")
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                inline_link(("transcribe-retry", row), "Retry", accent).on_click(cx.listener(
+                    move |this, _, _, cx| {
                         this.request_transcription(chat_id, message_id, cx);
-                    })),
+                    },
+                )),
             )
             .into_any_element(),
     }
@@ -853,6 +953,7 @@ pub(super) fn video_note_attachment(
             chat_id,
             message_id,
             &note.transcription,
+            cx.theme().primary,
             cx,
         ))
         .into_any_element()
@@ -945,27 +1046,36 @@ pub(super) fn sticker_label(sticker: &quill::telegram::envelope::StickerContent)
     }
 }
 
-pub(super) fn waveform_row(row_key: u64, bars: &[u8]) -> impl IntoElement {
+/// Voice waveform bars; the first `played` fraction is drawn solid, the
+/// rest faded, so the waveform doubles as the progress indicator.
+pub(super) fn waveform_row(
+    row_key: u64,
+    bars: &[u8],
+    color: Hsla,
+    played: f32,
+) -> impl IntoElement {
     let mut row = div()
         .id(("waveform", row_key))
         .flex()
-        .items_end()
-        .gap_0()
-        .h(px(28.));
+        .items_center()
+        .gap(px(2.))
+        .h(px(24.));
     let shown: Vec<u8> = if bars.is_empty() {
         vec![6, 10, 14, 8, 12]
     } else {
         bars.iter().copied().take(48).collect()
     };
+    let count = shown.len().max(1) as f32;
     for (index, bar) in shown.into_iter().enumerate() {
-        let h = 4.0 + f32::from(bar.min(31)) * 0.7;
+        let h = 3.0 + f32::from(bar.min(31)) * 0.65;
+        let lit = (index as f32 + 0.5) / count <= played;
         row = row.child(
             div()
                 .id(("wave-bar", row_key * 64 + index as u64))
-                .w(px(3.))
+                .w(px(2.))
                 .h(px(h))
-                .rounded_sm()
-                .bg(accent()),
+                .rounded_full()
+                .bg(if lit { color } else { color.opacity(0.35) }),
         );
     }
     row
@@ -975,31 +1085,106 @@ pub(super) fn waveform_row(row_key: u64, bars: &[u8]) -> impl IntoElement {
 /// `Slider` on the active row — click-to-seek and drag, with the UI layer
 /// restarting ffplay at the released offset via `-ss` — and a static
 /// track + fill on every other audio/voice row.
-pub(super) fn seek_bar_element(row_key: u64, seek: &SeekBarView) -> AnyElement {
+pub(super) fn seek_bar_element(row_key: u64, seek: &SeekBarView, color: Hsla) -> AnyElement {
     if let Some(slider) = &seek.slider {
         div()
             .id(("seek-bar", row_key))
             .role(gpui_kit::Role::Group)
             .aria_label("Playback position")
             .w_full()
-            .child(Slider::new(slider).bg(accent()).text_color(text_on_fill()))
+            .child(Slider::new(slider).bg(color).text_color(color))
             .into_any_element()
     } else {
         div()
             .id(("seek-bar", row_key))
             .w_full()
-            .h(px(6.))
+            .h(px(3.))
             .rounded_full()
-            .bg(border())
+            .bg(color.opacity(0.25))
             .child(
                 div()
                     .h_full()
                     .w(relative(seek.fraction() as f32))
                     .rounded_full()
-                    .bg(accent()),
+                    .bg(color),
             )
             .into_any_element()
     }
+}
+
+/// Accent color for controls drawn inside a bubble: the theme primary on
+/// incoming bubbles, white on the accent-filled outgoing ones.
+pub(super) fn bubble_accent(outgoing: bool, cx: &App) -> Hsla {
+    if outgoing {
+        gpui_kit::white()
+    } else {
+        cx.theme().primary
+    }
+}
+
+/// A compact text action inside a bubble ("Show in folder", "Transcribe",
+/// "1.5×") in the bubble accent color.
+pub(super) fn inline_link(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    color: Hsla,
+) -> Stateful<Div> {
+    let label = label.into();
+    div()
+        .id(id)
+        .role(gpui_kit::Role::Button)
+        .aria_label(label.clone())
+        .tab_index(0)
+        .cursor_pointer()
+        .text_xs()
+        .font_medium()
+        .text_color(color)
+        .hover(|style| style.underline())
+        .child(label)
+}
+
+/// Round accent action disc used by voice, audio and document rows: an
+/// icon, optionally inside a progress ring (`ring: Some(None)` spins).
+pub(super) fn action_disc(
+    id: impl Into<ElementId>,
+    outgoing: bool,
+    icon: gpui_kit::assets::IconName,
+    ring: Option<Option<f32>>,
+    label: &'static str,
+    cx: &App,
+) -> Stateful<Div> {
+    let id = id.into();
+    let (bg, fg) = if outgoing {
+        (gpui_kit::white().opacity(0.22), gpui_kit::white())
+    } else {
+        (cx.theme().primary, gpui_kit::white())
+    };
+    div()
+        .id(id.clone())
+        .relative()
+        .size(px(44.))
+        .flex_none()
+        .rounded_full()
+        .bg(bg)
+        .flex()
+        .items_center()
+        .justify_center()
+        .role(gpui_kit::Role::Button)
+        .aria_label(label)
+        .tab_index(0)
+        .cursor_pointer()
+        .when_some(ring, |this, fraction| {
+            this.child(
+                div().absolute().inset(px(3.)).child(
+                    ProgressCircle::new(ElementId::NamedChild(Arc::new(id), "ring".into()))
+                        .size_full()
+                        .color(fg)
+                        .loading(fraction.is_none())
+                        .value(fraction.unwrap_or(0.) * 100.),
+                ),
+            )
+        })
+        .child(Icon::new(icon).size(px(20.)).text_color(fg))
 }
 
 pub(super) fn voice_note_row(
@@ -1013,25 +1198,17 @@ pub(super) fn voice_note_row(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = note.file_id;
-    let ready = files
-        .get(&file_id.0)
-        .and_then(|file| file.usable_path())
-        .is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
     let bars = voice::waveform_bars_from_bytes(&note.waveform);
     let listened = note.is_listened;
     let note_duration = f64::from(note.duration);
     let active = seek.slider.is_some();
-    let play_label = if seek.is_playing {
-        "Pause"
-    } else if downloading_now {
-        "Downloading"
-    } else {
-        "Play"
-    };
+    let accent = bubble_accent(outgoing, cx);
     // Phase 4.6: the active row shows elapsed / total (tdesktop-style).
     let total = format_voice_duration(note.duration);
-    let mut meta = if active {
+    let meta = if downloading_now && !seek.is_playing {
+        "Downloading…".to_string()
+    } else if active {
         format!(
             "{} / {total}",
             format_voice_duration(seek.display_secs as i32)
@@ -1039,39 +1216,34 @@ pub(super) fn voice_note_row(
     } else {
         total
     };
-    if !outgoing && !note.is_listened && !active {
-        meta = format!("New · {meta}");
-    }
-    if !ready && !downloading_now {
-        meta = format!("{meta} · not downloaded");
+    let unheard = !outgoing && !note.is_listened && !active;
+    let (icon, label, ring) = if seek.is_playing {
+        (gpui_kit::assets::IconName::Pause, "Pause", None)
     } else if downloading_now {
-        meta = format!("{meta} · downloading…");
-    } else if seek.is_playing {
-        meta = format!("Playing · {meta}");
-    } else if active {
-        meta = format!("{meta} · paused");
-    }
+        (
+            gpui_kit::assets::IconName::X,
+            "Downloading",
+            Some(download_fraction(file_id, files)),
+        )
+    } else {
+        (gpui_kit::assets::IconName::Play, "Play voice message", None)
+    };
+    let row_key = message_id.0 as u64;
     div()
-        .id(("voice-note", message_id.0 as u64))
-        .mt_2()
-        .px_3()
-        .py_2()
-        .rounded_md()
-        .border_1()
-        .border_color(if active { success() } else { text_muted() })
-        .bg(bg_subtle())
+        .id(("voice-note", row_key))
+        .mt_1()
         .flex()
         .flex_col()
         .gap_1()
+        .min_w(px(220.))
         .child(
             div()
                 .flex()
                 .items_center()
-                .gap_2()
+                .gap_3()
                 .child(
-                    Button::new(format!("voice-play-{}", message_id.0))
-                        .label(play_label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                    action_disc(("voice-play", row_key), outgoing, icon, ring, label, cx).on_click(
+                        cx.listener(move |this, _, _, cx| {
                             this.toggle_voice_playback(
                                 chat_id,
                                 message_id,
@@ -1080,41 +1252,51 @@ pub(super) fn voice_note_row(
                                 note_duration,
                                 cx,
                             );
-                        })),
+                        }),
+                    ),
                 )
                 .child(
                     div()
-                        .text_sm()
-                        .font_medium()
-                        .text_color(text_bright())
-                        .child("Voice message"),
-                )
-                .child(div().text_xs().text_color(text_bright()).child(meta)),
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_0p5()
+                        .child(waveform_row(row_key, &bars, accent, seek.fraction() as f32))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .text_xs()
+                                .child(div().opacity(0.7).child(meta))
+                                // Unheard incoming note: a small accent dot.
+                                .when(unheard, |this| {
+                                    this.child(div().size(px(6.)).rounded_full().bg(accent))
+                                }),
+                        ),
+                ),
         )
-        .child(waveform_row(message_id.0 as u64, &bars))
-        .child(seek_bar_element(message_id.0 as u64, seek))
+        .when(active, |this| {
+            this.child(seek_bar_element(row_key, seek, accent))
+                // MED1: speed + mute on the active row.
+                .child(row_playback_controls(row_key, "voice", seek, accent, cx))
+        })
         // MED2: transcription (schema 1.8.67 `speechRecognitionResult`
         // on `voiceNote`).
         .child(transcription_row(
             chat_id,
             message_id,
             &note.transcription,
+            accent,
             cx,
         ))
-        // MED1: speed + mute on the active row.
-        .when(active, |this| {
-            this.child(row_playback_controls(
-                message_id.0 as u64,
-                "voice",
-                seek,
-                cx,
-            ))
-        })
         .into_any_element()
 }
 
 pub(super) fn audio_row(
     message_id: MessageId,
+    outgoing: bool,
     audio: &quill::telegram::envelope::AudioContent,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
@@ -1123,20 +1305,10 @@ pub(super) fn audio_row(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = audio.file_id;
-    let ready = files
-        .get(&file_id.0)
-        .and_then(|file| file.usable_path())
-        .is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
     let audio_duration = f64::from(audio.duration);
     let active = seek.slider.is_some();
-    let play_label = if seek.is_playing {
-        "Pause"
-    } else if downloading_now {
-        "Downloading"
-    } else {
-        "Play"
-    };
+    let accent = bubble_accent(outgoing, cx);
     let title = if !audio.title.is_empty() {
         audio.title.clone()
     } else if !audio.file_name.is_empty() {
@@ -1154,116 +1326,105 @@ pub(super) fn audio_row(
     } else {
         total
     };
-    let mut meta = duration_label;
-    if !audio.performer.is_empty() {
-        meta = format!("{} · {meta}", audio.performer);
-    }
-    if seek.is_playing {
-        meta = format!("Playing · {meta}");
+    let meta = if downloading_now && !seek.is_playing {
+        "Downloading…".to_string()
+    } else if audio.performer.is_empty() {
+        duration_label
+    } else {
+        format!("{} · {duration_label}", audio.performer)
+    };
+    let (icon, label, ring) = if seek.is_playing {
+        (gpui_kit::assets::IconName::Pause, "Pause", None)
     } else if downloading_now {
-        meta = format!("{meta} · downloading…");
-    } else if !ready {
-        meta = format!("{meta} · not downloaded");
-    } else if active {
-        meta = format!("{meta} · paused");
-    }
+        (
+            gpui_kit::assets::IconName::X,
+            "Downloading",
+            Some(download_fraction(file_id, files)),
+        )
+    } else {
+        (gpui_kit::assets::IconName::Play, "Play", None)
+    };
+    let row_key = message_id.0 as u64;
     let cover_id = audio.cover_file_id().unwrap_or(FileId(0));
     let cover = files
         .get(&cover_id.0)
         .and_then(|file| file.usable_path())
         .and_then(|path| sandboxed_display_path(path, media_roots));
-    let cover_box = if let Some(path) = cover {
-        img(path)
-            .id(("audio-cover", message_id.0 as u64))
-            .w(px(56.))
-            .h(px(56.))
+    let play = cx.listener(move |this, _, _, cx| {
+        this.toggle_audio_playback(message_id, file_id, audio_duration, cx);
+    });
+    // Album art, when there is one, carries the play glyph on a scrim;
+    // otherwise the plain accent disc.
+    let disc = match cover {
+        Some(path) => div()
+            .id(("audio-play", row_key))
+            .relative()
+            .size(px(44.))
+            .flex_none()
             .rounded_md()
-            .object_fit(ObjectFit::Cover)
-            .with_fallback(move || {
+            .overflow_hidden()
+            .role(gpui_kit::Role::Button)
+            .aria_label(label)
+            .tab_index(0)
+            .cursor_pointer()
+            .child(
+                img(path)
+                    .id(("audio-cover", row_key))
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
+            )
+            .child(
                 div()
-                    .w(px(56.))
-                    .h(px(56.))
-                    .rounded_md()
-                    .bg(fill_muted())
+                    .absolute()
+                    .inset_0()
+                    .bg(gpui_kit::black().opacity(0.35))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child("Audio")
-                    .into_any_element()
-            })
-            .into_any_element()
-    } else {
-        div()
-            .id(("audio-cover-ph", message_id.0 as u64))
-            .w(px(56.))
-            .h(px(56.))
-            .rounded_md()
-            .bg(fill_muted())
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(div().text_xs().text_color(text_bright()).child("Audio"))
-            .into_any_element()
+                    .child(Icon::new(icon).size(px(20.)).text_color(gpui_kit::white())),
+            )
+            .on_click(play),
+        None => {
+            action_disc(("audio-play", row_key), outgoing, icon, ring, label, cx).on_click(play)
+        }
     };
     div()
-        .id(("audio", message_id.0 as u64))
-        .mt_2()
-        .px_3()
-        .py_2()
-        .rounded_md()
-        .border_1()
-        .border_color(if active { success() } else { text_muted() })
-        .bg(bg_subtle())
+        .id(("audio", row_key))
+        .mt_1()
         .flex()
-        .items_center()
-        .gap_3()
-        .child(cover_box)
+        .flex_col()
+        .gap_1()
+        .min_w(px(220.))
         .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .gap_1()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_medium()
-                        .text_color(text_bright())
-                        .child(title),
-                )
-                .child(div().text_xs().text_color(text_primary()).child(meta))
-                .child(seek_bar_element(message_id.0 as u64, seek))
-                .child(
-                    Button::new(format!("audio-play-{}", message_id.0))
-                        .label(play_label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_audio_playback(message_id, file_id, audio_duration, cx);
-                        })),
-                )
-                // MED1: speed + mute on the active row.
-                .when(active, |this| {
-                    this.child(row_playback_controls(
-                        message_id.0 as u64,
-                        "audio",
-                        seek,
-                        cx,
-                    ))
-                }),
+            div().flex().items_center().gap_3().child(disc).child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_0p5()
+                    .child(div().text_sm().font_medium().truncate().child(title))
+                    .child(div().text_xs().opacity(0.7).truncate().child(meta)),
+            ),
         )
+        .when(active, |this| {
+            this.child(seek_bar_element(row_key, seek, accent))
+                // MED1: speed + mute on the active row.
+                .child(row_playback_controls(row_key, "audio", seek, accent, cx))
+        })
         .into_any_element()
 }
 
-/// MED3: document row. Primary click per state (TGX: tapping downloading
-/// media cancels it): ready → open with the system viewer; downloading →
-/// cancel (`cancelDownloadFile`); failed / not downloaded → download
-/// (retry). A second action row offers "Show in folder" (ready), "Cancel"
-/// + "Pause"/"Resume" (downloading — the toggle only appears for
-/// user-initiated listed downloads), "Retry" (failed). Progress comes from
-/// `file.download_progress()` — `updateFile`'s `downloaded_size` over the
-/// known total (TGX `TD.getFileProgress` semantics).
+/// A document row (tdesktop `HistoryDocument`): a round action disc —
+/// download, progress ring with cancel, open, or retry — then the name and
+/// a compact meta line ("450 KB · PDF", "1.2 MB of 3.4 MB") carrying the
+/// secondary actions (Show in folder, Pause/Resume).
 pub(super) fn document_chip(
     row_id: u64,
     doc: &quill::telegram::envelope::DocumentContent,
+    // The disc is accent-filled; on an accent outgoing bubble it switches
+    // to a translucent white one.
+    outgoing: bool,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     failed: &std::collections::HashSet<i32>,
@@ -1282,47 +1443,97 @@ pub(super) fn document_chip(
     let progress = file.and_then(|f| f.download_progress());
     let size = file.map(|f| f.display_size()).unwrap_or(0);
     let size_label = format_bytes(size);
-    let state = if ready {
-        "ready".to_string()
-    } else if paused_now {
-        "paused".to_string()
-    } else if downloading_now {
-        match progress {
-            Some(p) => format!("downloading… {}%", (p * 100.0).round() as i32),
-            None => "downloading…".to_string(),
+    let kind = document_kind_label(&doc.file_name, &doc.mime_type);
+    let meta = if downloading_now {
+        let done = file.map(|f| f.local.downloaded_size).unwrap_or(0);
+        let mut text = match (done > 0, size_label.is_empty()) {
+            (true, false) => format!("{} of {}", format_bytes(done), size_label),
+            _ => "Downloading…".to_string(),
+        };
+        if paused_now {
+            text.push_str(" · paused");
         }
+        text
     } else if failed_now {
-        "download failed".to_string()
+        "Download failed".to_string()
     } else {
-        "not downloaded".to_string()
+        [size_label.as_str(), kind.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
     };
-    let mut detail = doc.mime_type.clone();
-    if !size_label.is_empty() {
-        if !detail.is_empty() {
-            detail.push_str(" · ");
-        }
-        detail.push_str(&size_label);
-    }
-    if !detail.is_empty() {
-        detail.push_str(" · ");
-    }
-    detail.push_str(&state);
     let name = if doc.file_name.is_empty() {
         "Document".to_string()
     } else {
         doc.file_name.clone()
     };
-    let action_label = if ready {
-        Some("Show in folder")
-    } else if downloading_now {
-        Some("Cancel")
-    } else if failed_now {
-        Some("Retry")
+    let (disc_bg, disc_fg) = if outgoing {
+        (gpui_kit::white().opacity(0.22), gpui_kit::white())
     } else {
-        None
+        (cx.theme().primary, gpui_kit::white())
     };
-    // Slice media-downloads-pause: Pause/Resume toggle beside Cancel, only
-    // for user-initiated (listed) downloads — `None` hides it.
+    let (disc_icon, disc_label) = if ready {
+        (gpui_kit::assets::IconName::File, "Open")
+    } else if downloading_now {
+        (gpui_kit::assets::IconName::X, "Cancel download")
+    } else if failed_now {
+        (gpui_kit::assets::IconName::RotateCcw, "Retry download")
+    } else {
+        (gpui_kit::assets::IconName::ArrowDown, "Download")
+    };
+    let primary_action = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
+        if ready {
+            this.open_downloaded_file(file_id, cx);
+        } else if downloading_now {
+            this.cancel_media_download(file_id, cx);
+        } else {
+            this.request_media_download(file_id, sponsored, cx);
+        }
+    };
+    let disc = div()
+        .id(("doc-disc", row_id))
+        .relative()
+        .size(px(44.))
+        .flex_none()
+        .rounded_full()
+        .bg(disc_bg)
+        .flex()
+        .items_center()
+        .justify_center()
+        .role(gpui_kit::Role::Button)
+        .aria_label(disc_label)
+        .tab_index(0)
+        .cursor_pointer()
+        .pressable(cx.theme())
+        .when(downloading_now, |this| {
+            this.child(
+                div().absolute().inset(px(3.)).child(
+                    ProgressCircle::new(("doc-ring", row_id))
+                        .size_full()
+                        .color(disc_fg)
+                        .loading(progress.is_none() && !paused_now)
+                        .value(progress.unwrap_or(0.) * 100.),
+                ),
+            )
+        })
+        .child(Icon::new(disc_icon).size(px(20.)).text_color(disc_fg))
+        .on_click(cx.listener(move |this, _, _, cx| primary_action(this, cx)));
+    let link_color = (!outgoing).then_some(cx.theme().primary);
+    let link = |id: (&'static str, u64), label: &'static str| {
+        div()
+            .id(id)
+            .when_some(link_color, |this, color| this.text_color(color))
+            .role(gpui_kit::Role::Button)
+            .aria_label(label)
+            .tab_index(0)
+            .cursor_pointer()
+            .font_medium()
+            .hover(|style| style.underline())
+            .child(label)
+    };
+    // Slice media-downloads-pause: Pause/Resume only for user-initiated
+    // (listed) downloads — `None` hides it.
     let pause_label = if downloading_now {
         paused.map(|is_paused| if is_paused { "Resume" } else { "Pause" })
     } else {
@@ -1330,98 +1541,86 @@ pub(super) fn document_chip(
     };
     div()
         .id(("doc-chip", row_id))
-        .mt_2()
-        .px_3()
-        .py_2()
-        .rounded_md()
-        .border_1()
-        .border_color(text_muted())
-        .bg(bg_subtle())
+        .mt_1()
+        .flex()
+        .items_center()
+        .gap_3()
+        .min_w(px(220.))
+        .child(disc)
         .child(
             div()
-                .id(("doc-chip-name", row_id))
-                .role(gpui_kit::Role::Button)
-                .aria_label(format!("Open document {name}"))
-                .tab_index(0)
-                .cursor_pointer()
-                .pressable(cx.theme())
-                .child(div().text_sm().font_medium().child(name))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if ready {
-                        this.open_downloaded_file(file_id, cx);
-                    } else if downloading_now {
-                        this.cancel_media_download(file_id, cx);
-                    } else {
-                        this.request_media_download(file_id, sponsored, cx);
-                    }
-                })),
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .id(("doc-chip-name", row_id))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label(format!("Open document {name}"))
+                        .tab_index(0)
+                        .cursor_pointer()
+                        .text_sm()
+                        .font_medium()
+                        .truncate()
+                        .child(name)
+                        .on_click(cx.listener(move |this, _, _, cx| primary_action(this, cx))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_x_2()
+                        .text_xs()
+                        .child(div().opacity(0.7).child(meta))
+                        .when(ready, |this| {
+                            this.child(link(("doc-action", row_id), "Show in folder").on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.reveal_downloaded_file(file_id, cx);
+                                }),
+                            ))
+                        })
+                        .when(failed_now, |this| {
+                            this.child(link(("doc-action", row_id), "Retry").on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.request_media_download(file_id, sponsored, cx);
+                                },
+                            )))
+                        })
+                        .when_some(pause_label, |this, label| {
+                            this.child(link(("doc-pause", row_id), label).on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    if paused_now {
+                                        this.resume_media_download(file_id, cx);
+                                    } else {
+                                        this.pause_media_download(file_id, cx);
+                                    }
+                                },
+                            )))
+                        }),
+                ),
         )
-        .child(div().text_xs().text_color(text_primary()).child(detail))
-        .when(downloading_now, |this| {
-            this.child(
-                div()
-                    .id(("doc-progress", row_id))
-                    .w_full()
-                    .h(px(4.))
-                    .mt_1()
-                    .rounded_full()
-                    .bg(border())
-                    .child(
-                        div()
-                            .h_full()
-                            .w(relative(progress.unwrap_or(0.0)))
-                            .rounded_full()
-                            .bg(accent()),
-                    ),
-            )
-        })
-        .when_some(action_label, |this, label| {
-            this.child(
-                div()
-                    .id(("doc-action", row_id))
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(label)
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .mt_1()
-                    .text_xs()
-                    .text_color(accent())
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if ready {
-                            this.reveal_downloaded_file(file_id, cx);
-                        } else if downloading_now {
-                            this.cancel_media_download(file_id, cx);
-                        } else {
-                            this.request_media_download(file_id, sponsored, cx);
-                        }
-                    })),
-            )
-        })
-        .when_some(pause_label, |this, label| {
-            this.child(
-                div()
-                    .id(("doc-pause", row_id))
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(label)
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .mt_1()
-                    .text_xs()
-                    .text_color(accent())
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if paused_now {
-                            this.resume_media_download(file_id, cx);
-                        } else {
-                            this.pause_media_download(file_id, cx);
-                        }
-                    })),
-            )
-        })
         .into_any_element()
+}
+
+/// Short type tag for a document row: the file extension ("PDF", "ZIP"),
+/// else the MIME subtype, else nothing.
+pub(super) fn document_kind_label(file_name: &str, mime_type: &str) -> String {
+    let ext = std::path::Path::new(file_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| !ext.is_empty() && ext.len() <= 6);
+    match ext {
+        Some(ext) => ext.to_ascii_uppercase(),
+        None => mime_type
+            .split('/')
+            .nth(1)
+            .filter(|sub| !sub.is_empty() && sub.len() <= 12)
+            .map(str::to_ascii_uppercase)
+            .unwrap_or_default(),
+    }
 }
 
 /// MED3: display name for a downloads-manager row — the document's
@@ -1664,4 +1863,17 @@ pub(super) fn dice_row(row_id: u64, dice: &quill::telegram::envelope::DiceConten
                 .child(format!("Rolled {}", dice.value)),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::document_kind_label;
+
+    #[test]
+    fn document_kind_prefers_extension_then_mime_subtype() {
+        assert_eq!(document_kind_label("report.pdf", "application/pdf"), "PDF");
+        assert_eq!(document_kind_label("notes", "text/plain"), "PLAIN");
+        assert_eq!(document_kind_label("", ""), "");
+        assert_eq!(document_kind_label("weird.verylongext", ""), "");
+    }
 }
