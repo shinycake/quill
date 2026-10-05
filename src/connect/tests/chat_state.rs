@@ -1007,3 +1007,112 @@ fn chat_export_pages_history_until_a_page_adds_nothing() {
     assert!(export.done_paging);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn view_messages_reports_only_what_is_shown() {
+    // Opening a chat views only its newest message (Telegram X opens at the
+    // bottom and its viewport reports what is on screen); older loaded rows
+    // are viewed only when the UI reports them through `view_messages`.
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let views = |recorder: &RecordingSender| -> Vec<(String, Vec<i64>)> {
+        recorder
+            .snapshot()
+            .iter()
+            .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+            .filter(|v| v["@type"] == "viewMessages")
+            .map(|v| {
+                assert_eq!(v["force_read"], true);
+                let ids = v["message_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|id| id.as_i64().unwrap())
+                    .collect();
+                (v["@extra"].as_str().unwrap().to_string(), ids)
+            })
+            .collect()
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":3}}"#,
+    );
+    let history = driver
+        .select_chat(ChatId(7))
+        .unwrap()
+        .expect("history request");
+    let row = |id: i64| {
+        format!(
+            r#"{{"id":{id},"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}"#
+        )
+    };
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":3,"messages":[{},{},{}]}}"#,
+            history.0,
+            row(12),
+            row(11),
+            row(10)
+        ),
+    );
+    let sent = views(&recorder);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1, vec![12], "open views the newest message only");
+
+    // The UI reports rows on screen while the first view is in flight:
+    // they wait for it, then go out together.
+    assert_eq!(
+        driver
+            .view_messages(ChatId(7), &[MessageId(10), MessageId(11)])
+            .unwrap(),
+        None
+    );
+    assert_eq!(views(&recorder).len(), 1);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent[0].0),
+    );
+    let sent = views(&recorder);
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1].1, vec![10, 11]);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent[1].0),
+    );
+
+    // Already viewed rows are not re-sent; once the UI reports, a new
+    // incoming message waits until the UI shows it.
+    assert_eq!(
+        driver
+            .view_messages(ChatId(7), &[MessageId(11), MessageId(12)])
+            .unwrap(),
+        None
+    );
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"updateNewMessage","message":{}}}"#, row(13)),
+    );
+    assert_eq!(views(&recorder).len(), 2);
+    assert!(
+        driver
+            .view_messages(ChatId(7), &[MessageId(13)])
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(views(&recorder)[2].1, vec![13]);
+    // Reports for a chat that is not open are ignored.
+    assert_eq!(
+        driver.view_messages(ChatId(8), &[MessageId(1)]).unwrap(),
+        None
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

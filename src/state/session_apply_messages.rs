@@ -236,15 +236,20 @@ impl Session {
                 for message in &messages {
                     self.remember_files(&message.files);
                 }
+                let empty = messages.is_empty();
+                let rows: Vec<HistoryMessage> = messages
+                    .into_iter()
+                    .map(|message| history_message(message, false))
+                    .collect();
+                for row in &rows {
+                    self.index_poll(row);
+                }
                 let entry = self
                     .topic_histories
                     .entry((chat_id.0, forum_topic_id))
                     .or_default();
-                let empty = messages.is_empty();
-                for message in messages {
-                    entry
-                        .messages
-                        .insert(message.id.0, history_message(message, false));
+                for row in rows {
+                    entry.messages.insert(row.id.0, row);
                 }
                 if next_from_message_id.0 == 0 || empty {
                     entry.loaded_complete = true;
@@ -295,32 +300,26 @@ impl Session {
         // place; the row re-renders via `effective_content` (ephemeral
         // wins) and the chat-list preview refreshes when it's the
         // last message.
-        let updated = self
-            .histories
-            .get_mut(&chat_id.0)
-            .is_some_and(|history| history.update_ephemeral(message_id, ephemeral));
-        if updated {
-            let is_last = self
+        let updated = self.edit_loaded_message(chat_id, message_id, |message| {
+            message.ephemeral = ephemeral.clone();
+        });
+        if updated
+            && self.is_chat_last_message(chat_id, message_id)
+            && let Some(chat) = self.chats.get_mut(&chat_id.0)
+        {
+            let styled = self
                 .histories
                 .get(&chat_id.0)
-                .and_then(|history| history.messages.keys().next_back().copied())
-                == Some(message_id.0);
-            if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                let styled = self
-                    .histories
-                    .get(&chat_id.0)
-                    .and_then(|history| history.messages.get(&message_id.0))
-                    .map(|message| {
-                        let content =
-                            effective_content(&message.content, message.ephemeral.as_ref());
-                        let preview = content.preview();
-                        let style = preview_style(content, &preview);
-                        (preview, style)
-                    });
-                if let Some((preview, style)) = styled {
-                    chat.last_preview = preview;
-                    chat.last_preview_style = style;
-                }
+                .and_then(|history| history.messages.get(&message_id.0))
+                .map(|message| {
+                    let content = effective_content(&message.content, message.ephemeral.as_ref());
+                    let preview = content.preview();
+                    let style = preview_style(content, &preview);
+                    (preview, style)
+                });
+            if let Some((preview, style)) = styled {
+                chat.last_preview = preview;
+                chat.last_preview_style = style;
             }
         }
     }
@@ -347,21 +346,34 @@ impl Session {
         {
             slot.content = content.clone();
         }
-        let updated = self
-            .histories
-            .get_mut(&chat_id.0)
-            .is_some_and(|history| history.update_content(message_id, content));
-        if updated {
-            let is_last = self
-                .histories
-                .get(&chat_id.0)
-                .and_then(|history| history.messages.keys().next_back().copied())
-                == Some(message_id.0);
-            if is_last && let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                chat.last_preview = preview;
-                chat.last_preview_style = style;
-            }
+        let loaded = self.edit_loaded_message(chat_id, message_id, |message| {
+            message.content = content.clone();
+        });
+        if loaded && let MessageContent::Poll(poll) = &content {
+            self.poll_messages
+                .entry(poll.poll.id)
+                .or_default()
+                .insert((chat_id.0, message_id.0));
         }
+        // The row preview follows the chat's last message, loaded or not
+        // (Telegram X `TGChat.updateMessageContent`). The newest loaded
+        // row is not it after a jump, and while TDLib reports the last
+        // message as unknown there is nothing to refresh.
+        if self.is_chat_last_message(chat_id, message_id)
+            && let Some(chat) = self.chats.get_mut(&chat_id.0)
+        {
+            chat.last_preview = preview;
+            chat.last_preview_style = style;
+        }
+    }
+
+    /// Whether `message_id` is the chat's `last_message` as TDLib last
+    /// reported it (`updateChatLastMessage`).
+    fn is_chat_last_message(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.chats
+            .get(&chat_id.0)
+            .and_then(|chat| chat.last_message.as_ref())
+            .is_some_and(|last| last.id == message_id)
     }
 
     #[allow(clippy::too_many_arguments)]

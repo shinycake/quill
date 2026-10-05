@@ -5,6 +5,9 @@ impl Session {
     pub(crate) fn set_auth(&mut self, state: AuthorizationState) {
         if self.auth != state {
             self.requests.invalidate_auth();
+            // Download requests were dropped and files may be cleared
+            // below: every avatar gets one fresh look.
+            self.avatar_rescan = true;
         }
         if matches!(
             state,
@@ -13,6 +16,22 @@ impl Session {
                 | AuthorizationState::Closed
         ) {
             self.account_export = None;
+        }
+        // List paging belongs to one authorization. TDLib only leaves Ready
+        // through LoggingOut / Closing / Closed, so a later Ready (another
+        // login in this Session) must page every list from the start; the
+        // Ready entry resets too in case the leaving state was missed.
+        let entering_ready =
+            matches!(state, AuthorizationState::Ready) && self.auth != AuthorizationState::Ready;
+        if entering_ready
+            || matches!(
+                state,
+                AuthorizationState::LoggingOut | AuthorizationState::Closed
+            )
+        {
+            self.chats_exhausted = false;
+            self.archive_chats_exhausted = false;
+            self.folder_chats_exhausted.clear();
         }
         if matches!(state, AuthorizationState::Closed) {
             self.shutdown = ShutdownPhase::Closed;
@@ -152,6 +171,7 @@ impl Session {
         }
         let topic_id = message.topic_id;
         let row = history_message(message, pending);
+        self.index_poll(&row);
         let history = self.histories.entry(chat_id.0).or_default();
         history.upsert(row.clone());
         // Parity slice 4: a message addressed to a forum topic also lands
@@ -162,6 +182,47 @@ impl Session {
             && let Some(topic_history) = self.topic_histories.get_mut(&(chat_id.0, topic_id))
         {
             topic_history.upsert(row);
+        }
+    }
+
+    /// Apply `edit` to every loaded copy of one message: the row in the
+    /// chat's main history and the row in any loaded forum-topic history
+    /// of that chat (the topic view reads `topic_histories` only, and
+    /// per-message updates carry no topic id). Returns whether any copy
+    /// was found.
+    pub(crate) fn edit_loaded_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        mut edit: impl FnMut(&mut HistoryMessage),
+    ) -> bool {
+        let mut found = false;
+        if let Some(message) = self
+            .histories
+            .get_mut(&chat_id.0)
+            .and_then(|history| history.messages.get_mut(&message_id.0))
+        {
+            edit(message);
+            found = true;
+        }
+        for ((topic_chat_id, _), topic) in self.topic_histories.iter_mut() {
+            if *topic_chat_id == chat_id.0
+                && let Some(message) = topic.messages.get_mut(&message_id.0)
+            {
+                edit(message);
+                found = true;
+            }
+        }
+        found
+    }
+
+    /// Record a loaded poll row in `poll_messages` (see `apply_update_poll`).
+    pub(crate) fn index_poll(&mut self, message: &HistoryMessage) {
+        if let MessageContent::Poll(content) = &message.content {
+            self.poll_messages
+                .entry(content.poll.id)
+                .or_default()
+                .insert((message.chat_id.0, message.id.0));
         }
     }
 

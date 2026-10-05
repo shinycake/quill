@@ -1160,3 +1160,47 @@ fn code_info_answer_stores_pending_number_for_matching_request() {
     assert!(!session.change_number_loading);
     assert!(session.change_number_error.is_none());
 }
+
+#[test]
+fn per_message_updates_reach_loaded_topic_histories() {
+    // The topic view reads `topic_histories` only, so every per-message
+    // update must reach its copy of the row, not just the main history.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(16));
+    let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            "{{\"@type\":\"foundChatMessages\",\"@extra\":\"{}\",{}}}",
+            extra.0,
+            r#""total_count":2,"next_from_message_id":0,"messages":[{"id":50,"chat_id":16,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"before","entities":[]}}},{"id":60,"chat_id":16,"is_outgoing":false,"content":{"@type":"messagePoll","poll":{"@type":"poll","id":9001,"question":{"@type":"formattedText","text":"Lunch?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Sushi","entities":[]},"voter_count":1,"vote_percentage":100,"is_chosen":false}],"total_voter_count":1,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{"@type":"pollTypeRegular"}},"description":{"@type":"formattedText","text":"","entities":[]},"can_add_option":false}}]"#
+        ),
+    );
+    for update in [
+        r#"{"@type":"updateMessageContent","chat_id":16,"message_id":50,"new_content":{"@type":"messageText","text":{"@type":"formattedText","text":"after","entities":[]}}}"#,
+        r#"{"@type":"updateMessageIsPinned","chat_id":16,"message_id":50,"is_pinned":true}"#,
+        r#"{"@type":"updateMessageInteractionInfo","chat_id":16,"message_id":50,"interaction_info":{"@type":"messageInteractionInfo","view_count":7,"forward_count":0,"reply_info":null,"reactions":null}}"#,
+        r#"{"@type":"updateMessageEdited","chat_id":16,"message_id":50,"edit_date":1700000001,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"New","icon_custom_emoji_id":0,"type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AA=="}}]]}}"#,
+        r#"{"@type":"updatePoll","poll":{"@type":"poll","id":9001,"question":{"@type":"formattedText","text":"Lunch?","entities":[]},"options":[{"@type":"pollOption","id":"a","text":{"@type":"formattedText","text":"Sushi","entities":[]},"voter_count":2,"vote_percentage":100,"is_chosen":true}],"total_voter_count":2,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{"@type":"pollTypeRegular"}}}"#,
+    ] {
+        apply_json(&mut session, &seq, &sink, update);
+    }
+    let topic = &session.topic_histories[&(16, 2)];
+    let row = &topic.messages[&50];
+    assert!(
+        matches!(&row.content, MessageContent::Text(text) if text.text == "after"),
+        "{:?}",
+        row.content
+    );
+    assert!(row.is_pinned);
+    assert_eq!(row.interaction_info.as_ref().map(|i| i.view_count), Some(7));
+    assert!(row.reply_markup.is_some());
+    let MessageContent::Poll(poll) = &topic.messages[&60].content else {
+        panic!("poll row");
+    };
+    assert_eq!(poll.poll.total_voter_count, 2);
+    assert!(poll.poll.options[0].is_chosen);
+}

@@ -63,10 +63,12 @@ impl Session {
                 self.pending_sound_downloads.remove(&sound_id);
             }
         }
+        self.note_avatar_file_changed(file.id.0);
         self.files.insert(file.id.0, file);
     }
 
     pub(crate) fn unstick_download(&mut self, file_id: i32) {
+        self.note_avatar_file_changed(file_id);
         self.downloading.remove(&file_id);
         self.user_downloads.remove(&file_id);
         self.paused_downloads.remove(&file_id);
