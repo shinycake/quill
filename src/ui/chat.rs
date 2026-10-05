@@ -51,6 +51,9 @@ pub(super) fn apply_ready_slow_mode(
         format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":302,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":502}},"is_outgoing":false,"date":1700000060,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Type below and hit Enter: Quill blocks the send until the timer expires.","entities":[]}}}}}}}}"#
         ),
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":303,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":502}},"is_outgoing":false,"date":1700000090,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"The countdown appears above the composer.","entities":[]}}}}}}}}"#
+        ),
     ];
     for json in jsons {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {

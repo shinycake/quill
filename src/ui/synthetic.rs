@@ -458,7 +458,13 @@ fn message_bubble_with_quote(
         );
     }
     if let Some(avatar) = avatar {
-        message = message.avatar(avatar);
+        // Transparent slot: real avatars paint their own background, and
+        // the in-run spacer must stay invisible.
+        message = message.avatar_slot(
+            component::message::MessageAvatar::new()
+                .bg(gpui_kit::transparent_black())
+                .child(avatar),
+        );
     }
     div()
         .id(("row", row.id))
