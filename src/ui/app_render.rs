@@ -2,10 +2,10 @@
 
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
-    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
-    OpenSearch, OpenSettings, OpenShortcuts, QuitApp, SubmitCode, SubmitPassword, SubmitPhone,
-    ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut,
-    ViewerZoomReset, ZoomWindow,
+    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, NextChat, OpenChatSearch,
+    OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, SubmitCode,
+    SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev,
+    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -288,6 +288,12 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &OpenShortcuts, _, cx| {
                 this.shortcuts_open = true;
                 cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &NextChat, window, cx| {
+                this.step_open_chat(1, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PrevChat, window, cx| {
+                this.step_open_chat(-1, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                 this.composer
