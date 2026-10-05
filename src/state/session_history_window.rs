@@ -42,6 +42,31 @@ impl Session {
         }
     }
 
+    /// The newest own message of `chat_id` that can be edited in the
+    /// composer (Up in an empty composer, like Telegram Desktop). `None`
+    /// when the loaded window doesn't reach the latest messages — its
+    /// newest own message might not be the last one.
+    pub fn last_editable_message(&self, chat_id: ChatId) -> Option<crate::composer::ComposerEdit> {
+        let history = self.histories.get(&chat_id.0)?;
+        if history.has_newer {
+            return None;
+        }
+        history
+            .messages
+            .values()
+            .rev()
+            .filter(|message| message.is_outgoing && !message.pending && !message.failed)
+            .find_map(|message| {
+                crate::composer::ComposerEdit::from_own_content(
+                    chat_id,
+                    message.id,
+                    message.is_outgoing,
+                    message.pending,
+                    &message.content,
+                )
+            })
+    }
+
     /// Replace `chat_id`'s loaded window with an empty one. In-flight pages
     /// for the old window are marked stale and dropped when they answer.
     pub fn reset_history_window(&mut self, chat_id: ChatId) {

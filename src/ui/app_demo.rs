@@ -1798,6 +1798,23 @@ impl QuillApp {
                 .ok();
         })
         .detach();
+        // Up in an empty, focused composer edits the last own message
+        // (Telegram Desktop). The textarea binds Up to a cursor move, and
+        // bindings match before `on_key_down`, so intercept the keystroke.
+        let edit_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, window, cx| {
+            let keystroke = &event.keystroke;
+            if keystroke.key != "up" || keystroke.modifiers.modified() {
+                return;
+            }
+            let handled = edit_app
+                .update(cx, |this, cx| this.try_edit_last_message(window, cx))
+                .unwrap_or(false);
+            if handled {
+                cx.stop_propagation();
+            }
+        })
+        .detach();
         let notification_app = cx.weak_entity();
         cx.on_system_notification_response(move |response, cx| {
             let Some((account, chat)) = response.tag.rsplit_once(":chat:") else {
