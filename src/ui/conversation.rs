@@ -1177,6 +1177,15 @@ impl QuillApp {
             );
             let show_sender = previous != Some(identity);
             previous = Some(identity);
+            let accent = match message.sender {
+                Some(MessageSender::User { user_id }) => session
+                    .and_then(|s| s.user(user_id))
+                    .map(|u| u.accent_color_id),
+                // Chats carry no parsed name color: derive one from the id
+                // the way Telegram assigns defaults.
+                Some(MessageSender::Chat { chat_id }) => Some(chat_id.rem_euclid(7) as i32),
+                None => None,
+            };
             let name = match message.sender {
                 Some(MessageSender::User { user_id }) => session
                     .and_then(|s| s.user(user_id))
@@ -1193,8 +1202,13 @@ impl QuillApp {
                     sender_name.to_string()
                 }
             });
-            let sender = (!message.is_outgoing && (service || (is_group && show_sender)))
-                .then(|| name.clone());
+            let sender =
+                (!message.is_outgoing && (service || (is_group && show_sender))).then(|| {
+                    SenderLabel {
+                        name: name.clone(),
+                        accent: accent.filter(|_| is_group),
+                    }
+                });
             let receipt = if message.is_outgoing {
                 chat.map(|summary| summary.outbox_receipt(message))
                     .unwrap_or(OutboxReceipt::Sent)

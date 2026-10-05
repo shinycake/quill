@@ -95,6 +95,10 @@ pub struct ParsedUser {
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
     pub photo_small_file_id: i32,
+    /// `user.accent_color_id` (schema 1.8.67, line 2383): the name color in
+    /// chats. 0–6 are the built-in colors (red, orange, violet, green,
+    /// cyan, blue, pink); higher ids are server palettes.
+    pub accent_color_id: i32,
     /// A12: `user.profile_accent_color_id` (schema 1.8.67, line 2386) —
     /// the accent color for the user's profile; -1 if none.
     pub profile_accent_color_id: i32,
@@ -261,6 +265,11 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
             .and_then(|f| f.get("id")),
     ))
     .unwrap_or(0);
+    let accent_color_id = value
+        .get("accent_color_id")
+        .and_then(Value::as_i64)
+        .and_then(|n| i32::try_from(n).ok())
+        .unwrap_or(0);
     // A12: -1 = no profile accent color (schema 1.8.67, line 2386).
     let profile_accent_color_id = value
         .get("profile_accent_color_id")
@@ -289,6 +298,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_inline,
         status,
         photo_small_file_id,
+        accent_color_id,
         profile_accent_color_id,
         profile_background_custom_emoji_id,
         is_premium,

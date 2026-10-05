@@ -12,7 +12,7 @@ pub(crate) struct HistoryRowInputs {
     /// `None` for outgoing rows and when the header collapses (same
     /// direction as the previous row). Replaces the old `"You · sent"`
     /// label — delivery state now lives in the in-bubble footer.
-    pub(crate) sender: Option<String>,
+    pub(crate) sender: Option<SenderLabel>,
     /// kit Phase 4: outbox delivery state for the in-bubble footer
     /// (`✓` sent, `✓✓` read, `…` while pending).
     pub(crate) receipt: OutboxReceipt,
@@ -37,6 +37,14 @@ pub(crate) struct HistoryRowInputs {
 
 /// kit Phase 3: one virtualized history row — a single message or a media
 /// album group (albums render as one row, as before).
+/// A message row's sender header: display name plus the sender's
+/// Telegram name color (`accent_color_id`), when known.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SenderLabel {
+    pub(crate) name: String,
+    pub(crate) accent: Option<i32>,
+}
+
 #[derive(Clone)]
 pub(crate) enum HistoryRow {
     // Boxed: the per-row inputs are ~880 bytes; the album variant is
@@ -48,7 +56,7 @@ pub(crate) enum HistoryRow {
         // kit Phase 4: precomputed per-row chrome (sender header /
         // outbox receipt / avatar) — keeps the large `ChatSummary` out
         // of the variant.
-        sender: Option<String>,
+        sender: Option<SenderLabel>,
         receipt: OutboxReceipt,
         sender_avatar: Option<(String, Option<PathBuf>)>,
         day_label: Option<String>,

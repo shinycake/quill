@@ -426,14 +426,18 @@ fn avatar_initials(name: &str) -> String {
 /// kit Phase 4: builds the shared kit-shell chrome (sender header /
 /// avatar slot / footer) from row inputs.
 pub(super) fn message_chrome(
-    sender: Option<String>,
+    sender: Option<super::history_row::SenderLabel>,
     receipt: OutboxReceipt,
     sender_avatar: Option<(String, Option<PathBuf>)>,
     date: i32,
     pending: bool,
 ) -> MessageChrome {
     MessageChrome {
-        sender: sender.map(SharedString::from),
+        sender_color: sender
+            .as_ref()
+            .and_then(|label| label.accent)
+            .map(super::chat_theme::peer_name_color),
+        sender: sender.map(|label| SharedString::from(label.name)),
         avatar: sender_avatar
             .map(|(name, photo)| kit_avatar_element(&name, photo.as_deref(), px(32.))),
         footer: message_footer(date, pending, receipt),
