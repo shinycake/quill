@@ -1,6 +1,5 @@
 use super::app::QuillApp;
 use super::*;
-use gpui_kit::component::button::*;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -44,25 +43,32 @@ pub(crate) fn row_playback_controls(
     row_key: u64,
     kind: &str,
     seek: &SeekBarView,
+    accent: Hsla,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     div()
         .flex()
         .items_center()
-        .gap_2()
+        .gap_3()
         .child(
-            Button::new(format!("{kind}-speed-{row_key}"))
-                .label(QuillApp::speed_label(seek.speed))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.cycle_playback_speed(cx);
-                })),
+            super::message_media::inline_link(
+                SharedString::from(format!("{kind}-speed-{row_key}")),
+                QuillApp::speed_label(seek.speed),
+                accent,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.cycle_playback_speed(cx);
+            })),
         )
         .child(
-            Button::new(format!("{kind}-mute-{row_key}"))
-                .label(if seek.muted { "Unmute" } else { "Mute" })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_playback_mute(cx);
-                })),
+            super::message_media::inline_link(
+                SharedString::from(format!("{kind}-mute-{row_key}")),
+                if seek.muted { "Unmute" } else { "Mute" },
+                accent,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.toggle_playback_mute(cx);
+            })),
         )
         .when_some(seek.error.clone(), |this, err| {
             this.child(div().text_xs().text_color(danger_bright()).child(err))

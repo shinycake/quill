@@ -500,7 +500,9 @@ impl QuillApp {
                     )
                     .child(self.record_bar_actions(cx)),
             )
-            .when(!video, |this| this.child(waveform_row(0, &bars)))
+            .when(!video, |this| {
+                this.child(waveform_row(0, &bars, accent().into(), 1.0))
+            })
     }
 
     /// MED2: the record bar's right-side row — either the normal
