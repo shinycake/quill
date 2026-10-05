@@ -25,7 +25,7 @@ pub fn gif_frame_cache_dir(file_id: i32) -> PathBuf {
 /// (0700, symlink-safe) so `sandboxed_display_path` can canonicalize it.
 pub fn with_gif_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let root = gif_frame_cache_root();
-    let _ = crate::local_path::secure_create_dir(&root);
+    crate::local_path::ensure_private_dir(&root);
     roots.push(root);
     roots
 }
