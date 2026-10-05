@@ -128,19 +128,21 @@ impl QuillApp {
             };
             let mut footer = div().flex().justify_end().gap_2();
             if editing.is_some() {
-                footer =
-                    footer
-                        .child(
-                            Button::new("data-storage-back")
-                                .label("Back")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.data_storage_editor = None;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(Button::new("data-storage-save").label("Save").on_click(
-                            cx.listener(|this, _, _, cx| {
+                footer = footer
+                    .child(
+                        Button::new("data-storage-back")
+                            .label("Back")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.data_storage_editor = None;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("data-storage-save")
+                            .label("Save")
+                            .primary()
+                            .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some((network, draft)) = this.data_storage_editor.take() {
                                     if let Some(live) = this.live.as_mut() {
                                         // Applied on the confirmed `ok`
@@ -163,14 +165,14 @@ impl QuillApp {
                                     }
                                     cx.notify();
                                 }
-                            }),
-                        ));
+                            })),
+                    );
             } else {
                 footer = footer
                     .child(
                         Button::new("storage-refresh")
                             .label("Refresh")
-                            .ghost()
+                            .outline()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.refresh_storage_usage(cx);
                                 this.close_kit_dialog_if_done(DialogKind::StorageUsage, window, cx);
@@ -178,8 +180,8 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("close-storage-usage")
-                            .label("Close")
-                            .ghost()
+                            .label("Done")
+                            .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.storage_usage_open = false;
                                 cx.notify();
@@ -245,10 +247,14 @@ impl QuillApp {
                         .child(
                             Button::new("account-export-open")
                                 .label("Show export folder")
+                                .outline()
+                                .small()
                                 .on_click(move |_, _, cx| cx.reveal_path(&folder)),
                         )
                         .child(
                             Button::new("account-export-cancel")
+                                .ghost()
+                                .small()
                                 .label(if finished {
                                     "Dismiss export"
                                 } else {
@@ -263,8 +269,10 @@ impl QuillApp {
                         ),
                 );
         } else {
+            // Both export choices sit side by side as outline actions.
+            let mut exports = div().flex().flex_wrap().gap_2();
             for media in [false, true] {
-                body = body.child(
+                exports = exports.child(
                     Button::new(if media {
                         "account-export-media"
                     } else {
@@ -275,12 +283,15 @@ impl QuillApp {
                     } else {
                         "Export JSON…"
                     })
+                    .outline()
+                    .small()
                     .disabled(self.live.is_none())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.choose_account_export_folder(media, cx)
                     })),
                 );
             }
+            body = body.child(exports);
         }
         // --- Automatic downloads ---
         body = body.child(section_header("Automatic downloads"));
