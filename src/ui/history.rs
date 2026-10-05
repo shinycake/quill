@@ -702,6 +702,7 @@ pub(super) fn session_history_row(
         MessageContent::Document(doc) => Some(document_chip(
             message.id.0 as u64,
             doc,
+            message.is_outgoing,
             files,
             downloading,
             failed,
