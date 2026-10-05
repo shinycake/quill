@@ -212,7 +212,7 @@ impl QuillApp {
                         )
                         .child(
                             div().text_xs().text_color(cx.theme().muted_foreground).child(
-                                "The devices above have no access to your messages. The code was entered correctly, but no correct password was given.",
+                                "These devices have no access to your messages: the code was entered correctly, but not the password.",
                             ),
                         );
                     let mut incomplete_body = TableBody::new();
@@ -1339,7 +1339,8 @@ impl QuillApp {
             actions = actions.child(
                 Button::new(format!("terminate-session-{session_id}"))
                     .label("Terminate")
-                    .danger()
+                    .small()
+                    .custom(quiet_danger(cx))
                     .disabled(mutating)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.begin_terminate_session(session_id, incomplete, cx);
@@ -1573,7 +1574,8 @@ impl QuillApp {
                 div().flex_shrink_0().child(
                     Button::new(format!("disconnect-website-{website_id}"))
                         .label("Disconnect")
-                        .danger()
+                        .small()
+                        .custom(quiet_danger(cx))
                         .disabled(mutating)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.begin_disconnect_website(website_id, cx);
@@ -1582,4 +1584,14 @@ impl QuillApp {
             )
             .into_any_element()
     }
+}
+
+/// Per-row destructive action: danger-colored text without a filled
+/// background (fills are reserved for the final confirmation).
+fn quiet_danger(cx: &App) -> ButtonCustomVariant {
+    ButtonCustomVariant::new(cx)
+        .color(gpui_kit::transparent_black())
+        .foreground(cx.theme().danger)
+        .hover(cx.theme().danger.opacity(0.12))
+        .active(cx.theme().danger.opacity(0.2))
 }
