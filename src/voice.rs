@@ -105,7 +105,7 @@ impl VoiceCapture {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         ));
-        let child = Command::new("ffmpeg")
+        let child = crate::media_tools::command("ffmpeg")
             .args([
                 "-y",
                 "-f",
