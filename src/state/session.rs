@@ -75,6 +75,8 @@ pub struct Session {
     /// Bumped for every applied TDLib envelope: views that cache derived
     /// state (history rows) rebuild after any server-driven change.
     pub revision: u64,
+    /// The composer's `@` suggestions for the open chat.
+    pub mention_search: Option<MentionSearch>,
     /// M1: parsed `messageLink.link` from the last `getMessageLink` response
     /// (one-shot; the UI copies it to the clipboard and clears it).
     pub message_link_result: Option<String>,
@@ -966,6 +968,7 @@ impl Session {
             histories: HashMap::new(),
             stale_history_requests: HashSet::new(),
             revision: 0,
+            mention_search: None,
             message_link_result: None,
             message_caption_length_max: 1024,
             // Slice CL1: TDLib's compiled defaults for the pin limits

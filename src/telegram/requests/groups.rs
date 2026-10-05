@@ -313,6 +313,21 @@ pub fn supergroup_members_filter_recent_json() -> Value {
     json!({ "@type": "supergroupMembersFilterRecent" })
 }
 
+/// `searchChatMembers chat_id:int53 query:string limit:int32
+/// filter:ChatMembersFilter = ChatMembers;` — members of any group whose
+/// name or username matches `query` (the composer's `@` suggestions).
+pub fn search_chat_members(extra: RequestId, chat_id: ChatId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchChatMembers",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "query": query,
+        "limit": limit,
+        "filter": null,
+    })
+    .to_string()
+}
+
 /// Phase D3b: `supergroupMembersFilterSearch` (TDLib 1.8.67,
 /// `schema/td_api.tl:2568`):
 /// `supergroupMembersFilterSearch query:string = SupergroupMembersFilter;`

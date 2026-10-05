@@ -597,6 +597,9 @@ impl QuillApp {
                         // above the composer.
                         .when_some(self.force_reply_panel(cx), |this, panel| this.child(panel))
                         // Phase 3.3: `/` command menu above the composer.
+                        .when_some(self.mention_menu_dropdown(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
                         })

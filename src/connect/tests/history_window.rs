@@ -244,6 +244,81 @@ fn last_editable_message_is_the_newest_own_message_of_a_tail_window() {
 }
 
 #[test]
+fn mention_search_targets_group_members_and_drops_stale_answers() {
+    let mut h = Harness::with_unread_chat();
+    // Chat 7 is private: no one to mention.
+    h.driver.select_chat(ChatId(7)).unwrap();
+    h.driver.search_mentions(Some("al")).unwrap();
+    assert!(h.driver.session.mention_search.is_none());
+
+    h.ingest(r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"Group","type":{"@type":"chatTypeBasicGroup","basic_group_id":100},"unread_count":0}}"#);
+    h.ingest(r#"{"@type":"updateChatPosition","chat_id":-100,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}}"#);
+    h.driver.select_chat(ChatId(-100)).unwrap();
+    h.driver.search_mentions(Some("a")).unwrap();
+    let stale = h
+        .driver
+        .session
+        .mention_search
+        .as_ref()
+        .unwrap()
+        .request
+        .unwrap();
+    h.driver.search_mentions(Some("al")).unwrap();
+    let current = h
+        .driver
+        .session
+        .mention_search
+        .as_ref()
+        .unwrap()
+        .request
+        .unwrap();
+    let sent = h
+        .recorder
+        .snapshot()
+        .into_iter()
+        .rev()
+        .find(|j| j.contains("\"@type\":\"searchChatMembers\""))
+        .unwrap();
+    assert!(sent.contains("\"query\":\"al\""));
+    // Same query again: no new request.
+    h.driver.search_mentions(Some("al")).unwrap();
+    assert_eq!(
+        h.driver.session.mention_search.as_ref().unwrap().request,
+        Some(current)
+    );
+
+    let members = |extra: RequestId, ids: &[i64]| {
+        let members: Vec<String> = ids
+            .iter()
+            .map(|id| format!(r#"{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":{id}}},"inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusMember","member_until_date":0}}}}"#))
+            .collect();
+        format!(
+            r#"{{"@type":"chatMembers","@extra":"{}","total_count":{},"members":[{}]}}"#,
+            extra.0,
+            ids.len(),
+            members.join(",")
+        )
+    };
+    h.ingest(&members(stale, &[1, 2]));
+    assert!(
+        h.driver
+            .session
+            .mention_search
+            .as_ref()
+            .unwrap()
+            .user_ids
+            .is_empty()
+    );
+    h.ingest(&members(current, &[5, 6]));
+    assert_eq!(
+        h.driver.session.mention_search.as_ref().unwrap().user_ids,
+        vec![5, 6]
+    );
+    h.driver.search_mentions(None).unwrap();
+    assert!(h.driver.session.mention_search.is_none());
+}
+
+#[test]
 fn chat_peer_online_follows_the_private_user_status() {
     fn h_chat(h: &Harness) -> crate::state::ChatSummary {
         h.driver.session.chats.get(&7).unwrap().clone()

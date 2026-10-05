@@ -472,7 +472,11 @@ impl Session {
                 members,
                 total_count,
             } => {
-                if let Some(RequestPurpose::GetSupergroupMembers { filter }) =
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::SearchMentionMembers
+                {
+                    self.apply_mention_members(pending.id, &members);
+                } else if let Some(RequestPurpose::GetSupergroupMembers { filter }) =
                     pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
