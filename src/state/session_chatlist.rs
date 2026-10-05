@@ -77,26 +77,25 @@ impl Session {
     }
 
     pub(crate) fn rebuild_main_order(&mut self) {
-        let mut rows: Vec<ChatSummary> = self
+        // Runs on every position / last-message / draft update: sort the
+        // `(order, chat_id)` keys TDLib orders by (descending, schema
+        // 1.8.67 `chatPosition.order`), never clones of whole summaries.
+        let mut rows: Vec<(i64, ChatId)> = self
             .chats
             .values()
             .filter(|c| c.in_main_list)
-            .cloned()
+            .map(|c| (c.order, c.id))
             .collect();
-        rows.sort_by(|a, b| b.order.cmp(&a.order).then(b.id.0.cmp(&a.id.0)));
-        self.main_order = rows.into_iter().map(|c| c.id).collect();
-        let mut archived: Vec<ChatSummary> = self
+        rows.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(b.1.0.cmp(&a.1.0)));
+        self.main_order = rows.into_iter().map(|(_, id)| id).collect();
+        let mut archived: Vec<(i64, ChatId)> = self
             .chats
             .values()
             .filter(|c| c.in_archive)
-            .cloned()
+            .map(|c| (c.archive_order, c.id))
             .collect();
-        archived.sort_by(|a, b| {
-            b.archive_order
-                .cmp(&a.archive_order)
-                .then(b.id.0.cmp(&a.id.0))
-        });
-        self.archive_order = archived.into_iter().map(|c| c.id).collect();
+        archived.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(b.1.0.cmp(&a.1.0)));
+        self.archive_order = archived.into_iter().map(|(_, id)| id).collect();
     }
 
     pub fn open_chat(&mut self, chat_id: ChatId) {
