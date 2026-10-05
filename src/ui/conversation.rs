@@ -533,6 +533,20 @@ impl QuillApp {
                 this.child(
                     div()
                         .id("composer-file-drop")
+                        .relative()
+                        // The emoji / sticker / GIF popover floats above the
+                        // composer, anchored to its left edge.
+                        .when(self.media_panel_open(), |this| {
+                            let panel = self.media_panel(cx);
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .left(px(8.))
+                                    .bottom(relative(1.))
+                                    .pb_1()
+                                    .child(panel),
+                            )
+                        })
                         .when(
                             show_attach && !self.rich_editor_open && !self.recording_active(),
                             |this| {
@@ -664,16 +678,6 @@ impl QuillApp {
                         .when(self.pending_react.is_some(), |this| {
                             this.child(self.reaction_picker_panel(cx))
                         })
-                        .when(self.emoji_picker_open, |this| {
-                            this.child(self.emoji_picker_panel(cx))
-                        })
-                        .when(self.gif_panel_open(), |this| {
-                            this.child(self.gif_picker_panel(cx))
-                        })
-                        .when(
-                            self.sticker_panel_open() && !self.sticker_settings_open,
-                            |this| this.child(self.sticker_picker_panel(cx)),
-                        )
                         .when(self.schedule_popup_open, |this| {
                             this.child(self.schedule_popup(cx))
                         })
@@ -708,7 +712,10 @@ impl QuillApp {
                                                 })
                                                 .accessibility_label("Stickers")
                                                 .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.toggle_sticker_panel(cx);
+                                                    this.toggle_media_panel(
+                                                        super::media_panel::PanelTab::Emoji,
+                                                        cx,
+                                                    );
                                                 })),
                                         )
                                         .child(self.format_menu_button(cx))

@@ -267,29 +267,6 @@ impl QuillApp {
         self.session().is_some_and(|session| session.gifs.open)
     }
 
-    pub(super) fn toggle_gif_panel(&mut self, cx: &mut Context<Self>) {
-        if self.recording_active() {
-            self.cancel_recording(cx);
-        }
-        if self.gif_panel_open() {
-            self.close_gif_panel(cx);
-            return;
-        }
-        if self.sticker_panel_open() {
-            self.close_sticker_panel(cx);
-        }
-        if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.open_gif_panel() {
-                Ok(_) => "GIFs".into(),
-                Err(_) => "could not open GIFs".into(),
-            };
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.gifs.open = true;
-            self.status_note = "GIFs".into();
-        }
-        cx.notify();
-    }
-
     pub(super) fn close_gif_panel(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_gif_panel();
@@ -360,29 +337,6 @@ impl QuillApp {
 
     pub(super) fn sticker_panel_open(&self) -> bool {
         self.session().is_some_and(|session| session.stickers.open)
-    }
-
-    pub(super) fn toggle_sticker_panel(&mut self, cx: &mut Context<Self>) {
-        if self.recording_active() {
-            self.cancel_recording(cx);
-        }
-        if self.sticker_panel_open() {
-            self.close_sticker_panel(cx);
-            return;
-        }
-        if self.gif_panel_open() {
-            self.close_gif_panel(cx);
-        }
-        if let Some(live) = self.live.as_mut() {
-            self.status_note = match live.driver.open_sticker_panel() {
-                Ok(_) => "stickers".into(),
-                Err(_) => "could not open stickers".into(),
-            };
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.open = true;
-            self.status_note = "stickers".into();
-        }
-        cx.notify();
     }
 
     pub(super) fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {
@@ -1085,7 +1039,9 @@ impl QuillApp {
                             .icon(IconName::SquarePlay)
                             .checked(gifs_open)
                             .on_click(move |_, _, cx| {
-                                let _ = gif_owner.update(cx, |this, cx| this.toggle_gif_panel(cx));
+                                let _ = gif_owner.update(cx, |this, cx| {
+                                    this.toggle_media_panel(super::media_panel::PanelTab::Gifs, cx)
+                                });
                             }),
                     )
             })

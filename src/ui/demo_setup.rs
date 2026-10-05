@@ -397,7 +397,28 @@ impl QuillApp {
                     );
                 }
             }
+            // The panel's library holds the demo set's contents.
+            if let Some(session) = self.demo_session.as_mut() {
+                let stickers = session.stickers.stickers.clone();
+                session.media_library.set_stickers.insert(77, stickers);
+            }
+            self.media_panel.open = true;
+            self.media_panel.tab = super::media_panel::PanelTab::Stickers;
             self.status_note = "screenshot demo — stickers · tap to send".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyEmojiPanel)) {
+            self.set_media_pref(
+                |prefs| {
+                    prefs.recent_emoji = ["👍", "😂", "❤️", "🔥", "🎉", "😍", "🙏", "😭"]
+                        .iter()
+                        .map(|e| (*e).to_string())
+                        .collect();
+                },
+                cx,
+            );
+            self.media_panel.open = true;
+            self.media_panel.tab = super::media_panel::PanelTab::Emoji;
+            self.status_note = "screenshot demo — emoji panel".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVoice)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -458,6 +479,8 @@ impl QuillApp {
                 }
             }
             if demo == Some(ScreenshotDemo::ReadyGifs) {
+                self.media_panel.open = true;
+                self.media_panel.tab = super::media_panel::PanelTab::Gifs;
                 self.toggle_animation_playback(
                     MessageId(501),
                     quill::ids::FileId(63),

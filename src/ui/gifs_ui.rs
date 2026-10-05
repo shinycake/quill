@@ -212,33 +212,39 @@ impl QuillApp {
         let searching = panel.search_mode;
         div()
             .id("gif-picker")
-            .max_h(px(420.))
-            .overflow_y_scroll()
+            .when(!self.media_panel.open, |this| {
+                this.max_h(px(420.)).overflow_y_scroll()
+            })
             .flex()
             .flex_col()
             .gap_2()
             .px_3()
             .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(div().font_semibold().child("GIFs"))
-                    .child(
-                        Button::new("close-gif-picker")
-                            .icon(gpui_kit::assets::IconName::X)
-                            .tooltip("Close")
-                            .accessibility_label("Close")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_gif_panel(cx);
-                            })),
-                    ),
-            )
+            .when(!self.media_panel.open, |this| {
+                this.border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().sidebar)
+            })
+            // Embedded in the media panel: its tab and close button lead.
+            .when(!self.media_panel.open, |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(div().font_semibold().child("GIFs"))
+                        .child(
+                            Button::new("close-gif-picker")
+                                .icon(gpui_kit::assets::IconName::X)
+                                .tooltip("Close")
+                                .accessibility_label("Close")
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_gif_panel(cx);
+                                })),
+                        ),
+                )
+            })
             .child(
                 div()
                     .flex()

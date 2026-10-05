@@ -131,7 +131,7 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.emoji_set_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.emoji_picker_open = false;
+        self.media_panel.open = false;
         self.marketplace_open = false;
         self.marketplace_private = true;
         self.marketplace_error = None;
@@ -139,8 +139,6 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.marketplace_comment_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.emoji_category = 1;
-        self.emoji_visible_count = 120;
         self.emoji_search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.gif_search_input

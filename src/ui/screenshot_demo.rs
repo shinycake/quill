@@ -123,6 +123,8 @@ pub enum ScreenshotDemo {
     ReadyAlbums,
     /// The composer's `@` member suggestions.
     ReadyMentions,
+    /// The composer's emoji / sticker / GIF panel on the Emoji tab.
+    ReadyEmojiPanel,
     /// Channel sponsored / recommended rows + report flow (injected, no live Telegram).
     /// Fixture/proof surface only; the channel opens normally in live use.
     ReadySponsored,

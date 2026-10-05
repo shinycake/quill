@@ -357,6 +357,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — received album and own-sent album".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyEmojiPanel => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — emoji panel".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyMentions => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -956,9 +962,9 @@ impl QuillApp {
                 .placeholder("Search emoji")
                 .auto_grow(1, 1)
         });
-        cx.subscribe(&emoji_search_input, |this, _, event: &InputEvent, cx| {
+        cx.subscribe(&emoji_search_input, |_this, _, event: &InputEvent, cx| {
+            // The panel's rows follow the query on the next render.
             if matches!(event, InputEvent::Change) {
-                this.emoji_visible_count = 120;
                 cx.notify();
             }
         })
@@ -1382,9 +1388,7 @@ impl QuillApp {
             inline_query_token: 0,
             inline_query_armed: None,
             sticker_search_input,
-            emoji_picker_open: false,
-            emoji_category: 1,
-            emoji_visible_count: 120,
+            media_panel: super::media_panel::MediaPanel::default(),
             emoji_search_input,
             emoji_set_search_input,
             emoji_status_hours_input,
@@ -1770,7 +1774,8 @@ impl QuillApp {
             let handled = match event.keystroke.key.as_str() {
                 "escape" => menu_app
                     .update(cx, |this, cx| {
-                        this.close_inline_results(cx)
+                        this.close_media_panel(cx)
+                            || this.close_inline_results(cx)
                             || this.close_mention_menu(cx)
                             || this.close_command_menu(cx)
                     })

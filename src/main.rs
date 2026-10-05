@@ -58,7 +58,9 @@ gpui_kit::assets::icon_assets!(
         Download,
         MessageSquare,
         ChevronLeft,
-        ChevronRight
+        ChevronRight,
+        Clock,
+        Star
     ]
 );
 
@@ -422,6 +424,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-drafts" => ScreenshotDemo::ReadyDrafts,
                 "ready-albums" => ScreenshotDemo::ReadyAlbums,
                 "ready-mentions" => ScreenshotDemo::ReadyMentions,
+                "ready-emoji-panel" => ScreenshotDemo::ReadyEmojiPanel,
                 "ready-sponsored" => ScreenshotDemo::ReadySponsored,
                 "ready-custom-emoji" => ScreenshotDemo::ReadyCustomEmoji,
                 "ready-animated-emoji" => ScreenshotDemo::ReadyAnimatedEmoji,
@@ -651,6 +654,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyDrafts => ".quill-ready-ready-drafts",
         ScreenshotDemo::ReadyAlbums => ".quill-ready-ready-albums",
         ScreenshotDemo::ReadyMentions => ".quill-ready-ready-mentions",
+        ScreenshotDemo::ReadyEmojiPanel => ".quill-ready-ready-emoji-panel",
         ScreenshotDemo::ReadySponsored => ".quill-ready-ready-sponsored",
         ScreenshotDemo::ReadyCustomEmoji => ".quill-ready-ready-custom-emoji",
         ScreenshotDemo::ReadyAnimatedEmoji => ".quill-ready-ready-animated-emoji",
