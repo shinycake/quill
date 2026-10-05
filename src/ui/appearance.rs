@@ -140,7 +140,23 @@ impl QuillApp {
         // `Theme::update` re-derives the renderable tokens from `colors`,
         // re-projects the Base layer and refreshes windows. Mutating
         // `global_mut` alone would leave primary buttons on the old accent.
-        Theme::update(cx, |theme| theme.colors.primary = primary);
+        Theme::update(cx, |theme| {
+            // Primary buttons draw from their own tokens: point them at the
+            // accent too, or Send and other primary actions stay neutral.
+            let colors = &mut theme.colors;
+            colors.primary = primary;
+            colors.primary_foreground = gpui_kit::white();
+            colors.button_primary = primary;
+            colors.button_primary_hover = Hsla {
+                l: (primary.l + 0.06).min(1.),
+                ..primary
+            };
+            colors.button_primary_active = Hsla {
+                l: (primary.l - 0.06).max(0.),
+                ..primary
+            };
+            colors.button_primary_foreground = gpui_kit::white();
+        });
         self.appearance_applied = Some((mode, accent, hc));
         cx.notify();
     }

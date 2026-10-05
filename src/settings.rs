@@ -837,8 +837,22 @@ pub fn remove_account(app_root: &Path, key: &AccountKey) -> Result<(), RemoveAcc
 /// directory the process was launched from (a broad `git add` there would
 /// commit them).
 pub fn safe_app_root() -> Option<PathBuf> {
+    if let Some(root) = ISOLATED_APP_ROOT.get() {
+        return Some(root.clone());
+    }
     directories::ProjectDirs::from("org", "shinycake", APP_DIR_NAME)
         .map(|dirs| dirs.data_dir().to_path_buf())
+}
+
+static ISOLATED_APP_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Route every account/settings path for the rest of the process to
+/// `root` instead of the user's data directory. Screenshot demos call this
+/// first so fixtures start from default settings and never read or
+/// overwrite the user's real preferences. Returns `false` if a root was
+/// already chosen (the first one wins).
+pub fn use_isolated_app_root(root: PathBuf) -> bool {
+    ISOLATED_APP_ROOT.set(root).is_ok()
 }
 
 #[cfg(test)]

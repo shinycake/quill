@@ -1,0 +1,5 @@
+# Isolated demo data root; accent on primary buttons
+
+**Demo isolation.** `--screenshot-demo` loaded and saved the user's real settings (`~/Library/Application Support/org.shinycake.Quill/accounts/primary/*_prefs.json`). Fixtures therefore rendered in whatever theme the developer last chose: every capture during this audit was in high contrast, because the stored prefs say `"theme": "high_contrast"`. A demo that touched appearance could also overwrite the user's file. `quill::settings::use_isolated_app_root` now pins the process's data root, and the demo sets it to a fresh temp directory before anything loads. Every settings and account path flows through `safe_app_root`, so demos start from defaults and never write user data. The user's existing prefs file was left untouched.
+
+**Accent on primary buttons.** gpui-kit primary buttons draw from `button_primary*` tokens, not `primary`, so Send and every other primary action stayed neutral black/white whatever the accent. `apply_appearance` now sets the button tokens (with hover/active shades and white text) inside the same `Theme::update`.
