@@ -554,7 +554,9 @@ impl QuillApp {
                     .child(div().font_semibold().child("Notifications"))
                     .child(
                         Button::new("close-mute-menu")
-                            .label("Close")
+                            .icon(gpui_kit::assets::IconName::X)
+                            .tooltip("Close")
+                            .accessibility_label("Close")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_mute_menu(cx);
@@ -839,7 +841,9 @@ impl QuillApp {
                     .child(div().font_semibold().child(title))
                     .child(
                         Button::new("close-ttl-picker")
-                            .label("Close")
+                            .icon(gpui_kit::assets::IconName::X)
+                            .tooltip("Close")
+                            .accessibility_label("Close")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.ttl_picker_open = false;
