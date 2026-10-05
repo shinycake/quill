@@ -236,6 +236,10 @@ pub enum EnvelopePayload {
         /// `chat.positions` (schema 1.8.67, line 3594) — the chat's
         /// positions in the chat lists it is already placed in.
         positions: Vec<ChatPositionUpdate>,
+        /// `chat.last_message` (schema 1.8.67, line 3593): the preview a
+        /// newly loaded chat starts with; `updateChatLastMessage` only
+        /// reports later changes. Boxed: messages are large.
+        last_message: Option<Box<ParsedMessage>>,
     },
     /// `updateChatDraftMessage`. Positions are the new chat-list orders.
     UpdateChatDraftMessage {

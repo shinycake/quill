@@ -1022,3 +1022,38 @@ fn message_level_read_updates_refresh_chat_badge_counts() {
     assert_eq!(chat.unread_mention_count, 1);
     assert_eq!(chat.unread_reaction_count, 0);
 }
+
+#[test]
+fn new_chat_carries_its_last_message_preview() {
+    // `updateNewChat.chat.last_message` is the starting preview; TDLib only
+    // reports later changes through `updateChatLastMessage`.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"last_message":{"id":42,"chat_id":7,"is_outgoing":true,"date":1790631720,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"See you soon","entities":[]}}}}}"#,
+    );
+    let chat = &session.chats[&7];
+    assert_eq!(chat.last_preview, "See you soon");
+    assert_eq!(
+        chat.last_message.map(|last| (last.id.0, last.is_outgoing)),
+        Some((42, true))
+    );
+    // A newer `updateChatLastMessage` that arrived first is never replaced
+    // by a re-sent chat object carrying an older message.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatLastMessage","chat_id":7,"last_message":{"id":50,"chat_id":7,"is_outgoing":false,"date":1790631800,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Newer","entities":[]}}},"positions":[]}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"last_message":{"id":42,"chat_id":7,"is_outgoing":true,"date":1790631720,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"See you soon","entities":[]}}}}}"#,
+    );
+    assert_eq!(session.chats[&7].last_preview, "Newer");
+}

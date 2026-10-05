@@ -171,6 +171,10 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
         // `blockListMain` means the peer is blocked.
         blocked: is_block_list_main(chat.get("block_list")),
         positions: parse_position_list(ChatId(int53(chat.get("id"))?), chat.get("positions")),
+        last_message: match chat.get("last_message") {
+            None | Some(Value::Null) => None,
+            Some(message) => super::parse_message(message).ok().map(Box::new),
+        },
     })
 }
 

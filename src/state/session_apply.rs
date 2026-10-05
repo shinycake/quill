@@ -116,6 +116,7 @@ impl Session {
                 can_be_reported,
                 blocked,
                 positions,
+                last_message,
             } => {
                 self.apply_update_new_chat(
                     chat_id,
@@ -143,6 +144,19 @@ impl Session {
                     extra,
                     seq,
                 );
+                // `chat.last_message`: the starting preview. Never replaces
+                // a newer one an `updateChatLastMessage` already set.
+                if let Some(message) = last_message {
+                    let newer_known = self
+                        .chats
+                        .get(&chat_id.0)
+                        .and_then(|chat| chat.last_message)
+                        .is_some_and(|known| known.id.0 > message.id.0);
+                    if !newer_known {
+                        self.remember_files(&message.files);
+                        self.set_chat_last_message(chat_id, Some(&message));
+                    }
+                }
                 // `chat.positions`: place the chat in every list it already
                 // has a non-zero position in, like Telegram X
                 // (`Tdlib.updateNewChat` → `TdlibChatList.onUpdateNewChat`).
@@ -893,33 +907,10 @@ impl Session {
                 if let Some(ref message) = last_message {
                     self.remember_files(&message.files);
                 }
-                let chat = self
-                    .chats
-                    .entry(chat_id.0)
-                    .or_insert_with(|| placeholder_chat(chat_id));
                 // Slice chatlist-list-style: the preview's style inputs
                 // (media icon, formatted-text entities) and the 3-line
                 // sender name are pure functions of the same content.
-                if let Some(message) = last_message.as_ref() {
-                    let content = effective_content(&message.content, message.ephemeral.as_ref());
-                    chat.last_preview = content.preview();
-                    chat.last_preview_style = preview_style(content, &chat.last_preview);
-                    chat.last_preview_sender = preview_sender_name(
-                        message.is_outgoing,
-                        message.author_signature.as_deref(),
-                        &chat.title,
-                    );
-                    chat.last_message = Some(ChatLastMessage {
-                        id: message.id,
-                        date: message.date,
-                        is_outgoing: message.is_outgoing,
-                    });
-                } else {
-                    chat.last_preview = String::new();
-                    chat.last_preview_style = ChatPreviewStyle::default();
-                    chat.last_preview_sender = String::new();
-                    chat.last_message = None;
-                }
+                self.set_chat_last_message(chat_id, last_message.as_ref());
                 // `positions` is the full set of lists this chat belongs to.
                 self.replace_main_list_from_positions(chat_id, &positions);
                 self.rebuild_main_order();
@@ -2359,6 +2350,42 @@ impl Session {
                     note: "unknown-variant",
                 });
             }
+        }
+    }
+}
+
+impl Session {
+    /// Set (or clear) a chat's last-message preview fields: preview text,
+    /// its style inputs, the 3-line sender name, and the row's
+    /// id/date/direction for the timestamp and receipt.
+    pub(crate) fn set_chat_last_message(
+        &mut self,
+        chat_id: ChatId,
+        message: Option<&ParsedMessage>,
+    ) {
+        let chat = self
+            .chats
+            .entry(chat_id.0)
+            .or_insert_with(|| placeholder_chat(chat_id));
+        if let Some(message) = message {
+            let content = effective_content(&message.content, message.ephemeral.as_ref());
+            chat.last_preview = content.preview();
+            chat.last_preview_style = preview_style(content, &chat.last_preview);
+            chat.last_preview_sender = preview_sender_name(
+                message.is_outgoing,
+                message.author_signature.as_deref(),
+                &chat.title,
+            );
+            chat.last_message = Some(ChatLastMessage {
+                id: message.id,
+                date: message.date,
+                is_outgoing: message.is_outgoing,
+            });
+        } else {
+            chat.last_preview = String::new();
+            chat.last_preview_style = ChatPreviewStyle::default();
+            chat.last_preview_sender = String::new();
+            chat.last_message = None;
         }
     }
 }
