@@ -12,7 +12,6 @@ pub(super) fn title_bar(
     mode: PaneMode,
     live: bool,
     search_open: bool,
-    chat_search_open: bool,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let _ = live;
@@ -61,32 +60,6 @@ pub(super) fn title_bar(
                                     this.close_search_ui(window, cx);
                                 } else {
                                     this.open_search_ui(window, cx);
-                                }
-                            })),
-                    )
-                    .child(
-                        Button::new("find-in-chat")
-                            .icon(if chat_search_open {
-                                IconName::X
-                            } else {
-                                IconName::TextSearch
-                            })
-                            .ghost()
-                            .tooltip(if chat_search_open {
-                                "Close find in chat"
-                            } else {
-                                "Find in chat"
-                            })
-                            .accessibility_label(if chat_search_open {
-                                "Close find in chat"
-                            } else {
-                                "Find in chat"
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if this.chat_search_is_open() {
-                                    this.close_chat_search_ui(window, cx);
-                                } else {
-                                    this.open_chat_search_ui(window, cx);
                                 }
                             })),
                     )
