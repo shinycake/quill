@@ -50,7 +50,7 @@ use crate::telegram::requests::{
     ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
 };
 use crate::telegram::requests_privacy::PrivacySettingKey;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 

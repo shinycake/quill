@@ -118,29 +118,67 @@ impl Session {
         history.view_generation = self.view_generation;
         history.viewed.clear();
         history.viewing.clear();
+        history.visible.clear();
+        history.visible_reported = false;
     }
 
-    /// Server message ids in the open history that have not yet been sent to `viewMessages`.
+    /// Message ids of the open history that are due for `viewMessages`
+    /// and not yet sent: the rows the UI reported as shown
+    /// (`report_visible_messages`), or — until the UI has reported anything
+    /// this open generation — only the newest sent row. A chat opens at
+    /// its bottom, and viewing that message with `force_read` reads the
+    /// history up to it (Telegram X `Tdlib.markChatAsRead` views
+    /// `chat.lastMessage`; its `MessagesManager.viewMessages` reports only
+    /// on-screen rows). Older loaded rows are never viewed just for being
+    /// loaded.
     pub fn message_ids_to_view(&self, chat_id: ChatId) -> Vec<MessageId> {
         let Some(history) = self.histories.get(&chat_id.0) else {
             return Vec::new();
         };
+        let due =
+            |id: i64| id > 0 && !history.viewed.contains(&id) && !history.viewing.contains(&id);
+        if history.visible_reported {
+            return history
+                .visible
+                .iter()
+                .copied()
+                .filter(|id| due(*id))
+                .map(MessageId)
+                .collect();
+        }
         history
             .messages
             .values()
-            .filter(|message| {
-                message.id.0 > 0
-                    && !history.viewed.contains(&message.id.0)
-                    && !history.viewing.contains(&message.id.0)
-            })
+            .rev()
+            .find(|message| message.id.0 > 0 && !message.pending && !message.failed)
             .map(|message| message.id)
+            .filter(|id| due(id.0))
+            .into_iter()
             .collect()
+    }
+
+    /// The UI shows `ids` of the open chat `chat_id`: they become due for
+    /// `viewMessages`, and from now on this open generation views only
+    /// reported rows. Returns whether `chat_id` is the open chat.
+    pub fn report_visible_messages(&mut self, chat_id: ChatId, ids: &[MessageId]) -> bool {
+        if self.open_chat != Some(chat_id) {
+            return false;
+        }
+        let history = self.histories.entry(chat_id.0).or_default();
+        history.visible_reported = true;
+        for id in ids {
+            if id.0 > 0 && !history.viewed.contains(&id.0) && !history.viewing.contains(&id.0) {
+                history.visible.insert(id.0);
+            }
+        }
+        true
     }
 
     pub fn mark_viewed(&mut self, chat_id: ChatId, ids: &[MessageId]) {
         let history = self.histories.entry(chat_id.0).or_default();
         for id in ids {
             history.viewing.remove(&id.0);
+            history.visible.remove(&id.0);
             history.viewed.insert(id.0);
         }
     }
@@ -149,6 +187,7 @@ impl Session {
     pub fn begin_viewing(&mut self, chat_id: ChatId, ids: &[MessageId]) {
         let history = self.histories.entry(chat_id.0).or_default();
         for id in ids {
+            history.visible.remove(&id.0);
             history.viewing.insert(id.0);
         }
     }
@@ -160,7 +199,13 @@ impl Session {
 
     pub(crate) fn abort_viewing(&mut self, chat_id: ChatId) {
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.viewing.clear();
+            // Reported rows stay due so the retry re-sends them; before any
+            // report the newest row is recomputed anyway.
+            if history.visible_reported {
+                history.visible.extend(history.viewing.drain());
+            } else {
+                history.viewing.clear();
+            }
         }
     }
 

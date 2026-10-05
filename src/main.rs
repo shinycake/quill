@@ -27,7 +27,10 @@ gpui_kit::assets::icon_assets!(
         Pencil,
         Trash,
         Phone,
-        AudioLines
+        AudioLines,
+        Lock,
+        UserPlus,
+        UserX
     ]
 );
 

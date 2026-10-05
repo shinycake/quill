@@ -39,7 +39,7 @@ pub fn viewer_frame_cache_dir(file_id: i32) -> PathBuf {
 /// (0700, symlink-safe) so `sandboxed_display_path` can canonicalize it.
 pub fn with_viewer_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let root = viewer_frame_cache_root();
-    let _ = crate::local_path::secure_create_dir(&root);
+    crate::local_path::ensure_private_dir(&root);
     roots.push(root);
     roots
 }
@@ -53,7 +53,7 @@ pub fn discard_viewer_frame_cache(file_id: i32) {
 /// (0700, symlink-safe) so `sandboxed_display_path` can canonicalize it.
 pub fn with_video_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
     let root = video_frame_cache_root();
-    let _ = crate::local_path::secure_create_dir(&root);
+    crate::local_path::ensure_private_dir(&root);
     roots.push(root);
     roots
 }

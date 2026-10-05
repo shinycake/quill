@@ -250,6 +250,41 @@ fn load_chats_404_marks_exhaustion() {
 }
 
 #[test]
+fn chat_list_paging_restarts_after_logout_and_login() {
+    // Exhaustion belongs to one authorization: after logging out, a fresh
+    // Ready (or a new account in the same Session) must page every list
+    // again from the start.
+    for leaving in ["authorizationStateLoggingOut", "authorizationStateClosed"] {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let auth = |state: &str| {
+            format!(
+                r#"{{"@type":"updateAuthorizationState","authorization_state":{{"@type":"{state}"}}}}"#
+            )
+        };
+        apply_json(&mut session, &seq, &sink, &auth("authorizationStateReady"));
+        for purpose in [RequestPurpose::LoadChats, RequestPurpose::LoadArchiveChats] {
+            let extra = session.request(purpose, None);
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{}"}}"#,
+                    extra.0
+                ),
+            );
+        }
+        session.folder_chats_exhausted.insert(2);
+        assert!(session.chats_exhausted && session.archive_chats_exhausted);
+        apply_json(&mut session, &seq, &sink, &auth(leaving));
+        assert!(!session.chats_exhausted, "{leaving}");
+        assert!(!session.archive_chats_exhausted, "{leaving}");
+        assert!(session.folder_chats_exhausted.is_empty(), "{leaving}");
+    }
+}
+
+#[test]
 fn take_purpose_drops_only_matching_request() {
     let (mut session, _) = session();
     let stats_id = session.request(RequestPurpose::GetStorageStatistics, None);

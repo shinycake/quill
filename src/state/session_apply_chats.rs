@@ -131,7 +131,7 @@ impl Session {
         chat.last_read_inbox_message_id = last_read_inbox_message_id;
         chat.last_read_outbox_message_id = last_read_outbox_message_id;
         chat.notification_settings = notification_settings;
-        chat.photo_file_id = photo_file_id;
+        let old_photo_file_id = std::mem::replace(&mut chat.photo_file_id, photo_file_id);
         chat.can_send_basic_messages = can_send_basic_messages;
         // Slice G1: full default permissions block for the editor.
         chat.permissions = permissions;
@@ -176,6 +176,7 @@ impl Session {
         if !self.draft_dirty.contains(&chat_id.0) {
             chat.draft = draft;
         }
+        self.replace_avatar(old_photo_file_id, photo_file_id);
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_supergroup(

@@ -510,6 +510,91 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
 }
 
 #[test]
+fn chat_list_photos_download_whenever_they_become_due() {
+    // Avatars are tracked incrementally, so every way an avatar becomes
+    // downloadable must still reach `downloadFile`: arriving before Ready,
+    // a photo change while data saver is on (sent once it is off), and a
+    // completed avatar evicted from TDLib's cache.
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let file = |id: i32, path: &str, completed: bool| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"{path}","can_be_downloaded":true,"can_be_deleted":true,"is_downloading_active":false,"is_downloading_completed":{completed},"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u{id}","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}}"#
+        )
+    };
+    let downloads = |recorder: &RecordingSender, id: i32| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|j| {
+                j.contains("\"@type\":\"downloadFile\"") && j.contains(&format!("\"file_id\":{id}"))
+            })
+            .count()
+    };
+    let tick = r#"{"@type":"updateChatTitle","chat_id":7,"title":"c"}"#;
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":7,"title":"c","type":{{"@type":"chatTypePrivate","user_id":7}},"unread_count":0,"photo":{{"@type":"chatPhotoInfo","small":{},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}}}}}"#,
+            file(91, "", false)
+        ),
+    );
+    assert_eq!(downloads(&recorder, 91), 0, "nothing before Ready");
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    assert_eq!(downloads(&recorder, 91), 1, "pre-Ready avatar after Ready");
+
+    driver.session.media_prefs.data_saver = true;
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateChatPhoto","chat_id":7,"photo":{{"@type":"chatPhotoInfo","small":{},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}}}"#,
+            file(93, "", false)
+        ),
+    );
+    assert_eq!(downloads(&recorder, 93), 0, "data saver pauses avatars");
+    driver.session.media_prefs.data_saver = false;
+    ingest(&mut driver, tick);
+    assert_eq!(downloads(&recorder, 93), 1, "sent once data saver is off");
+
+    let extra = recorder
+        .snapshot()
+        .iter()
+        .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+        .find(|v| v["@type"] == "downloadFile" && v["file_id"] == 93)
+        .and_then(|v| v["@extra"].as_str().map(str::to_string))
+        .expect("downloadFile extra");
+    ingest(
+        &mut driver,
+        &file(93, "/tmp/a.jpg", true).replacen("{", &format!(r#"{{"@extra":"{extra}","#), 1),
+    );
+    ingest(&mut driver, tick);
+    assert_eq!(downloads(&recorder, 93), 1, "completed avatar not re-sent");
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"updateFile","file":{}}}"#, file(93, "", false)),
+    );
+    ingest(&mut driver, tick);
+    assert_eq!(
+        downloads(&recorder, 93),
+        2,
+        "evicted avatar downloads again"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn failed_automatic_downloads_are_not_retried_on_every_ingest() {
     // An automatic download that TDLib stops (active → idle without
     // completing) or refuses must not be re-sent by the next ingest —

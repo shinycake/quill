@@ -55,6 +55,11 @@ fn dark() -> bool {
     MODE_DARK.load(Ordering::Relaxed) == 1
 }
 
+/// Whether surfaces are dark (dark mode or high contrast).
+pub fn is_dark_palette() -> bool {
+    dark() || high_contrast()
+}
+
 /// stories-high-contrast: whether the high-contrast palette is active.
 #[inline]
 pub fn high_contrast() -> bool {

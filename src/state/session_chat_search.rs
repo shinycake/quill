@@ -92,8 +92,9 @@ impl Session {
             return;
         };
         let hit = self.search.messages[index].clone();
-        let history = self.histories.entry(chat_id.0).or_default();
-        history.upsert(hit.into_history());
+        let row = hit.into_history();
+        self.index_poll(&row);
+        self.histories.entry(chat_id.0).or_default().upsert(row);
     }
 
     /// Main-list chats whose title contains `query` (case-insensitive). Demo-only

@@ -353,6 +353,43 @@ pub(super) enum DemoSeed {
     SendMedia,
 }
 
+/// `QUILL_DEMO_STRESS=<chats>,<messages>` (both optional counts).
+pub(super) fn demo_stress_size() -> Option<(usize, usize)> {
+    let value = std::env::var("QUILL_DEMO_STRESS").ok()?;
+    let (chats, messages) = value.split_once(',').unwrap_or((value.as_str(), "0"));
+    Some((
+        chats.trim().parse().ok()?,
+        messages.trim().parse().unwrap_or(0),
+    ))
+}
+
+fn stress_fixture(chats: usize, messages: usize) -> Vec<String> {
+    let mut out = Vec::with_capacity(chats * 3 + messages);
+    for i in 0..chats {
+        let id = 10_000 + i as i64;
+        let file_id = 50_000 + i as i64;
+        out.push(format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Stress chat {i}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":{unread},"photo":{{"@type":"chatPhotoInfo","small":{{"@type":"file","id":{file_id},"size":1000,"expected_size":1000,"local":{{"@type":"localFile","path":"","can_be_downloaded":false,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r{file_id}","unique_id":"u{file_id}","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":1000}}}},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}}}}}"#,
+            unread = i % 7
+        ));
+        out.push(format!(
+            r#"{{"@type":"updateChatLastMessage","chat_id":{id},"last_message":{{"id":1,"chat_id":{id},"is_outgoing":{out},"date":{date},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Message number {i} with some preview text","entities":[]}}}}}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}]}}"#,
+            out = i % 3 == 0,
+            date = 1_790_000_000 + i as i64 * 60,
+            order = 1_000_000 + i
+        ));
+    }
+    for i in 0..messages {
+        let id = 1_000 + i as i64;
+        out.push(format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":{out},"date":{date},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Stress message {i}: some bold words, a link https://example.com/{i}, and enough text to wrap onto a second line in a typical window width.","entities":[{{"@type":"textEntity","offset":20,"length":10,"type":{{"@type":"textEntityTypeBold"}}}}]}}}}}}}}"#,
+            out = i % 2 == 0,
+            date = 1_790_000_000 + i as i64 * 600
+        ));
+    }
+    out
+}
+
 pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Session {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let mut session = Session::new(AccountKey::primary(), dyn_sink.clone());
@@ -395,7 +432,14 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
         r#"{"@type":"updateNewMessage","message":{"id":40,"chat_id":12,"is_outgoing":false,"date":1790632080,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Later.","entities":[]}}}}"#
             .to_string(),
     ];
-    for json in jsons {
+    // Performance fixture: `QUILL_DEMO_STRESS=<chats>,<messages>` adds that
+    // many chats (each with an avatar file) and that many formatted
+    // messages in the open chat, for profiling realistic volumes.
+    let stress: Vec<String> = match (kind, demo_stress_size()) {
+        (DemoSeed::ReadyChats, Some((chats, messages))) => stress_fixture(chats, messages),
+        _ => Vec::new(),
+    };
+    for json in jsons.into_iter().chain(stress) {
         if matches!(kind, DemoSeed::Media | DemoSeed::SendMedia)
             && (json.contains(r#""id":101"#)
                 || json.contains(r#""id":102"#)

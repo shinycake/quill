@@ -45,9 +45,6 @@ use std::sync::atomic::AtomicU64;
 /// kit Phase 3: per-render shared inputs for message-history rows.
 #[derive(Default)]
 pub(super) struct HistoryShared {
-    pub(super) files: HashMap<i32, ParsedFile>,
-    pub(super) downloading: std::collections::HashSet<i32>,
-    pub(super) failed: std::collections::HashSet<i32>,
     pub(super) media_roots: Vec<PathBuf>,
 }
 

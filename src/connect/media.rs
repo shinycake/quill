@@ -45,9 +45,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Parity slice: auto-download chat-list avatar photos
     /// (`chat.photo.small`, the cheap 160px thumbnail, for every chat type).
-    /// Runs on every ingest; `should_download` dedupes in-flight and
-    /// completed files, so each photo is requested at most once until it
-    /// lands, and `updateChatPhoto` re-arms the new file id.
+    /// Runs on every ingest but only looks at avatars that became due
+    /// (`Session::take_due_chat_list_photos`); `should_download` dedupes
+    /// in-flight and completed files, so each photo is requested at most
+    /// once until it lands, and `updateChatPhoto` re-arms the new file id.
     pub fn maybe_download_chat_list_photos(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Ok(Vec::new());
@@ -57,11 +58,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.media_prefs.data_saver {
             return Ok(Vec::new());
         }
-        let ids = self.session.chat_list_photo_file_ids();
+        let ids = self.session.take_due_chat_list_photos();
         let mut extras = Vec::new();
-        for file_id in ids {
-            if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {
-                extras.push(extra);
+        for (index, file_id) in ids.iter().enumerate() {
+            match self.download_file(*file_id, THUMB_DOWNLOAD_PRIORITY) {
+                Ok(Some(extra)) => extras.push(extra),
+                Ok(None) => {}
+                Err(err) => {
+                    // Not sent: keep this and the rest due for the next ingest.
+                    self.session
+                        .avatar_downloads_due
+                        .extend(ids[index..].iter().map(|id| id.0));
+                    return Err(err);
+                }
             }
         }
         Ok(extras)

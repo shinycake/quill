@@ -1,7 +1,7 @@
 //! Connect driver: composer drafts and open-chat bookkeeping.
 use super::*;
 use crate::composer::{DraftSaveClock, DraftSaveStep, draft_text_to_store, schedule_draft_save};
-use crate::ids::{ChatId, RequestId};
+use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::ChatDraft;
 use crate::telegram::requests::{
@@ -194,8 +194,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// `viewMessages` for loaded history in the open chat (TDLib 1.8.67).
-    /// Unread counts change only when `updateChatReadInbox` arrives.
+    /// `viewMessages` for the open chat's due rows (TDLib 1.8.67): the
+    /// newest message until the UI reports visible rows, then only those
+    /// (`Session::message_ids_to_view`). Unread counts change only when
+    /// `updateChatReadInbox` arrives.
     pub fn maybe_view_open_messages(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Ok(None);
@@ -241,6 +243,27 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// The UI reports the rows of the open chat it is showing (call it when
+    /// the visible range settles: after layout, after a scroll stops, and
+    /// when a new row appears on screen). The ids become due for
+    /// `viewMessages` (`force_read`, `messageSourceChatHistory`) and are
+    /// sent now, or after the in-flight `viewMessages` answers. From the
+    /// first report on, this open generation views only reported rows
+    /// (Telegram X `MessagesManager.viewMessages` →
+    /// `TdlibMessageViewer.Viewport.viewMessages`). Reports for a chat that
+    /// is not open are ignored (`Ok(None)`).
+    pub fn view_messages(
+        &mut self,
+        chat_id: ChatId,
+        message_ids: &[MessageId],
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.report_visible_messages(chat_id, message_ids)
+        {
+            return Ok(None);
+        }
+        self.maybe_view_open_messages()
     }
 
     /// Persist the open chat's composer before a search result switches chats.
