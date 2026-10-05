@@ -132,31 +132,19 @@ pub(super) fn chat_list_empty_state(
         )
 }
 
-pub(super) fn chat_list_caption(
-    mode: PaneMode,
-    session: Option<&Session>,
-    folder: Option<i32>,
-) -> SharedString {
+/// Section caption above the chat list, shown only where it adds
+/// information the list itself doesn't (search mode, connecting).
+pub(super) fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> Option<SharedString> {
     match mode {
-        PaneMode::Synthetic => "Synthetic".into(),
-        PaneMode::Connecting => "Connecting…".into(),
-        PaneMode::Ready => {
-            if session.is_some_and(|s| s.search.open) {
-                if session.is_some_and(|s| s.search.recents) {
-                    "Recent".into()
-                } else {
-                    "Search".into()
-                }
-            } else if let (Some(session), Some(folder_id)) = (session, folder) {
-                // Phase 7.1: a selected folder tab names the caption.
-                let name = session.folder_name(folder_id).unwrap_or("Folder");
-                let n = session.ordered_folder_chats(folder_id).len();
-                format!("{name} · {n}").into()
+        PaneMode::Synthetic => None,
+        PaneMode::Connecting => Some("Connecting…".into()),
+        PaneMode::Ready => session.filter(|s| s.search.open).map(|s| {
+            if s.search.recents {
+                "Recent".into()
             } else {
-                let n = session.map(|s| s.ordered_chats().len()).unwrap_or(0);
-                format!("Chats · {n}").into()
+                "Search results".into()
             }
-        }
+        }),
     }
 }
 
@@ -596,31 +584,24 @@ pub(super) fn session_chat_row(
             div()
                 .flex()
                 .items_center()
-                .gap_2()
+                .gap_3()
                 // Parity slice: circular chat photo or colored initials for
                 // every chat-list row / chat type.
                 // Slice CL3: the select-mode check circle precedes the
                 // avatar while multi-select is active.
-                // kit Phase 4: the unread badge overlays the avatar.
                 .when(selecting, |this| this.child(select_check(id, checked)))
-                .child({
-                    let avatar = chat_avatar(&title, photo_path, 40.).into_any_element();
-                    match unread_indicator {
-                        Some((count, dot)) => unread_badge(avatar, count, dot),
-                        None => avatar,
-                    }
-                })
+                .child(chat_avatar(&title, photo_path, CHAT_ROW_AVATAR))
                 .child(
                     div()
                         .flex()
                         .flex_col()
+                        .gap_0p5()
                         .min_w_0()
                         .flex_1()
                         .child(
                             div()
                                 .flex()
                                 .items_center()
-                                .justify_between()
                                 .gap_2()
                                 .child(
                                     div()
@@ -628,35 +609,52 @@ pub(super) fn session_chat_row(
                                         .items_center()
                                         .gap_1()
                                         .min_w_0()
-                                        .child(
-                                            div().font_medium().min_w_0().truncate().child(title),
-                                        )
-                                        .when(chat.is_muted(), |this| this.child(muted_badge(id)))
-                                        .when(chat.is_forum_chat(), |this| {
-                                            this.child(forum_badge(id))
-                                        })
-                                        // Phase B1: lock indicator for
-                                        // secret chats (E2E).
+                                        .flex_1()
+                                        // Phase B1: lock for secret chats (E2E).
                                         .when(
                                             matches!(chat.kind, ChatKind::Secret { .. }),
-                                            |this| this.child(secret_badge(id)),
-                                        ),
-                                )
-                                // Slice CL3: TGX draws the @ mention badge and
-                                // ♥ reaction badge right-to-left; the flex
-                                // row renders them left-to-right in the
-                                // same order. kit Phase 4: the unread
-                                // counter now overlays the avatar instead.
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .when(has_reactions, |this| {
-                                            this.child(reaction_badge(chat.is_muted()))
+                                            |this| {
+                                                this.child(row_glyph(
+                                                    IconName::Lock,
+                                                    success().into(),
+                                                ))
+                                            },
+                                        )
+                                        .child(
+                                            div().font_semibold().min_w_0().truncate().child(title),
+                                        )
+                                        .when(chat.is_muted(), |this| {
+                                            this.child(row_glyph(
+                                                IconName::BellOff,
+                                                cx.theme().muted_foreground,
+                                            ))
                                         })
-                                        .when(has_mentions, |this| this.child(mention_badge())),
-                                ),
+                                        .when(chat.is_forum_chat(), |this| {
+                                            this.child(forum_badge(id, cx))
+                                        }),
+                                )
+                                .when_some(row_stamp(chat), |this, (receipt, stamp)| {
+                                    this.child(
+                                        div()
+                                            .flex()
+                                            .flex_none()
+                                            .items_center()
+                                            .gap_0p5()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .when_some(receipt, |this, read| {
+                                                this.child(row_glyph(
+                                                    if read {
+                                                        IconName::CheckCheck
+                                                    } else {
+                                                        IconName::Check
+                                                    },
+                                                    accent().into(),
+                                                ))
+                                            })
+                                            .child(stamp),
+                                    )
+                                }),
                         )
                         .when(row_style.preview_lines >= 3, |this| {
                             // Slice chatlist-list-style: the third line
@@ -671,9 +669,49 @@ pub(super) fn session_chat_row(
                                     .child(chat.last_preview_sender.clone()),
                             )
                         })
-                        .child(super::chatlist_style::chat_list_preview_line(
-                            icon, &preview, entities, cx,
-                        )),
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(div().flex_1().min_w_0().child(
+                                    super::chatlist_style::chat_list_preview_line(
+                                        icon, &preview, entities, cx,
+                                    ),
+                                ))
+                                // Slice CL3: TGX order — ♥ reactions, @ mentions,
+                                // then the unread counter at the trailing edge.
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_none()
+                                        .items_center()
+                                        .gap_1()
+                                        .when(has_reactions, |this| {
+                                            this.child(reaction_badge(chat.is_muted()))
+                                        })
+                                        .when(has_mentions, |this| this.child(mention_badge()))
+                                        .map(|this| match unread_indicator {
+                                            Some((count, dot)) => this.child(unread_pill(
+                                                id,
+                                                count,
+                                                dot,
+                                                chat.is_muted(),
+                                                cx,
+                                            )),
+                                            None if pinned_here(chat, archived)
+                                                && !has_mentions
+                                                && !has_reactions =>
+                                            {
+                                                this.child(row_glyph(
+                                                    IconName::Pin,
+                                                    cx.theme().muted_foreground,
+                                                ))
+                                            }
+                                            None => this,
+                                        }),
+                                ),
+                        ),
                 ),
         )
         .when(!tags.is_empty(), |this| {
@@ -744,53 +782,86 @@ impl Render for PinnedChatDrag {
     }
 }
 
-fn muted_badge(chat_id: ChatId) -> impl IntoElement {
-    div()
-        .id(("muted-badge", chat_id.0 as u64))
-        .h(px(18.))
-        .px_1()
-        .rounded_md()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(bg_badge_muted())
-        .text_color(text_on_fill())
-        .text_xs()
-        .font_semibold()
-        .child("Muted")
+/// Chat-row avatar edge (px). Row heights in `chatlist_style` leave room
+/// for it plus vertical padding.
+const CHAT_ROW_AVATAR: f32 = 46.;
+
+/// Small inline icon in a chat row (lock, muted bell, pin, receipts).
+fn row_glyph(name: IconName, color: Hsla) -> impl IntoElement {
+    Icon::new(name).size(px(14.)).flex_none().text_color(color)
 }
 
-/// Phase B1: lock indicator for secret chats in the chat list (E2E).
-fn secret_badge(chat_id: ChatId) -> impl IntoElement {
+/// Whether the chat is pinned in the list this row belongs to.
+fn pinned_here(chat: &ChatSummary, archived: bool) -> bool {
+    if archived {
+        chat.archive_is_pinned
+    } else {
+        chat.is_pinned
+    }
+}
+
+/// Trailing title-line stamp: `(Some(read) for an outgoing last message,
+/// local time/day label)`, or `None` for an empty chat.
+fn row_stamp(chat: &ChatSummary) -> Option<(Option<bool>, String)> {
+    let last = chat.last_message.filter(|last| last.date > 0)?;
+    let receipt = match chat.last_message_receipt() {
+        quill::state::OutboxReceipt::Read => Some(true),
+        quill::state::OutboxReceipt::Sent => Some(false),
+        quill::state::OutboxReceipt::None => None,
+    };
+    let now = quill::local_time::civil_local(quill::local_time::now_unix());
+    let date = quill::local_time::civil_local(i64::from(last.date));
+    Some((receipt, quill::local_time::chat_list_stamp(&date, &now)))
+}
+
+/// Unread counter at the row's trailing edge: accent for active chats,
+/// neutral for muted ones; a bare dot for marked-as-unread.
+fn unread_pill(chat_id: ChatId, count: i32, dot: bool, muted: bool, cx: &App) -> AnyElement {
+    let bg = if muted {
+        cx.theme().muted_foreground.opacity(0.55)
+    } else {
+        Hsla::from(accent_strong())
+    };
+    let label = if count > 999 {
+        format!("{}K", count / 1000)
+    } else {
+        count.to_string()
+    };
     div()
-        .id(("secret-badge", chat_id.0 as u64))
-        .h(px(18.))
-        .px_1()
-        .rounded_md()
+        .id(("unread-pill", chat_id.0 as u64))
+        .flex_none()
+        .h(px(20.))
+        .min_w(px(20.))
+        .when(dot, |this| this.w(px(12.)).h(px(12.)).min_w(px(12.)))
+        .px(if dot { px(0.) } else { px(6.) })
+        .rounded_full()
         .flex()
         .items_center()
         .justify_center()
-        .bg(accent_strong())
+        .bg(bg)
         .text_color(text_on_fill())
         .text_xs()
         .font_semibold()
-        .child("🔒")
+        .aria_label(if dot {
+            "Marked as unread".to_string()
+        } else {
+            format!("{count} unread")
+        })
+        .when(!dot, |this| this.child(label))
+        .into_any_element()
 }
 
 /// Phase 5.1: forum indicator for forum supergroups in the chat list.
-fn forum_badge(chat_id: ChatId) -> impl IntoElement {
+fn forum_badge(chat_id: ChatId, cx: &App) -> impl IntoElement {
     div()
         .id(("forum-badge", chat_id.0 as u64))
-        .h(px(18.))
+        .flex_none()
         .px_1()
-        .rounded_md()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(bg_premium())
-        .text_color(text_on_fill())
+        .rounded_sm()
+        .border_1()
+        .border_color(cx.theme().border)
+        .text_color(cx.theme().muted_foreground)
         .text_xs()
-        .font_semibold()
         .child("Topics")
 }
 

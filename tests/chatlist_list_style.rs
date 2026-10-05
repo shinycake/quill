@@ -103,13 +103,13 @@ fn row_style_clamps_preview_lines() {
 fn chat_row_height_reflects_lines_and_tags() {
     // 56px base (avatar 40 + py_2), 80px with the folder-tag strip; the
     // third line adds one text_xs line (16px).
-    assert_eq!(chat_row_height_px(false, 2), 56.0);
-    assert_eq!(chat_row_height_px(true, 2), 80.0);
-    assert_eq!(chat_row_height_px(false, 3), 72.0);
-    assert_eq!(chat_row_height_px(true, 3), 96.0);
+    assert_eq!(chat_row_height_px(false, 2), 64.0);
+    assert_eq!(chat_row_height_px(true, 2), 88.0);
+    assert_eq!(chat_row_height_px(false, 3), 80.0);
+    assert_eq!(chat_row_height_px(true, 3), 104.0);
     // Out-of-range line counts clamp instead of producing odd heights.
-    assert_eq!(chat_row_height_px(false, 9), 72.0);
-    assert_eq!(chat_row_height_px(false, 0), 56.0);
+    assert_eq!(chat_row_height_px(false, 9), 80.0);
+    assert_eq!(chat_row_height_px(false, 0), 64.0);
 }
 
 #[test]

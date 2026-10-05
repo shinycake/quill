@@ -734,18 +734,9 @@ impl QuillApp {
             .map(|s| s.ordered_story_tray().into_iter().cloned().collect())
             .unwrap_or_default();
         if entries.is_empty() {
-            return div()
-                .px_3()
-                .py_1()
-                .child(
-                    Button::new("story-tray-add")
-                        .label("Create a story")
-                        .ghost()
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.open_story_composer(window, cx)),
-                        ),
-                )
-                .into_any_element();
+            // Nobody has active stories: the tray collapses. "New story"
+            // stays reachable from the main menu.
+            return div().into_any_element();
         }
         let mut row = div()
             .id("story-tray")
@@ -1318,14 +1309,21 @@ impl QuillApp {
                     })
                     .child(self.list_tabs(cx)),
             )
-            .when(!self.contacts_tab_open && !self.calls_tab_open, |this| {
-                this.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(chat_list_caption(mode, self.session(), self.folder_tab)),
-                )
-            });
+            .when_some(
+                (!self.contacts_tab_open && !self.calls_tab_open)
+                    .then(|| chat_list_caption(mode, self.session()))
+                    .flatten(),
+                |this, caption| {
+                    this.child(
+                        div()
+                            .px_1()
+                            .text_xs()
+                            .font_medium()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(caption),
+                    )
+                },
+            );
         match mode {
             PaneMode::Synthetic => {
                 list = list

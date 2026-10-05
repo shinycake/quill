@@ -343,6 +343,7 @@ mod tests {
             last_preview: String::new(),
             last_preview_style: ChatPreviewStyle::default(),
             last_preview_sender: String::new(),
+            last_message: None,
             typing_senders: Vec::new(),
             choosing_sticker_senders: Vec::new(),
             draft: None,
