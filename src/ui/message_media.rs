@@ -1355,9 +1355,16 @@ pub(super) fn audio_row(
 /// user-initiated listed downloads), "Retry" (failed). Progress comes from
 /// `file.download_progress()` — `updateFile`'s `downloaded_size` over the
 /// known total (TGX `TD.getFileProgress` semantics).
+/// A document row (tdesktop `HistoryDocument`): a round action disc —
+/// download, progress ring with cancel, open, or retry — then the name and
+/// a compact meta line ("450 KB · PDF", "1.2 MB of 3.4 MB") carrying the
+/// secondary actions (Show in folder, Pause/Resume).
 pub(super) fn document_chip(
     row_id: u64,
     doc: &quill::telegram::envelope::DocumentContent,
+    // The disc is accent-filled; on an accent outgoing bubble it switches
+    // to a translucent white one.
+    outgoing: bool,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     failed: &std::collections::HashSet<i32>,
@@ -1376,47 +1383,97 @@ pub(super) fn document_chip(
     let progress = file.and_then(|f| f.download_progress());
     let size = file.map(|f| f.display_size()).unwrap_or(0);
     let size_label = format_bytes(size);
-    let state = if ready {
-        "ready".to_string()
-    } else if paused_now {
-        "paused".to_string()
-    } else if downloading_now {
-        match progress {
-            Some(p) => format!("downloading… {}%", (p * 100.0).round() as i32),
-            None => "downloading…".to_string(),
+    let kind = document_kind_label(&doc.file_name, &doc.mime_type);
+    let meta = if downloading_now {
+        let done = file.map(|f| f.local.downloaded_size).unwrap_or(0);
+        let mut text = match (done > 0, size_label.is_empty()) {
+            (true, false) => format!("{} of {}", format_bytes(done), size_label),
+            _ => "Downloading…".to_string(),
+        };
+        if paused_now {
+            text.push_str(" · paused");
         }
+        text
     } else if failed_now {
-        "download failed".to_string()
+        "Download failed".to_string()
     } else {
-        "not downloaded".to_string()
+        [size_label.as_str(), kind.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
     };
-    let mut detail = doc.mime_type.clone();
-    if !size_label.is_empty() {
-        if !detail.is_empty() {
-            detail.push_str(" · ");
-        }
-        detail.push_str(&size_label);
-    }
-    if !detail.is_empty() {
-        detail.push_str(" · ");
-    }
-    detail.push_str(&state);
     let name = if doc.file_name.is_empty() {
         "Document".to_string()
     } else {
         doc.file_name.clone()
     };
-    let action_label = if ready {
-        Some("Show in folder")
-    } else if downloading_now {
-        Some("Cancel")
-    } else if failed_now {
-        Some("Retry")
+    let (disc_bg, disc_fg) = if outgoing {
+        (gpui_kit::white().opacity(0.22), gpui_kit::white())
     } else {
-        None
+        (cx.theme().primary, gpui_kit::white())
     };
-    // Slice media-downloads-pause: Pause/Resume toggle beside Cancel, only
-    // for user-initiated (listed) downloads — `None` hides it.
+    let (disc_icon, disc_label) = if ready {
+        (gpui_kit::assets::IconName::File, "Open")
+    } else if downloading_now {
+        (gpui_kit::assets::IconName::X, "Cancel download")
+    } else if failed_now {
+        (gpui_kit::assets::IconName::RotateCcw, "Retry download")
+    } else {
+        (gpui_kit::assets::IconName::ArrowDown, "Download")
+    };
+    let primary_action = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
+        if ready {
+            this.open_downloaded_file(file_id, cx);
+        } else if downloading_now {
+            this.cancel_media_download(file_id, cx);
+        } else {
+            this.request_media_download(file_id, sponsored, cx);
+        }
+    };
+    let disc = div()
+        .id(("doc-disc", row_id))
+        .relative()
+        .size(px(44.))
+        .flex_none()
+        .rounded_full()
+        .bg(disc_bg)
+        .flex()
+        .items_center()
+        .justify_center()
+        .role(gpui_kit::Role::Button)
+        .aria_label(disc_label)
+        .tab_index(0)
+        .cursor_pointer()
+        .pressable(cx.theme())
+        .when(downloading_now, |this| {
+            this.child(
+                div().absolute().inset(px(3.)).child(
+                    ProgressCircle::new(("doc-ring", row_id))
+                        .size_full()
+                        .color(disc_fg)
+                        .loading(progress.is_none() && !paused_now)
+                        .value(progress.unwrap_or(0.) * 100.),
+                ),
+            )
+        })
+        .child(Icon::new(disc_icon).size(px(20.)).text_color(disc_fg))
+        .on_click(cx.listener(move |this, _, _, cx| primary_action(this, cx)));
+    let link_color = (!outgoing).then_some(cx.theme().primary);
+    let link = |id: (&'static str, u64), label: &'static str| {
+        div()
+            .id(id)
+            .when_some(link_color, |this, color| this.text_color(color))
+            .role(gpui_kit::Role::Button)
+            .aria_label(label)
+            .tab_index(0)
+            .cursor_pointer()
+            .font_medium()
+            .hover(|style| style.underline())
+            .child(label)
+    };
+    // Slice media-downloads-pause: Pause/Resume only for user-initiated
+    // (listed) downloads — `None` hides it.
     let pause_label = if downloading_now {
         paused.map(|is_paused| if is_paused { "Resume" } else { "Pause" })
     } else {
@@ -1424,98 +1481,86 @@ pub(super) fn document_chip(
     };
     div()
         .id(("doc-chip", row_id))
-        .mt_2()
-        .px_3()
-        .py_2()
-        .rounded_md()
-        .border_1()
-        .border_color(text_muted())
-        .bg(bg_subtle())
+        .mt_1()
+        .flex()
+        .items_center()
+        .gap_3()
+        .min_w(px(220.))
+        .child(disc)
         .child(
             div()
-                .id(("doc-chip-name", row_id))
-                .role(gpui_kit::Role::Button)
-                .aria_label(format!("Open document {name}"))
-                .tab_index(0)
-                .cursor_pointer()
-                .pressable(cx.theme())
-                .child(div().text_sm().font_medium().child(name))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if ready {
-                        this.open_downloaded_file(file_id, cx);
-                    } else if downloading_now {
-                        this.cancel_media_download(file_id, cx);
-                    } else {
-                        this.request_media_download(file_id, sponsored, cx);
-                    }
-                })),
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .id(("doc-chip-name", row_id))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label(format!("Open document {name}"))
+                        .tab_index(0)
+                        .cursor_pointer()
+                        .text_sm()
+                        .font_medium()
+                        .truncate()
+                        .child(name)
+                        .on_click(cx.listener(move |this, _, _, cx| primary_action(this, cx))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_x_2()
+                        .text_xs()
+                        .child(div().opacity(0.7).child(meta))
+                        .when(ready, |this| {
+                            this.child(link(("doc-action", row_id), "Show in folder").on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.reveal_downloaded_file(file_id, cx);
+                                }),
+                            ))
+                        })
+                        .when(failed_now, |this| {
+                            this.child(link(("doc-action", row_id), "Retry").on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.request_media_download(file_id, sponsored, cx);
+                                },
+                            )))
+                        })
+                        .when_some(pause_label, |this, label| {
+                            this.child(link(("doc-pause", row_id), label).on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    if paused_now {
+                                        this.resume_media_download(file_id, cx);
+                                    } else {
+                                        this.pause_media_download(file_id, cx);
+                                    }
+                                },
+                            )))
+                        }),
+                ),
         )
-        .child(div().text_xs().text_color(text_primary()).child(detail))
-        .when(downloading_now, |this| {
-            this.child(
-                div()
-                    .id(("doc-progress", row_id))
-                    .w_full()
-                    .h(px(4.))
-                    .mt_1()
-                    .rounded_full()
-                    .bg(border())
-                    .child(
-                        div()
-                            .h_full()
-                            .w(relative(progress.unwrap_or(0.0)))
-                            .rounded_full()
-                            .bg(accent()),
-                    ),
-            )
-        })
-        .when_some(action_label, |this, label| {
-            this.child(
-                div()
-                    .id(("doc-action", row_id))
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(label)
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .mt_1()
-                    .text_xs()
-                    .text_color(accent())
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if ready {
-                            this.reveal_downloaded_file(file_id, cx);
-                        } else if downloading_now {
-                            this.cancel_media_download(file_id, cx);
-                        } else {
-                            this.request_media_download(file_id, sponsored, cx);
-                        }
-                    })),
-            )
-        })
-        .when_some(pause_label, |this, label| {
-            this.child(
-                div()
-                    .id(("doc-pause", row_id))
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(label)
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .mt_1()
-                    .text_xs()
-                    .text_color(accent())
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if paused_now {
-                            this.resume_media_download(file_id, cx);
-                        } else {
-                            this.pause_media_download(file_id, cx);
-                        }
-                    })),
-            )
-        })
         .into_any_element()
+}
+
+/// Short type tag for a document row: the file extension ("PDF", "ZIP"),
+/// else the MIME subtype, else nothing.
+pub(super) fn document_kind_label(file_name: &str, mime_type: &str) -> String {
+    let ext = std::path::Path::new(file_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| !ext.is_empty() && ext.len() <= 6);
+    match ext {
+        Some(ext) => ext.to_ascii_uppercase(),
+        None => mime_type
+            .split('/')
+            .nth(1)
+            .filter(|sub| !sub.is_empty() && sub.len() <= 12)
+            .map(str::to_ascii_uppercase)
+            .unwrap_or_default(),
+    }
 }
 
 /// MED3: display name for a downloads-manager row — the document's
@@ -1758,4 +1803,17 @@ pub(super) fn dice_row(row_id: u64, dice: &quill::telegram::envelope::DiceConten
                 .child(format!("Rolled {}", dice.value)),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::document_kind_label;
+
+    #[test]
+    fn document_kind_prefers_extension_then_mime_subtype() {
+        assert_eq!(document_kind_label("report.pdf", "application/pdf"), "PDF");
+        assert_eq!(document_kind_label("notes", "text/plain"), "PLAIN");
+        assert_eq!(document_kind_label("", ""), "");
+        assert_eq!(document_kind_label("weird.verylongext", ""), "");
+    }
 }
