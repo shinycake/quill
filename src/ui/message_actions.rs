@@ -61,6 +61,11 @@ impl QuillApp {
             .border_1()
             .border_color(accent())
             .bg(bg_canvas());
+        // Reactions lead the menu (Telegram Desktop): the chat's quick
+        // strip, expandable to every reaction it allows.
+        if message.can_react() {
+            panel = panel.child(self.reaction_strip(chat_id, message_id, &message, cx));
+        }
         macro_rules! item {
             ($id:expr, $label:expr, $this:ident, $window:ident, $cx:ident, $body:block) => {
                 panel = panel.child(
@@ -96,12 +101,6 @@ impl QuillApp {
                 this.status_note = "copied to clipboard".into();
                 this.message_menu = None;
                 cx.notify();
-            });
-        }
-        if message.can_react() {
-            item!("menu-react", "Add reaction", this, _window, cx, {
-                this.message_menu = None;
-                this.open_reaction_picker(chat_id, message_id, cx);
             });
         }
         let is_secret = self

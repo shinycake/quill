@@ -176,6 +176,29 @@ impl HistoryMessage {
             .unwrap_or_default()
     }
 
+    /// Emoji and custom-emoji reaction chips (Telegram Desktop order).
+    pub fn reaction_chips(&self) -> Vec<&MessageReaction> {
+        self.interaction_info
+            .as_ref()
+            .map(MessageInteractionInfo::display_chips)
+            .unwrap_or_default()
+    }
+
+    /// Whether the current user chose `choice` on this message.
+    pub fn chosen_reaction(&self, choice: &crate::state::ReactionChoice) -> bool {
+        let Some(reactions) = self
+            .interaction_info
+            .as_ref()
+            .and_then(|info| info.reactions.as_ref())
+        else {
+            return false;
+        };
+        match choice {
+            crate::state::ReactionChoice::Emoji(emoji) => reactions.chosen_emoji(emoji),
+            crate::state::ReactionChoice::CustomEmoji(id) => reactions.chosen_custom_emoji(*id),
+        }
+    }
+
     pub fn chosen_emoji(&self, emoji: &str) -> bool {
         self.interaction_info
             .as_ref()

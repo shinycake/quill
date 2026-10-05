@@ -675,9 +675,6 @@ impl QuillApp {
                         // schedule picker opens above the input.
                         // Pickers open directly above the input, next to the
                         // buttons that summon them.
-                        .when(self.pending_react.is_some(), |this| {
-                            this.child(self.reaction_picker_panel(cx))
-                        })
                         .when(self.schedule_popup_open, |this| {
                             this.child(self.schedule_popup(cx))
                         })
@@ -1687,12 +1684,14 @@ impl QuillApp {
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.message_menu = Some(MessageMenuState {
-                                chat_id: row_chat,
-                                message_id: row_msg,
-                                position: event.position,
-                            });
-                            cx.notify();
+                            this.open_message_menu(
+                                MessageMenuState {
+                                    chat_id: row_chat,
+                                    message_id: row_msg,
+                                    position: event.position,
+                                },
+                                cx,
+                            );
                         }),
                     )
                     // M1: swipe-to-reply — press on the row, release >24px

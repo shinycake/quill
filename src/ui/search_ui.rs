@@ -379,10 +379,6 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if self.pending_react.is_some() {
-            self.close_reaction_picker(cx);
-            return;
-        }
         if self
             .session()
             .is_some_and(|session| session.sponsored_report.is_some())

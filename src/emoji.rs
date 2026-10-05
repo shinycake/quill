@@ -322,10 +322,11 @@ impl Session {
         }
     }
 
-    /// Custom emoji ids referenced by the open chat's message text that are
-    /// neither resolved (`custom_emoji_stickers`) nor already attempted.
-    /// Sorted, deduplicated, capped at the server's 200-ids-per-call limit.
-    pub fn message_custom_emoji_ids_to_resolve(&self) -> Vec<i64> {
+    /// Custom emoji the open chat shows: ids in message text, custom-emoji
+    /// reactions under messages, and those the open reaction picker offers.
+    /// Sorted and deduplicated.
+    pub fn open_chat_custom_emoji_ids(&self) -> Vec<i64> {
+        use crate::telegram::envelope::ReactionType;
         let mut ids = Vec::new();
         for message in self
             .open_chat
@@ -333,32 +334,68 @@ impl Session {
             .into_iter()
             .flat_map(|history| history.messages.values())
         {
-            let MessageContent::Text(text) = &message.content else {
-                continue;
-            };
-            for entity in &text.entities {
-                let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
-                    continue;
-                };
-                if custom_emoji_id > 0
-                    && !self
-                        .emoji
-                        .status_resolution_attempted
-                        .contains(&custom_emoji_id)
-                    && !self
-                        .emoji
-                        .custom_emoji_stickers
-                        .iter()
-                        .any(|s| s.custom_emoji_id == Some(custom_emoji_id))
-                {
-                    ids.push(custom_emoji_id);
-                }
+            if let Some(reactions) = message
+                .interaction_info
+                .as_ref()
+                .and_then(|info| info.reactions.as_ref())
+            {
+                ids.extend(reactions.reactions.iter().filter_map(|reaction| {
+                    match reaction.reaction_type {
+                        ReactionType::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id),
+                        _ => None,
+                    }
+                }));
+            }
+            if let MessageContent::Text(text) = &message.content {
+                ids.extend(text.entities.iter().filter_map(|entity| match entity.kind {
+                    TextEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id),
+                    _ => None,
+                }));
             }
         }
+        if let Some(options) = &self.message_reaction_options {
+            ids.extend(options.all().into_iter().filter_map(|choice| match choice {
+                crate::state::ReactionChoice::CustomEmoji(id) => Some(id),
+                crate::state::ReactionChoice::Emoji(_) => None,
+            }));
+        }
+        ids.retain(|id| *id > 0);
         ids.sort_unstable();
         ids.dedup();
+        ids
+    }
+
+    /// [`Self::open_chat_custom_emoji_ids`] that are neither resolved
+    /// (`custom_emoji_stickers`) nor already attempted, capped at the
+    /// server's 200-ids-per-call limit.
+    pub fn message_custom_emoji_ids_to_resolve(&self) -> Vec<i64> {
+        let mut ids = self.open_chat_custom_emoji_ids();
+        ids.retain(|id| {
+            !self.emoji.status_resolution_attempted.contains(id)
+                && !self
+                    .emoji
+                    .custom_emoji_stickers
+                    .iter()
+                    .any(|s| s.custom_emoji_id == Some(*id))
+        });
         ids.truncate(200);
         ids
+    }
+
+    /// Image files of the open chat's resolved custom emoji that still need
+    /// a download (the renderer shows the fallback emoji until they land).
+    pub fn open_chat_custom_emoji_files(&self) -> Vec<crate::ids::FileId> {
+        let ids = self.open_chat_custom_emoji_ids();
+        self.emoji
+            .custom_emoji_stickers
+            .iter()
+            .filter(|s| {
+                s.custom_emoji_id
+                    .is_some_and(|id| ids.binary_search(&id).is_ok())
+            })
+            .filter_map(|s| s.display_file_id())
+            .filter(|file| self.should_download(*file))
+            .collect()
     }
 
     /// Slice S10: an emoji-status or emoji-set mutation succeeded — drop the
@@ -493,6 +530,52 @@ mod tests {
         // Attempted ids are excluded.
         session.emoji.status_resolution_attempted.insert(12345);
         assert!(session.message_custom_emoji_ids_to_resolve().is_empty());
+    }
+
+    /// Custom-emoji reactions count as open-chat custom emoji, and resolved
+    /// ones queue their image file once (not while it downloads).
+    #[test]
+    fn open_chat_custom_emoji_files_cover_text_and_reactions() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(1);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi 😀","entities":[{"@type":"textEntity","offset":3,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"12345"}}]}}}}"#,
+        );
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            r#"{"@type":"updateMessageInteractionInfo","chat_id":4,"message_id":9,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"777"},"total_count":2,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+        );
+        session.open_chat = Some(ChatId(4));
+        assert_eq!(session.open_chat_custom_emoji_ids(), vec![777, 12345]);
+        let message = &session.histories[&4].messages[&9];
+        assert_eq!(message.reaction_chips().len(), 1);
+        assert!(message.emoji_reaction_chips().is_empty());
+        assert!(message.chosen_reaction(&crate::state::ReactionChoice::CustomEmoji(777)));
+        session.emoji.custom_emoji_stickers.push(StickerItem {
+            custom_emoji_id: Some(777),
+            id: 1,
+            set_id: 2,
+            emoji: "🔥".into(),
+            width: 100,
+            height: 100,
+            format: crate::telegram::envelope::StickerFormat::Webp,
+            file_id: crate::ids::FileId(55),
+            thumb_file_id: None,
+            thumb_width: 0,
+            thumb_height: 0,
+            requires_premium: false,
+        });
+        assert_eq!(
+            session.open_chat_custom_emoji_files(),
+            vec![crate::ids::FileId(55)]
+        );
+        session.begin_download(crate::ids::FileId(55));
+        assert!(session.open_chat_custom_emoji_files().is_empty());
     }
 
     /// Slice S10: emoji-backend answers are stored only under a matching

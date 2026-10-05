@@ -3,7 +3,9 @@
 //! comes into view), plus the reaction options of the message whose
 //! reaction picker is open.
 use super::*;
-use crate::telegram::envelope::{StoryAvailableReactionKind, StoryAvailableReactionView};
+use crate::telegram::envelope::{
+    ReactionType, StoryAvailableReactionKind, StoryAvailableReactionView,
+};
 
 /// At most this many `getStickerSet` requests for the library in flight.
 pub const MAX_LIBRARY_LOADS: usize = 4;
@@ -25,6 +27,18 @@ pub enum ReactionChoice {
 }
 
 impl ReactionChoice {
+    /// The choice a reaction under a message stands for (paid and unknown
+    /// reactions have none).
+    pub fn from_type(reaction_type: &ReactionType) -> Option<Self> {
+        match reaction_type {
+            ReactionType::Emoji { emoji } => Some(Self::Emoji(emoji.clone())),
+            ReactionType::CustomEmoji { custom_emoji_id } => {
+                Some(Self::CustomEmoji(*custom_emoji_id))
+            }
+            ReactionType::Paid | ReactionType::Unknown => None,
+        }
+    }
+
     fn from_view(view: StoryAvailableReactionView) -> Option<Self> {
         match view.kind {
             StoryAvailableReactionKind::Emoji(emoji) => Some(Self::Emoji(emoji)),

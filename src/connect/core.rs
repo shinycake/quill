@@ -675,6 +675,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.maybe_resolve_emoji_status_choices()?;
         self.maybe_resolve_message_custom_emoji()?;
+        if !self.session.emoji.custom_emoji_stickers.is_empty() {
+            let files = self.session.open_chat_custom_emoji_files();
+            self.ensure_media_files(&files)?;
+        }
         if gif_bot_changed {
             self.cancel_gif_search_requests();
             self.session.gifs.search_results.clear();

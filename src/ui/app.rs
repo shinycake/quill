@@ -430,7 +430,8 @@ pub struct QuillApp {
     /// Last successful (or failed) `forwardMessages` result.
     pub(super) forward_result: Option<ForwardResult>,
     /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
-    pub(super) pending_react: Option<(ChatId, MessageId)>,
+    /// The message menu's reaction strip is expanded to every reaction.
+    pub(super) reactions_expanded: bool,
     /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
     pub(super) mute_menu_open: bool,
     /// Phase B4: self-destruct / auto-delete timer picker below the

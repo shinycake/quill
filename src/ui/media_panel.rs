@@ -517,7 +517,7 @@ impl QuillApp {
     }
 
     /// The static image for a sticker / custom emoji cell, when local.
-    fn panel_still(&self, item: &StickerItem) -> Option<std::path::PathBuf> {
+    pub(super) fn panel_still(&self, item: &StickerItem) -> Option<std::path::PathBuf> {
         let roots = self.media_display_roots();
         let session = self.session()?;
         [item.display_file_id(), item.thumb_file_id]

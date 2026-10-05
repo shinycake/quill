@@ -366,12 +366,6 @@ impl QuillApp {
             self.pending_forward = None;
             self.forward_picker_open = false;
         }
-        if self
-            .pending_react
-            .is_some_and(|(react_chat, _)| react_chat != chat_id)
-        {
-            self.pending_react = None;
-        }
         if self.recording_active() {
             self.cancel_recording(cx);
         }

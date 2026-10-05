@@ -77,6 +77,17 @@ impl MessageReactions {
             .filter(|reaction| reaction.reaction_type.emoji_text().is_some())
     }
 
+    /// Chips under a message: emoji and custom-emoji reactions (paid
+    /// reactions are a separate flow).
+    pub fn display_chips(&self) -> impl Iterator<Item = &MessageReaction> {
+        self.reactions.iter().filter(|reaction| {
+            matches!(
+                reaction.reaction_type,
+                ReactionType::Emoji { .. } | ReactionType::CustomEmoji { .. }
+            )
+        })
+    }
+
     pub fn chosen_emoji(&self, emoji: &str) -> bool {
         self.reactions.iter().any(|reaction| {
             reaction.is_chosen && reaction.reaction_type.emoji_text() == Some(emoji)
@@ -105,6 +116,13 @@ impl MessageInteractionInfo {
         self.reactions
             .as_ref()
             .map(|reactions| reactions.emoji_chips().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn display_chips(&self) -> Vec<&MessageReaction> {
+        self.reactions
+            .as_ref()
+            .map(|reactions| reactions.display_chips().collect())
             .unwrap_or_default()
     }
 

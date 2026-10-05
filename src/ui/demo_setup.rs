@@ -220,7 +220,33 @@ impl QuillApp {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_reactions(session, &self.demo_sink, &self.demo_seq);
             }
-            self.pending_react = Some((ChatId(11), MessageId(101)));
+            // The message menu with its reaction strip, expanded.
+            if let Some(session) = self.demo_session.as_mut() {
+                use quill::state::{MessageReactionOptions, ReactionChoice};
+                let emoji = |e: &str| ReactionChoice::Emoji(e.to_string());
+                session.message_reaction_options = Some(MessageReactionOptions {
+                    chat_id: ChatId(11),
+                    message_id: MessageId(101),
+                    top: ["❤", "👍", "🔥", "😂", "😮", "😢", "🎉"]
+                        .into_iter()
+                        .map(emoji)
+                        .collect(),
+                    recent: vec![emoji("👏")],
+                    popular: [
+                        "🤔", "🙏", "👌", "😍", "🤯", "😱", "🥰", "🤩", "💯", "⚡", "🏆", "🤝",
+                    ]
+                    .into_iter()
+                    .map(emoji)
+                    .collect(),
+                    allow_custom_emoji: false,
+                });
+            }
+            self.message_menu = Some(MessageMenuState {
+                chat_id: ChatId(11),
+                message_id: MessageId(101),
+                position: point(px(420.), px(200.)),
+            });
+            self.reactions_expanded = true;
             self.status_note = "screenshot demo — react · unreact · chips".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyPin)) {
