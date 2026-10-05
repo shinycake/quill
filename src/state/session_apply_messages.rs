@@ -295,10 +295,9 @@ impl Session {
         // place; the row re-renders via `effective_content` (ephemeral
         // wins) and the chat-list preview refreshes when it's the
         // last message.
-        let updated = self
-            .histories
-            .get_mut(&chat_id.0)
-            .is_some_and(|history| history.update_ephemeral(message_id, ephemeral));
+        let updated = self.edit_loaded_message(chat_id, message_id, |message| {
+            message.ephemeral = ephemeral.clone();
+        });
         if updated {
             let is_last = self
                 .histories
@@ -347,10 +346,9 @@ impl Session {
         {
             slot.content = content.clone();
         }
-        let updated = self
-            .histories
-            .get_mut(&chat_id.0)
-            .is_some_and(|history| history.update_content(message_id, content));
+        let updated = self.edit_loaded_message(chat_id, message_id, |message| {
+            message.content = content.clone();
+        });
         if updated {
             let is_last = self
                 .histories

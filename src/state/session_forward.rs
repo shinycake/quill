@@ -28,6 +28,16 @@ impl Session {
                 }
             }
         }
+        // The topic view reads only `topic_histories`.
+        for topic in self.topic_histories.values_mut() {
+            for message in topic.messages.values_mut() {
+                if let MessageContent::Poll(poll_content) = &mut message.content
+                    && poll_content.poll.id == poll.id
+                {
+                    poll_content.poll = poll.clone();
+                }
+            }
+        }
         // N2: an open voter dialog goes stale when the poll updates
         // (counts/options change) — drop cached pages for touched
         // messages so the next open refetches.

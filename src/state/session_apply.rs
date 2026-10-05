@@ -1206,26 +1206,26 @@ impl Session {
                 message_id,
                 interaction_info,
             } => {
-                if let Some(history) = self.histories.get_mut(&chat_id.0) {
-                    history.update_interaction_info(message_id, interaction_info);
-                }
+                self.edit_loaded_message(chat_id, message_id, |message| {
+                    message.interaction_info = interaction_info.clone();
+                });
             }
             EnvelopePayload::UpdateMessageIsPinned {
                 chat_id,
                 message_id,
                 is_pinned,
             } => {
-                if let Some(history) = self.histories.get_mut(&chat_id.0) {
-                    history.update_is_pinned(message_id, is_pinned);
-                }
+                self.edit_loaded_message(chat_id, message_id, |message| {
+                    message.is_pinned = is_pinned;
+                });
             }
             EnvelopePayload::UpdateMessageContentOpened {
                 chat_id,
                 message_id,
             } => {
-                if let Some(history) = self.histories.get_mut(&chat_id.0) {
-                    history.mark_content_opened(message_id);
-                }
+                self.edit_loaded_message(chat_id, message_id, |message| {
+                    message.content.mark_content_opened();
+                });
             }
             EnvelopePayload::UpdateMessageEdited {
                 chat_id,
@@ -1236,9 +1236,9 @@ impl Session {
                 // Phase 3.2: bots edit inline keyboards via `updateMessageEdited`
                 // (schema 1.8.67 line 10431) — the new `reply_markup` (possibly
                 // None) replaces the message's keyboard.
-                if let Some(history) = self.histories.get_mut(&chat_id.0) {
-                    history.update_reply_markup(message_id, reply_markup);
-                }
+                self.edit_loaded_message(chat_id, message_id, |message| {
+                    message.reply_markup = reply_markup.clone();
+                });
             }
             EnvelopePayload::UpdatePoll { poll } => {
                 // Phase 4.2: `updatePoll` (schema 1.8.67 line 11179) carries

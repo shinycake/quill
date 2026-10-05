@@ -165,6 +165,37 @@ impl Session {
         }
     }
 
+    /// Apply `edit` to every loaded copy of one message: the row in the
+    /// chat's main history and the row in any loaded forum-topic history
+    /// of that chat (the topic view reads `topic_histories` only, and
+    /// per-message updates carry no topic id). Returns whether any copy
+    /// was found.
+    pub(crate) fn edit_loaded_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        mut edit: impl FnMut(&mut HistoryMessage),
+    ) -> bool {
+        let mut found = false;
+        if let Some(message) = self
+            .histories
+            .get_mut(&chat_id.0)
+            .and_then(|history| history.messages.get_mut(&message_id.0))
+        {
+            edit(message);
+            found = true;
+        }
+        for ((topic_chat_id, _), topic) in self.topic_histories.iter_mut() {
+            if *topic_chat_id == chat_id.0
+                && let Some(message) = topic.messages.get_mut(&message_id.0)
+            {
+                edit(message);
+                found = true;
+            }
+        }
+        found
+    }
+
     pub(crate) fn remember_files(&mut self, files: &[ParsedFile]) {
         for file in files {
             // Nested message files can still be idle while a download is in flight.
