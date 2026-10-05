@@ -4,12 +4,25 @@ use crate::text::TextEntityKind;
 
 impl Session {
     pub(crate) fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
+        if !from_file_update
+            && self.files.get(&file.id.0).is_some_and(|current| {
+                (current.usable_path().is_some() && file.usable_path().is_none())
+                    || (current.local.is_downloading_active && file.local.is_idle_incomplete())
+            })
+        {
+            return;
+        }
         let idle_incomplete = file.local.is_idle_incomplete();
+        let paused = self.paused_downloads.contains(&file.id.0);
         if file.local.is_downloading_completed {
             self.failed_downloads.remove(&file.id.0);
             self.record_completed_user_download(file.id.0);
         }
-        if from_file_update && idle_incomplete && self.user_downloads.contains(&file.id.0) {
+        if from_file_update
+            && idle_incomplete
+            && !paused
+            && self.user_downloads.contains(&file.id.0)
+        {
             // MED3: a user-initiated download that went active → idle without
             // completing stalled (or errored without failing the request) —
             // surface it as failed so the row offers Retry. Explicit cancels
@@ -19,7 +32,7 @@ impl Session {
         }
         if file.local.is_downloading_completed
             || !file.local.can_be_downloaded
-            || (from_file_update && idle_incomplete)
+            || (from_file_update && idle_incomplete && !paused)
         {
             self.unstick_download(file.id.0);
         }
@@ -202,10 +215,7 @@ impl Session {
                 &[]
             };
             for sticker in visible.iter().chain(self.stickers.suggestions.iter()) {
-                let file_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
-                    (sticker.format == StickerFormat::Webp && sticker.file_id.0 != 0)
-                        .then_some(sticker.file_id)
-                });
+                let file_id = sticker.display_file_id();
                 if let Some(file_id) = file_id
                     && self.should_download(file_id)
                 {
@@ -220,10 +230,7 @@ impl Session {
                 .iter()
                 .chain(&self.emoji.custom_emoji_stickers)
             {
-                let file_id = sticker.thumb_file_id.filter(|id| id.0 != 0).or_else(|| {
-                    (sticker.format == StickerFormat::Webp && sticker.file_id.0 != 0)
-                        .then_some(sticker.file_id)
-                });
+                let file_id = sticker.display_file_id();
                 if let Some(file_id) = file_id
                     && self.should_download(file_id)
                 {

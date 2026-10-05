@@ -419,6 +419,15 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|live| !live.driver.has_call_engine())
+        {
+            self.status_note = "Calls are unavailable. The audio component could not start.".into();
+            cx.notify();
+            return;
+        }
         // Refuse offline before the confirm dialog — a call can't be
         // queued, so confirming then failing would be dishonest.
         if self

@@ -14,6 +14,7 @@ pub enum SearchStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchMessageHit {
+    pub sender: Option<MessageSender>,
     pub chat_id: ChatId,
     pub message_id: MessageId,
     pub preview: String,
@@ -39,6 +40,7 @@ pub struct SearchMessageHit {
 impl SearchMessageHit {
     pub(crate) fn from_parsed(message: &ParsedMessage) -> Self {
         Self {
+            sender: message.sender,
             chat_id: message.chat_id,
             message_id: message.id,
             preview: effective_content(&message.content, message.ephemeral.as_ref()).preview(),
@@ -59,6 +61,7 @@ impl SearchMessageHit {
 
     pub(crate) fn into_history(self) -> HistoryMessage {
         HistoryMessage {
+            sender: self.sender,
             id: self.message_id,
             chat_id: self.chat_id,
             is_outgoing: self.is_outgoing,

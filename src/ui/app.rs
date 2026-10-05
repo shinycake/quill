@@ -127,7 +127,11 @@ pub struct QuillApp {
     pub(super) forward_search_input: Entity<TextareaState>,
     pub(super) auth_demo: AuthorizationState,
     pub(super) focus_sidebar: FocusHandle,
+    pub(super) context_menu_focus: FocusHandle,
+    pub(super) context_menu_was_open: bool,
+    pub(super) context_menu_previous_focus: Option<FocusHandle>,
     pub(super) connect_status: ConnectUiStatus,
+    pub(super) connection_generation: u64,
     pub(super) live: Option<LiveConnect>,
     pub(super) status_note: String,
     /// Slice auth-logout-warning: the startup credentials, kept so a
@@ -461,6 +465,7 @@ pub struct QuillApp {
     pub(super) playing_audio: Option<MessageId>,
     /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
     pub(super) pending_audio_play: Option<(MessageId, FileId, f64)>,
+    pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
     pub(super) voice_player: Option<Child>,
     /// Active audio/voice track's playback clock (playing or paused-with-offset).
     /// `Some` exactly when `playing_voice` or `playing_audio` is `Some` (Phase 4.6).

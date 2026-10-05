@@ -10,7 +10,6 @@
 //! the UI — switch away from it first.
 
 use super::app::QuillApp;
-use super::connect_ui::ConnectUiStatus;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
@@ -18,8 +17,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::connect::{CLIENT_CLOSE_TIMEOUT, start_live_connect_for_account};
-use quill::diagnostics::MemorySink;
+use quill::connect::CLIENT_CLOSE_TIMEOUT;
 use quill::ids::AccountKey;
 use quill::platform::live_secret_store;
 use quill::settings::{
@@ -28,7 +26,6 @@ use quill::settings::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 /// Slice parity:auth-multi-account: working state for the Accounts dialog.
 pub(crate) struct AccountsUiState {
@@ -100,7 +97,7 @@ impl QuillApp {
     pub(crate) fn switch_account(
         &mut self,
         key: &AccountKey,
-        display_name: &str,
+        _display_name: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -112,7 +109,7 @@ impl QuillApp {
             );
             return;
         };
-        let Some(credentials) = self.credentials.clone() else {
+        let Some(_) = self.credentials.as_ref() else {
             self.fail_account_switch(
                 "Could not switch account: Telegram credentials are not available",
                 window,
@@ -159,28 +156,7 @@ impl QuillApp {
             self.fail_account_switch(format!("Could not switch account: {e}"), window, cx);
             return;
         }
-        match start_live_connect_for_account(
-            credentials,
-            live_secret_store().as_ref(),
-            Arc::new(MemorySink::new()),
-            key.clone(),
-        ) {
-            Ok(live) => {
-                self.live = Some(live);
-                self.reload_account_keybindings(cx);
-                // Clear any earlier restore-blocked label — the switch
-                // succeeded and the connect is live again.
-                self.connect_status = ConnectUiStatus::Live;
-                self.status_note = format!("Switched to “{display_name}” — connecting…");
-            }
-            Err(blocker) => {
-                self.connect_status = ConnectUiStatus::RestoreBlocked(blocker.user_message());
-                self.status_note = format!(
-                    "Could not start “{display_name}”: {}",
-                    blocker.user_message()
-                );
-            }
-        }
+        self.start_connection(cx);
         cx.notify();
     }
 

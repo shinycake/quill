@@ -527,7 +527,7 @@ impl ChatSummary {
         if matches!(self.kind, ChatKind::Secret { .. }) {
             return "Secret chat".into();
         }
-        "cloud chat".into()
+        "No messages yet".into()
     }
 
     pub fn outbox_receipt(&self, message: &HistoryMessage) -> OutboxReceipt {

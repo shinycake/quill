@@ -21,6 +21,20 @@ use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, StoryPostOutcome, connection_indicator};
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let menu_open = self.message_menu.is_some() || self.chat_menu.is_some();
+        if menu_open && !self.context_menu_was_open {
+            self.context_menu_previous_focus = window.focused(cx);
+            window.focus(&self.context_menu_focus, cx);
+        } else if !menu_open && self.context_menu_was_open {
+            // A menu action may already have focused an editor or a dialog.
+            if self.context_menu_focus.contains_focused(window, cx)
+                && let Some(previous) = self.context_menu_previous_focus.as_ref()
+            {
+                window.focus(previous, cx);
+            }
+            self.context_menu_previous_focus = None;
+        }
+        self.context_menu_was_open = menu_open;
         // Phase 8.1: feed OS window focus into the notification decision, then
         // dispatch any notifications the reducer queued since the last frame.
         if let Some(live) = self.live.as_mut() {

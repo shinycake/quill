@@ -352,6 +352,16 @@ impl Worker {
                 .ok_or_else(|| io::Error::other("Missing chat identifiers"))?;
             chats.extend(ids.iter().filter_map(Value::as_i64));
         }
+        // TDLib keeps recently inactive channels outside either visible list.
+        // Retain its raw answer even when it cannot offer any history, then
+        // export every chat it does expose through the normal history path.
+        let inactive = self.raw(json!({"@type":"getInactiveSupergroupChats"}))?;
+        self.write("inactive-supergroup-chats.json", &inactive)?;
+        if inactive["@type"] == "chats"
+            && let Some(ids) = inactive["chat_ids"].as_array()
+        {
+            chats.extend(ids.iter().filter_map(Value::as_i64));
+        }
         let mut metadata = private_file(&self.output.join("chats.jsonl"))?;
         for (index, chat_id) in chats.into_iter().enumerate() {
             *self.status.lock().unwrap() =
@@ -541,6 +551,9 @@ mod tests {
                             json!({"@type":"chats","chat_ids":[1]})
                         }
                     }
+                    "getInactiveSupergroupChats" => {
+                        json!({"@type":"chats","chat_ids":[-3]})
+                    }
                     "getChat" => json!({"@type":"chat","id":request["chat_id"],"title":"Fixture"}),
                     "getChatHistory" => {
                         let from = request["from_message_id"].as_i64().unwrap();
@@ -610,8 +623,8 @@ mod tests {
                     .label()
                     .starts_with("Export finished with limitations:")
             );
-            assert_eq!(manifest["messages"], 2);
-            assert_eq!(manifest["protected_items_skipped"], 3);
+            assert_eq!(manifest["messages"], 3);
+            assert_eq!(manifest["protected_items_skipped"], 4);
             let stories = std::fs::read_to_string(folder.join("stories.jsonl")).unwrap();
             assert_eq!(stories.lines().count(), 2);
             assert!(
@@ -633,7 +646,7 @@ mod tests {
                     .count(),
                 2
             );
-            for name in ["chat-1.jsonl", "chat--2.jsonl"] {
+            for name in ["chat-1.jsonl", "chat--2.jsonl", "chat--3.jsonl"] {
                 let contents = std::fs::read_to_string(folder.join(name)).unwrap();
                 assert_eq!(contents.lines().count(), 1);
                 assert!(contents.contains("future_content"));
@@ -643,7 +656,12 @@ mod tests {
                     .iter()
                     .filter(|m| m.as_str() == "getChatHistory")
                     .count(),
-                6
+                9
+            );
+            assert!(
+                std::fs::read_to_string(folder.join("inactive-supergroup-chats.json"))
+                    .unwrap()
+                    .contains("-3")
             );
             assert_eq!(
                 std::fs::read(folder.join("media/4")).unwrap(),

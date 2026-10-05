@@ -26,7 +26,9 @@ use quill::state::{
     ChatSearchJump, ChatSummary, HistoryMessage, InfoPanelTarget, OutboxReceipt, Session,
 };
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{ChatKind, MessageContent, ParsedFile, format_ttl_setting};
+use quill::telegram::envelope::{
+    ChatKind, MessageContent, MessageSender, ParsedFile, format_ttl_setting,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,8 +49,7 @@ impl QuillApp {
         typing: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let (chat_id, muted, forever, archived) =
-            actions.unwrap_or((ChatId(0), false, false, false));
+        let (chat_id, muted, forever, _) = actions.unwrap_or((ChatId(0), false, false, false));
         // Phase 6: the header title opens the info panel for private chats
         // (user profile) and supergroups/channels (group info). Other chat
         // kinds keep the plain title.
@@ -390,73 +391,6 @@ impl QuillApp {
                                         this.select_listed_chat(ChatId(discussion_id), window, cx);
                                     })),
                             )
-                        })
-                        .child(
-                            Button::new("chat-mute")
-                                .label(if muted { "Unmute" } else { "Mute" })
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    if muted {
-                                        this.apply_chat_mute(chat_id, 0, cx);
-                                    } else if this.mute_menu_open {
-                                        this.close_mute_menu(cx);
-                                    } else {
-                                        this.open_mute_menu(cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            Button::new("chat-archive")
-                                .label(if archived { "Unarchive" } else { "Archive" })
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.toggle_archive(chat_id, cx);
-                                })),
-                        )
-                        // Parity slice: per-chat folder picker — destinations
-                        // come from `getChatListsToAddChat`, as the schema
-                        // intends; removals go through `editChatFolder`
-                        // (there is no `removeChatFromList` in 1.8.67).
-                        .child(
-                            Button::new("chat-folders")
-                                .label("Folders")
-                                .ghost()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    if this.folder_menu_open {
-                                        this.folder_menu_open = false;
-                                        cx.notify();
-                                    } else {
-                                        this.open_folder_menu(chat_id, cx);
-                                    }
-                                })),
-                        )
-                        // Slice media-shared-gallery: the per-chat shared
-                        // media gallery (Media / Files / Music / Links /
-                        // Voice / GIFs tabs). Live only — demo sessions have
-                        // no TDLib to fetch pages from (the screenshot
-                        // fixture seeds `Session::shared_media` directly).
-                        .when(self.live.is_some(), |this| {
-                            this.child(
-                                Button::new("chat-shared-media")
-                                    .label("Media")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.open_shared_media_ui(cx);
-                                    })),
-                            )
-                        })
-                        // `parity:platform-chat-export` — export the chat's
-                        // history to a JSON file in Downloads. Live only:
-                        // the export pages `getChatHistory` from TDLib.
-                        .when(self.live.is_some(), |this| {
-                            this.child(
-                                Button::new("chat-export-history")
-                                    .label("Export")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.start_chat_export(chat_id, cx);
-                                    })),
-                            )
                         }),
                 )
             })
@@ -498,7 +432,7 @@ impl QuillApp {
                 .into_any_element(),
             PaneMode::Connecting => pane_placeholder(
                 "Not signed in",
-                "Chat list and sending unlock after authorization is Ready. This window is not showing a fake inbox.",
+                "Sign in to see your chats and messages.",
                 cx,
             )
             .into_any_element(),
@@ -565,7 +499,7 @@ impl QuillApp {
                         Some("Loading topic…".to_string())
                     }
                 } else if open.is_none() {
-                    Some("Select a supported cloud chat to send.".to_string())
+                    Some("Select a chat to start messaging.".to_string())
                 } else {
                     // Phase B1: secret chats that can't send yet explain why
                     // instead of the generic unsupported note.
@@ -1165,7 +1099,7 @@ impl QuillApp {
             } else if open.is_none() {
                 pane_placeholder(
                     "Select a chat",
-                    "The main list is driven by loadChats + updateNewChat / updateChatPosition.",
+                    "Choose a conversation from the sidebar to start messaging.",
                     cx,
                 )
                 .into_any_element()
@@ -1186,7 +1120,7 @@ impl QuillApp {
                 if topic_messages.is_empty() {
                     pane_placeholder(
                         "No messages in this topic yet",
-                        "Topic history arrives via searchChatMessages with topic_id.",
+                        "No messages in this topic yet.",
                         cx,
                     )
                     .into_any_element()
@@ -1286,55 +1220,61 @@ impl QuillApp {
             |message| quill::album::is_album_media(&message.content),
         );
         let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
-        // kit Phase 4: per-row sender chrome. Outgoing rows never had a
-        // sender header — their delivery state moves into the in-bubble
-        // footer. The sender name collapses for consecutive same-direction
-        // rows. The chat title is the only sender identity plumbed: it
-        // identifies the sender in 1:1/secret chats and channels, so the
-        // avatar slot is filled there and left empty in groups (never
-        // invented).
-        let single_sender = matches!(
+        let is_group = matches!(
             chat.map(|summary| &summary.kind),
-            Some(ChatKind::Private { .. } | ChatKind::Secret { .. })
-                | Some(ChatKind::Supergroup {
-                    is_channel: true,
-                    ..
-                })
+            Some(
+                ChatKind::BasicGroup { .. }
+                    | ChatKind::Supergroup {
+                        is_channel: false,
+                        ..
+                    }
+            )
         );
-        let avatar_photo: Option<PathBuf> = chat
-            .and_then(|summary| session.and_then(|live| live.chat_photo_path(summary.id)))
-            .map(PathBuf::from);
-        let mut prev_outgoing: Option<bool> = None;
+        let mut previous = None;
         let mut row_chrome = |message: &HistoryMessage| {
-            // Service rows (e.g. screenshot notices) must never collapse the
-            // sender: the row chrome renders "{sender} took a screenshot",
-            // and collapsing to None would show "Someone" instead.
-            // Slice G9: the join-from-community row attributes the join
-            // to the sender ("{name} joined the group from the
-            // community"), so it keeps the sender too.
-            let show_sender = prev_outgoing != Some(message.is_outgoing)
-                || matches!(message.content, MessageContent::ScreenshotTaken)
-                || matches!(
-                    message.content,
-                    MessageContent::ChatJoinFromCommunity { .. }
-                );
-            prev_outgoing = Some(message.is_outgoing);
-            let sender = if !message.is_outgoing && show_sender {
-                Some(sender_name.to_string())
-            } else {
-                None
-            };
+            let identity = (message.is_outgoing, message.sender);
+            let service = matches!(
+                message.content,
+                MessageContent::ScreenshotTaken | MessageContent::ChatJoinFromCommunity { .. }
+            );
+            let show_sender = previous != Some(identity);
+            previous = Some(identity);
+            let name = match message.sender {
+                Some(MessageSender::User { user_id }) => session
+                    .and_then(|s| s.user(user_id))
+                    .map(|u| u.display_name()),
+                Some(MessageSender::Chat { chat_id }) => session
+                    .and_then(|s| s.chats.get(&chat_id))
+                    .map(|c| c.title.clone()),
+                None => None,
+            }
+            .unwrap_or_else(|| {
+                if is_group {
+                    "Member".into()
+                } else {
+                    sender_name.to_string()
+                }
+            });
+            let sender = (!message.is_outgoing && (service || (is_group && show_sender)))
+                .then(|| name.clone());
             let receipt = if message.is_outgoing {
                 chat.map(|summary| summary.outbox_receipt(message))
                     .unwrap_or(OutboxReceipt::Sent)
             } else {
                 OutboxReceipt::None
             };
-            let sender_avatar = if !message.is_outgoing && single_sender {
-                Some((sender_name.to_string(), avatar_photo.clone()))
-            } else {
-                None
-            };
+            let photo = match message.sender {
+                Some(MessageSender::User { user_id }) => {
+                    session.and_then(|s| s.user_photo_path(user_id))
+                }
+                Some(MessageSender::Chat { chat_id }) => {
+                    session.and_then(|s| s.chat_photo_path(ChatId(chat_id)))
+                }
+                None => None,
+            }
+            .and_then(|path| sandboxed_display_path(path, &media_roots));
+            let sender_avatar =
+                (!message.is_outgoing && is_group && show_sender).then_some((name, photo));
             (sender, receipt, sender_avatar)
         };
         for group in groups {
@@ -1400,9 +1340,6 @@ impl QuillApp {
                             .forward_info
                             .as_ref()
                             .and_then(|info| session.map(|s| s.forward_from_label(info))),
-                        reaction_open: self
-                            .pending_react
-                            .is_some_and(|(chat, id)| chat == message.chat_id && id == message.id),
                         seek_bar,
                         animation_playing,
                         animation_frame,
@@ -1596,8 +1533,6 @@ impl QuillApp {
                     inputs.sender_avatar.clone(),
                     inputs.quote_preview.clone(),
                     inputs.forward_from.clone(),
-                    inputs.selected_forward,
-                    inputs.reaction_open,
                     inputs.seek_bar.clone(),
                     inputs.animation_playing,
                     inputs.animation_frame.clone(),

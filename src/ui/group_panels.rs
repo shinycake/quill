@@ -104,6 +104,10 @@ impl QuillApp {
             let user_id = row.user_id;
             let name = row.name.clone();
             let status = row.status_text.clone();
+            let photo = self
+                .session()
+                .and_then(|s| s.user_photo_path(user_id))
+                .and_then(|path| sandboxed_display_path(path, &self.media_display_roots()));
             panel = panel.child(
                 div()
                     .id(("new-secret-contact", user_id as u64))
@@ -125,7 +129,7 @@ impl QuillApp {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(initials_avatar(&name, 32.))
+                            .child(chat_avatar(&name, photo.as_deref(), 32.))
                             .child(
                                 div()
                                     .flex()
@@ -417,6 +421,7 @@ impl QuillApp {
                     .and_then(|i| i.photo_file_id)
                     .and_then(|id| s.files.get(&id))
                     .and_then(|file| file.usable_path())
+                    .or_else(|| s.user_photo_path(user_id))
             })
             .and_then(|path| sandboxed_display_path(path, &roots));
         let avatar: AnyElement = match photo_path {

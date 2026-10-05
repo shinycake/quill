@@ -132,9 +132,11 @@ impl QuillApp {
         }
         set_theme_mode(mode, None, cx);
         set_high_contrast(hc);
-        if accent != 0 {
-            Theme::global_mut(cx).colors.accent = Hsla::from(rgb(accent));
-        }
+        Theme::global_mut(cx).colors.primary = if accent == 0 {
+            Hsla::from(super::chat_theme::accent_strong())
+        } else {
+            Hsla::from(rgb(accent))
+        };
         // The accent mutation touches fields the Base layer mirrors
         // (scrollbar styles, semantic tokens, text-view defaults) — they
         // only reach the Base layer once Theme::sync_base runs.
@@ -291,8 +293,7 @@ impl QuillApp {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(
-                            "Theme, accent, wallpaper, text size, chat style, chat-list rows, message send key, app language, startup and keyboard shortcuts. \
-                             Changes apply immediately (language applies after restart) and are saved on this device.",
+                            "Customize how Quill looks and feels. Changes are saved on this device.",
                         ),
                 );
                 body = body.child(this.appearance_theme_section(cx));
@@ -397,8 +398,12 @@ impl QuillApp {
             .py_1()
             .rounded_md()
             .border_1()
-            .border_color(if selected { theme.accent } else { theme.border })
-            .when(selected, |this| this.bg(theme.accent.opacity(0.15)))
+            .border_color(if selected {
+                theme.primary
+            } else {
+                theme.border
+            })
+            .when(selected, |this| this.bg(theme.primary.opacity(0.15)))
             .role(gpui_kit::Role::Button)
             .aria_label(label.clone())
             .tab_index(0)

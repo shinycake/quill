@@ -104,6 +104,7 @@ pub fn effective_preview(message: &HistoryMessage) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryMessage {
+    pub sender: Option<MessageSender>,
     pub id: MessageId,
     pub chat_id: ChatId,
     pub is_outgoing: bool,

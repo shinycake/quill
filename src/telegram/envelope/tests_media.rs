@@ -168,7 +168,7 @@ fn message_sticker_keeps_webp_thumb_and_file() {
             assert_eq!(sticker.emoji, "😀");
             assert_eq!(sticker.file_id, FileId(41));
             assert_eq!(sticker.thumb_file_id, Some(FileId(42)));
-            assert_eq!(sticker.display_file_id(), Some(FileId(42)));
+            assert_eq!(sticker.display_file_id(), Some(FileId(41)));
             assert_eq!(sticker.format, StickerFormat::Webp);
             assert!(message.files.iter().any(|file| file.id == FileId(42)));
             assert_eq!(message.content.preview(), "😀");
@@ -596,4 +596,29 @@ fn message_audio_parses_1_8_67_fields() {
     assert!(message.files.iter().any(|file| file.id == FileId(7)));
     assert!(message.files.iter().any(|file| file.id == FileId(8)));
     assert!(message.files.iter().any(|file| file.id == FileId(9)));
+}
+
+#[test]
+fn standalone_animated_emoji_keeps_readable_content() {
+    let env = parse_envelope(r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"content":{"@type":"messageAnimatedEmoji","emoji":"🥰","animated_emoji":null}}}"#).unwrap();
+    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+        panic!("Expected message")
+    };
+    assert!(matches!(message.content, MessageContent::Text(_)));
+    assert_eq!(message.content.preview(), "🥰");
+}
+
+#[test]
+fn ordinary_service_messages_keep_readable_content() {
+    for (kind, expected) in [
+        ("messageChatChangeTitle", "Chat renamed to New title"),
+        ("messageChatChangePhoto", "Chat photo changed"),
+        ("messagePinMessage", "A message was pinned"),
+        ("messageCustomServiceAction", "Welcome"),
+    ] {
+        let value = serde_json::json!({"@type":kind,"title":"New title","text":"Welcome"});
+        let (content, _) = parse_content(Some(&value));
+        assert_eq!(content, MessageContent::Service(expected.into()));
+        assert_eq!(content.preview(), expected);
+    }
 }

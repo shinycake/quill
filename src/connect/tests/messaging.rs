@@ -496,6 +496,16 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
         .filter(|j| j.contains("downloadFile") && j.contains("\"file_id\":91"))
         .count();
     assert_eq!(avatar_downloads, 1, "in-flight avatar download deduped");
+    driver.ingest(copy_and_parse(
+        r#"{"@type":"updateUser","user":{"id":42,"first_name":"Contact","type":{"@type":"userTypeRegular"},"profile_photo":{"@type":"profilePhoto","small":{"@type":"file","id":92},"big":null}}}"#,
+        &seq, &dyn_sink).unwrap()).unwrap();
+    assert!(
+        recorder
+            .snapshot()
+            .iter()
+            .any(|j| j.contains("downloadFile") && j.contains("\"file_id\":92")),
+        "contact avatars are downloaded too"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -22,6 +22,11 @@ pub(super) enum NavigationAction {
     Storage,
     Subscriptions,
     Gift,
+    ChatMute,
+    ChatArchive,
+    ChatFolders,
+    SharedMedia,
+    ExportChat,
     Appearance,
     Privacy,
     TwoFa,
@@ -45,6 +50,34 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match action {
+            NavigationAction::ChatMute => {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat)
+                    && self
+                        .session()
+                        .and_then(|s| s.chats.get(&chat.0))
+                        .is_some_and(|c| c.is_muted())
+                {
+                    self.apply_chat_mute(chat, 0, cx);
+                } else {
+                    self.open_mute_menu(cx);
+                }
+            }
+            NavigationAction::ChatArchive => {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                    self.toggle_archive(chat, cx);
+                }
+            }
+            NavigationAction::ChatFolders => {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                    self.open_folder_menu(chat, cx);
+                }
+            }
+            NavigationAction::SharedMedia => self.open_shared_media_ui(cx),
+            NavigationAction::ExportChat => {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                    self.start_chat_export(chat, cx);
+                }
+            }
             NavigationAction::Saved => {
                 self.open_saved_messages(window, cx);
             }
@@ -182,6 +215,12 @@ impl QuillApp {
             .into_any_element()
     }
     pub(super) fn chat_navigation_menu(&self, cx: &mut Context<Self>) -> AnyElement {
+        let chat = self
+            .session()
+            .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)));
+        let muted = chat.is_some_and(|c| c.is_muted());
+        let archived = chat.is_some_and(|c| c.in_archive);
+        let live = self.live.is_some();
         let owner = cx.entity().downgrade();
         Button::new("chat-more-menu")
             .label("⋯")
@@ -195,15 +234,41 @@ impl QuillApp {
                     );
                 }
             })
-            .dropdown_menu(move |menu, _, _| {
-                let owner = owner.clone();
-                menu.item(PopupMenuItem::new("Send collectible gift").on_click(
-                    move |_, window, cx| {
-                        let _ = owner.update(cx, |this, cx| {
-                            this.navigate(NavigationAction::Gift, window, cx)
-                        });
-                    },
-                ))
+            .tooltip("Chat actions")
+            .dropdown_menu(move |mut menu, _, _| {
+                for (label, action, visible) in [
+                    (
+                        if muted {
+                            "Unmute notifications"
+                        } else {
+                            "Mute notifications"
+                        },
+                        NavigationAction::ChatMute,
+                        true,
+                    ),
+                    (
+                        if archived {
+                            "Unarchive chat"
+                        } else {
+                            "Archive chat"
+                        },
+                        NavigationAction::ChatArchive,
+                        true,
+                    ),
+                    ("Add to folder", NavigationAction::ChatFolders, true),
+                    ("Shared media", NavigationAction::SharedMedia, live),
+                    ("Export chat history", NavigationAction::ExportChat, live),
+                    ("Send collectible gift", NavigationAction::Gift, true),
+                ] {
+                    if !visible {
+                        continue;
+                    }
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| this.navigate(action, window, cx));
+                    }));
+                }
+                menu
             })
             .into_any_element()
     }

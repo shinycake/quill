@@ -1,7 +1,7 @@
 //! Poll loop and OS notification threads.
 
 use super::app::QuillApp;
-use super::connect_ui::{bootstrap_connect, live_status_for};
+use super::connect_ui::live_status_for;
 use super::notification_settings::{
     MAX_OS_NOTIFICATION_SOUND_THREADS, MAX_OS_NOTIFICATION_THREADS,
 };
@@ -37,6 +37,7 @@ pub(super) fn notification_settings_json(settings: &ChatNotificationSettings) ->
 
 impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
+        let generation = self.connection_generation;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -44,6 +45,9 @@ impl QuillApp {
                     .await;
                 let cont = this
                     .update(cx, |this, cx| {
+                        if generation != this.connection_generation {
+                            return false;
+                        }
                         this.poll_live(cx);
                         this.live.is_some()
                     })
@@ -357,9 +361,11 @@ impl QuillApp {
         if progressed || send_failed {
             cx.notify();
         }
+        self.discard_stopped_media_playback(cx);
         self.resume_pending_gif(cx);
         self.resume_pending_video(cx);
         self.resume_pending_audio(cx);
+        self.resume_pending_voice(cx);
         // Parity slice 5: a viewer video whose clip just finished downloading.
         self.resume_pending_viewer_video(cx);
         if logged_out {
@@ -384,13 +390,7 @@ impl QuillApp {
         // erased from this device" — TDLib destroyed its own data, but
         // Quill's decrypted media scratch is only swept at startup.
         quill::local_path::sweep_media_caches();
-        let (status, live, note, auth) = bootstrap_connect(self.credentials.clone());
-        self.live = live;
-        self.reload_account_keybindings(cx);
-        self.connect_status = status;
-        self.status_note = note;
-        self.auth_demo = auth;
-        cx.notify();
+        self.start_connection(cx);
     }
 
     /// Phase 8.1: drain notification click callbacks (focus the chat) and
@@ -403,6 +403,8 @@ impl QuillApp {
             .map(|mut guard| std::mem::take(&mut *guard))
             .unwrap_or_default();
         for chat_id in clicks {
+            cx.activate(true);
+            window.activate_window();
             self.select_listed_chat(chat_id, window, cx);
         }
         // B1: force-reply — an incoming message demanded a reply; drain
@@ -428,7 +430,7 @@ impl QuillApp {
             if let Some(kind) = queued.sound {
                 self.play_notification_sound(kind);
             }
-            self.spawn_os_notification(queued);
+            self.spawn_os_notification(queued, cx);
         }
         // Parity slice: custom sounds whose downloads just completed.
         let plays: Vec<PathBuf> = self
@@ -492,8 +494,28 @@ impl QuillApp {
     /// worker thread. A click (Linux `notify-send --wait --action`) records
     /// the chat id; the next render focuses it. Concurrent workers are
     /// capped; excess bursts are dropped rather than stacking threads.
-    pub(super) fn spawn_os_notification(&mut self, queued: QueuedNotification) {
+    pub(super) fn spawn_os_notification(
+        &mut self,
+        queued: QueuedNotification,
+        cx: &mut Context<Self>,
+    ) {
         let notification = queued.for_display();
+        if cfg!(target_os = "macos") {
+            cx.show_system_notification(SystemNotification {
+                tag: format!(
+                    "account:{}:chat:{}",
+                    self.session()
+                        .map(|s| s.account.0.as_str())
+                        .unwrap_or("primary"),
+                    notification.chat_id.0
+                )
+                .into(),
+                title: notification.title.into(),
+                body: notification.body.into(),
+                actions: Vec::new(),
+            });
+            return;
+        }
         let Some(command) = quill::notify::build_notification_command(&notification) else {
             return;
         };

@@ -756,7 +756,7 @@ impl QuillApp {
                     body = body.child(
                         div()
                             .text_sm()
-                            .child("Star subscriptions are not supported in this slice."),
+                            .child("Star subscriptions are not available yet."),
                     );
                 }
                 PaymentFormTypeData::Unknown => {

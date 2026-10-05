@@ -46,6 +46,7 @@ impl Session {
                     .rev()
                     .filter(|message| message.content.preview().to_lowercase().contains(&needle))
                     .map(|message| SearchMessageHit {
+                        sender: message.sender,
                         chat_id: message.chat_id,
                         message_id: message.id,
                         preview: effective_preview(message),
@@ -140,6 +141,7 @@ impl Session {
 
 pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
     HistoryMessage {
+        sender: message.sender,
         id: message.id,
         chat_id: message.chat_id,
         is_outgoing: message.is_outgoing,
