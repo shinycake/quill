@@ -1,0 +1,164 @@
+//! The open chat's loaded history window: one contiguous run of messages,
+//! opened at the first unread message when there is one, paged in both
+//! directions, and replaced (never patched) when a jump lands outside it.
+use super::*;
+
+/// Every request that fills the main history window.
+const WINDOW_PURPOSES: [RequestPurpose; 3] = [
+    RequestPurpose::GetHistory,
+    RequestPurpose::GetHistoryAround,
+    RequestPurpose::GetHistoryNewer,
+];
+
+impl ChatSummary {
+    /// The last read incoming message, when the chat has unread messages
+    /// after it: where an opened chat should start reading.
+    pub fn unread_anchor(&self) -> Option<MessageId> {
+        let last_read = self.last_read_inbox_message_id;
+        (self.unread_count > 0
+            && last_read.0 > 0
+            && self
+                .last_message
+                .as_ref()
+                .is_none_or(|last| last.id.0 > last_read.0))
+        .then_some(last_read)
+    }
+}
+
+impl Session {
+    /// Replace `chat_id`'s loaded window with an empty one. In-flight pages
+    /// for the old window are marked stale and dropped when they answer.
+    pub fn reset_history_window(&mut self, chat_id: ChatId) {
+        for id in self.requests.ids_for_chat(&WINDOW_PURPOSES, chat_id) {
+            self.stale_history_requests.insert(id.0);
+        }
+        self.histories.entry(chat_id.0).or_default().reset_window();
+    }
+
+    /// Whether `pending` was issued for a window that has since been
+    /// replaced (consumes the stale mark).
+    pub(crate) fn take_stale_history_request(&mut self, pending: &PendingRequest) -> bool {
+        self.stale_history_requests.remove(&pending.id.0)
+    }
+
+    /// Prepare the window when the driver opens `chat_id` (after
+    /// `open_chat` recorded the unread anchor): with unread messages it must
+    /// cover the read boundary (otherwise it is replaced and loads around
+    /// it); a window left behind by an earlier jump is replaced so the chat
+    /// opens at its latest messages.
+    pub fn prepare_history_window(&mut self, chat_id: ChatId) {
+        let history = self.histories.entry(chat_id.0).or_default();
+        let keep = !history.has_newer
+            && match history.unread_anchor {
+                // A tail window that reaches back to the boundary shows the
+                // unread run as is.
+                Some(anchor) => {
+                    history.loaded_complete
+                        || history
+                            .oldest_id()
+                            .is_some_and(|oldest| oldest.0 <= anchor.0)
+                }
+                None => true,
+            };
+        if !keep {
+            self.reset_history_window(chat_id);
+        }
+    }
+
+    /// Recompute whether the window stops short of the chat's latest
+    /// message after a page landed.
+    pub(crate) fn refresh_history_has_newer(&mut self, chat_id: ChatId) {
+        let summary_last = self
+            .chats
+            .get(&chat_id.0)
+            .and_then(|chat| chat.last_message.as_ref())
+            .map_or(0, |last| last.id.0);
+        let Some(history) = self.histories.get_mut(&chat_id.0) else {
+            return;
+        };
+        let latest = summary_last.max(history.latest_seen);
+        history.has_newer = latest > 0
+            && !history.contains(MessageId(latest))
+            && history.newest_id().is_some_and(|newest| newest.0 < latest);
+    }
+
+    /// Apply a `GetHistoryNewer` page: everything at or after the request's
+    /// `from_message_id` joins the window. A page with nothing newer than
+    /// the boundary means the window now reaches the latest message.
+    pub(crate) fn apply_history_newer(
+        &mut self,
+        pending: &PendingRequest,
+        messages: Vec<ParsedMessage>,
+        seq: u64,
+    ) {
+        if self.take_stale_history_request(pending)
+            || pending.view_generation != Some(self.view_generation)
+        {
+            self.diagnostics.record(Diagnostic {
+                category: "reducer",
+                type_name: Some("messages".into()),
+                extra: Some(pending.id.0),
+                seq: Some(seq),
+                note: "stale-history-newer",
+            });
+            return;
+        }
+        let Some(chat_id) = pending.chat_id else {
+            return;
+        };
+        let from = pending.around_message_id.map_or(0, |id| id.0);
+        let any_newer = messages.iter().any(|m| m.id.0 > from);
+        for message in messages {
+            self.upsert_message(message, false);
+        }
+        if any_newer {
+            self.refresh_history_has_newer(chat_id);
+        } else if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.has_newer = false;
+        }
+    }
+
+    /// A newer-page request failed: stop auto-paging this window.
+    pub(crate) fn fail_history_newer(&mut self, pending: &PendingRequest) {
+        if self.take_stale_history_request(pending) {
+            return;
+        }
+        if let Some(chat_id) = pending.chat_id
+            && let Some(history) = self.histories.get_mut(&chat_id.0)
+        {
+            history.newer_failed = true;
+        }
+    }
+
+    /// `updateNewMessage` while the window stops short of the latest
+    /// message: an incoming message stays out of the window (it is not
+    /// adjacent to it); an outgoing one means the user just sent from the
+    /// middle of the history, so the window jumps to the latest run, which
+    /// starts with this message. Returns whether the message still needs
+    /// the normal upsert.
+    pub(crate) fn route_new_message_into_window(&mut self, message: &ParsedMessage) -> bool {
+        let chat_id = message.chat_id;
+        if !self
+            .histories
+            .get(&chat_id.0)
+            .is_some_and(|history| history.has_newer)
+        {
+            return true;
+        }
+        // Incoming messages are always server messages; an outgoing one
+        // may still carry a temporary id.
+        if let Some(history) = self.histories.get_mut(&chat_id.0)
+            && !message.is_outgoing
+        {
+            history.latest_seen = history.latest_seen.max(message.id.0);
+        }
+        if message.is_outgoing {
+            self.reset_history_window(chat_id);
+            if let Some(history) = self.histories.get_mut(&chat_id.0) {
+                history.unread_anchor = None;
+            }
+            return true;
+        }
+        false
+    }
+}

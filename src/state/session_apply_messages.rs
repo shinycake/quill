@@ -99,9 +99,17 @@ impl Session {
             return;
         }
         if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetHistoryNewer
+        {
+            self.apply_history_newer(pending, messages, seq);
+            return;
+        }
+        if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetHistory
         {
-            if pending.view_generation != Some(self.view_generation) {
+            if self.take_stale_history_request(pending)
+                || pending.view_generation != Some(self.view_generation)
+            {
                 self.diagnostics.record(Diagnostic {
                     category: "reducer",
                     type_name: Some("messages".into()),
@@ -137,6 +145,7 @@ impl Session {
                 for message in messages {
                     self.upsert_message(message, false);
                 }
+                self.refresh_history_has_newer(chat_id);
             }
         }
     }
@@ -404,7 +413,24 @@ impl Session {
             chat_id: message.chat_id,
             message_id: message.id,
         });
-        self.upsert_message(message, false);
+        if self.route_new_message_into_window(&message) {
+            self.upsert_message(message, false);
+        } else {
+            // Outside the loaded window: keep its files and any loaded
+            // forum-topic copy, but leave the main history alone.
+            self.remember_files(&message.files);
+            if let Some(topic_id) = message.topic_id
+                && self
+                    .topic_histories
+                    .contains_key(&(message.chat_id.0, topic_id))
+            {
+                let chat_id = message.chat_id;
+                let row = history_message(message, false);
+                if let Some(topic_history) = self.topic_histories.get_mut(&(chat_id.0, topic_id)) {
+                    topic_history.upsert(row);
+                }
+            }
+        }
         if let Some(target) = force_reply {
             self.pending_force_reply = Some(target);
         }

@@ -110,10 +110,22 @@ fn replay_unread_then_mark_read_and_outbox_receipt() {
     // kit Phase 4: the badge label is the kit `Badge`'s `count` (capped at
     // 99, hidden at 0) — no Quill-side label logic left to assert.
     session.open_chat(quill::ids::ChatId(7));
-    // Only the newest message is viewed on open; with `force_read` it reads
-    // the history up to it.
+    // Opened with unread messages: nothing is viewed until the UI reports
+    // the rows actually on screen (opening must not mark the chat read).
+    assert!(
+        session
+            .message_ids_to_view(quill::ids::ChatId(7))
+            .is_empty()
+    );
+    session.report_visible_messages(
+        quill::ids::ChatId(7),
+        &[quill::ids::MessageId(41), quill::ids::MessageId(42)],
+    );
     let ids = session.message_ids_to_view(quill::ids::ChatId(7));
-    assert_eq!(ids, vec![quill::ids::MessageId(42)]);
+    assert_eq!(
+        ids,
+        vec![quill::ids::MessageId(41), quill::ids::MessageId(42)]
+    );
     session.mark_viewed(quill::ids::ChatId(7), &ids);
     // Local view does not invent a zero unread count.
     assert_eq!(session.chats.get(&7).unwrap().unread_count, 2);

@@ -165,8 +165,32 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .requests
             .has_purpose_for_chat(RequestPurpose::GetHistory, chat_id)
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetHistoryAround, chat_id)
         {
             return Ok(None);
+        }
+        // Opened with unread messages: the first page loads around the read
+        // boundary, so the chat starts where the reader left off.
+        if let Some(history) = self.session.histories.get(&chat_id.0)
+            && history.messages.is_empty()
+            && let Some(anchor) = history.unread_anchor
+        {
+            let extra = self.session.request_history_around(chat_id, anchor);
+            if let Err(err) = self.sender.send_json(&get_chat_history(
+                extra,
+                chat_id,
+                anchor,
+                HISTORY_AROUND_OFFSET,
+                HISTORY_AROUND_LIMIT,
+                false,
+            )) {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+            return Ok(Some(extra));
         }
         let from = self
             .session
@@ -189,6 +213,66 @@ impl<S: JsonSender> ConnectDriver<S> {
             false,
         ))?;
         Ok(Some(extra))
+    }
+
+    /// Load the page after the window's newest message while the window
+    /// stops short of the chat's latest message (`HistoryState::has_newer`).
+    pub fn fetch_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let Some(from) = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .filter(|h| h.has_newer && !h.newer_failed)
+            .and_then(|h| h.newest_id())
+        else {
+            return Ok(None);
+        };
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetHistoryNewer, chat_id)
+        {
+            return Ok(None);
+        }
+        let extra =
+            self.session
+                .request_for_message(RequestPurpose::GetHistoryNewer, chat_id, from);
+        // A negative offset returns `-offset` messages newer than `from`
+        // plus `from` itself (schema `getChatHistory`).
+        if let Err(err) = self.sender.send_json(&get_chat_history(
+            extra,
+            chat_id,
+            from,
+            -(HISTORY_PAGE_SIZE - 1),
+            HISTORY_PAGE_SIZE,
+            false,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Jump the open chat to its latest messages: replace a window that
+    /// stops short of them (and drop the unread divider) and load the
+    /// newest page.
+    pub fn jump_to_latest(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let history = self.session.histories.entry(chat_id.0).or_default();
+        history.unread_anchor = None;
+        if !history.has_newer {
+            return Ok(None);
+        }
+        self.session.reset_history_window(chat_id);
+        self.fetch_history()
     }
 
     /// Parity slice 4: the forum topic a send to `chat_id` is addressed to.

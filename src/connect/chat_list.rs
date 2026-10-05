@@ -415,6 +415,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.draft_clock = DraftSaveClock::idle();
         self.pending_draft = None;
         self.session.open_chat(chat_id);
+        self.session.prepare_history_window(chat_id);
         // Channels are ungated since Phase 2.2: they follow the normal
         // openChat / history path; sponsored rows fetch for every channel.
         self.send_open_chat(chat_id)?;

@@ -77,6 +77,7 @@ mod session_chatlist;
 mod session_files;
 mod session_forum;
 mod session_forward;
+mod session_history_window;
 mod session_members;
 mod session_notifications;
 mod session_requests;

@@ -63,7 +63,9 @@ impl Session {
         messages: &[ParsedMessage],
         seq: u64,
     ) {
-        if pending.view_generation != Some(self.view_generation) {
+        if self.take_stale_history_request(pending)
+            || pending.view_generation != Some(self.view_generation)
+        {
             self.diagnostics.record(Diagnostic {
                 category: "reducer",
                 type_name: Some("messages".into()),
@@ -86,9 +88,15 @@ impl Session {
             });
             return;
         }
+        let from = pending.around_message_id.map_or(0, |id| id.0);
+        let reached_start = from > 0 && !messages.iter().any(|m| m.id.0 < from);
         for message in messages {
             self.upsert_message(message.clone(), false);
         }
+        if reached_start && let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.loaded_complete = true;
+        }
+        self.refresh_history_has_newer(chat_id);
         if let Some(message_id) = pending.around_message_id {
             self.finish_history_around(Some(pending), message_id, false, seq);
         }

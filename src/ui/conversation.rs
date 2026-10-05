@@ -31,6 +31,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+
+/// Rows before the end of a window that stops short of the latest
+/// message at which the next newer page is requested.
+const NEWER_PREFETCH_ROWS: usize = 8;
 pub(super) fn apply_ready_typing(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let json = r#"{"@type":"updateChatAction","chat_id":11,"topic_id":null,"sender_id":{"@type":"messageSenderUser","user_id":11},"action":{"@type":"chatActionTyping"}}"#;
@@ -974,6 +978,22 @@ impl QuillApp {
                 .unwrap_or(-1),
             session.and_then(|s| s.open_topic),
         );
+        // The main history's loaded window (topic views page their own
+        // history and have none of this).
+        let (unread_anchor, has_newer, window_epoch) = session
+            .filter(|s| s.open_topic.is_none())
+            .and_then(|s| s.open_chat.and_then(|chat| s.histories.get(&chat.0)))
+            .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
+            .unwrap_or((None, false, 0));
+        let unread_count = chat.map_or(0, |chat| chat.unread_count);
+        let mut divider_placed = false;
+        let mut first_unread = |message: &HistoryMessage| {
+            let first = !divider_placed
+                && !message.is_outgoing
+                && unread_anchor.is_some_and(|anchor| message.id.0 > anchor.0);
+            divider_placed |= first;
+            first
+        };
         let groups = quill::album::group_media_albums(
             &messages,
             |message| message.media_album_id,
@@ -1110,6 +1130,7 @@ impl QuillApp {
                         .map(|message| row_chrome(message, continues))
                         .unwrap_or((None, OutboxReceipt::None, None, false));
                     let day_label = album_messages.first().and_then(|m| day_label(m.date));
+                    let unread_divider = album_messages.first().is_some_and(&mut first_unread);
                     rows.push(HistoryRow::Album {
                         album_id,
                         messages: album_messages,
@@ -1117,6 +1138,7 @@ impl QuillApp {
                         receipt,
                         sender_avatar,
                         day_label,
+                        unread_divider,
                     })
                 }
                 None => {
@@ -1160,6 +1182,7 @@ impl QuillApp {
                         highlighted: highlight_id == Some(message.id),
                         run_start: run_start && index > 0,
                         day_label: day_label(message.date),
+                        unread_divider: first_unread(&message),
                         selected_forward: self
                             .pending_forward
                             .as_ref()
@@ -1230,15 +1253,20 @@ impl QuillApp {
             }
         }
         self.history_media_signature = media_signature;
+        if self.history_key != Some(history_key) || self.history_window_epoch != window_epoch {
+            // A new or replaced window anchors once its rows are in.
+            self.history_window_epoch = window_epoch;
+            self.history_anchor_pending = true;
+        }
         if self.history_key != Some(history_key) {
-            // New chat/topic (or first render): reset and show the tail.
+            // New chat/topic (or first render): reset; the anchor below
+            // picks the position.
             self.history_key = Some(history_key);
             // Message ids are chat-local: a stale highlight id in the new
             // chat must not suppress its search-jump scroll.
             self.last_highlight = None;
             self.history_scroller.update(cx, |state, cx| {
                 state.reset(count, cx);
-                state.scroll_to_end(cx);
             });
         } else if count != self.history_scroller.read(cx).item_count() {
             let prev_count = self.history_scroller.read(cx).item_count();
@@ -1247,10 +1275,17 @@ impl QuillApp {
                     if first == Some(prev_first) && count > prev_count =>
                 {
                     // New messages appended at the tail — tail-follow keeps
-                    // the view pinned when the user is at the bottom.
+                    // the view pinned when the user is at the bottom. A
+                    // newer page must not be skipped that way: keep the old
+                    // last row in view and read on from there.
                     let added = count.saturating_sub(prev_count);
+                    let newer_page = self.history_had_newer;
                     self.history_scroller.update(cx, |state, cx| {
+                        let following = state.is_following_tail();
                         state.append(added, cx);
+                        if newer_page && following {
+                            state.scroll_to_item(prev_count.saturating_sub(1), cx);
+                        }
                     });
                 }
                 (_, Some(_), Some((_, prev_last)))
@@ -1293,6 +1328,33 @@ impl QuillApp {
             _ => None,
         };
         self.history_rows = rows;
+        self.history_had_newer = has_newer;
+        // A new or replaced window: start at the jump target, else at the
+        // "Unread messages" divider, else at the bottom.
+        if self.history_anchor_pending && !self.history_rows.is_empty() {
+            self.history_anchor_pending = false;
+            let highlighted = highlight_id.and_then(|target| {
+                self.history_rows
+                    .iter()
+                    .position(|row| row.contains(target))
+            });
+            if highlighted.is_some() {
+                self.last_highlight = highlight_id;
+            }
+            let target = highlighted.or_else(|| {
+                self.history_rows
+                    .iter()
+                    .position(HistoryRow::unread_divider)
+                    // A little context above the divider.
+                    .map(|ix| ix.saturating_sub(1))
+            });
+            self.history_scroller.update(cx, |state, cx| match target {
+                Some(ix) => {
+                    state.scroll_to_item(ix, cx);
+                }
+                None => state.scroll_to_end(cx),
+            });
+        }
         // Chat-search jump: scroll the highlight into view once per new
         // `highlight_id` (current code only outlined the message).
         if highlight_id != self.last_highlight {
@@ -1339,6 +1401,14 @@ impl QuillApp {
                             let _ = weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
                         });
                     }
+                    // Prefetch the next newer page a few rows before the
+                    // window's end so reading on rarely waits.
+                    if has_newer && ix + NEWER_PREFETCH_ROWS >= count {
+                        let weak = weak.clone();
+                        cx.defer(move |cx| {
+                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_newer(cx));
+                        });
+                    }
                     weak.update(cx, |this, cx| this.render_history_row(ix, cx))
                         .unwrap_or_else(|_| div().into_any_element())
                 })
@@ -1347,6 +1417,22 @@ impl QuillApp {
                 // density. The kit also supplies row px and list py, so the
                 // outer div needs neither.
                 .with_row_style(StyleRefinement::default().pb_1())
+                // Jump to latest: shows the unread count, and replaces a
+                // window that stops short of the latest message instead of
+                // only scrolling to its end.
+                .with_jump_button_renderer({
+                    let jump = cx.weak_entity();
+                    move |button| {
+                        button
+                            .when(unread_count > 0, |button| {
+                                button.label(unread_count.to_string())
+                            })
+                            .on_click(move |_, _, cx| {
+                                let _ =
+                                    jump.update(cx, |this, cx| this.jump_to_latest_messages(cx));
+                            })
+                    }
+                })
                 .size_full()
                 .min_h_0(),
             )
@@ -1382,15 +1468,18 @@ impl QuillApp {
             cx.notify();
         }
         let element = self.render_history_row_body(row, cx);
-        match row.day_label() {
-            Some(label) => div()
-                .flex()
-                .flex_col()
-                .child(day_separator(label, cx))
-                .child(element)
-                .into_any_element(),
-            None => element,
+        if row.day_label().is_none() && !row.unread_divider() {
+            return element;
         }
+        div()
+            .flex()
+            .flex_col()
+            .when_some(row.day_label(), |this, label| {
+                this.child(day_separator(label, cx))
+            })
+            .when(row.unread_divider(), |this| this.child(unread_divider(cx)))
+            .child(element)
+            .into_any_element()
     }
 
     fn render_history_row_body(&self, row: &HistoryRow, cx: &mut Context<Self>) -> AnyElement {
@@ -1539,6 +1628,42 @@ impl QuillApp {
     /// the top row of the virtualized history becomes visible. Notifies the
     /// frame only when a request was actually sent (the driver dedupes
     /// in-flight `getChatHistory` requests and stops at `loaded_complete`).
+    /// The window stops short of the latest message and its end is near:
+    /// load the next newer page (the driver dedupes in-flight requests).
+    pub(super) fn maybe_auto_load_newer(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.session.open_topic.is_none()
+            && live.driver.fetch_history_newer().ok().flatten().is_some()
+        {
+            cx.notify();
+        }
+    }
+
+    /// The jump-to-latest button: a window that stops short of the latest
+    /// message is replaced by the newest page (the scroller re-anchors at
+    /// the bottom when it lands); otherwise just scroll down.
+    pub(super) fn jump_to_latest_messages(&mut self, cx: &mut Context<Self>) {
+        let replaced = self.live.as_mut().is_some_and(|live| {
+            live.driver
+                .session
+                .open_chat
+                .and_then(|chat| live.driver.session.histories.get(&chat.0))
+                .is_some_and(|h| h.has_newer)
+                && live.driver.jump_to_latest().is_ok()
+        });
+        if !replaced {
+            if let Some(live) = self.live.as_mut()
+                && let Some(chat) = live.driver.session.open_chat
+                && let Some(history) = live.driver.session.histories.get_mut(&chat.0)
+            {
+                history.unread_anchor = None;
+            }
+            self.history_scroller
+                .update(cx, |state, cx| state.scroll_to_end(cx));
+        }
+        cx.notify();
+    }
+
     pub(super) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.
@@ -1555,6 +1680,24 @@ impl QuillApp {
             }
         }
     }
+}
+
+/// Full-width "Unread messages" bar above the first unread message.
+fn unread_divider(cx: &App) -> impl IntoElement {
+    div()
+        .id("unread-divider")
+        .w_full()
+        .my_2()
+        .py_1()
+        .flex()
+        .justify_center()
+        .bg(cx.theme().secondary.opacity(0.7))
+        .text_xs()
+        .font_medium()
+        .text_color(cx.theme().secondary_foreground)
+        .role(Role::Heading)
+        .aria_label("Unread messages")
+        .child("Unread messages")
 }
 
 /// Centered local-day pill between history rows ("Today", "12 March").

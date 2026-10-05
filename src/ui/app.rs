@@ -82,6 +82,15 @@ pub struct QuillApp {
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) history_ends: Option<(MessageId, MessageId)>,
+    /// `HistoryState::window_epoch` the scroller last anchored for: a
+    /// change (window replaced) re-anchors like opening the chat.
+    pub(super) history_window_epoch: u64,
+    /// The scroller must anchor once rows exist: the jump highlight, else
+    /// the "Unread messages" divider, else the bottom.
+    pub(super) history_anchor_pending: bool,
+    /// The window stopped short of the latest message at the last render:
+    /// rows appended since are a newer page, not live messages.
+    pub(super) history_had_newer: bool,
     /// (ready files, downloading files) at the last history render; a
     /// change remeasures the virtualized rows (media grew in place).
     pub(super) history_media_signature: (usize, usize),
