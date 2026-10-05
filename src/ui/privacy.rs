@@ -205,9 +205,9 @@ impl QuillApp {
         payments = payments.child(
             div().flex().flex_col().gap_1().child(
                 Button::new("privacy-clear-payment-info")
+                    .small()
                     .label("Clear saved payment/shipping info…")
-                    .ghost()
-                    .danger()
+                    .custom(super::security::quiet_danger(cx))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.open_group_confirm(
                             ChatId(0),
@@ -367,6 +367,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("privacy-block-add")
+                        .small()
                         .label("Block…")
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -410,6 +411,7 @@ impl QuillApp {
             let remaining = total as usize - list.len();
             section = section.child(
                 Button::new("privacy-blocked-more")
+                    .small()
                     .label(format!("Load more ({remaining} remaining)"))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -450,6 +452,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new(format!("privacy-unblock-confirm-{user_id}"))
+                            .small()
                             .label("Unblock")
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.unblock_user(user_id, cx);
@@ -457,6 +460,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(format!("privacy-unblock-cancel-{user_id}"))
+                            .small()
                             .label("Cancel")
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -468,6 +472,7 @@ impl QuillApp {
         } else {
             row = row.child(
                 Button::new(format!("privacy-unblock-{user_id}"))
+                    .small()
                     .label("Unblock")
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -874,6 +879,7 @@ impl QuillApp {
                     .child(div().text_sm().child(name))
                     .child(
                         Button::new(format!("privacy-exception-remove-{user_id}"))
+                            .small()
                             .label("Remove")
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -884,6 +890,7 @@ impl QuillApp {
         }
         body = body.child(
             Button::new("privacy-exception-add")
+                .small()
                 .label("Add user…")
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {

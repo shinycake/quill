@@ -1,8 +1,8 @@
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
-    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, OpenChatSearch, OpenHelp,
-    OpenSearch, OpenSettings, OpenShortcuts, QuitApp, ToggleFullscreen, ToggleTheme, ViewerNext,
-    ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, NextChat, OpenChatSearch,
+    OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, ToggleFullscreen,
+    ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -66,6 +66,16 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
         id: "focus-composer",
         label: "Focus composer",
         defaults: &["cmd-l", "ctrl-l"],
+    },
+    RebindableAction {
+        id: "next-chat",
+        label: "Next chat",
+        defaults: &["alt-down", "ctrl-tab"],
+    },
+    RebindableAction {
+        id: "prev-chat",
+        label: "Previous chat",
+        defaults: &["alt-up", "ctrl-shift-tab"],
     },
     RebindableAction {
         id: "load-older",
@@ -155,6 +165,8 @@ pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
     match id {
         "focus-sidebar" => Some(KeyBinding::new(keystroke, FocusSidebar, None)),
         "focus-composer" => Some(KeyBinding::new(keystroke, FocusComposer, None)),
+        "next-chat" => Some(KeyBinding::new(keystroke, NextChat, None)),
+        "prev-chat" => Some(KeyBinding::new(keystroke, PrevChat, None)),
         "load-older" => Some(KeyBinding::new(keystroke, LoadOlder, None)),
         "open-search" => Some(KeyBinding::new(keystroke, OpenSearch, None)),
         "open-chat-search" => Some(KeyBinding::new(keystroke, OpenChatSearch, None)),
@@ -541,6 +553,10 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             "Navigation",
             FocusComposer,
         ),
+        row("alt-down", "Next chat", "Navigation", NextChat),
+        row("ctrl-tab", "Next chat", "Navigation", NextChat),
+        row("alt-up", "Previous chat", "Navigation", PrevChat),
+        row("ctrl-shift-tab", "Previous chat", "Navigation", PrevChat),
         row("cmd-up", "Load older messages", "Navigation", LoadOlder),
         row("ctrl-up", "Load older messages", "Navigation", LoadOlder),
         // Search.
@@ -687,7 +703,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 31);
+        assert_eq!(defaults.len(), 35);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
