@@ -40,7 +40,19 @@ gpui_kit::assets::icon_assets!(
         Play,
         Pause,
         ArrowDown,
-        FolderOpen
+        FolderOpen,
+        FileText,
+        Camera,
+        Users,
+        Shield,
+        Link,
+        UserCheck,
+        Megaphone,
+        PenLine,
+        ShieldCheck,
+        MessagesSquare,
+        Hand,
+        LogOut
     ]
 );
 

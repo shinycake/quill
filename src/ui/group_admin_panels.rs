@@ -5,6 +5,7 @@ use super::pressable::action_row;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::state::{AdminListFetch, InviteLinkFetch, JoinRequestFetch, RequestPurpose};
@@ -311,10 +312,37 @@ impl QuillApp {
                     "Manage group"
                 }),
         );
+        use gpui_kit::assets::IconName as I;
         macro_rules! row {
-            ($id:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
+            ($id:expr, $icon:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
                 section = section.child(
-                    action_row($id, None, $label, false, cx)
+                    action_row($id, Some($icon), $label, false, cx)
+                        .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
+                );
+            };
+        }
+        macro_rules! danger_row {
+            ($id:expr, $icon:expr, $label:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
+                section = section.child(
+                    action_row($id, Some($icon), $label, true, cx)
+                        .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
+                );
+            };
+        }
+        // An on/off setting: the row toggles it; the trailing switch shows
+        // the state (it carries no handler of its own, so the click reaches
+        // the row).
+        macro_rules! toggle_row {
+            ($id:expr, $icon:expr, $label:expr, $on:expr, |$this:ident, $window:ident, $cx:ident| $action:block) => {
+                section = section.child(
+                    action_row($id, Some($icon), $label, false, cx)
+                        .aria_selected($on)
+                        .child(div().flex_1())
+                        .child(
+                            gpui_kit::component::switch::Switch::new(($id, 1u64))
+                                .checked($on)
+                                .small(),
+                        )
                         .on_click(cx.listener(move |$this, _, $window, $cx| $action)),
                 );
             };
@@ -336,32 +364,44 @@ impl QuillApp {
                 _ => false,
             });
         if can_edit_info {
-            row!("g8-edit-title", "Edit title", |this, window, cx| {
-                this.open_group_title_dialog(chat_id, window, cx);
-            });
+            row!(
+                "g8-edit-title",
+                I::Pencil,
+                "Edit title",
+                |this, window, cx| {
+                    this.open_group_title_dialog(chat_id, window, cx);
+                }
+            );
             row!(
                 "g8-edit-description",
+                I::FileText,
                 "Edit description",
                 |this, window, cx| {
                     this.open_group_description_dialog(chat_id, window, cx);
                 }
             );
-            row!("g8-edit-photo", "Change photo", |this, window, cx| {
-                this.open_group_photo_dialog(chat_id, window, cx);
-            });
+            row!(
+                "g8-edit-photo",
+                I::Camera,
+                "Change photo",
+                |this, window, cx| {
+                    this.open_group_photo_dialog(chat_id, window, cx);
+                }
+            );
         }
         // Members / subscribers — everyone who can see the panel and
         // add or restrict may manage; plain members get a read-only
         // list through the dialog's All tab.
         if can_add || can_restrict || is_member {
             let label = if is_channel { "Subscribers" } else { "Members" };
-            row!("g1-open-members", label, |this, window, cx| {
+            row!("g1-open-members", I::Users, label, |this, window, cx| {
                 this.open_member_dialog(chat_id, window, cx);
             });
         }
         if can_restrict {
             row!(
                 "g1-open-permissions",
+                I::Shield,
                 "Default permissions",
                 |this, _window, cx| {
                     this.open_permissions_dialog(chat_id, cx);
@@ -377,6 +417,7 @@ impl QuillApp {
         if can_invite {
             row!(
                 "g1-replace-invite-link",
+                I::Link,
                 "Replace primary invite link",
                 |this, _window, cx| {
                     this.replace_primary_invite_link(chat_id, cx);
@@ -389,14 +430,15 @@ impl QuillApp {
         if !is_channel && !is_basic_group {
             if can_restrict && !self.chat_is_broadcast(chat_id) {
                 let enabled = self.chat_join_by_request(chat_id);
-                let label = if enabled {
-                    "✓ Approve new members"
-                } else {
-                    "Approve new members"
-                };
-                row!("g1-toggle-join-request", label, |this, _window, cx| {
-                    this.toggle_join_by_request(chat_id, cx);
-                });
+                toggle_row!(
+                    "g1-toggle-join-request",
+                    I::UserCheck,
+                    "Approve new members",
+                    enabled,
+                    |this, _window, cx| {
+                        this.toggle_join_by_request(chat_id, cx);
+                    }
+                );
             }
             if is_owner {
                 let username = self.chat_username(chat_id);
@@ -405,17 +447,13 @@ impl QuillApp {
                 } else {
                     format!("Public username (@{username})")
                 };
-                section = section.child(
-                    Button::new("g1-open-username")
-                        .label(label)
-                        .ghost()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_username_dialog(chat_id, window, cx);
-                        })),
-                );
+                row!("g1-open-username", I::AtSign, label, |this, window, cx| {
+                    this.open_username_dialog(chat_id, window, cx);
+                });
                 if !self.chat_is_broadcast(chat_id) {
                     row!(
                         "g1-broadcast-upgrade",
+                        I::Megaphone,
                         "Convert to broadcast group",
                         |this, _window, cx| {
                             this.open_group_confirm(
@@ -434,26 +472,28 @@ impl QuillApp {
         // `ToggleSupergroupSignMessages(id, sign, sign && show)`).
         if is_channel && session.is_some_and(|session| session.chat_can_change_info(chat_id)) {
             let (sign, show) = self.sign_flags(chat_id);
-            let label = if sign {
-                "✓ Sign messages"
-            } else {
-                "Sign messages"
-            };
-            row!("g2-toggle-sign-messages", label, |this, _window, cx| {
-                let (sign, show) = this.sign_flags(chat_id);
-                this.set_sign_messages(chat_id, !sign, !sign && show, cx);
-            });
-            let show_label = if show && sign {
-                "✓ Show message authors"
-            } else {
-                "Show message authors"
-            };
-            row!("g2-toggle-show-authors", show_label, |this, _window, cx| {
-                let (_, show) = this.sign_flags(chat_id);
-                // Enabling authors implies signatures (Telegram X forces
-                // `show = sign && show`).
-                this.set_sign_messages(chat_id, true, !show, cx);
-            });
+            toggle_row!(
+                "g2-toggle-sign-messages",
+                I::PenLine,
+                "Sign messages",
+                sign,
+                |this, _window, cx| {
+                    let (sign, show) = this.sign_flags(chat_id);
+                    this.set_sign_messages(chat_id, !sign, !sign && show, cx);
+                }
+            );
+            toggle_row!(
+                "g2-toggle-show-authors",
+                I::Eye,
+                "Show message authors",
+                show && sign,
+                |this, _window, cx| {
+                    let (_, show) = this.sign_flags(chat_id);
+                    // Enabling authors implies signatures (Telegram X forces
+                    // `show = sign && show`).
+                    this.set_sign_messages(chat_id, true, !show, cx);
+                }
+            );
         }
         // Slice G2: aggressive anti-spam toggle (supergroups only;
         // gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`).
@@ -476,29 +516,30 @@ impl QuillApp {
                         })
                 })
                 .unwrap_or(false);
-            let label = if enabled {
-                "✓ Aggressive anti-spam"
-            } else {
-                "Aggressive anti-spam"
-            };
-            row!("g2-toggle-anti-spam", label, |this, _window, cx| {
-                let enabled = this
-                    .session()
-                    .and_then(|session| {
-                        session
-                            .chats
-                            .get(&chat_id.0)
-                            .and_then(|chat| match chat.kind {
-                                ChatKind::Supergroup { supergroup_id, .. } => session
-                                    .supergroup_anti_spam_enabled
-                                    .get(&supergroup_id)
-                                    .copied(),
-                                _ => None,
-                            })
-                    })
-                    .unwrap_or(false);
-                this.set_anti_spam(chat_id, !enabled, cx);
-            });
+            toggle_row!(
+                "g2-toggle-anti-spam",
+                I::ShieldCheck,
+                "Aggressive anti-spam",
+                enabled,
+                |this, _window, cx| {
+                    let enabled = this
+                        .session()
+                        .and_then(|session| {
+                            session
+                                .chats
+                                .get(&chat_id.0)
+                                .and_then(|chat| match chat.kind {
+                                    ChatKind::Supergroup { supergroup_id, .. } => session
+                                        .supergroup_anti_spam_enabled
+                                        .get(&supergroup_id)
+                                        .copied(),
+                                    _ => None,
+                                })
+                        })
+                        .unwrap_or(false);
+                    this.set_anti_spam(chat_id, !enabled, cx);
+                }
+            );
         }
         // Slice G2: forum-topic management (admins with
         // `can_manage_topics` in forum supergroups).
@@ -514,6 +555,7 @@ impl QuillApp {
         {
             row!(
                 "g2-open-forum-manage",
+                I::MessagesSquare,
                 "Manage topics",
                 |this, window, cx| {
                     this.open_forum_manage_dialog(chat_id, window, cx);
@@ -528,14 +570,27 @@ impl QuillApp {
                 .as_ref()
                 .and_then(|session| session.chat_has_welcome_messages.get(&chat_id.0).copied())
                 .unwrap_or(false);
-            let label = if has_welcome {
-                "✓ Welcome message"
-            } else {
-                "Welcome message"
-            };
-            row!("g2-open-welcome", label, |this, window, cx| {
-                this.open_welcome_dialog(chat_id, window, cx);
-            });
+            section = section.child(
+                action_row(
+                    "g2-open-welcome",
+                    Some(I::Hand),
+                    "Welcome message",
+                    false,
+                    cx,
+                )
+                .child(div().flex_1())
+                .when(has_welcome, |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("On"),
+                    )
+                })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_welcome_dialog(chat_id, window, cx);
+                })),
+            );
         }
         if is_member {
             let label = if is_channel {
@@ -543,7 +598,7 @@ impl QuillApp {
             } else {
                 "Leave group"
             };
-            row!("g1-leave-chat", label, |this, _window, cx| {
+            danger_row!("g1-leave-chat", I::LogOut, label, |this, _window, cx| {
                 this.open_group_confirm(chat_id, GroupConfirmAction::LeaveChat, cx);
             });
         }
@@ -551,7 +606,12 @@ impl QuillApp {
         // everyone only when `chat.can_be_deleted_for_all_users` —
         // creator of a group/channel, or any private chat.
         if can_delete {
-            row!("g1-delete-chat", "Delete group", |this, _window, cx| {
+            let label = if is_channel {
+                "Delete channel"
+            } else {
+                "Delete group"
+            };
+            danger_row!("g1-delete-chat", I::Trash, label, |this, _window, cx| {
                 this.open_group_confirm(chat_id, GroupConfirmAction::DeleteChat, cx);
             });
         }
