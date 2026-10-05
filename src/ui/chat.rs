@@ -43,6 +43,8 @@ pub(super) fn apply_ready_slow_mode(
             r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":{description_json},"member_count":128,"slow_mode_delay":30,"slow_mode_delay_expires_in":25.0,"my_boost_count":0,"unrestrict_boost_count":0}}"#,
             extra.0,
         ),
+        r#"{"@type":"updateUser","user":{"@type":"user","id":501,"first_name":"Maya","last_name":"Levin","accent_color_id":3,"type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusRecently"}}}"#.to_string(),
+        r#"{"@type":"updateUser","user":{"@type":"user","id":502,"first_name":"Omar","last_name":"Haddad","accent_color_id":5,"type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusRecently"}}}"#.to_string(),
         format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":301,"chat_id":{chat_id},"sender_id":{{"@type":"messageSenderUser","user_id":501}},"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Slow mode is on in this group: 30 seconds between messages.","entities":[]}}}}}}}}"#
         ),

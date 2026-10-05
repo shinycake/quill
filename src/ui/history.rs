@@ -151,7 +151,7 @@ pub(super) fn album_history_row(
     // kit Phase 4: per-row chrome (sender header / outbox receipt /
     // avatar) computed at row-build time so the virtualized row doesn't
     // carry the chat.
-    sender: Option<String>,
+    sender: Option<SenderLabel>,
     receipt: OutboxReceipt,
     sender_avatar: Option<(String, Option<PathBuf>)>,
     // Settings → Appearance: font size + bubble/plain style.
@@ -379,7 +379,7 @@ pub(super) fn session_history_row(
     // kit Phase 4: per-row chrome (sender header / outbox receipt /
     // avatar) computed at row-build time so the virtualized row doesn't
     // carry the chat.
-    sender: Option<String>,
+    sender: Option<SenderLabel>,
     receipt: OutboxReceipt,
     sender_avatar: Option<(String, Option<PathBuf>)>,
     quote_preview: Option<String>,
@@ -451,7 +451,9 @@ pub(super) fn session_history_row(
         } else {
             format!(
                 "{} took a screenshot",
-                sender.as_deref().unwrap_or("Someone")
+                sender
+                    .as_ref()
+                    .map_or("Someone", |label| label.name.as_str())
             )
         };
         return div()
@@ -511,11 +513,15 @@ pub(super) fn session_history_row(
             (true, None) => "You joined the group from the community".to_string(),
             (false, Some(name)) => format!(
                 "{} joined the group from the community \"{name}\"",
-                sender.as_deref().unwrap_or("Someone")
+                sender
+                    .as_ref()
+                    .map_or("Someone", |label| label.name.as_str())
             ),
             (false, None) => format!(
                 "{} joined the group from the community",
-                sender.as_deref().unwrap_or("Someone")
+                sender
+                    .as_ref()
+                    .map_or("Someone", |label| label.name.as_str())
             ),
         };
         return community_service_row(text);

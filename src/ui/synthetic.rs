@@ -203,6 +203,8 @@ pub(crate) struct MessageChrome {
     /// Incoming sender name → kit `MessageHeader` (above the bubble).
     /// `None` renders no header (outgoing messages never had one).
     pub sender: Option<SharedString>,
+    /// The sender's name color (groups); `None` keeps the default text.
+    pub sender_color: Option<Hsla>,
     /// Incoming sender avatar → kit `Message` avatar slot. `None` where the
     /// sender can't be identified (groups) — never invented.
     pub avatar: Option<AnyElement>,
@@ -305,6 +307,7 @@ fn message_bubble_with_quote(
     let rich_body = body_el.is_some();
     let MessageChrome {
         sender,
+        sender_color,
         avatar,
         footer,
         footer_inline,
@@ -398,22 +401,42 @@ fn message_bubble_with_quote(
             }
             Some(footer) => this.child(div().flex().justify_end().mt_0p5().child(footer)),
             None => this,
-        })
-        .when_some(actions, |this, actions| {
-            let group = group.clone();
-            this.child(
-                div()
-                    .absolute()
-                    .top(px(4.))
-                    .right(px(4.))
-                    .invisible()
-                    .group_hover(group, |style| style.visible())
-                    .child(actions),
-            )
         });
     let mut bubble = component::bubble::Bubble::new()
         .alignment(alignment)
         .content(bubble_content);
+    // Hover-revealed actions anchored just outside the bubble's side edge
+    // (right of incoming, left of outgoing), so they never cover its text
+    // or time. The kit's reaction region is the bubble-anchored slot that
+    // isn't clipped by the surface; restyle it to a bare container.
+    if let Some(actions) = actions {
+        let (side_alignment, outside) = if row.outgoing {
+            (component::message::MessageAlignment::Start, true)
+        } else {
+            (component::message::MessageAlignment::End, false)
+        };
+        let region = component::bubble::BubbleReactions::new()
+            .side(component::bubble::BubbleReactionSide::Top)
+            .alignment(side_alignment)
+            .top(px(2.))
+            .p_0()
+            .border_0()
+            .bg(gpui_kit::transparent_black())
+            .map(|this| {
+                if outside {
+                    this.left(px(-34.))
+                } else {
+                    this.right(px(-34.))
+                }
+            })
+            .child(
+                div()
+                    .invisible()
+                    .group_hover(group.clone(), |style| style.visible())
+                    .child(actions),
+            );
+        bubble = bubble.reactions(region);
+    }
     if look.plain {
         bubble = bubble.with_variant(component::bubble::BubbleVariant::Ghost);
     }
@@ -427,6 +450,8 @@ fn message_bubble_with_quote(
                     .id("sender")
                     .role(Role::Label)
                     .aria_label(sender.clone())
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .when_some(sender_color, |this, color| this.text_color(color))
                     .child(sender)
                     .into_any_element(),
             ),
