@@ -397,7 +397,6 @@ impl Render for QuillApp {
                 self.pane_mode(),
                 self.live.is_some(),
                 self.search_is_open(),
-                self.chat_search_is_open(),
                 cx,
             ))
             .when(

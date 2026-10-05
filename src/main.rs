@@ -25,7 +25,9 @@ gpui_kit::assets::icon_assets!(
         ALargeSmall,
         Reply,
         Pencil,
-        Trash
+        Trash,
+        Phone,
+        AudioLines
     ]
 );
 

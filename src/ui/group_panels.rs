@@ -17,14 +17,12 @@ use quill::state::{ContactRow, InfoPanelTarget, SupergroupMembersFetch};
 use quill::telegram::envelope::ChatKind;
 use std::path::PathBuf;
 /// Parity slice: data for the channel/supergroup conversation header —
-/// photo, description snippet, primary @username, subscriber/member count,
-/// and the linked discussion chat id (`linked_chat_id`, 0 = none).
+/// primary @username, subscriber/member count, and the linked discussion
+/// chat id (`linked_chat_id`, 0 = none).
 pub(super) struct SupergroupHeaderExtras {
     pub(super) is_channel: bool,
-    pub(super) photo: Option<PathBuf>,
     pub(super) username: Option<String>,
     pub(super) member_count: Option<i32>,
-    pub(super) description_snippet: Option<String>,
     pub(super) discussion_chat_id: Option<i64>,
 }
 
@@ -147,15 +145,6 @@ impl QuillApp {
             );
         }
         panel
-    }
-
-    pub(super) fn open_supergroup_panel(
-        &mut self,
-        supergroup_id: i64,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_info_panel_target(InfoPanelTarget::Supergroup(supergroup_id), window, cx);
     }
 
     /// Open an info panel: set the target, then fetch its data on the live
