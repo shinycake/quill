@@ -469,40 +469,61 @@ impl QuillApp {
             .as_ref()
             .map(|capture| capture.bars.clone())
             .unwrap_or_default();
-        let title = format!(
-            "Recording {} · {}{}",
-            if video { "video" } else { "voice" },
+        // A pulsing red dot + elapsed time, the live waveform, then the
+        // lock / discard / send actions — one row, like the composer it
+        // replaces while recording.
+        let label = format!(
+            "Recording {} {}",
+            if video {
+                "video message"
+            } else {
+                "voice message"
+            },
             format_voice_duration(seconds),
-            if self.record_locked { " · locked" } else { "" },
         );
         div()
             .id("voice-record-bar")
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(danger())
-            .bg(bg_subtle())
+            .role(gpui_kit::Role::Group)
+            .aria_label(label)
             .flex()
-            .flex_col()
-            .gap_2()
+            .items_center()
+            .gap_3()
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_medium()
-                            .text_color(text_bright())
-                            .child(title),
-                    )
-                    .child(self.record_bar_actions(cx)),
+                    .size(px(10.))
+                    .flex_none()
+                    .rounded_full()
+                    .bg(danger())
+                    .with_animation(
+                        "record-pulse",
+                        Animation::new(std::time::Duration::from_millis(1200))
+                            .repeat()
+                            .with_easing(pulsating_between(0.35, 1.0)),
+                        |dot, delta| dot.opacity(delta),
+                    ),
             )
-            .when(!video, |this| {
-                this.child(waveform_row(0, &bars, accent().into(), 1.0))
-            })
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .flex_none()
+                    .child(format_voice_duration(seconds)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .when(video, |this| {
+                        this.text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Video message")
+                    })
+                    .when(!video, |this| {
+                        this.child(waveform_row(0, &bars, accent().into(), 1.0))
+                    }),
+            )
+            .child(self.record_bar_actions(cx))
     }
 
     /// MED2: the record bar's right-side row — either the normal
@@ -513,22 +534,21 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(text_bright())
-                        .child("Discard this recording?"),
-                )
+                .child(div().text_sm().child("Discard recording?"))
                 .child(
                     Button::new("discard-record-confirm")
                         .label("Discard")
+                        .danger()
+                        .small()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.confirm_discard_recording(cx);
                         })),
                 )
                 .child(
                     Button::new("keep-recording")
-                        .label("Keep recording")
+                        .label("Keep")
+                        .ghost()
+                        .small()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.record_discard_confirm = false;
                             cx.notify();
@@ -538,25 +558,44 @@ impl QuillApp {
         }
         div()
             .flex()
-            .gap_2()
+            .items_center()
+            .gap_1()
             .child(
                 Button::new("lock-record")
-                    .label(if self.record_locked { "Unlock" } else { "Lock" })
-                    .tooltip("Lock: hands-free recording — Esc won't cancel")
+                    .icon(gpui_kit::assets::IconName::Lock)
+                    .ghost()
+                    .selected(self.record_locked)
+                    .tooltip(if self.record_locked {
+                        "Locked — Esc won't cancel. Click to unlock"
+                    } else {
+                        "Lock: hands-free recording — Esc won't cancel"
+                    })
+                    .accessibility_label(if self.record_locked {
+                        "Unlock recording"
+                    } else {
+                        "Lock recording"
+                    })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_record_lock(cx);
                     })),
             )
             .child(
                 Button::new("cancel-record")
-                    .label("Cancel")
+                    .icon(gpui_kit::assets::IconName::Trash)
+                    .ghost()
+                    .tooltip("Discard recording")
+                    .accessibility_label("Discard recording")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.request_discard_recording(cx);
                     })),
             )
             .child(
                 Button::new("send-record")
-                    .label("Send")
+                    .icon(gpui_kit::assets::IconName::Send)
+                    .primary()
+                    .rounded_full()
+                    .tooltip("Send recording")
+                    .accessibility_label("Send recording")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.send_recording(window, cx);
                     })),
