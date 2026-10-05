@@ -1360,6 +1360,7 @@ impl QuillApp {
                     state.sidebar_width
                 })),
             window_state_save_pending: false,
+            history_rows_key: None,
             history_media_signature: (0, 0),
             last_highlight: None,
             group_call_composer,

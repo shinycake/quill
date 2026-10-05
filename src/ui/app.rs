@@ -95,6 +95,8 @@ pub struct QuillApp {
     pub(super) sidebar_width: Pixels,
     /// A debounced `window_state.json` save is scheduled.
     pub(super) window_state_save_pending: bool,
+    /// What `history_rows` were last built from (`None`: not cacheable).
+    pub(super) history_rows_key: Option<super::conversation::HistoryRowsKey>,
     /// (ready files, downloading files) at the last history render; a
     /// change remeasures the virtualized rows (media grew in place).
     pub(super) history_media_signature: (usize, usize),
