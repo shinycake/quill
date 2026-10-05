@@ -140,13 +140,11 @@ pub(super) fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> Op
     match mode {
         PaneMode::Synthetic => None,
         PaneMode::Connecting => Some("Connecting…".into()),
-        PaneMode::Ready => session.filter(|s| s.search.open).map(|s| {
-            if s.search.recents {
-                "Recent".into()
-            } else {
-                "Search results".into()
-            }
-        }),
+        // Search shows its own section headings.
+        PaneMode::Ready => {
+            let _ = session;
+            None
+        }
     }
 }
 

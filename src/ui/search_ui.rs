@@ -16,17 +16,43 @@ use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatDraft;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+/// One search hit: avatar, title with the date (message hits), and the
+/// preview with the query's matches highlighted — the chat-row anatomy.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn search_result_row(
     id: (&'static str, u64),
     title: String,
     preview: String,
+    date: Option<i32>,
+    query: &str,
+    photo: Option<std::path::PathBuf>,
     cx: &mut Context<QuillApp>,
     on_pick: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
 ) -> impl IntoElement {
+    let stamp = date.filter(|date| *date > 0).map(|date| {
+        let now = quill::local_time::civil_local(quill::local_time::now_unix());
+        quill::local_time::chat_list_stamp(&quill::local_time::civil_local(i64::from(date)), &now)
+    });
+    let highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = match_ranges(&preview, query)
+        .into_iter()
+        .map(|range| {
+            (
+                range,
+                HighlightStyle {
+                    color: Some(cx.theme().foreground),
+                    font_weight: Some(FontWeight::SEMIBOLD),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
     div()
         .id(id)
+        .flex()
+        .items_center()
+        .gap_3()
         .px_2()
-        .py_2()
+        .py_1p5()
         .rounded_md()
         .role(gpui_kit::Role::Button)
         .aria_label(format!("{title} · {preview}"))
@@ -34,13 +60,129 @@ pub(super) fn search_result_row(
         .cursor_pointer()
         .pressable(cx.theme())
         .on_click(cx.listener(move |this, _, window, cx| on_pick(this, window, cx)))
-        .child(div().font_medium().child(title))
+        .child(super::chat_row::chat_avatar(&title, photo.as_deref(), 40.))
         .child(
             div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(preview),
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_medium()
+                                .child(title),
+                        )
+                        .when_some(stamp, |this, stamp| {
+                            this.child(
+                                div()
+                                    .flex_none()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(stamp),
+                            )
+                        }),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .truncate()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(StyledText::new(preview).with_highlights(highlights)),
+                ),
         )
+}
+
+/// One in-chat search hit: the message snippet with matches highlighted
+/// and its date; the selected hit (the one the history jumped to) is
+/// tinted. Click jumps to it.
+fn chat_search_hit_row(
+    message_id: MessageId,
+    preview: String,
+    date: i32,
+    query: &str,
+    selected: bool,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement {
+    let stamp = (date > 0).then(|| {
+        let now = quill::local_time::civil_local(quill::local_time::now_unix());
+        quill::local_time::chat_list_stamp(&quill::local_time::civil_local(i64::from(date)), &now)
+    });
+    let highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = match_ranges(&preview, query)
+        .into_iter()
+        .map(|range| {
+            (
+                range,
+                HighlightStyle {
+                    font_weight: Some(FontWeight::SEMIBOLD),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    div()
+        .id(("chat-search-hit", message_id.0 as u64))
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .py_1p5()
+        .rounded_md()
+        .role(gpui_kit::Role::Button)
+        .aria_label(preview.clone())
+        .aria_selected(selected)
+        .tab_index(0)
+        .cursor_pointer()
+        .pressable(cx.theme())
+        .when(selected, |this| this.bg(cx.theme().selection))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.jump_chat_search_message(message_id, cx);
+        }))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_sm()
+                .truncate()
+                .child(StyledText::new(preview).with_highlights(highlights)),
+        )
+        .when_some(stamp, |this, stamp| {
+            this.child(
+                div()
+                    .flex_none()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(stamp),
+            )
+        })
+}
+
+/// Byte ranges in `text` matching `query` case-insensitively. Empty when the
+/// query is empty or lowercasing would shift byte offsets (no highlight is
+/// better than a misplaced one).
+fn match_ranges(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let haystack = text.to_lowercase();
+    let needle = query.to_lowercase();
+    if haystack.len() != text.len() {
+        return Vec::new();
+    }
+    haystack
+        .match_indices(&needle)
+        .map(|(start, matched)| start..start + matched.len())
+        .filter(|range| text.is_char_boundary(range.start) && text.is_char_boundary(range.end))
+        .collect()
 }
 
 pub(super) fn chat_search_jump_note(session: &Session) -> String {
@@ -514,7 +656,7 @@ impl QuillApp {
             .map(|s| s.chat_search.position_label())
             .unwrap_or_default();
         let jump_note = session.map(chat_search_jump_note).unwrap_or_default();
-        let hits: Vec<(MessageId, String, bool)> = session
+        let hits: Vec<(MessageId, String, i32, bool)> = session
             .map(|s| {
                 s.chat_search
                     .hits
@@ -524,6 +666,7 @@ impl QuillApp {
                         (
                             hit.message_id,
                             hit.preview.clone(),
+                            hit.date,
                             s.chat_search.selected == Some(i),
                         )
                     })
@@ -614,19 +757,9 @@ impl QuillApp {
             )
             .when(!hits.is_empty(), |this| {
                 let mut list = div().id("chat-search-hits").flex().flex_col().gap_1();
-                for (message_id, preview, selected) in hits {
-                    list = list.child(search_result_row(
-                        ("chat-search-hit", message_id.0 as u64),
-                        preview,
-                        if selected {
-                            "Jump · selected".into()
-                        } else {
-                            "Jump".into()
-                        },
-                        cx,
-                        move |this, _window, cx| {
-                            this.jump_chat_search_message(message_id, cx);
-                        },
+                for (message_id, preview, date, selected) in hits {
+                    list = list.child(chat_search_hit_row(
+                        message_id, preview, date, &query, selected, cx,
                     ));
                 }
                 this.child(list)
@@ -805,11 +938,17 @@ impl QuillApp {
                     ),
             )
             .when(self.search_is_open(), |this| {
-                this.child(Button::new("search-clear").label("Clear").ghost().on_click(
-                    cx.listener(|this, _, window, cx| {
-                        this.cancel_search(window, cx);
-                    }),
-                ))
+                this.child(
+                    Button::new("search-clear")
+                        .icon(gpui_kit::assets::IconName::X)
+                        .ghost()
+                        .small()
+                        .tooltip("Close search")
+                        .accessibility_label("Close search")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.cancel_search(window, cx);
+                        })),
+                )
             })
     }
 
@@ -884,7 +1023,7 @@ impl QuillApp {
         let chat_ids: Vec<ChatId> = session
             .map(|s| s.search.chat_ids.clone())
             .unwrap_or_default();
-        let messages: Vec<(ChatId, MessageId, String, String)> = session
+        let messages: Vec<(ChatId, MessageId, String, String, i32)> = session
             .map(|s| {
                 s.search
                     .messages
@@ -895,7 +1034,13 @@ impl QuillApp {
                             .get(&hit.chat_id.0)
                             .map(|c| c.title.clone())
                             .unwrap_or_else(|| format!("chat {}", hit.chat_id.0));
-                        (hit.chat_id, hit.message_id, title, hit.preview.clone())
+                        (
+                            hit.chat_id,
+                            hit.message_id,
+                            title,
+                            hit.preview.clone(),
+                            hit.date,
+                        )
                     })
                     .collect()
             })
@@ -930,12 +1075,15 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
+        let has_results = !chats.is_empty() || !public_chats.is_empty() || !messages.is_empty();
+        // Only states the results don't already show: still loading with
+        // nothing yet, nothing found, failure.
         let hint = match status {
             SearchStatus::Idle => "Type to search chats and messages.".to_string(),
+            SearchStatus::Searching if has_results => String::new(),
             SearchStatus::Searching if recents => "Loading recent chats…".to_string(),
             SearchStatus::Searching => format!("Searching “{query}”…"),
-            SearchStatus::Ready if recents => String::new(),
-            SearchStatus::Ready => format!("Results for “{query}”"),
+            SearchStatus::Ready => String::new(),
             SearchStatus::Empty => format!("No chats or messages match “{query}”."),
             SearchStatus::Failed => "Search failed.".to_string(),
             SearchStatus::Closed => String::new(),
@@ -979,10 +1127,14 @@ impl QuillApp {
                         }),
                 );
                 for (id, title, preview) in chats {
+                    let photo = self.chat_photo_for_row(id);
                     block = block.child(search_result_row(
                         ("search-chat", id.0 as u64),
                         title,
                         preview,
+                        None,
+                        &query,
+                        photo,
                         cx,
                         move |this, window, cx| this.select_search_chat(id, window, cx),
                     ));
@@ -997,10 +1149,14 @@ impl QuillApp {
                     .gap_1()
                     .child(div().text_xs().font_semibold().child("Public chats"));
                 for (id, title, preview) in public_chats {
+                    let photo = self.chat_photo_for_row(id);
                     block = block.child(search_result_row(
                         ("search-public-chat", id.0 as u64),
                         title,
                         preview,
+                        None,
+                        &query,
+                        photo,
                         cx,
                         move |this, window, cx| this.select_search_chat(id, window, cx),
                     ));
@@ -1014,11 +1170,15 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(div().text_xs().font_semibold().child("Messages"));
-                for (chat_id, message_id, title, preview) in messages {
+                for (chat_id, message_id, title, preview, date) in messages {
+                    let photo = self.chat_photo_for_row(chat_id);
                     block = block.child(search_result_row(
                         ("search-msg", message_id.0 as u64),
                         title,
                         preview,
+                        Some(date),
+                        &query,
+                        photo,
                         cx,
                         move |this, window, cx| {
                             this.select_search_message(chat_id, message_id, window, cx);
@@ -1027,5 +1187,29 @@ impl QuillApp {
                 }
                 this.child(block)
             })
+    }
+}
+
+impl QuillApp {
+    /// A chat's downloaded photo, sandboxed for display (search rows).
+    fn chat_photo_for_row(&self, chat_id: ChatId) -> Option<std::path::PathBuf> {
+        self.session()
+            .and_then(|s| s.chat_photo_path(chat_id))
+            .and_then(|path| {
+                quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
+            })
+    }
+}
+
+#[cfg(test)]
+mod match_tests {
+    use super::match_ranges;
+
+    #[test]
+    fn matches_case_insensitively_and_skips_unsafe_text() {
+        assert_eq!(match_ranges("Hello hello", "HELLO"), vec![0..5, 6..11]);
+        assert!(match_ranges("Hello", "").is_empty());
+        // Lowercasing İ changes the byte length: no highlight at all.
+        assert!(match_ranges("İstanbul hello", "hello").is_empty());
     }
 }
