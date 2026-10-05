@@ -1483,6 +1483,26 @@ impl QuillApp {
         let Some(row) = self.history_rows.get(ix) else {
             return div().into_any_element();
         };
+        {
+            let mut rendered = self.rendered_history_rows.borrow_mut();
+            if !rendered.contains(&ix) {
+                rendered.push(ix);
+            }
+        }
+        // A row scrolled into view that hasn't been reported yet: render
+        // the app once more so `report_visible_history` sees it promptly
+        // (list scrolling alone doesn't re-render the app view).
+        let unreported = self.live.is_some()
+            && self.history_window_active
+            && row.message_ids().iter().any(|id| {
+                !self
+                    .reported_visible
+                    .as_ref()
+                    .is_some_and(|(_, ids)| ids.contains(id))
+            });
+        if unreported {
+            cx.notify();
+        }
         let element = self.render_history_row_body(row, cx);
         match row.day_label() {
             Some(label) => div()
@@ -1673,4 +1693,44 @@ fn day_separator(label: &str, cx: &App) -> impl IntoElement {
             .aria_label(SharedString::from(label.to_string()))
             .child(label.to_string()),
     )
+}
+
+impl QuillApp {
+    /// Report the history rows the list rendered last frame as seen
+    /// (`viewMessages` through the driver), so only messages actually on
+    /// screen are marked read. Skipped while the window is inactive —
+    /// nothing is "seen" behind another app — and when the set is
+    /// unchanged; the driver also drops ids already viewed or in flight.
+    pub(super) fn report_visible_history(&mut self, window_active: bool, cx: &mut Context<Self>) {
+        self.history_window_active = window_active;
+        let rendered = std::mem::take(&mut *self.rendered_history_rows.borrow_mut());
+        if !window_active || rendered.is_empty() {
+            return;
+        }
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+            return;
+        };
+        let mut ids: Vec<MessageId> = rendered
+            .into_iter()
+            .filter_map(|ix| self.history_rows.get(ix))
+            .flat_map(HistoryRow::message_ids)
+            .collect();
+        ids.sort_unstable_by_key(|id| id.0);
+        ids.dedup();
+        if self
+            .reported_visible
+            .as_ref()
+            .is_some_and(|(chat, last)| *chat == chat_id && *last == ids)
+        {
+            return;
+        }
+        if let Some(live) = self.live.as_mut() {
+            // Recorded even when the send fails: the driver keeps the ids
+            // queued for the next attempt, and re-reporting every frame
+            // would only spin the render loop.
+            let _ = live.driver.view_messages(chat_id, &ids);
+            self.reported_visible = Some((chat_id, ids));
+            cx.notify();
+        }
+    }
 }

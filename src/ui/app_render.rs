@@ -21,6 +21,8 @@ use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, StoryPostOutcome, connection_indicator};
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Rows the history list painted last frame are what the user saw.
+        self.report_visible_history(window.is_window_active(), cx);
         let menu_open = self.message_menu.is_some() || self.chat_menu.is_some();
         if menu_open && !self.context_menu_was_open {
             self.context_menu_previous_focus = window.focused(cx);

@@ -64,6 +64,15 @@ pub struct QuillApp {
     /// Rebuilt each render; the `MessageScroller` renderer only builds
     /// elements for visible indices.
     pub(super) history_rows: Vec<HistoryRow>,
+    /// Row indices the history list rendered in the last frame (the
+    /// virtual list only builds on-screen rows plus a small overdraw).
+    /// Drained into `viewMessages` reports on the next render.
+    pub(super) rendered_history_rows: std::cell::RefCell<Vec<usize>>,
+    /// Last `(chat, message ids)` reported as visible, to skip repeats.
+    pub(super) reported_visible: Option<(ChatId, Vec<MessageId>)>,
+    /// Window activity at the last render; rows only prompt a visibility
+    /// report while the window is active.
+    pub(super) history_window_active: bool,
     /// kit Phase 3: per-render shared inputs for history rows (files,
     /// downloads, media roots) so visible-row rendering doesn't re-clone.
     pub(super) history_shared: HistoryShared,
