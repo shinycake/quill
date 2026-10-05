@@ -77,6 +77,12 @@ pub struct Session {
     pub revision: u64,
     /// The composer's `@` suggestions for the open chat.
     pub mention_search: Option<MentionSearch>,
+    /// Member counts from `updateSupergroup` / `updateBasicGroup` (the
+    /// header's fallback before full info loads), keyed by group id.
+    pub supergroup_member_counts: HashMap<i64, i32>,
+    pub basic_group_member_counts: HashMap<i64, i32>,
+    /// `updateChatOnlineMemberCount`, keyed by chat id.
+    pub chat_online_counts: HashMap<i64, i32>,
     /// M1: parsed `messageLink.link` from the last `getMessageLink` response
     /// (one-shot; the UI copies it to the clipboard and clears it).
     pub message_link_result: Option<String>,
@@ -969,6 +975,9 @@ impl Session {
             stale_history_requests: HashSet::new(),
             revision: 0,
             mention_search: None,
+            supergroup_member_counts: HashMap::new(),
+            basic_group_member_counts: HashMap::new(),
+            chat_online_counts: HashMap::new(),
             message_link_result: None,
             message_caption_length_max: 1024,
             // Slice CL1: TDLib's compiled defaults for the pin limits

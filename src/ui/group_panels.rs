@@ -24,6 +24,8 @@ pub(super) struct SupergroupHeaderExtras {
     pub(super) is_channel: bool,
     pub(super) username: Option<String>,
     pub(super) member_count: Option<i32>,
+    /// Members online (groups, while open); 0 when unknown.
+    pub(super) online_count: i32,
     pub(super) discussion_chat_id: Option<i64>,
 }
 

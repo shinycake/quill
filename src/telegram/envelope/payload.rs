@@ -1053,10 +1053,22 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // line 2746). Parity slice: also keep the first active username
         // (`supergroup.usernames`, schema lines 2746/2372) for the
         // channel/supergroup header.
+        "updateBasicGroup" => {
+            let group = value.get("basic_group").ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::UpdateBasicGroup {
+                basic_group_id: int53(group.get("id"))?,
+                member_count: int53(group.get("member_count")).unwrap_or(0) as i32,
+            })
+        }
+        "updateChatOnlineMemberCount" => Ok(EnvelopePayload::UpdateChatOnlineMemberCount {
+            chat_id: int53(value.get("chat_id"))?,
+            online_member_count: int53(value.get("online_member_count")).unwrap_or(0) as i32,
+        }),
         "updateSupergroup" => {
             let supergroup = value.get("supergroup").ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::UpdateSupergroup {
                 supergroup_id: int53(supergroup.get("id"))?,
+                member_count: int53(supergroup.get("member_count")).unwrap_or(0) as i32,
                 is_forum: supergroup
                     .get("is_forum")
                     .and_then(Value::as_bool)
