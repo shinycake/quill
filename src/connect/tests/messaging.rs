@@ -500,6 +500,99 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
 }
 
 #[test]
+fn failed_automatic_downloads_are_not_retried_on_every_ingest() {
+    // An automatic download that TDLib stops (active → idle without
+    // completing) or refuses must not be re-sent by the next ingest —
+    // that turns every update into another `downloadFile`. Telegram X
+    // treats a stopped download as paused until the user asks again
+    // (`TdlibFilesManager.onFileUpdate` → `STATE_PAUSED`).
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let file = |id: i32, active: bool| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":{active},"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"x","unique_id":"u{id}","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":24}}}}"#
+        )
+    };
+    let downloads = |recorder: &RecordingSender, id: i32| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|j| {
+                j.contains("\"@type\":\"downloadFile\"") && j.contains(&format!("\"file_id\":{id}"))
+            })
+            .count()
+    };
+    for (chat_id, file_id) in [(7, 91), (8, 92)] {
+        ingest(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"c","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0,"photo":{{"@type":"chatPhotoInfo","small":{},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}}}}}"#,
+                file(file_id, false)
+            ),
+        );
+    }
+    assert_eq!(downloads(&recorder, 91), 1);
+    assert_eq!(downloads(&recorder, 92), 1);
+    let extra_for = |recorder: &RecordingSender, id: i32| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+            .find(|v| v["@type"] == "downloadFile" && v["file_id"] == id)
+            .and_then(|v| v["@extra"].as_str().map(str::to_string))
+            .expect("downloadFile extra")
+    };
+    // 91: TDLib accepts (`downloadFile` answers the active file at once),
+    // then stops the download without completing it.
+    let accepted = file(91, true).replacen(
+        "{",
+        &format!(r#"{{"@extra":"{}","#, extra_for(&recorder, 91)),
+        1,
+    );
+    ingest(&mut driver, &accepted);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"updateFile","file":{}}}"#, file(91, true)),
+    );
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"updateFile","file":{}}}"#, file(91, false)),
+    );
+    // 92: TDLib refuses the request.
+    let extra = extra_for(&recorder, 92);
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"FILE_ID_INVALID"}}"#
+        ),
+    );
+    for _ in 0..3 {
+        ingest(
+            &mut driver,
+            r#"{"@type":"updateChatTitle","chat_id":7,"title":"c"}"#,
+        );
+    }
+    assert_eq!(downloads(&recorder, 91), 1, "stopped download not re-sent");
+    assert_eq!(downloads(&recorder, 92), 1, "refused download not re-sent");
+    // The user can still ask for the file explicitly.
+    assert!(
+        driver
+            .download_user_file(FileId(91), None)
+            .unwrap()
+            .is_some()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn select_channel_fetches_supergroup_profile_and_full_info() {
     // Parity slice: opening a channel sends `getSupergroup` (for the
     // header @username) and `getSupergroupFullInfo` (description,

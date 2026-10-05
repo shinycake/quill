@@ -7,7 +7,17 @@ impl Session {
         let idle_incomplete = file.local.is_idle_incomplete();
         if file.local.is_downloading_completed {
             self.failed_downloads.remove(&file.id.0);
+            self.stalled_auto_downloads.remove(&file.id.0);
             self.record_completed_user_download(file.id.0);
+        }
+        if from_file_update
+            && idle_incomplete
+            && self.downloading.contains(&file.id.0)
+            && !self.user_downloads.contains(&file.id.0)
+        {
+            // An automatic download we started went idle without
+            // completing (explicit cancels already left `downloading`).
+            self.stalled_auto_downloads.insert(file.id.0);
         }
         if from_file_update && idle_incomplete && self.user_downloads.contains(&file.id.0) {
             // MED3: a user-initiated download that went active → idle without
@@ -83,6 +93,7 @@ impl Session {
     pub fn begin_download(&mut self, file_id: FileId) {
         if file_id.0 != 0 {
             self.failed_downloads.remove(&file_id.0);
+            self.stalled_auto_downloads.remove(&file_id.0);
             self.downloading.insert(file_id.0);
         }
     }

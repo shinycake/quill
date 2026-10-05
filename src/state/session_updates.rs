@@ -20,6 +20,7 @@ impl Session {
             self.account_generation.bump();
             self.files.clear();
             self.downloading.clear();
+            self.stalled_auto_downloads.clear();
             self.download_extras.clear();
             self.search.close();
             self.chat_search.close();

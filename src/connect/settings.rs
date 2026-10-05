@@ -1157,6 +1157,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         // playback on completion, and start the download (deduped).
         self.session.sound_file_ids.insert(file_id.0, sound_id);
         self.session.pending_sound_downloads.insert(sound_id);
+        // A play request is explicit: retry even if an earlier attempt
+        // stalled (the stall mark only stops per-ingest auto retries).
+        self.session.stalled_auto_downloads.remove(&file_id.0);
         let _ = self.download_file(file_id, USER_DOWNLOAD_PRIORITY);
         R::Pending
     }

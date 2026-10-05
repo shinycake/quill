@@ -79,7 +79,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.should_download(file_id) {
+        if !self.session.should_download(file_id)
+            || self.session.stalled_auto_downloads.contains(&file_id.0)
+        {
             return Ok(None);
         }
         let extra = self.session.request_download(file_id);

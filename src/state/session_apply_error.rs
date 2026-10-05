@@ -1376,6 +1376,9 @@ impl Session {
             // the user must not show rows here.
             if self.user_downloads.contains(&file_id) {
                 self.failed_downloads.insert(file_id);
+            } else {
+                // A refused automatic download is not retried per ingest.
+                self.stalled_auto_downloads.insert(file_id);
             }
             self.unstick_download(file_id);
         }
