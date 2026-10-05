@@ -384,21 +384,35 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub(crate) fn refresh_emoji_pack_catalog(&mut self) -> Result<(), ConnectSendError> {
+        // TDLib sends this update while it loads the list a request asked
+        // for, so a dropped in-flight request is sent again; a cached list
+        // (the composer panel's) is refreshed too.
+        let installed_wanted = self
+            .session
+            .requests
+            .take_purpose(RequestPurpose::GetInstalledEmojiSets)
+            .is_some()
+            || !self.session.emoji.installed_sets.is_empty()
+            || self.session.emoji.open;
         for purpose in [
-            RequestPurpose::GetInstalledEmojiSets,
             RequestPurpose::SearchEmojiSets,
             RequestPurpose::GetTrendingEmojiSets,
             RequestPurpose::GetEmojiSet,
         ] {
             drop(self.session.requests.take_purpose(purpose));
         }
-        if !self.chats_path_active() || !self.session.emoji.open {
+        if !self.chats_path_active() {
             return Ok(());
         }
-        self.emoji_set_request(
-            RequestPurpose::GetInstalledEmojiSets,
-            get_installed_emoji_sets,
-        )?;
+        if installed_wanted {
+            self.emoji_set_request(
+                RequestPurpose::GetInstalledEmojiSets,
+                get_installed_emoji_sets,
+            )?;
+        }
+        if !self.session.emoji.open {
+            return Ok(());
+        }
         match self.session.emoji.tab {
             EmojiSetTab::Search => {
                 let query = self.session.emoji.search_query.clone();

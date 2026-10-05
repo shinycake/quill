@@ -192,3 +192,27 @@ fn media_roots_cover_tdlib_database_caches() {
     assert!(crate::local_path::sandboxed_display_path(db.to_str().unwrap(), &roots).is_none());
     assert!(roots.contains(&h.driver.tdlib_files().to_path_buf()));
 }
+
+/// TDLib announces `updateInstalledStickerSets` (custom emoji) while it
+/// loads the list the panel asked for. Refreshing the catalog must not
+/// leave the panel without its custom emoji packs.
+#[test]
+fn custom_emoji_packs_survive_the_installed_sets_update() {
+    let mut h = Harness::ready();
+    h.driver.open_media_panel().unwrap();
+    h.ingest(r#"{"@type":"updateInstalledStickerSets","sticker_type":{"@type":"stickerTypeCustomEmoji"},"sticker_set_ids":["7"]}"#);
+    let custom: Vec<Value> = h
+        .sent("getInstalledStickerSets")
+        .into_iter()
+        .filter(|v| v["sticker_type"]["@type"] == "stickerTypeCustomEmoji")
+        .collect();
+    assert_eq!(custom.len(), 2, "the dropped request is sent again");
+    let latest = Harness::extra_of(custom.last().unwrap());
+    h.ingest(&format!(
+        r#"{{"@type":"stickerSets","@extra":"{}","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"7","title":"Retro Font","name":"retro","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":false,"sticker_type":{{"@type":"stickerTypeCustomEmoji"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":60,"covers":[]}}]}}"#,
+        latest.0
+    ));
+    let sets = &h.driver.session.emoji.installed_sets;
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0].title, "Retro Font");
+}

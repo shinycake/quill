@@ -864,6 +864,32 @@ impl QuillApp {
                 })
                 .h(px(34.)),
             );
+            // Footer pack icons are each set's first sticker: load the sets
+            // and icon files they need, after the visible rows (two defers
+            // put these behind the rows' requests; loads are capped).
+            let mut icon_sets = Vec::new();
+            let mut icon_files = Vec::new();
+            for section in &sections {
+                if let SectionIcon::Set(set_id) = section.icon {
+                    match self.panel_item(StickerSource::Set(set_id), 0) {
+                        None => icon_sets.push(set_id),
+                        Some(item) => icon_files.extend(item.display_file_id()),
+                    }
+                }
+            }
+            if !icon_sets.is_empty() || !icon_files.is_empty() {
+                let weak = cx.weak_entity();
+                cx.defer(move |cx| {
+                    cx.defer(move |cx| {
+                        let _ = weak.update(cx, |this, _| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.ensure_library_sets(&icon_sets);
+                                let _ = live.driver.ensure_media_files(&icon_files);
+                            }
+                        });
+                    });
+                });
+            }
             let empty = self.media_panel.rows.is_empty();
             let list = list(self.media_panel.list.clone(), move |ix, _window, cx| {
                 weak.update(cx, |this, cx| this.render_panel_row(ix, cx))

@@ -28,6 +28,7 @@ pub mod lifecycle;
 pub mod local_path;
 pub mod local_time;
 pub mod marketplace;
+pub mod media_tools;
 pub mod media_viewer;
 pub mod notify;
 pub mod pins;

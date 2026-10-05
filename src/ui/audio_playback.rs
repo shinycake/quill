@@ -200,7 +200,7 @@ impl QuillApp {
     /// (`-af atempo=` when != 1x) baked in. `atempo` only accepts
     /// 0.5–2.0 — the TGX speed span, enforced by `PlaybackClock`.
     pub(super) fn ffplay_command(&self, offset_secs: f64) -> Command {
-        let mut command = Command::new("ffplay");
+        let mut command = quill::media_tools::command("ffplay");
         command.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
         if offset_secs > 0.05 {
             command.arg("-ss").arg(format!("{offset_secs:.1}"));

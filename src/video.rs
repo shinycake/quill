@@ -138,7 +138,7 @@ pub fn write_video_note_thumbnail(src: &Path) -> Option<VideoNoteThumbnail> {
         .ok()?
         .as_nanos();
     let dest = dir.join(format!("{}-{nanos}.jpg", std::process::id()));
-    let status = Command::new("ffmpeg")
+    let status = crate::media_tools::command("ffmpeg")
         .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
         .arg(src)
         .args(["-frames:v", "1", "-vf", "scale=240:240", "-q:v", "5"])
@@ -177,7 +177,7 @@ pub fn probe_local_video(path: &Path) -> Result<VideoProbe, String> {
 }
 
 pub(crate) fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Option<VideoProbe> {
-    let output = Command::new("ffprobe")
+    let output = crate::media_tools::command("ffprobe")
         .args([
             "-v",
             "error",
@@ -598,7 +598,7 @@ pub(crate) fn extract_frames(
 ) -> Result<Vec<PathBuf>, String> {
     crate::local_path::secure_create_dir(cache_dir).map_err(|err| err.to_string())?;
     let pattern = cache_dir.join("frame-%03d.png");
-    let mut command = Command::new("ffmpeg");
+    let mut command = crate::media_tools::command("ffmpeg");
     command.args(["-y", "-hide_banner", "-loglevel", "error"]);
     if start_timestamp > 0 {
         command.arg("-ss").arg(start_timestamp.to_string());
@@ -694,7 +694,7 @@ impl VideoNoteCapture {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         ));
-        let child = Command::new("ffmpeg")
+        let child = crate::media_tools::command("ffmpeg")
             .args([
                 "-y",
                 "-f",
@@ -798,7 +798,7 @@ impl Drop for VideoNoteCapture {
 /// than at capture time.
 fn transcode_square(src: &Path, dest: &Path, size: i32) -> Result<(), String> {
     let filter = format!("crop=min(iw\\,ih):min(iw\\,ih),scale={size}:{size}");
-    let status = Command::new("ffmpeg")
+    let status = crate::media_tools::command("ffmpeg")
         .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
         .arg(src)
         .args([
