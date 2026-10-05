@@ -6,13 +6,13 @@ description: 'How to build desktop applications with GPUI Kit, the Rust framewor
 # GPUI Kit
 
 > **Quill pin (local note, not upstream).** This copy is vendored from
-> `longbridge/gpui-component` tag `v0.6.1` (Apache-2.0, see `LICENSE-APACHE`),
-> matching `gpui-kit = "=0.6.1"` in Quill's `Cargo.toml`. The gpui-kit.com docs
-> and `llms.txt` track the *latest* release (0.7+), so APIs there may not exist
-> in 0.6.1. The source of truth for signatures is the local registry source:
-> `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/` →
-> `gpui-kit-0.6.1`, `gpui-component-0.6.1`, `gpui-base-0.6.1`, and GPUI itself
-> in `gpui-pre-0.3.5` (plus `gpui-pre-*` sub-crates). Grep there before using
+> `longbridge/gpui-component` tag `v0.7.0` (Apache-2.0, see `LICENSE-APACHE`),
+> matching `gpui-kit = "=0.7.0"` in Quill's `Cargo.toml`. gpui-kit.com docs
+> track the *latest* release and may describe APIs this version lacks. The
+> source of truth for signatures is the local registry source:
+> `~/.cargo/registry/src/index.crates.io-*/` → `gpui-kit-0.7.0`,
+> `gpui-component-0.7.0`, `gpui-base-0.7.0`, and GPUI itself in
+> `gpui-pre-0.3.7` (plus `gpui-pre-*` sub-crates). Grep there before using
 > any API. When bumping gpui-kit, refresh this skill from the matching tag.
 
 Applications depend on one crate, `gpui-kit`. GPUI is `use gpui_kit::*;`, and
@@ -107,13 +107,15 @@ Setup and examples: [references/usage.md](references/usage.md).
 
 ```rust
 use gpui_kit::*;
-use gpui_kit::component::Root;
 
 gpui_kit::application()
     .with_assets(gpui_kit::assets::Assets)
     .run(|cx| {
         gpui_kit::init(cx);                       // first, before anything else
-        // ... open_window(..., |window, cx| cx.new(|cx| Root::new(view, window, cx)))
+        gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| AppView::new(window, cx))
+        })
+        .expect("failed to open window");
     });
 ```
 
@@ -152,6 +154,7 @@ fetch the component's `.md` doc.
 | `Stepper`     | `stepper::Stepper`                              | Stateless. Multi-step progress               |
 | `ColorPicker` | `color_picker::{ColorPicker, ColorPickerState}` | Stateful.                                    |
 | `DatePicker`  | `date_picker::{DatePicker, DatePickerState}`    | Stateful.                                    |
+| `TimeField`   | `time_field::{TimeField, TimeFieldState}`       | Stateful. Time of day, 24/12-hour            |
 | `Calendar`    | `calendar::{Calendar, CalendarState}`           | Stateful. Inline month view                  |
 | `Form`        | `form::{v_form, h_form, field}`                 | Layout container for form fields             |
 
