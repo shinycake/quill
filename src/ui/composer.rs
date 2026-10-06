@@ -572,6 +572,13 @@ impl QuillApp {
     }
 
     /// Drop one picked file; the batch options reset with the last one.
+    pub(super) fn toggle_attachment_spoiler(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(attachment) = self.pending_attachments.get_mut(index) {
+            attachment.spoiler = !attachment.spoiler;
+            cx.notify();
+        }
+    }
+
     pub(super) fn remove_attachment(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.pending_attachments.len() {
             return;

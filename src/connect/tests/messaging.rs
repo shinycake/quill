@@ -1007,6 +1007,7 @@ fn driver_sends_photo_and_document_from_picked_paths() {
             path: pick_dir.join("missing-forged.bin"),
             kind: AttachmentKind::Document,
             file_name: "missing-forged.bin".into(),
+            spoiler: false,
         }),
     );
     assert_eq!(

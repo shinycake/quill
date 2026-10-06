@@ -506,6 +506,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        let spoiler = snapshot.attachment.as_ref().is_some_and(|att| {
+            att.spoiler && matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
+        });
         // Contains caption / path — do not log `json`.
         let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
             (Some(att), Some(path)) => match att.kind {
@@ -579,6 +582,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Err(ConnectSendError::InvalidRequest);
             }
         };
+        let json = if spoiler { with_spoiler(json) } else { json };
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -875,6 +879,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     return Err(ConnectSendError::InvalidRequest);
                 }
             };
+            let mut content = content;
+            if att.spoiler && matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video) {
+                content["has_spoiler"] = serde_json::Value::Bool(true);
+            }
             contents.push(content);
         }
         // Slice G1: quote-carrying reply (`inputTextQuote`).
@@ -1426,5 +1434,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+}
+
+/// A built `sendMessage` with its media hidden behind a spoiler.
+fn with_spoiler(json: String) -> String {
+    match serde_json::from_str::<serde_json::Value>(&json) {
+        Ok(mut value) => {
+            value["input_message_content"]["has_spoiler"] = serde_json::Value::Bool(true);
+            value.to_string()
+        }
+        Err(_) => json,
     }
 }

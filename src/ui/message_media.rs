@@ -2022,3 +2022,82 @@ fn round_inline_surface(inline: super::inline_video::InlineFrame) -> AnyElement 
         )
         .into_any_element()
 }
+
+/// A hidden spoiler (photo, video or GIF): Telegram Desktop covers it with
+/// a soft preview under drifting "dust"; a click reveals it for good (until
+/// the app restarts). The preview is the inline minithumbnail when there
+/// is one: too small to show detail, it reads as a blur.
+pub(super) fn spoiler_cover(
+    row_id: u64,
+    chat_id: ChatId,
+    message_id: MessageId,
+    minithumbnail: Option<&quill::telegram::envelope::MiniThumbnail>,
+    // The file to fetch on reveal (photos), so the picture shows at once.
+    download: Option<FileId>,
+    frame_w: Pixels,
+    frame_h: Pixels,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let key = (chat_id.0, message_id.0 as u64, u64::MAX, false);
+    let preview = minithumbnail
+        .filter(|mini| !mini.data.is_empty())
+        .map(|mini| {
+            img(ImageSource::Image(Arc::new(gpui_kit::Image::from_bytes(
+                gpui_kit::ImageFormat::Jpeg,
+                mini.data.clone(),
+            ))))
+            .absolute()
+            .inset_0()
+            .size_full()
+            .object_fit(ObjectFit::Cover)
+        });
+    let shade = if preview.is_some() { 0.45 } else { 0.15 };
+    let (width, height) = (frame_w / px(1.), frame_h / px(1.));
+    // Deterministic dust per message: ~1 dot per 300 px², max 220.
+    let count = ((width * height / 300.0) as u64).clamp(40, 220);
+    let dust = (0..count).map(|index| {
+        let mut seed = row_id ^ index.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % 10_000) as f32 / 10_000.0
+        };
+        let (x, y, size, alpha) = (next(), next(), 1.0 + next() * 1.6, 0.35 + next() * 0.55);
+        div()
+            .absolute()
+            .left(px(x * width))
+            .top(px(y * height))
+            .size(px(size))
+            .rounded_full()
+            .bg(gpui_kit::white().opacity(alpha))
+    });
+    div()
+        .id(("spoiler-cover", row_id))
+        .relative()
+        .overflow_hidden()
+        .w(frame_w)
+        .h(frame_h)
+        .rounded_md()
+        .bg(fill_muted())
+        .children(preview)
+        .child(
+            div()
+                .absolute()
+                .inset_0()
+                .bg(gpui_kit::black().opacity(shade)),
+        )
+        .children(dust)
+        .role(gpui_kit::Role::Button)
+        .aria_label("Reveal spoiler")
+        .tab_index(0)
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.spoiler_revealed.insert(key);
+            if let Some(file_id) = download {
+                this.request_media_download(file_id, None, cx);
+            }
+            cx.notify();
+        }))
+        .into_any_element()
+}
