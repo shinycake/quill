@@ -326,8 +326,10 @@ pub struct QuillApp {
     pub(super) pinned_list_open: bool,
     /// Muted, looping inline players for visible videos and GIFs.
     pub(super) inline_videos: std::cell::RefCell<super::inline_video::InlineVideos>,
-    /// Whether the inline-playback redraw tick is running.
-    pub(super) inline_tick: std::cell::Cell<bool>,
+    /// Highest frame rate animated content asked for since the last
+    /// clock tick (0: nothing animated rendered); see `frame_clock`.
+    pub(super) animation_demand: std::cell::Cell<u32>,
+    pub(super) frame_clock_running: std::cell::Cell<bool>,
     /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
     /// a secret chat (TGX `SecretChatContextBotAlert`) — the stashed
     /// query is inserted on Confirm.

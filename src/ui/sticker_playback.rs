@@ -13,8 +13,11 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 pub(super) struct StickerClip {
-    image: Arc<RenderImage>,
-    final_image: Arc<RenderImage>,
+    /// One single-frame image per animation frame; the frame clock picks
+    /// the current one (`frame_clock`), instead of GPUI animating a
+    /// multi-frame image at the display's refresh rate.
+    frames: Vec<Arc<RenderImage>>,
+    fps: f64,
     started: Instant,
     duration: Duration,
     used: Instant,
@@ -236,22 +239,21 @@ impl QuillApp {
                             }
                             _ => return Err("Unsupported animated sticker".into()),
                         };
+                        if frames.is_empty() {
+                            return Err("Sticker has no frames".to_string());
+                        }
                         let duration = Duration::from_secs_f64(frames.len() as f64 / fps);
-                        let last = frames
-                            .last()
-                            .ok_or_else(|| "Sticker has no frames".to_string())?
-                            .clone();
-                        let delay =
-                            image::Delay::from_numer_denom_ms((1000.0 / fps).round() as u32, 1);
-                        let animated = frames
+                        let frames = frames
                             .into_iter()
-                            .map(|rgba| image::Frame::from_parts(rgba, 0, 0, delay))
-                            .collect::<SmallVec<[_; 1]>>();
+                            .map(|rgba| {
+                                Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
+                                    rgba,
+                                )])))
+                            })
+                            .collect();
                         Ok(StickerClip {
-                            image: Arc::new(RenderImage::new(animated)),
-                            final_image: Arc::new(RenderImage::new(SmallVec::from_buf([
-                                image::Frame::new(last),
-                            ]))),
+                            frames,
+                            fps,
                             used: Instant::now(),
                             started: Instant::now(),
                             duration,
@@ -433,17 +435,34 @@ impl QuillApp {
         }
         let entity = cx.entity();
         let app = self;
-        let image = app.playback_cache(size).clips.get(&id.0).map(|clip| {
-            if app
+        let mut animating = false;
+        let image = app.playback_cache(size).clips.get(&id.0).and_then(|clip| {
+            let elapsed = clip.started.elapsed();
+            let looping = app
                 .session()
-                .is_none_or(|s| s.media_prefs.loop_animated_stickers)
-                || clip.started.elapsed() < clip.duration
-            {
-                clip.image.clone()
+                .is_none_or(|s| s.media_prefs.loop_animated_stickers);
+            let count = clip.frames.len();
+            let index = if !looping && elapsed >= clip.duration {
+                count.saturating_sub(1)
             } else {
-                clip.final_image.clone()
-            }
+                animating = count > 1;
+                (elapsed.as_secs_f64() * clip.fps) as usize % count.max(1)
+            };
+            clip.frames.get(index).cloned()
         });
+        if animating {
+            // Stickers are drawn large and play at their own rate (Lottie
+            // runs at 60); small emoji look the same at 30.
+            let fps = match size {
+                PlaybackSize::Sticker => 60,
+                PlaybackSize::Emoji => 30,
+            };
+            let fps = image
+                .as_ref()
+                .and(app.playback_cache(size).clips.get(&id.0))
+                .map_or(fps, |clip| fps.min(clip.fps.ceil() as u32));
+            app.request_animation_tick(fps, cx);
+        }
         {
             let weak = entity.downgrade();
             cx.defer(move |cx| {

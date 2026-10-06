@@ -10,7 +10,6 @@ use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageContent;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
 
 /// `(chat id, message id)`.
 type Key = (i64, i64);
@@ -47,11 +46,6 @@ impl InlineVideos {
             let render = self.render;
             self.players.retain(|_, slot| slot.seen + 1 >= render);
         }
-    }
-
-    /// Whether any clip is playing (the history then redraws each frame).
-    pub(super) fn active(&self) -> bool {
-        !self.players.is_empty()
     }
 
     /// Stop everything (viewer opened, autoplay turned off).
@@ -160,37 +154,9 @@ impl QuillApp {
             .frame(chat_id.0, message_id.0, || {
                 self.playable_clip_path(chat_id, message_id, file_id)
             });
-        self.ensure_inline_tick(cx);
-        frame
-    }
-
-    /// Redraw at ~30 fps while an inline clip plays; stops by itself once
-    /// none does.
-    fn ensure_inline_tick(&self, cx: &mut Context<Self>) {
-        if self.inline_tick.get() || !self.inline_videos.borrow().active() {
-            return;
+        if frame.is_some() {
+            self.request_animation_tick(30, cx);
         }
-        self.inline_tick.set(true);
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(33))
-                    .await;
-                let active = this
-                    .update(cx, |this, cx| {
-                        let active = this.inline_videos.borrow().active();
-                        if active {
-                            cx.notify();
-                        }
-                        active
-                    })
-                    .unwrap_or(false);
-                if !active {
-                    break;
-                }
-            }
-            let _ = this.update(cx, |this, _| this.inline_tick.set(false));
-        })
-        .detach();
+        frame
     }
 }
