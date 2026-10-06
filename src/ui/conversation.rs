@@ -1671,11 +1671,14 @@ impl QuillApp {
                 // M1: `cx.listener` closures must be `'static`, so the
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);
+                let selection_overlay =
+                    self.selection_overlay(row_chat, row_msg, message.pending, cx);
                 let highlighted = inputs.highlighted;
                 let selected_forward = inputs.selected_forward;
                 let failed = message.failed;
                 let run_start = inputs.run_start;
                 div()
+                    .relative()
                     .when(run_start, |this| this.pt_2())
                     // Jump target, forward selection and failed sends tint
                     // the whole row instead of outlining it: no border or
@@ -1737,6 +1740,7 @@ impl QuillApp {
                                 .child("⚠ Failed to send — right-click → Retry send"),
                         )
                     })
+                    .children(selection_overlay)
                     .into_any_element()
             }
         }

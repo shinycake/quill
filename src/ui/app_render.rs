@@ -241,6 +241,12 @@ impl Render for QuillApp {
                         cx.write_to_clipboard(ClipboardItem::new_string(text));
                     }
                     cx.stop_propagation();
+                } else if let Some((chat_id, text)) = _this.selected_messages_text() {
+                    // Selection mode: copy the selected messages.
+                    if !_this.refuse_protected_copy(chat_id, cx) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
+                    cx.stop_propagation();
                 }
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
