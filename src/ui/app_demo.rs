@@ -1774,7 +1774,8 @@ impl QuillApp {
             let handled = match event.keystroke.key.as_str() {
                 "escape" => menu_app
                     .update(cx, |this, cx| {
-                        this.close_media_panel(cx)
+                        this.close_context_menus(cx)
+                            || this.close_media_panel(cx)
                             || this.close_inline_results(cx)
                             || this.close_mention_menu(cx)
                             || this.close_command_menu(cx)

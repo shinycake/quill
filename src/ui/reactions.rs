@@ -57,6 +57,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Escape closes an open message or chat context menu first.
+    pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.message_menu.is_none() && self.chat_menu.is_none() {
+            return false;
+        }
+        self.message_menu = None;
+        self.chat_menu = None;
+        cx.notify();
+        true
+    }
+
     /// Add or remove the user's `choice` on a message.
     pub(super) fn toggle_reaction(
         &mut self,
