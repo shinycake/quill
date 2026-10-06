@@ -60,7 +60,10 @@ gpui_kit::assets::icon_assets!(
         ChevronLeft,
         ChevronRight,
         Clock,
-        Star
+        Star,
+        Volume2,
+        VolumeX,
+        PictureInPicture2
     ]
 );
 
