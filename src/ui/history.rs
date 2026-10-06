@@ -412,6 +412,8 @@ pub(super) fn session_history_row(
     animation_playing: bool,
     animation_frame: Option<Arc<RenderImage>>,
     sticker_frame: Option<Arc<RenderImage>>,
+    // Decoded animations of the message's custom emoji (by custom emoji id).
+    animated_emoji: HashMap<i64, Arc<RenderImage>>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
@@ -908,6 +910,7 @@ pub(super) fn session_history_row(
                 .as_ref()
                 .map(|s| s.emoji.custom_emoji_stickers.as_slice())
                 .unwrap_or(&[]),
+            &animated_emoji,
             revealed,
             // Settings → Appearance: message font size.
             look.font,

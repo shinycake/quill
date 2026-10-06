@@ -527,7 +527,7 @@ fn custom_emoji_paths(
     stickers: &[StickerItem],
     files: &HashMap<i32, ParsedFile>,
     media_roots: &[PathBuf],
-) -> HashMap<i64, PathBuf> {
+) -> HashMap<i64, ImageSource> {
     let mut out = HashMap::new();
     for entity in entities {
         let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
@@ -544,7 +544,7 @@ fn custom_emoji_paths(
             .and_then(|f| f.usable_path())
             .and_then(|path| sandboxed_display_path(path, media_roots));
         if let Some(path) = path {
-            out.insert(custom_emoji_id, path);
+            out.insert(custom_emoji_id, ImageSource::from(path));
         }
     }
     out
@@ -561,7 +561,7 @@ fn paint_text_run(
     msg_key: (i64, u64),
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
-    emoji_paths: &HashMap<i64, PathBuf>,
+    emoji_paths: &HashMap<i64, ImageSource>,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,
@@ -593,11 +593,11 @@ fn paint_text_run(
             .into_any_element();
     }
     if let Some(id) = run.custom_emoji_id
-        && let Some(path) = emoji_paths.get(&id)
+        && let Some(source) = emoji_paths.get(&id)
     {
         let edge = font * 1.25;
         let fallback_text = run.text.clone();
-        let image = img(path.clone())
+        let image = img(source.clone())
             .id(format!("{run_id}-emoji"))
             .w(edge)
             .h(edge)
@@ -671,7 +671,7 @@ fn quote_block(
     msg_key: (i64, u64),
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
-    emoji_paths: &HashMap<i64, PathBuf>,
+    emoji_paths: &HashMap<i64, ImageSource>,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,
@@ -760,7 +760,7 @@ pub(super) fn rich_text_line(
     // Settings → Appearance: message font size (was hardcoded text_sm).
     font: Pixels,
     // Resolved custom emoji sticker images (id → path); empty when none.
-    emoji_paths: &HashMap<i64, PathBuf>,
+    emoji_paths: &HashMap<i64, ImageSource>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     rich_text_reserving(
@@ -787,7 +787,7 @@ pub(super) fn rich_text_reserving(
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     font: Pixels,
-    emoji_paths: &HashMap<i64, PathBuf>,
+    emoji_paths: &HashMap<i64, ImageSource>,
     reserve: Option<Pixels>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -877,7 +877,7 @@ fn inline_paragraph(
     msg_key: (i64, u64),
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
-    emoji_paths: &HashMap<i64, PathBuf>,
+    emoji_paths: &HashMap<i64, ImageSource>,
     font: Pixels,
     reserve: Option<Pixels>,
     cx: &mut Context<QuillApp>,
@@ -1031,6 +1031,9 @@ pub(super) fn message_text_block(
     media_roots: &[PathBuf],
     // Resolved custom emoji stickers for inline rendering (EmojiPanel cache).
     custom_emoji: &[StickerItem],
+    // Animated frames of this message's custom emoji, when decoded; they
+    // replace the still images.
+    animated_emoji: &HashMap<i64, Arc<RenderImage>>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Settings → Appearance: message font size.
     font: Pixels,
@@ -1067,7 +1070,13 @@ pub(super) fn message_text_block(
         false,
         revealed,
         font,
-        &custom_emoji_paths(&text.entities, custom_emoji, files, media_roots),
+        &{
+            let mut images = custom_emoji_paths(&text.entities, custom_emoji, files, media_roots);
+            for (id, frames) in animated_emoji {
+                images.insert(*id, ImageSource::from(frames.clone()));
+            }
+            images
+        },
         reserve.filter(|_| !card_below),
         cx,
     );

@@ -624,6 +624,12 @@ impl QuillApp {
     }
 
     fn custom_emoji_cell(&self, id: u64, item: StickerItem, cx: &mut Context<Self>) -> AnyElement {
+        // Like stickers, the emoji under the cursor animates.
+        let file_id = item.file_id;
+        let hovered = self.media_panel.hovered == Some(file_id);
+        let animated = hovered
+            .then(|| self.custom_emoji_image(file_id, item.format, cx))
+            .flatten();
         let still = self.panel_still(&item);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         let fallback: SharedString = item.emoji.clone().into();
@@ -639,17 +645,32 @@ impl QuillApp {
             .role(gpui_kit::Role::Button)
             .aria_label(format!("Custom emoji {}", item.emoji))
             .when(!premium, |this| this.opacity(0.55))
+            .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
+                let next = hovering.then_some(file_id);
+                if this.media_panel.hovered != next
+                    && (*hovering || this.media_panel.hovered == Some(file_id))
+                {
+                    this.media_panel.hovered = next;
+                    cx.notify();
+                }
+            }))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.insert_panel_custom_emoji(&item, window, cx)
             }))
-            .child(match still {
-                Some(path) => img(path)
-                    .size(px(CUSTOM_EMOJI_SIZE))
-                    .aspect_square()
-                    .object_fit(ObjectFit::Contain)
-                    .into_any_element(),
-                None => div().text_size(px(22.)).child(fallback).into_any_element(),
-            })
+            .child(
+                match animated
+                    .map(ImageSource::from)
+                    .or_else(|| still.map(ImageSource::from))
+                {
+                    Some(source) => img(source)
+                        .id(("panel-custom-emoji-img", id))
+                        .size(px(CUSTOM_EMOJI_SIZE))
+                        .aspect_square()
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element(),
+                    None => div().text_size(px(22.)).child(fallback).into_any_element(),
+                },
+            )
             .into_any_element()
     }
 
@@ -722,7 +743,10 @@ impl QuillApp {
                 )
             })
             .child(match source {
+                // GPUI advances an animated image's frames only for an
+                // element with an id (its frame state lives there).
                 Some(source) => img(source)
+                    .id(("panel-sticker-img", id))
                     .size_full()
                     .object_fit(ObjectFit::Contain)
                     .into_any_element(),

@@ -1654,6 +1654,7 @@ impl QuillApp {
                         }
                         _ => None,
                     },
+                    self.message_custom_emoji_frames(message, cx),
                     inputs.video_playing,
                     inputs.video_frame.clone(),
                     &self.spoiler_revealed,

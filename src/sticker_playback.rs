@@ -145,6 +145,15 @@ impl Rlottie {
 }
 
 pub fn decode_tgs(path: &Path, cancelled: &AtomicBool) -> Result<StickerFrames, String> {
+    decode_tgs_sized(path, STICKER_EDGE, cancelled)
+}
+
+/// [`decode_tgs`] at `edge` × `edge` px (custom emoji decode smaller).
+pub fn decode_tgs_sized(
+    path: &Path,
+    edge: usize,
+    cancelled: &AtomicBool,
+) -> Result<StickerFrames, String> {
     let data = tgs_json(path)?;
     // ponytail: serialize native renders behind one lock; separate renderer processes if throughput matters.
     static RENDERER: OnceLock<Mutex<Option<Rlottie>>> = OnceLock::new();
@@ -193,16 +202,16 @@ pub fn decode_tgs(path: &Path, cancelled: &AtomicBool) -> Result<StickerFrames, 
         if cancelled.load(Ordering::SeqCst) {
             return Err("Sticker playback cancelled".into());
         }
-        let mut pixels = vec![0u32; STICKER_EDGE * STICKER_EDGE];
-        // SAFETY: renderer writes exactly the 128x128 surface with its correct byte stride.
+        let mut pixels = vec![0u32; edge * edge];
+        // SAFETY: renderer writes exactly the edge×edge surface with its correct byte stride.
         unsafe {
             (renderer.render)(
                 animation.0,
                 index * total / count,
                 pixels.as_mut_ptr(),
-                STICKER_EDGE,
-                STICKER_EDGE,
-                STICKER_EDGE * 4,
+                edge,
+                edge,
+                edge * 4,
             )
         };
         frames.push(pixels.into_iter().flat_map(u32::to_ne_bytes).collect());
@@ -219,6 +228,17 @@ pub fn decode_webm(
     child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
     cancelled: &AtomicBool,
 ) -> Result<crate::video::ViewerFrames, String> {
+    decode_webm_sized(path, cache, STICKER_EDGE, child, cancelled)
+}
+
+/// [`decode_webm`] at `edge` px wide.
+pub fn decode_webm_sized(
+    path: &Path,
+    cache: &Path,
+    edge: usize,
+    child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
+    cancelled: &AtomicBool,
+) -> Result<crate::video::ViewerFrames, String> {
     let probe =
         crate::video::probe_with_ffprobe(path, false).ok_or("Could not read video sticker")?;
     if probe.duration > 30 {
@@ -231,7 +251,7 @@ pub fn decode_webm(
         cache,
         0,
         fps,
-        STICKER_EDGE as i32,
+        edge as i32,
         MAX_STICKER_FRAMES as i32,
         Some((child, cancelled)),
         Some("libvpx-vp9"),
