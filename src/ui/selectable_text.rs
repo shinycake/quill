@@ -19,6 +19,9 @@ thread_local! {
     static VIEWPORT: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
     /// The message each painted text participant belongs to, by the
     /// participant's entity id; see [`SelectableRichText::message`].
+    /// The message whose text the current selection covers, as last
+    /// painted; see [`selected_message_text`].
+    static SELECTED_MESSAGE: Cell<Option<(i64, u64)>> = const { Cell::new(None) };
     static OWNERS: std::cell::RefCell<std::collections::HashMap<EntityId, (i64, u64)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
@@ -238,6 +241,16 @@ impl Element for SelectableRichText {
             ]
         };
         let projection = handle.update_runs(&runs, cx);
+        if !foreign
+            && let Some(message) = self.message
+            && projection
+                .ranges()
+                .iter()
+                .flatten()
+                .any(|range| !range.is_empty())
+        {
+            SELECTED_MESSAGE.with(|selected| selected.set(Some(message)));
+        }
         if selected_before != TextSelection::selected_text(window, cx) {
             window.refresh();
         }
@@ -310,6 +323,23 @@ impl Element for SelectableRichText {
             });
         }
     }
+}
+
+/// The window's selected message text and the message it belongs to.
+/// Footer padding (em spaces reserving room for the time) is stripped.
+pub(super) fn selected_message_text(
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<((i64, u64), String)> {
+    if !TextSelection::has_selection(window, cx) {
+        return None;
+    }
+    let text = TextSelection::selected_text(window, cx).replace('\u{2003}', "");
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some((SELECTED_MESSAGE.with(Cell::get)?, text.to_string()))
 }
 
 /// Marks the scrolling region that selectable message text lives in, so a

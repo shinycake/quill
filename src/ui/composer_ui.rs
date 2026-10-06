@@ -3,7 +3,6 @@
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::pressable::PressableDiv;
-use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::attachment::{
@@ -12,8 +11,6 @@ use gpui_kit::component::attachment::{
 };
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -25,8 +22,6 @@ use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::effective_content;
 use quill::telegram::requests::SelfDestructSend;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -195,11 +190,14 @@ impl QuillApp {
         Some(list.into_any_element())
     }
 
-    /// Slice G1: open the partial-quote dialog for a text message.
-    pub(super) fn open_quote_reply_dialog(
+    /// Quote & Reply (Telegram Desktop): reply quoting the part of the
+    /// message selected in the history. The quote must be verbatim message
+    /// text; its UTF-16 offset is located in the full text.
+    pub(super) fn begin_quote_reply(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
+        quote: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -214,56 +212,24 @@ impl QuillApp {
                 ))
             })
             .unwrap_or_default();
-        if full_text.trim().is_empty() {
-            self.status_note = "only text messages can be quoted".into();
-            cx.notify();
-            return;
-        }
-        self.quote_reply_dialog = Some(QuoteReplyDialog::new(
-            window, cx, chat_id, message_id, full_text,
-        ));
-        cx.notify();
-    }
-
-    pub(super) fn close_quote_reply_dialog(&mut self, cx: &mut Context<Self>) {
-        self.quote_reply_dialog = None;
-        cx.notify();
-    }
-
-    /// Slice G1: validate the trimmed quote against the original text
-    /// and set the composer's reply with its UTF-16 offset. A quote
-    /// that is no longer a verbatim substring keeps the dialog open
-    /// with an explanatory note.
-    pub(super) fn submit_quote_reply_dialog(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(dialog) = self.quote_reply_dialog.take() else {
+        let quote = quote.trim();
+        let Some(position) = quill::composer::quote_position(&full_text, quote) else {
+            // Not verbatim text of the message (it shouldn't happen for a
+            // selection); reply to the whole message instead.
+            self.begin_reply_from_message(chat_id, message_id, window, cx);
             return;
         };
-        let quote_text = dialog.input.read(cx).value();
-        let quote_text = quote_text.trim();
-        match quill::composer::quote_position(&dialog.full_text, quote_text) {
-            Some(position) => {
-                let preview = dialog.full_text.chars().take(80).collect::<String>();
-                let reply = quill::composer::ComposerReplyTo::with_quote(
-                    dialog.chat_id,
-                    dialog.message_id,
-                    preview,
-                    quill::composer::QuoteSelection {
-                        text: quote_text.to_string(),
-                        position,
-                    },
-                );
-                self.begin_reply_to(reply, window, cx);
-                self.status_note = "quoting part of the message".into();
-            }
-            None => {
-                self.quote_reply_dialog = Some(dialog);
-                self.status_note = "the quote must be an unedited part of the message".into();
-            }
-        }
+        let preview = full_text.chars().take(80).collect::<String>();
+        let reply = quill::composer::ComposerReplyTo::with_quote(
+            chat_id,
+            message_id,
+            preview,
+            quill::composer::QuoteSelection {
+                text: quote.to_string(),
+                position,
+            },
+        );
+        self.begin_reply_to(reply, window, cx);
         cx.notify();
     }
 
@@ -432,82 +398,6 @@ impl QuillApp {
             self.consume_sent_reply(chat_id, cx);
         }
         cx.notify();
-    }
-
-    /// kit Phase 2 (redo): quote reply hosted in a kit `Dialog` via
-    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
-    pub(super) fn build_quote_reply_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::QuoteReply, |this, _, cx| {
-                this.close_quote_reply_dialog(cx);
-            });
-        app.update(cx, |this, cx| {
-            let dialog = dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title("Quote part of message"));
-            let Some(dialog_state) = this.quote_reply_dialog.as_ref() else {
-                return dialog.on_close(on_close);
-            };
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Trim the text below to the part you want to quote"),
-                )
-                .child(
-                    div().flex_1().child(
-                        Textarea::new(&dialog_state.input)
-                            .aria_label("Quoted message text")
-                            .h(px(120.)),
-                    ),
-                )
-                .into_any_element();
-            let footer = div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                    Button::new("g1-quote-cancel")
-                        .label("Cancel")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_quote_reply_dialog(cx);
-                            this.close_kit_dialog_if_done(DialogKind::QuoteReply, window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("g1-quote-submit")
-                        .label("Quote reply")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_quote_reply_dialog(window, cx);
-                            this.close_kit_dialog_if_done(DialogKind::QuoteReply, window, cx);
-                        })),
-                );
-            dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
     }
 
     pub(super) fn composer_edit_banner(

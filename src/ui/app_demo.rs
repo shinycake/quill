@@ -1650,7 +1650,7 @@ impl QuillApp {
             community_ui: CommunityUi::default(),
             restrict_dialog: None,
             group_confirm_dialog: None,
-            quote_reply_dialog: None,
+            message_menu_selection: None,
             media_viewer: MediaViewer::closed(),
             viewer_zoom: ViewerZoom::new(),
             viewer_frame: (720.0, 480.0),

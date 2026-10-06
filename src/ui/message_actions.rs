@@ -126,52 +126,50 @@ impl QuillApp {
                 ));
             };
         }
+        // Over a text selection, Reply quotes it and Copy copies it
+        // (Telegram Desktop: "Quote & Reply", "Copy Selected Text").
+        let selection = self.message_menu_selection.clone();
         if can_reply {
+            let quote = selection.clone();
             item!(
                 10,
                 gpui_kit::assets::IconName::Reply,
                 "menu-reply",
-                "Reply",
+                if quote.is_some() {
+                    "Quote & Reply"
+                } else {
+                    "Reply"
+                },
                 this,
                 window,
                 cx,
                 {
-                    this.begin_reply_from_message(chat_id, message_id, window, cx);
+                    match quote.as_deref() {
+                        Some(quote) => {
+                            this.begin_quote_reply(chat_id, message_id, quote, window, cx)
+                        }
+                        None => this.begin_reply_from_message(chat_id, message_id, window, cx),
+                    }
                     this.message_menu = None;
                     cx.notify();
                 }
             );
         }
-        // Slice G1: partial-message quote (`inputTextQuote`, schema
-        // 1.8.67 line 3056) — only for messages with copyable text.
-        if can_reply && copyable.is_some() {
-            item!(
-                11,
-                gpui_kit::assets::IconName::Quote,
-                "menu-quote-reply",
-                "Reply with Quote",
-                this,
-                window,
-                cx,
-                {
-                    this.open_quote_reply_dialog(chat_id, message_id, window, cx);
-                    this.message_menu = None;
-                    cx.notify();
-                }
-            );
-        }
-        if let Some(text) = copyable.filter(|_| allows(true, |a| a.can_be_copied)) {
+        let copy = match selection {
+            Some(selected) => Some(("Copy Selected Text", selected)),
+            None => copyable.map(|text| ("Copy Text", text)),
+        };
+        if let Some((label, text)) = copy.filter(|_| allows(true, |a| a.can_be_copied)) {
             item!(
                 40,
                 gpui_kit::assets::IconName::Copy,
                 "menu-copy",
-                "Copy Text",
+                label,
                 this,
                 _window,
                 cx,
                 {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                    this.status_note = "copied to clipboard".into();
                     this.message_menu = None;
                     cx.notify();
                 }

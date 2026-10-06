@@ -606,8 +606,9 @@ pub struct QuillApp {
     /// `chatEventLogFilters` has no user field, schema 1.8.67 line 7956).
     /// `None` shows all admins.
     pub(super) event_log_admin_filter: Option<i64>,
-    /// Slice G1: partial-quote dialog (message menu → "Quote reply").
-    pub(super) quote_reply_dialog: Option<QuoteReplyDialog>,
+    /// Message text selected when the message menu opened, if the
+    /// selection lies in that message (Quote & Reply, Copy Selected Text).
+    pub(super) message_menu_selection: Option<String>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     pub(super) media_viewer: MediaViewer,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
