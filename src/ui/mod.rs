@@ -46,6 +46,7 @@ mod audio_playback;
 mod auth_registration;
 mod auth_ui;
 mod bot_pending;
+mod bot_stream;
 mod bots;
 mod call_ui;
 mod calls;

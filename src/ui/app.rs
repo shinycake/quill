@@ -330,6 +330,8 @@ pub struct QuillApp {
     /// clock tick (0: nothing animated rendered); see `frame_clock`.
     pub(super) animation_demand: std::cell::Cell<u32>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
+    /// Smooth reveal of a bot's streaming reply (`bot_stream`).
+    pub(super) stream_reveal: std::cell::RefCell<super::bot_stream::StreamReveal>,
     /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
     /// a secret chat (TGX `SecretChatContextBotAlert`) — the stashed
     /// query is inserted on Confirm.
