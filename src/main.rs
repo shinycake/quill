@@ -72,7 +72,8 @@ gpui_kit::assets::icon_assets!(
         PinOff,
         CircleStop,
         EllipsisVertical,
-        PanelRight
+        PanelRight,
+        List
     ]
 );
 

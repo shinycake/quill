@@ -494,6 +494,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => Vec::new(),
         };
+        // A pin in the open chat refetches its pinned list (the pinned
+        // message may not be loaded); a confirmed unpin-all empties it.
+        let pins_changed: Option<ChatId> = match &owned.envelope.payload {
+            EnvelopePayload::UpdateMessageIsPinned {
+                chat_id,
+                is_pinned: true,
+                ..
+            } => Some(*chat_id),
+            _ => None,
+        };
+        let unpinned_all: Option<ChatId> = match &owned.envelope.payload {
+            EnvelopePayload::Ok => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.get(id))
+                .filter(|pending| pending.purpose == RequestPurpose::UnpinAllChatMessages)
+                .and_then(|pending| pending.chat_id),
+            _ => None,
+        };
         let recent_packs = self.session.media_prefs.recent_emoji_packs.clone();
         let recent_emoji = self.session.media_prefs.recent_custom_emoji_ids.clone();
         let previous_seq = self.session.last_seq;
@@ -517,6 +536,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
+        }
+        if let Some(chat_id) = unpinned_all {
+            self.session.pinned_messages.insert(chat_id.0, Vec::new());
+        }
+        if let Some(chat_id) = pins_changed.filter(|chat| self.session.open_chat == Some(*chat)) {
+            let _ = self.fetch_pinned_messages(chat_id);
         }
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;

@@ -433,6 +433,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_fetch_supergroup_profile(chat_id)?;
         self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
         self.maybe_fetch_forum_topics(chat_id)?;
+        self.fetch_pinned_messages(chat_id)?;
         self.fetch_history()
     }
 

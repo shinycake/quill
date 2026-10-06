@@ -599,6 +599,10 @@ pub struct Session {
     pub(crate) download_extras: HashMap<u64, i32>,
     pub search: SearchState,
     pub chat_search: ChatSearchState,
+    /// Each chat's pinned messages, newest first, as last fetched
+    /// (`RequestPurpose::GetPinnedMessages`). Absent until fetched; the
+    /// pinned bar then falls back to pinned rows in loaded history.
+    pub pinned_messages: HashMap<i64, Vec<HistoryMessage>>,
     /// Slice media-shared-gallery: per-chat shared-media gallery state
     /// (Media / Files / Music / Links / Voice / GIFs tabs).
     pub shared_media: SharedMediaState,
@@ -1151,6 +1155,7 @@ impl Session {
             download_extras: HashMap::new(),
             search: SearchState::default(),
             chat_search: ChatSearchState::default(),
+            pinned_messages: HashMap::new(),
             shared_media: SharedMediaState::default(),
             stickers: StickerPanel::default(),
             emoji: EmojiPanel::default(),

@@ -1,12 +1,12 @@
 //! Connect driver: reactions, pins, links, instant view.
 use super::*;
-use crate::ids::{ChatId, MessageId, RequestId};
+use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::settings::InstantViewMode;
 use crate::state::{ComposerLinkPreview, RequestPurpose};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
-    get_web_page_instant_view, pin_chat_message, remove_message_reaction, unpin_all_chat_messages,
-    unpin_chat_message,
+    get_web_page_instant_view, pin_chat_message, remove_message_reaction, search_chat_messages,
+    search_messages_filter_json, unpin_all_chat_messages, unpin_chat_message,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -186,6 +186,32 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// M1: unpin every pinned message in a chat (tdesktop pinned-bar menu /
     /// context action; TDLib 1.8.67 `schema/td_api.tl:13565`).
+    /// Fetch the chat's pinned messages (newest first) for the pinned bar
+    /// — `searchChatMessages` with `searchMessagesFilterPinned`. One
+    /// request per chat at a time.
+    pub fn fetch_pinned_messages(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+        let purpose = RequestPurpose::GetPinnedMessages;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(());
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let json = search_chat_messages(
+            extra,
+            chat_id,
+            &TopicId::None,
+            "",
+            MessageId(0),
+            0,
+            100,
+            Some(search_messages_filter_json("searchMessagesFilterPinned")),
+        );
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
     pub fn unpin_all_chat_messages(
         &mut self,
         chat_id: ChatId,

@@ -727,3 +727,45 @@ fn public_search_error_resolves_status() {
     assert_eq!(session.search.status, SearchStatus::Failed);
     assert!(session.search.public_chat_ids.is_empty());
 }
+
+#[test]
+fn pinned_list_fills_newest_first_and_drops_unpins() {
+    // The pinned bar's list: a `searchMessagesFilterPinned` page lands
+    // newest first; an unpin or delete drops the row at once.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(16)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":3,"next_from_message_id":0,"messages":[{{"id":40,"chat_id":16,"is_outgoing":false,"is_pinned":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"older","entities":[]}}}}}},{{"id":60,"chat_id":16,"is_outgoing":false,"is_pinned":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"newest","entities":[]}}}}}},{{"id":50,"chat_id":16,"is_outgoing":false,"is_pinned":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"middle","entities":[]}}}}}}]}}"#,
+            extra.0
+        ),
+    );
+    let ids: Vec<i64> = session
+        .pinned_list(ChatId(16))
+        .iter()
+        .map(|message| message.id.0)
+        .collect();
+    assert_eq!(ids, vec![60, 50, 40]);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageIsPinned","chat_id":16,"message_id":50,"is_pinned":false}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateDeleteMessages","chat_id":16,"message_ids":[60],"is_permanent":true,"from_cache":false}"#,
+    );
+    let ids: Vec<i64> = session
+        .pinned_list(ChatId(16))
+        .iter()
+        .map(|message| message.id.0)
+        .collect();
+    assert_eq!(ids, vec![40]);
+}
