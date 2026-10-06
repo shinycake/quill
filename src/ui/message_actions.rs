@@ -699,29 +699,58 @@ impl QuillApp {
         let can_clear = chat.can_be_deleted_only_for_self || chat.can_be_deleted_for_all_users;
         let can_revoke = chat.can_be_deleted_for_all_users;
 
-        let mut panel = div()
-            .id("chat-menu-panel")
-            .flex()
-            .flex_col()
-            .min_w(px(180.))
-            .px_1()
-            .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas());
+        // Telegram Desktop's chat menu: left-aligned rows with an icon, in
+        // its order (Archive, Pin, Mute, Mark as read/unread, Clear
+        // history, Delete chat); Quill's extras slot in before Delete.
+        let mut rows: Vec<(u8, AnyElement)> = Vec::new();
+        let row_hover = cx.theme().accent;
         macro_rules! item {
-            ($id:expr, $label:expr, $this:ident, $cx:ident, $body:block) => {
-                panel = panel.child(
-                    Button::new($id)
-                        .label($label)
-                        .ghost()
-                        .text_color(text_menu())
-                        .on_click($cx.listener(move |$this, _, _, $cx| $body)),
-                );
+            ($order:expr, $icon:expr, $id:expr, $label:expr, $this:ident, $cx:ident, $body:block) => {
+                let danger = $id == "chat-menu-delete";
+                rows.push((
+                    $order,
+                    div()
+                        .id($id)
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .px_3()
+                        .py_1p5()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .text_sm()
+                        .text_color(if danger { danger_bright() } else { text_menu() })
+                        .hover(|style| style.bg(row_hover))
+                        .role(gpui_kit::Role::MenuItem)
+                        .aria_label($label)
+                        .child(Icon::new($icon).size(px(16.)))
+                        .child($label)
+                        .on_click($cx.listener(move |$this, _, _, $cx| $body))
+                        .into_any_element(),
+                ));
             };
         }
+        use gpui_kit::assets::IconName as Lucide;
         item!(
+            10,
+            if archived {
+                Lucide::ArchiveRestore
+            } else {
+                Lucide::Archive
+            },
+            "chat-menu-archive",
+            if archived { "Unarchive" } else { "Archive" },
+            this,
+            cx,
+            {
+                this.toggle_archive(chat_id, cx);
+                this.chat_menu = None;
+                cx.notify();
+            }
+        );
+        item!(
+            20,
+            if pinned { Lucide::PinOff } else { Lucide::Pin },
             "chat-menu-pin",
             if pinned { "Unpin" } else { "Pin" },
             this,
@@ -733,6 +762,29 @@ impl QuillApp {
             }
         );
         item!(
+            30,
+            if muted { Lucide::Bell } else { Lucide::BellOff },
+            "chat-menu-mute",
+            if muted {
+                "Unmute notifications"
+            } else {
+                "Mute notifications"
+            },
+            this,
+            cx,
+            {
+                this.apply_chat_mute(chat_id, if muted { 0 } else { MUTE_FOREVER }, cx);
+                this.chat_menu = None;
+                cx.notify();
+            }
+        );
+        item!(
+            40,
+            if unread {
+                Lucide::CircleCheck
+            } else {
+                Lucide::MessageSquareDot
+            },
             "chat-menu-read",
             if unread {
                 "Mark as read"
@@ -747,41 +799,43 @@ impl QuillApp {
                 cx.notify();
             }
         );
+        // Slice CL3: enter multi-select mode with this chat checked.
         item!(
-            "chat-menu-mute",
-            if muted { "Unmute" } else { "Mute" },
+            50,
+            Lucide::ListChecks,
+            "chat-menu-select",
+            "Select",
             this,
             cx,
             {
-                this.apply_chat_mute(chat_id, if muted { 0 } else { MUTE_FOREVER }, cx);
-                this.chat_menu = None;
-                cx.notify();
-            }
-        );
-        item!(
-            "chat-menu-archive",
-            if archived { "Unarchive" } else { "Archive" },
-            this,
-            cx,
-            {
-                this.toggle_archive(chat_id, cx);
+                this.enter_select_mode(chat_id, cx);
                 this.chat_menu = None;
                 cx.notify();
             }
         );
         if can_clear {
-            item!("chat-menu-clear", "Clear history", this, cx, {
-                this.open_group_confirm(
-                    chat_id,
-                    GroupConfirmAction::ClearHistory { revoke: false },
-                    cx,
-                );
-                this.chat_menu = None;
-                cx.notify();
-            });
+            item!(
+                60,
+                Lucide::Eraser,
+                "chat-menu-clear",
+                "Clear history",
+                this,
+                cx,
+                {
+                    this.open_group_confirm(
+                        chat_id,
+                        GroupConfirmAction::ClearHistory { revoke: false },
+                        cx,
+                    );
+                    this.chat_menu = None;
+                    cx.notify();
+                }
+            );
         }
         if can_revoke {
             item!(
+                61,
+                Lucide::Eraser,
                 "chat-menu-clear-all",
                 "Clear history for everyone",
                 this,
@@ -797,18 +851,11 @@ impl QuillApp {
                 }
             );
         }
-        if can_clear {
-            item!("chat-menu-delete", "Delete chat", this, cx, {
-                this.open_group_confirm(chat_id, GroupConfirmAction::RemoveFromList, cx);
-                this.chat_menu = None;
-                cx.notify();
-            });
-        }
         // Slice CL3: Report — gated on `chat.can_be_reported` (schema
         // 1.8.67, line 3606); sends the simple spam report
         // (`reportChat` with empty option_id/message_ids, schema:3667).
         if chat.can_be_reported {
-            item!("chat-menu-report", "Report", this, cx, {
+            item!(70, Lucide::Flag, "chat-menu-report", "Report", this, cx, {
                 this.open_group_confirm(chat_id, GroupConfirmAction::ReportChat, cx);
                 this.chat_menu = None;
                 cx.notify();
@@ -831,6 +878,8 @@ impl QuillApp {
         if blockable.is_some() {
             let blocked = chat.blocked;
             item!(
+                75,
+                Lucide::Ban,
                 "chat-menu-block",
                 if blocked {
                     "Unblock user"
@@ -850,12 +899,35 @@ impl QuillApp {
                 }
             );
         }
-        // Slice CL3: enter multi-select mode with this chat checked.
-        item!("chat-menu-select", "Select", this, cx, {
-            this.enter_select_mode(chat_id, cx);
-            this.chat_menu = None;
-            cx.notify();
-        });
+        if can_clear {
+            item!(
+                90,
+                Lucide::Trash,
+                "chat-menu-delete",
+                "Delete chat",
+                this,
+                cx,
+                {
+                    this.open_group_confirm(chat_id, GroupConfirmAction::RemoveFromList, cx);
+                    this.chat_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        rows.sort_by_key(|(order, _)| *order);
+        let panel = div()
+            .id("chat-menu-panel")
+            .occlude()
+            .flex()
+            .flex_col()
+            .min_w(px(200.))
+            .px_1()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(accent())
+            .bg(bg_canvas())
+            .children(rows.into_iter().map(|(_, row)| row));
         div()
             .id("chat-menu-overlay")
             .track_focus(&self.context_menu_focus)

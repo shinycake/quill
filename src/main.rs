@@ -73,7 +73,15 @@ gpui_kit::assets::icon_assets!(
         CircleStop,
         EllipsisVertical,
         PanelRight,
-        List
+        List,
+        Archive,
+        ArchiveRestore,
+        Bell,
+        Eraser,
+        Ban,
+        Flag,
+        ListChecks,
+        MessageSquareDot
     ]
 );
 
