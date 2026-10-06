@@ -16,6 +16,8 @@ pub struct UserFullInfoData {
     /// Slice A6: `userFullInfo.block_list` is `blockListMain` — drives
     /// the Block/Unblock label in the user info panel.
     pub blocked: bool,
+    /// Birthday and groups in common (`userFullInfo`).
+    pub extras: crate::telegram::envelope::UserProfileExtras,
 }
 
 /// Phase 6: cached `supergroupFullInfo` subset (schema 1.8.67, line 2792).

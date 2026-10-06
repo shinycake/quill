@@ -16,6 +16,7 @@ use quill::ids::ChatId;
 use quill::local_path::sandboxed_display_path;
 use quill::state::{ContactRow, InfoPanelTarget, SupergroupMembersFetch};
 use quill::telegram::envelope::ChatKind;
+use quill::telegram::envelope::MUTE_FOREVER;
 use std::path::PathBuf;
 /// Parity slice: data for the channel/supergroup conversation header —
 /// primary @username, subscriber/member count, and the linked discussion
@@ -187,6 +188,15 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             live.driver.set_info_panel(Some(target));
+            // Shared-media counts for the open chat (Telegram Desktop's
+            // "N photos · N videos …" rows).
+            if !matches!(
+                target,
+                InfoPanelTarget::Statistics(_) | InfoPanelTarget::Community(_)
+            ) && let Some(chat_id) = live.driver.session.open_chat
+            {
+                let _ = live.driver.fetch_chat_media_counts(chat_id);
+            }
             let fetch = match target {
                 InfoPanelTarget::User(user_id) => {
                     live.driver.fetch_user_full_info(user_id).map(|_| ())
@@ -310,6 +320,103 @@ impl QuillApp {
 
     /// Right-side info panel for the open `InfoPanelTarget` (user profile
     /// or group info). Rendered next to the conversation in the shell.
+    /// Telegram Desktop's shared-media rows ("161 photos", "10 videos" …,
+    /// "6 groups in common") for the open chat; a row opens that tab of
+    /// the shared-media gallery. `None` until a count arrives.
+    pub(super) fn media_counts_section(
+        &self,
+        groups_in_common: i32,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        use quill::state::SharedMediaTab;
+        let session = self.session()?;
+        let chat_id = session.open_chat?;
+        let counts = session.chat_media_counts.get(&chat_id.0)?;
+        let icons = [
+            IconName::Image,
+            IconName::Video,
+            IconName::File,
+            IconName::AudioLines,
+            IconName::Link,
+            IconName::Mic,
+            IconName::Film,
+        ];
+        let tabs = [
+            SharedMediaTab::Media,
+            SharedMediaTab::Media,
+            SharedMediaTab::Files,
+            SharedMediaTab::Music,
+            SharedMediaTab::Links,
+            SharedMediaTab::Voice,
+            SharedMediaTab::Gifs,
+        ];
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (index, (_, one, many)) in quill::telegram::requests::MEDIA_COUNT_FILTERS
+            .iter()
+            .enumerate()
+        {
+            let Some(&count) = counts.get(&(index as u8)).filter(|count| **count > 0) else {
+                continue;
+            };
+            let tab = tabs[index];
+            rows.push(
+                action_row(
+                    ("info-media-count", index as u64),
+                    Some(icons[index]),
+                    format!(
+                        "{} {}",
+                        compact_count(count),
+                        if count == 1 { *one } else { *many }
+                    ),
+                    false,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.open_shared_media_tab(tab, cx)))
+                .into_any_element(),
+            );
+        }
+        if groups_in_common > 0 {
+            rows.push(
+                action_row(
+                    "info-groups-in-common",
+                    Some(IconName::Users),
+                    format!(
+                        "{groups_in_common} group{} in common",
+                        if groups_in_common == 1 { "" } else { "s" }
+                    ),
+                    false,
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        (!rows.is_empty()).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .w_full()
+                .gap_0p5()
+                .pt_2()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .children(rows)
+                .into_any_element()
+        })
+    }
+
+    /// Open the shared-media gallery on `tab`.
+    pub(super) fn open_shared_media_tab(
+        &mut self,
+        tab: quill::state::SharedMediaTab,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_shared_media_ui(cx);
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.select_shared_media_tab(tab);
+        }
+        cx.notify();
+    }
+
     pub(super) fn info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let target = self.session()?.open_info_panel?;
         let (title, content) = match target {
@@ -506,6 +613,26 @@ impl QuillApp {
                 cx,
             ));
         }
+        // Telegram Desktop's Mute button, for the chat with this user.
+        if !is_self && let Some(chat) = session.and_then(|s| s.open_chat) {
+            let muted = session
+                .and_then(|s| s.chats.get(&chat.0))
+                .is_some_and(|c| c.is_muted());
+            any_tile = true;
+            tiles = tiles.child(info_tile(
+                "info-panel-mute",
+                if muted {
+                    gpui_kit::assets::IconName::Bell
+                } else {
+                    gpui_kit::assets::IconName::BellOff
+                },
+                if muted { "Unmute" } else { "Mute" },
+                cx.listener(move |this, _, _, cx| {
+                    this.apply_chat_mute(chat, if muted { 0 } else { MUTE_FOREVER }, cx);
+                }),
+                cx,
+            ));
+        }
         if any_tile {
             body = body.child(tiles);
         }
@@ -518,7 +645,14 @@ impl QuillApp {
             details.push(("Username", format!("@{username}")));
         }
         if !phone.is_empty() {
-            details.push(("Phone", format_phone(&phone)));
+            details.push(("Mobile", format_phone(&phone)));
+        }
+        if let Some(birthday) = info
+            .as_ref()
+            .and_then(|i| i.extras.birthdate)
+            .map(format_birthday)
+        {
+            details.push(("Birthday", birthday));
         }
         if !details.is_empty() {
             let mut card = div()
@@ -548,6 +682,10 @@ impl QuillApp {
                 );
             }
             body = body.child(card);
+        }
+        let groups_in_common = info.as_ref().map_or(0, |i| i.extras.groups_in_common);
+        if let Some(section) = self.media_counts_section(groups_in_common, cx) {
+            body = body.child(section);
         }
         // Slice A6: contact management for any other user — Delete
         // contact (`removeContacts`) and Block/Unblock
@@ -812,6 +950,9 @@ impl QuillApp {
                     })),
             );
         }
+        if let Some(section) = self.media_counts_section(0, cx) {
+            body = body.child(section);
+        }
         // Phase D3a: invite-link + join-request management (admins with
         // `can_invite_users` only; the sections no-op otherwise).
         body = body.child(self.invite_links_section(chat_id, cx));
@@ -886,6 +1027,9 @@ impl QuillApp {
                             }),
                     ),
             );
+        if let Some(section) = self.media_counts_section(0, cx) {
+            body = body.child(section);
+        }
         body = body.child(self.group_management_section(chat_id, false, true, cx));
         body.into_any_element()
     }
@@ -922,16 +1066,62 @@ fn info_tile(
 /// `+15550101031` → `+1 555 010 1031`-style grouping for readability;
 /// numbers that don't look like E.164 pass through unchanged.
 fn format_phone(raw: &str) -> String {
+    // Grouping by country code, as Telegram's phone formatter does for the
+    // common ones; other codes keep their digits.
+    const PATTERNS: [(&str, &[usize]); 14] = [
+        ("1", &[3, 3, 4]),
+        ("7", &[3, 3, 2, 2]),
+        ("20", &[2, 4, 4]),
+        ("33", &[1, 2, 2, 2, 2]),
+        ("34", &[3, 3, 3]),
+        ("39", &[3, 3, 4]),
+        ("44", &[4, 6]),
+        ("49", &[3, 4, 4]),
+        ("55", &[2, 5, 4]),
+        ("61", &[1, 4, 4]),
+        ("86", &[3, 4, 4]),
+        ("91", &[5, 5]),
+        ("380", &[2, 3, 2, 2]),
+        ("972", &[2, 3, 4]),
+    ];
     let digits: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
     if digits.len() < 7 || digits.len() > 15 {
         return raw.to_string();
     }
-    let (country, rest) = if digits.len() == 11 && digits.starts_with('1') {
-        ("1", &digits[1..])
-    } else {
-        return format!("+{digits}");
-    };
-    format!("+{country} {} {} {}", &rest[..3], &rest[3..6], &rest[6..])
+    for (code, groups) in PATTERNS {
+        let rest = match digits.strip_prefix(code) {
+            Some(rest) if rest.len() == groups.iter().sum::<usize>() => rest,
+            _ => continue,
+        };
+        let mut out = format!("+{code}");
+        let mut at = 0;
+        for len in groups {
+            out.push(' ');
+            out.push_str(&rest[at..at + len]);
+            at += len;
+        }
+        return out;
+    }
+    format!("+{digits}")
+}
+
+/// "Jul 30, 1965 (61 years old)" — Telegram Desktop's birthday row.
+fn format_birthday(date: quill::telegram::envelope::Birthdate) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let month = MONTHS[usize::from(date.month.clamp(1, 12)) - 1];
+    match date.year {
+        Some(year) => {
+            let today = quill::local_time::civil_local(quill::local_time::now_unix());
+            let mut age = today.year as i32 - year;
+            if (today.month, today.day) < (date.month, date.day) {
+                age -= 1;
+            }
+            format!("{month} {}, {year} ({age} years old)", date.day)
+        }
+        None => format!("{month} {}", date.day),
+    }
 }
 
 #[cfg(test)]
@@ -942,8 +1132,10 @@ mod tests {
     fn phone_numbers_group_for_reading() {
         assert_eq!(format_phone("15550101031"), "+1 555 010 1031");
         assert_eq!(format_phone("+15550101031"), "+1 555 010 1031");
-        // Other country codes keep their digits rather than guessing groups.
-        assert_eq!(format_phone("442071838750"), "+442071838750");
+        assert_eq!(format_phone("+972502002287"), "+972 50 200 2287");
+        assert_eq!(format_phone("442071838750"), "+44 2071 838750");
+        // Unknown country codes keep their digits rather than guessing groups.
+        assert_eq!(format_phone("3530861234567"), "+3530861234567");
         assert_eq!(format_phone("12"), "12");
     }
 }

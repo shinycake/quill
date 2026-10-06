@@ -916,3 +916,33 @@ pub fn set_community_name(extra: RequestId, community_id: i64, name: &str) -> St
     })
     .to_string()
 }
+
+/// The info panel's media rows, in Telegram Desktop's order: the
+/// `searchMessagesFilter*` constructor and its row label (singular, plural).
+pub const MEDIA_COUNT_FILTERS: [(&str, &str, &str); 7] = [
+    ("searchMessagesFilterPhoto", "photo", "photos"),
+    ("searchMessagesFilterVideo", "video", "videos"),
+    ("searchMessagesFilterDocument", "file", "files"),
+    ("searchMessagesFilterAudio", "audio file", "audio files"),
+    ("searchMessagesFilterUrl", "shared link", "shared links"),
+    (
+        "searchMessagesFilterVoiceNote",
+        "voice message",
+        "voice messages",
+    ),
+    ("searchMessagesFilterAnimation", "GIF", "GIFs"),
+];
+
+/// `getChatMessageCount` (schema 1.8.67, line 11989) for one filter, from
+/// the server (`return_local: false`).
+pub fn get_chat_message_count(extra: RequestId, chat_id: ChatId, filter: &str) -> String {
+    json!({
+        "@type": "getChatMessageCount",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "filter": { "@type": filter },
+        "return_local": false,
+    })
+    .to_string()
+}

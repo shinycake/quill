@@ -63,6 +63,41 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// The info panel's media counts for `chat_id`: one
+    /// `getChatMessageCount` per `MEDIA_COUNT_FILTERS` entry, once per
+    /// chat per session (counts change little while the panel is open).
+    pub fn fetch_chat_media_counts(
+        &mut self,
+        chat_id: crate::ids::ChatId,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() || self.session.chat_media_counts.contains_key(&chat_id.0) {
+            return Ok(());
+        }
+        self.session
+            .chat_media_counts
+            .insert(chat_id.0, Default::default());
+        for (index, (filter, _, _)) in crate::telegram::requests::MEDIA_COUNT_FILTERS
+            .iter()
+            .enumerate()
+        {
+            let purpose = RequestPurpose::GetChatMessageCount {
+                filter: index as u8,
+            };
+            let extra = self.session.request(purpose, Some(chat_id));
+            if let Err(err) =
+                self.sender
+                    .send_json(&crate::telegram::requests::get_chat_message_count(
+                        extra, chat_id, filter,
+                    ))
+            {
+                self.session.requests.take(extra);
+                self.session.chat_media_counts.remove(&chat_id.0);
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
     /// Phase 6: `addContact` from the add-contact dialog. The reducer
     /// invalidates the contacts list on `ok`; the new contact row arrives
     /// via `updateUser`. `share_phone_number` stays `false` — sharing the

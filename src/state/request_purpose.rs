@@ -79,6 +79,11 @@ pub enum RequestPurpose {
     /// `searchMessagesFilterPinned` (schema 1.8.67, line 6316), newest
     /// first. Feeds the pinned bar (Telegram Desktop's pinned tracker).
     GetPinnedMessages,
+    /// The info panel's media counts: `getChatMessageCount` with the
+    /// filter at index `filter` of `MEDIA_COUNT_FILTERS`.
+    GetChatMessageCount {
+        filter: u8,
+    },
     /// Slice media-shared-gallery: one `searchChatMessages` page for a
     /// gallery tab. `generation` is the `SharedMediaState` generation at
     /// send time — late answers drop on mismatch.

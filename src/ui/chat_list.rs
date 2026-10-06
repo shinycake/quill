@@ -406,6 +406,16 @@ impl QuillApp {
         self.restore_open_draft(window, cx);
         let text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&text);
+        // Telegram Desktop's info column follows the open chat.
+        if self.session().is_some_and(|s| s.open_info_panel.is_some()) {
+            match self
+                .session()
+                .and_then(|s| s.info_panel_target_for_chat(chat_id))
+            {
+                Some(target) => self.open_info_panel_target(target, window, cx),
+                None => self.close_info_panel(cx),
+            }
+        }
         cx.notify();
     }
 

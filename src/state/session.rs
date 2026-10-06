@@ -697,6 +697,9 @@ pub struct Session {
     /// Phase 6: cached `getUserFullInfo` bios, keyed by user id. Presence
     /// records "fetched" so the driver never refetches.
     pub user_full_infos: HashMap<i64, UserFullInfoData>,
+    /// Message counts per `searchMessagesFilter*` (index into
+    /// `MEDIA_COUNT_FILTERS`) for chats whose info panel was opened.
+    pub chat_media_counts: HashMap<i64, HashMap<u8, i32>>,
     /// Phase 6: cached `getSupergroupFullInfo`, keyed by supergroup id.
     /// Presence records "fetched".
     pub supergroup_full_infos: HashMap<i64, SupergroupFullInfoData>,
@@ -1156,6 +1159,7 @@ impl Session {
             search: SearchState::default(),
             chat_search: ChatSearchState::default(),
             pinned_messages: HashMap::new(),
+            chat_media_counts: HashMap::new(),
             shared_media: SharedMediaState::default(),
             stickers: StickerPanel::default(),
             emoji: EmojiPanel::default(),

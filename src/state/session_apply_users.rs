@@ -10,6 +10,7 @@ impl Session {
         photo: Option<ParsedFile>,
         photo_id: Option<i64>,
         blocked: bool,
+        extras: crate::telegram::envelope::UserProfileExtras,
         pending: Option<&PendingRequest>,
         _extra: Option<RequestId>,
         _seq: u64,
@@ -39,6 +40,7 @@ impl Session {
                         photo_file_id,
                         photo_id,
                         blocked,
+                        extras,
                     },
                 );
                 if let Some(bot_id) = pending
