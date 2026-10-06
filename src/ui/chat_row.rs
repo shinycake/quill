@@ -1028,27 +1028,25 @@ pub(super) fn unread_badge(anchor: AnyElement, count: i32, dot: bool) -> AnyElem
 /// — shown when `unread_mention_count > 0`) as a kit `Badge` (Icon variant)
 /// on a 16px anchor — the badge exactly fills its anchor by construction.
 fn mention_badge() -> impl IntoElement {
-    Badge::new()
-        .icon(Icon::new(IconName::AtSign))
-        .color(accent_strong())
-        .child(div().size(px(16.)).into_any_element())
+    // Telegram Desktop: a bare "@" in the accent color, no badge.
+    Icon::new(IconName::AtSign)
+        .size(px(16.))
+        .text_color(accent_strong())
         .into_any_element()
 }
 
-/// Slice CL3 / kit Phase 4: the ♥ reaction badge (TGX `TGChat.reactionsCounter`
-/// — heart badge, dimmed when the chat is muted, shown when
-/// `unread_reaction_count > 0`) as a kit `Badge` (Icon variant) on a
-/// 16px anchor.
+/// The unread-reaction mark: Telegram Desktop draws a bare filled heart,
+/// red, or grey when the chat is muted (`dialogsUnreadReaction`).
 fn reaction_badge(muted: bool) -> impl IntoElement {
-    let color = if muted {
-        bg_badge_muted()
-    } else {
-        accent_strong()
-    };
-    Badge::new()
-        .icon(Icon::new(IconName::Heart))
-        .color(color)
-        .child(div().size(px(16.)).into_any_element())
+    div()
+        .text_base()
+        .line_height(px(16.))
+        .text_color(if muted {
+            bg_badge_muted()
+        } else {
+            danger_bright()
+        })
+        .child("\u{2665}")
         .into_any_element()
 }
 

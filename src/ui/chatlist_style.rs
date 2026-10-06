@@ -20,37 +20,47 @@ pub(crate) fn chat_list_preview_line(
     emoji: &std::collections::HashMap<i64, ImageSource>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let mut line = div()
-        .text_xs()
-        .truncate()
-        .text_color(cx.theme().muted_foreground)
-        .flex()
-        .flex_row()
-        .items_center();
-    if let Some(glyph) = icon {
-        line = line.child(div().child(format!("{glyph} ")));
-    }
+    // One line, as in Telegram Desktop: line breaks read as spaces (same
+    // byte length, so entity offsets still hold).
+    let preview = preview.replace(['\n', '\r'], " ");
+    let muted = cx.theme().muted_foreground;
     if entities.is_empty() {
-        return line.child(preview.to_string()).into_any_element();
+        // A single text node, so an overlong preview ends in an ellipsis.
+        let text = match icon {
+            Some(glyph) => format!("{glyph} {preview}"),
+            None => preview,
+        };
+        return div()
+            .text_xs()
+            .truncate()
+            .text_color(muted)
+            .child(text)
+            .into_any_element();
     }
-    let key = line_key(preview);
-    for (index, run) in styled_runs(preview, entities).into_iter().enumerate() {
+    let mut parts: Vec<(bool, Div)> = Vec::new();
+    if let Some(glyph) = icon {
+        parts.push((false, div().child(format!("{glyph} "))));
+    }
+    let key = line_key(&preview);
+    for (index, run) in styled_runs(&preview, entities).into_iter().enumerate() {
         if run.text.is_empty() {
             continue;
         }
         if let Some(source) = run.custom_emoji_id.and_then(|id| emoji.get(&id)) {
-            line = line.child(
-                img(source.clone())
-                    .id(SharedString::from(format!("preview-emoji-{key}-{index}")))
-                    .size(px(14.))
-                    .aspect_square()
-                    .object_fit(ObjectFit::Contain)
-                    .flex_none(),
-            );
+            parts.push((
+                false,
+                div().child(
+                    img(source.clone())
+                        .id(SharedString::from(format!("preview-emoji-{key}-{index}")))
+                        .size(px(14.))
+                        .aspect_square()
+                        .object_fit(ObjectFit::Contain),
+                ),
+            ));
             continue;
         }
         let style = &run.style;
-        let mut el = div().child(run.text);
+        let mut el = div().whitespace_nowrap().child(run.text);
         if style.bold {
             el = el.font_weight(FontWeight::BOLD);
         }
@@ -69,7 +79,25 @@ pub(crate) fn chat_list_preview_line(
         if style.spoiler {
             el = el.bg(fill_muted()).text_color(fill_muted()).rounded_sm();
         }
-        line = line.child(el);
+        parts.push((true, el));
+    }
+    // The last text run shrinks and ends in the ellipsis; everything
+    // before it keeps its width.
+    let last_text = parts.iter().rposition(|(is_text, _)| *is_text);
+    let mut line = div()
+        .text_xs()
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_color(muted)
+        .flex()
+        .flex_row()
+        .items_center();
+    for (position, (_, part)) in parts.into_iter().enumerate() {
+        line = line.child(if Some(position) == last_text {
+            part.min_w_0().flex_shrink(1.).truncate()
+        } else {
+            part.flex_none()
+        });
     }
     line.into_any_element()
 }

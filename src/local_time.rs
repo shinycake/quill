@@ -161,10 +161,17 @@ pub fn day_label(date: &CivilTime, now: &CivilTime) -> String {
     }
 }
 
-/// Compact chat-list timestamp: `HH:MM` today, a short weekday within the
+/// Compact chat-list timestamp: `HH:MM` today or within the last 20 hours
+/// (Telegram Desktop's `FormatDialogsDate`), a short weekday within the
 /// past week, `12 Mar` this year, `12.03.25` otherwise.
 pub fn chat_list_stamp(date: &CivilTime, now: &CivilTime) -> String {
+    const RECENT_MINUTES: i64 = 20 * 60;
+    let minutes =
+        |t: &CivilTime| t.day_number() * 1440 + i64::from(t.hour) * 60 + i64::from(t.minute);
     let age = now.day_number() - date.day_number();
+    if (minutes(now) - minutes(date)).abs() < RECENT_MINUTES {
+        return hhmm(date);
+    }
     match age {
         i64::MIN..=0 => hhmm(date),
         1..=6 => weekday_name(date.weekday)[..3].to_string(),
@@ -249,6 +256,13 @@ mod tests {
         assert_eq!(stamp(2 * 86_400), "Sat");
         assert_eq!(stamp(30 * 86_400), "29 Aug");
         assert_eq!(stamp(400 * 86_400), "24.08.25");
+        // Last night, within 20 hours: still the time.
+        let early = civil_at(T + 4 * 3600, 0);
+        assert_eq!(chat_list_stamp(&civil_at(T, 0), &early), "21:42");
+        assert_eq!(
+            chat_list_stamp(&civil_at(T + 4 * 3600 - 21 * 3600, 0), &early),
+            "Mon"
+        );
     }
 
     #[test]
