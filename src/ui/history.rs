@@ -855,6 +855,7 @@ pub(super) fn session_history_row(
             media_roots,
             video_playing,
             video_frame.as_deref(),
+            inline,
             cx,
         )),
         MessageContent::Poll(poll) => Some(poll_body(message.chat_id, message.id, poll, cx)),
