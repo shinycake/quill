@@ -213,6 +213,10 @@ pub enum EnvelopePayload {
         /// — true when the chat has welcome messages; only sent for chat
         /// administrators with the `can_change_info` right.
         has_welcome_messages: bool,
+        /// `chat.has_protected_content` (schema 1.8.67, lines 3598 / 3627)
+        /// — the chat's content can't be saved, forwarded or copied.
+        /// Refreshed by `updateChatHasProtectedContent` (line 10582).
+        has_protected_content: bool,
         /// Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67, lines
         /// 3600 / 3627). Refreshed by `updateChatIsMarkedAsUnread`
         /// (schema line 10588).
@@ -1031,6 +1035,12 @@ pub enum EnvelopePayload {
     UpdateChatHasWelcomeMessages {
         chat_id: i64,
         has_welcome_messages: bool,
+    },
+    /// `updateChatHasProtectedContent` (schema 1.8.67, line 10582) — the
+    /// chat's `has_protected_content` changed.
+    UpdateChatHasProtectedContent {
+        chat_id: i64,
+        has_protected_content: bool,
     },
     /// Slice G2: `chatBoostStatus` (schema 1.8.67, line 6943) — the
     /// `getChatBoostStatus` response. Only `level` and `boost_count`

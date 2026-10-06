@@ -1848,6 +1848,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        "updateChatHasProtectedContent" => Ok(EnvelopePayload::UpdateChatHasProtectedContent {
+            chat_id: int53(value.get("chat_id"))?,
+            has_protected_content: value
+                .get("has_protected_content")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         "chatBoostStatus" => Ok(EnvelopePayload::ChatBoostStatus {
             level: value.get("level").and_then(Value::as_i64).unwrap_or(0) as i32,
             boost_count: value

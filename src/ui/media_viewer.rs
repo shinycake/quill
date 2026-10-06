@@ -784,6 +784,9 @@ impl QuillApp {
             return;
         };
         let (chat_id, message_id) = (item.chat_id, item.message_id);
+        if self.refuse_protected_copy(chat_id, cx) {
+            return;
+        }
         // Close the overlay first so the forward picker is visible.
         self.close_media_viewer(cx);
         self.begin_forward_one(chat_id, message_id, false, window, cx);
@@ -796,6 +799,9 @@ impl QuillApp {
         let Some(item) = self.media_viewer.current().cloned() else {
             return;
         };
+        if self.refuse_protected_copy(item.chat_id, cx) {
+            return;
+        }
         let files: HashMap<i32, ParsedFile> =
             self.session().map(|s| s.files.clone()).unwrap_or_default();
         let path = match item.kind {
@@ -1358,6 +1364,11 @@ impl QuillApp {
             } else {
                 None
             };
+        let protected = self
+            .media_viewer
+            .current()
+            .zip(self.session())
+            .is_some_and(|(item, session)| session.chat_has_protected_content(item.chat_id));
         let row_id = item.message_id.0 as u64;
         let downloading_now = item
             .display_file_ids
@@ -1882,26 +1893,32 @@ impl QuillApp {
                             })),
                         )
                     })
-                    .child(
-                        icon_action(
-                            ("media-viewer-share", row_id),
-                            gpui_kit::assets::IconName::Forward,
-                            "Share",
+                    // Protected content can't be shared or saved
+                    // (Telegram Desktop hides both).
+                    .when(!protected, |this| {
+                        this.child(
+                            icon_action(
+                                ("media-viewer-share", row_id),
+                                gpui_kit::assets::IconName::Forward,
+                                "Share",
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.share_viewer_media(window, cx);
+                                },
+                            )),
                         )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.share_viewer_media(window, cx);
-                        })),
-                    )
-                    .child(
-                        icon_action(
-                            ("media-viewer-save", row_id),
-                            gpui_kit::assets::IconName::Download,
-                            "Save",
+                        .child(
+                            icon_action(
+                                ("media-viewer-save", row_id),
+                                gpui_kit::assets::IconName::Download,
+                                "Save",
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.save_viewer_media(cx);
+                            })),
                         )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.save_viewer_media(cx);
-                        })),
-                    )
+                    })
                     .child(
                         icon_action(
                             ("media-viewer-show-in-chat", row_id),

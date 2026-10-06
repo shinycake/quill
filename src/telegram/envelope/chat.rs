@@ -126,6 +126,11 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("can_be_deleted_only_for_self")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // `chat.has_protected_content` (schema 1.8.67, line 3598).
+        has_protected_content: chat
+            .get("has_protected_content")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         // Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67,
         // lines 3600/3627).
         is_marked_as_unread: chat
