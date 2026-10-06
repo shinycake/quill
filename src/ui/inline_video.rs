@@ -12,6 +12,9 @@ use quill::telegram::envelope::MessageContent;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Largest clip fetched in the background so it can autoplay.
+const AUTOPLAY_PREFETCH_MAX: i64 = 20 * 1024 * 1024;
+
 /// `(chat id, message id)`.
 type Key = (i64, i64);
 
@@ -52,6 +55,12 @@ impl InlineVideos {
             let render = self.render;
             self.players.retain(|_, slot| slot.seen + 1 >= render);
         }
+    }
+
+    /// Whether any clip is playing: the frame clock keeps ticking, also
+    /// for a player that hasn't produced its first frame yet.
+    pub(super) fn active(&self) -> bool {
+        !self.players.is_empty()
     }
 
     /// Stop everything (viewer opened, autoplay turned off).
@@ -191,7 +200,21 @@ impl QuillApp {
             }
             _ => return None,
         };
-        if session.files.get(&file_id.0)?.usable_path().is_none() {
+        let file = session.files.get(&file_id.0)?;
+        if file.usable_path().is_none() {
+            // Like Telegram Desktop, fetch a clip that should autoplay
+            // (within a size cap) in the background; it starts once local.
+            let size = file.size.max(file.expected_size);
+            if size > 0 && size <= AUTOPLAY_PREFETCH_MAX && session.should_download(file_id) {
+                let app = cx.weak_entity();
+                cx.defer(move |cx| {
+                    let _ = app.update(cx, |this, _| {
+                        if let Some(live) = this.live.as_mut() {
+                            let _ = live.driver.download_file(file_id, 1);
+                        }
+                    });
+                });
+            }
             return None;
         }
         let (chat_id, message_id) = (message.chat_id, message.id);
@@ -201,7 +224,7 @@ impl QuillApp {
             .frame(chat_id.0, message_id.0, || {
                 self.playable_clip_path(chat_id, message_id, file_id)
             });
-        if frame.is_some() {
+        if self.inline_videos.borrow().active() {
             self.request_animation_tick(30, cx);
         }
         frame

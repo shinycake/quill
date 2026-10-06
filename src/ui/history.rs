@@ -663,6 +663,13 @@ pub(super) fn session_history_row(
                 }
             )
         });
+    // Saved Messages reactions are tags: Telegram Desktop shows just the
+    // tag's emoji, without a count or who reacted.
+    let are_tags = message
+        .interaction_info
+        .as_ref()
+        .and_then(|info| info.reactions.as_ref())
+        .is_some_and(|reactions| reactions.are_tags);
     let has_chips = !chips.is_empty();
     let chip_row = (!chips.is_empty()).then(|| {
         let mut row = div()
@@ -731,7 +738,9 @@ pub(super) fn session_history_row(
                     }))
                     .child(glyph)
                     .map(|this| {
-                        if reactors.is_empty() {
+                        if are_tags {
+                            this
+                        } else if reactors.is_empty() {
                             this.child(count.to_string())
                         } else {
                             // Overlapping 18 px avatars of who reacted.
