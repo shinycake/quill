@@ -89,48 +89,93 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas());
         // Reactions lead the menu (Telegram Desktop): the chat's quick
-        // strip, expandable to every reaction it allows.
-        if message.can_react() {
-            panel = panel.child(self.reaction_strip(chat_id, message_id, &message, cx));
-        }
+        // strip in its own pill above the menu, expandable to every
+        // reaction it allows.
+        let strip = message
+            .can_react()
+            .then(|| self.reaction_strip(chat_id, message_id, &message, cx));
+        // Telegram Desktop's message menu: left-aligned rows with an icon,
+        // in its order (Reply, Edit, Pin, Copy Text, Copy Link, Forward,
+        // Delete, Select). Items are collected with their position, then
+        // sorted into the panel.
+        let mut rows: Vec<(u8, AnyElement)> = Vec::new();
+        let row_hover = cx.theme().accent;
         macro_rules! item {
-            ($id:expr, $label:expr, $this:ident, $window:ident, $cx:ident, $body:block) => {
-                panel = panel.child(
-                    Button::new($id)
-                        .label($label)
-                        .ghost()
-                        // Slice CL3 drive-by: same dark-panel text fix CL1
-                        // applied to the chat-row menu (commit 5cd5c25) —
-                        // ghost buttons inherit unreadable dark text on
-                        // the bg_canvas() panel without it.
-                        .text_color(text_menu())
-                        .on_click($cx.listener(move |$this, _, $window, $cx| $body)),
-                );
+            ($order:expr, $icon:expr, $id:expr, $label:expr, $this:ident, $window:ident, $cx:ident, $body:block) => {
+                let danger = $id == "menu-delete";
+                rows.push((
+                    $order,
+                    div()
+                        .id($id)
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .px_3()
+                        .py_1p5()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .text_sm()
+                        .text_color(if danger { danger_bright() } else { text_menu() })
+                        .hover(|style| style.bg(row_hover))
+                        .role(gpui_kit::Role::MenuItem)
+                        .aria_label($label)
+                        .child(Icon::new($icon).size(px(16.)))
+                        .child($label)
+                        .on_click($cx.listener(move |$this, _, $window, $cx| $body))
+                        .into_any_element(),
+                ));
             };
         }
         if can_reply {
-            item!("menu-reply", "Reply", this, window, cx, {
-                this.begin_reply_from_message(chat_id, message_id, window, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                10,
+                gpui_kit::assets::IconName::Reply,
+                "menu-reply",
+                "Reply",
+                this,
+                window,
+                cx,
+                {
+                    this.begin_reply_from_message(chat_id, message_id, window, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         // Slice G1: partial-message quote (`inputTextQuote`, schema
         // 1.8.67 line 3056) — only for messages with copyable text.
         if can_reply && copyable.is_some() {
-            item!("menu-quote-reply", "Quote reply", this, window, cx, {
-                this.open_quote_reply_dialog(chat_id, message_id, window, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                11,
+                gpui_kit::assets::IconName::Quote,
+                "menu-quote-reply",
+                "Reply with Quote",
+                this,
+                window,
+                cx,
+                {
+                    this.open_quote_reply_dialog(chat_id, message_id, window, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         if let Some(text) = copyable.filter(|_| allows(true, |a| a.can_be_copied)) {
-            item!("menu-copy", "Copy", this, _window, cx, {
-                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                this.status_note = "copied to clipboard".into();
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                40,
+                gpui_kit::assets::IconName::Copy,
+                "menu-copy",
+                "Copy Text",
+                this,
+                _window,
+                cx,
+                {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                    this.status_note = "copied to clipboard".into();
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         let is_secret = matches!(chat_kind, Some(ChatKind::Secret { .. }));
         if !is_secret
@@ -138,16 +183,34 @@ impl QuillApp {
             && quill::composer::ForwardDraft::from_message(chat_id, message_id, message.pending)
                 .is_some()
         {
-            item!("menu-forward", "Forward", this, window, cx, {
-                this.begin_forward_one(chat_id, message_id, message.pending, window, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
-            item!("menu-select", "Select", this, _window, cx, {
-                this.toggle_forward_select(chat_id, message_id, message.pending, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                50,
+                gpui_kit::assets::IconName::Forward,
+                "menu-forward",
+                "Forward",
+                this,
+                window,
+                cx,
+                {
+                    this.begin_forward_one(chat_id, message_id, message.pending, window, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
+            item!(
+                70,
+                gpui_kit::assets::IconName::CircleCheck,
+                "menu-select",
+                "Select",
+                this,
+                _window,
+                cx,
+                {
+                    this.toggle_forward_select(chat_id, message_id, message.pending, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         if let Some(edit) = quill::composer::ComposerEdit::from_own_content(
             chat_id,
@@ -158,26 +221,57 @@ impl QuillApp {
         )
         .filter(|_| allows(true, |a| a.can_be_edited))
         {
-            item!("menu-edit", "Edit", this, window, cx, {
-                this.begin_edit(edit.clone(), window, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                20,
+                gpui_kit::assets::IconName::Pencil,
+                "menu-edit",
+                "Edit",
+                this,
+                window,
+                cx,
+                {
+                    this.begin_edit(edit.clone(), window, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         if allows(message.can_pin() && !is_channel_post, |a| a.can_be_pinned) {
             let label = if pinned { "Unpin" } else { "Pin" };
-            item!("menu-toggle-pin", label, this, _window, cx, {
-                this.toggle_pin_message(chat_id, message_id, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                30,
+                if pinned {
+                    gpui_kit::assets::IconName::PinOff
+                } else {
+                    gpui_kit::assets::IconName::Pin
+                },
+                "menu-toggle-pin",
+                label,
+                this,
+                _window,
+                cx,
+                {
+                    this.toggle_pin_message(chat_id, message_id, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         if allows(is_shared_chat, |a| a.can_get_link) {
-            item!("menu-share", "Copy message link", this, _window, cx, {
-                this.share_message_link(chat_id, message_id, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                45,
+                gpui_kit::assets::IconName::Link,
+                "menu-share",
+                "Copy Message Link",
+                this,
+                _window,
+                cx,
+                {
+                    this.share_message_link(chat_id, message_id, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         // B4: stopPoll (schema 1.8.67 line 12953) — TGX `StopPollWarn`
         // shows Stop Poll / Stop Quiz only for open polls with
@@ -187,38 +281,78 @@ impl QuillApp {
             && can_stop_poll(message.is_outgoing, &poll_content.poll)
         {
             let is_quiz = matches!(poll_content.poll.poll_type, PollType::Quiz { .. });
-            let label = if is_quiz { "Stop quiz" } else { "Stop poll" };
-            item!("menu-stop-poll", label, this, _window, cx, {
-                this.begin_stop_poll(chat_id, message_id, is_quiz, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            let label = if is_quiz { "Stop Quiz" } else { "Stop Poll" };
+            item!(
+                55,
+                gpui_kit::assets::IconName::CircleStop,
+                "menu-stop-poll",
+                label,
+                this,
+                _window,
+                cx,
+                {
+                    this.begin_stop_poll(chat_id, message_id, is_quiz, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         // Slice G2: channel-post comment threads (`getMessageThreadHistory`,
         // schema 1.8.67, line 11839). The dialog shows an honest error
         // when the post has no discussion thread.
         if is_channel_post && allows(false, |a| a.can_get_message_thread) {
-            item!("menu-comments", "View comments", this, window, cx, {
-                this.open_comment_thread_dialog(chat_id, message_id, window, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                15,
+                gpui_kit::assets::IconName::MessageSquare,
+                "menu-comments",
+                "View Comments",
+                this,
+                window,
+                cx,
+                {
+                    this.open_comment_thread_dialog(chat_id, message_id, window, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         if failed && message.can_retry {
-            item!("menu-retry", "Retry send", this, _window, cx, {
-                this.retry_failed_message(chat_id, message_id, cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                58,
+                gpui_kit::assets::IconName::RotateCw,
+                "menu-retry",
+                "Resend",
+                this,
+                _window,
+                cx,
+                {
+                    this.retry_failed_message(chat_id, message_id, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
         }
         if let Some(confirm) =
             delete_confirm.filter(|_| allows(!is_channel_post, |a| a.can_be_deleted()))
         {
-            item!("menu-delete", "Delete", this, _window, cx, {
-                this.begin_delete(confirm.clone(), cx);
-                this.message_menu = None;
-                cx.notify();
-            });
+            item!(
+                60,
+                gpui_kit::assets::IconName::Trash,
+                "menu-delete",
+                "Delete",
+                this,
+                _window,
+                cx,
+                {
+                    this.begin_delete(confirm.clone(), cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
+        }
+        rows.sort_by_key(|(order, _)| *order);
+        for (_, row) in rows {
+            panel = panel.child(row);
         }
         div()
             .id("message-menu-overlay")
@@ -247,7 +381,27 @@ impl QuillApp {
                 anchored()
                     .position(menu.position)
                     .snap_to_window_with_margin(px(8.))
-                    .child(panel),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap_1()
+                            .when_some(strip, |this, strip| {
+                                this.child(
+                                    div()
+                                        .id("message-menu-reactions")
+                                        .occlude()
+                                        .rounded_xl()
+                                        .border_1()
+                                        .border_color(accent())
+                                        .bg(bg_canvas())
+                                        .shadow_md()
+                                        .child(strip),
+                                )
+                            })
+                            .child(panel),
+                    ),
             )
             .focus_trap("message-menu-focus", &self.context_menu_focus)
             .into_any_element()

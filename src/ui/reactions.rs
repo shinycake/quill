@@ -282,16 +282,7 @@ impl QuillApp {
                 }))
                 .into_any_element();
         };
-        let mut container = div()
-            .id("reaction-strip")
-            .flex()
-            .flex_col()
-            .px_1()
-            .pt_1()
-            .pb_1()
-            .mb_1()
-            .border_b_1()
-            .border_color(bg_subtle());
+        let mut container = div().id("reaction-strip").flex().flex_col().px_1().py_1();
         if !self.reactions_expanded {
             let mut row = div().flex().items_center().gap(px(2.));
             for (ix, choice) in options.top.iter().take(7).enumerate() {
