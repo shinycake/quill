@@ -150,17 +150,14 @@ pub fn hhmm(time: &CivilTime) -> String {
     format!("{:02}:{:02}", time.hour, time.minute)
 }
 
-/// Day separator label for a message dated `date`, seen at `now`:
-/// "Today", "Yesterday", a weekday within the past week, "12 March" this
-/// year, "12 March 2025" otherwise.
+/// Day separator label for a message dated `date`, seen at `now`, as
+/// Telegram Desktop prints it (`langDayOfMonthFull`): "October 6" this
+/// year, "October 6, 2025" otherwise — always the date, never "Today".
 pub fn day_label(date: &CivilTime, now: &CivilTime) -> String {
-    let age = now.day_number() - date.day_number();
-    match age {
-        0 => "Today".into(),
-        1 => "Yesterday".into(),
-        2..=6 => weekday_name(date.weekday).into(),
-        _ if date.year == now.year => format!("{} {}", date.day, month_name(date.month)),
-        _ => format!("{} {} {}", date.day, month_name(date.month), date.year),
+    if date.year == now.year {
+        format!("{} {}", month_name(date.month), date.day)
+    } else {
+        format!("{} {}, {}", month_name(date.month), date.day, date.year)
     }
 }
 
@@ -238,11 +235,10 @@ mod tests {
     fn day_labels_relative_to_now() {
         let now = civil_at(T, 0);
         let label = |secs_ago: i64| day_label(&civil_at(T - secs_ago, 0), &now);
-        assert_eq!(label(60), "Today");
-        assert_eq!(label(86_400), "Yesterday");
-        assert_eq!(label(3 * 86_400), "Friday");
-        assert_eq!(label(30 * 86_400), "29 August");
-        assert_eq!(label(400 * 86_400), "24 August 2025");
+        assert_eq!(label(60), "September 28");
+        assert_eq!(label(86_400), "September 27");
+        assert_eq!(label(30 * 86_400), "August 29");
+        assert_eq!(label(400 * 86_400), "August 24, 2025");
     }
 
     #[test]

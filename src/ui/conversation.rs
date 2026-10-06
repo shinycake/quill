@@ -530,6 +530,11 @@ impl QuillApp {
             .when_some(self.call_busy_banner(cx), |this, banner| this.child(banner))
             .when(composer.is_some(), |this| {
                 let show_attach = matches!(mode, PaneMode::Ready) && self.pending_edit.is_none();
+                // Something to send (text, an attachment, an edit): the
+                // composer shows Send instead of the mic.
+                let sendable = !show_attach
+                    || !self.pending_attachments.is_empty()
+                    || !self.composer.read(cx).value().trim().is_empty();
                 this.child(
                     div()
                         .id("composer-file-drop")
@@ -732,7 +737,9 @@ impl QuillApp {
                                 // badge — only while the draft has
                                 // misspellings; opens the corrections panel.
                                 .when_some(self.spellcheck_badge(cx), |row, badge| row.child(badge))
-                                .when(show_attach, |row| {
+                                // Telegram Desktop shows the mic while there's
+                                // nothing to send, and Send once there is.
+                                .when(show_attach && !sendable, |row| {
                                     row.child(
                                         // MED2: click records in the current
                                         // mode; right-click flips audio/video
@@ -761,39 +768,54 @@ impl QuillApp {
                                             ),
                                     )
                                 })
-                                .child(
-                                    // Right-click: send options (silent,
-                                    // schedule, link preview).
-                                    div()
-                                        .id("composer-send-wrap")
-                                        .context_menu({
-                                            let owner = cx.entity().downgrade();
-                                            move |menu, _, cx| {
-                                                QuillApp::send_options_menu(owner.clone(), menu, cx)
-                                            }
-                                        })
-                                        .child(
-                                            Button::new("composer-send")
-                                                .icon(IconName::Send)
-                                                .primary()
-                                                .rounded_full()
-                                                .tooltip("Send · right-click for options")
-                                                .accessibility_label("Send message")
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    let text =
-                                                        this.composer.read(cx).value().to_string();
-                                                    // Same guard as
-                                                    // Enter-to-send: text, or
-                                                    // attachments without a
-                                                    // caption.
-                                                    if !text.trim().is_empty()
-                                                        || !this.pending_attachments.is_empty()
-                                                    {
-                                                        this.submit_composer(text, window, cx);
-                                                    }
-                                                })),
-                                        ),
-                                ),
+                                .when(sendable, |row| {
+                                    row.child(
+                                        // Right-click: send options (silent,
+                                        // schedule, link preview).
+                                        div()
+                                            .id("composer-send-wrap")
+                                            .context_menu({
+                                                let owner = cx.entity().downgrade();
+                                                move |menu, _, cx| {
+                                                    QuillApp::send_options_menu(
+                                                        owner.clone(),
+                                                        menu,
+                                                        cx,
+                                                    )
+                                                }
+                                            })
+                                            .child(
+                                                Button::new("composer-send")
+                                                    .icon(IconName::Send)
+                                                    .primary()
+                                                    .rounded_full()
+                                                    .tooltip("Send · right-click for options")
+                                                    .accessibility_label("Send message")
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            let text = this
+                                                                .composer
+                                                                .read(cx)
+                                                                .value()
+                                                                .to_string();
+                                                            // Same guard as
+                                                            // Enter-to-send: text, or
+                                                            // attachments without a
+                                                            // caption.
+                                                            if !text.trim().is_empty()
+                                                                || !this
+                                                                    .pending_attachments
+                                                                    .is_empty()
+                                                            {
+                                                                this.submit_composer(
+                                                                    text, window, cx,
+                                                                );
+                                                            }
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                }),
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.
