@@ -1210,6 +1210,58 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Delete a selection of messages (Telegram Desktop's "Delete N" in
+    /// selection mode) with one `deleteMessages`. Every message must be
+    /// loaded and deletable; `revoke` (delete for everyone) is only honored
+    /// when they're all your own.
+    pub fn delete_selected(
+        &mut self,
+        chat_id: ChatId,
+        message_ids: &[MessageId],
+        revoke: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || message_ids.is_empty() || message_ids.len() > 100 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = self
+            .session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.supported());
+        let history = self.session.histories.get(&chat_id.0);
+        let mut all_outgoing = true;
+        for id in message_ids {
+            let Some(message) = history.and_then(|history| history.messages.get(&id.0)) else {
+                return Err(ConnectSendError::InvalidRequest);
+            };
+            if DeleteConfirm::for_message(
+                message.chat_id,
+                message.id,
+                message.is_outgoing,
+                message.pending,
+            )
+            .is_none()
+            {
+                return Err(ConnectSendError::InvalidRequest);
+            }
+            all_outgoing &= message.is_outgoing;
+        }
+        if !supported {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeleteMessages, Some(chat_id));
+        let json = delete_messages(extra, chat_id, message_ids, revoke && all_outgoing);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
     /// Send `forwardMessages` after the dest picker chooses a supported chat.
     /// `send_copy: false` preserves official "Forwarded from" attribution.
     pub fn forward_messages(
