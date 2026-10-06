@@ -145,6 +145,38 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Ask what the message context menu may offer for `message_id`
+    /// (`getMessageProperties`, answered locally by TDLib). Always asks
+    /// again: pin state and the edit window change over time.
+    pub fn fetch_message_menu_actions(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.message_menu_actions = None;
+        let extra = self.session.request(
+            RequestPurpose::GetMessageMenuActions {
+                chat_id,
+                message_id,
+            },
+            Some(chat_id),
+        );
+        match self
+            .sender
+            .send_json(&crate::telegram::requests::get_message_properties(
+                extra, chat_id, message_id,
+            )) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
     /// Add `choice` to the message, or remove it when it's already ours.
     pub fn toggle_reaction_choice(
         &mut self,

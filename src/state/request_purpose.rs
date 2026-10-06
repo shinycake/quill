@@ -184,6 +184,12 @@ pub enum RequestPurpose {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// `getMessageProperties` for the open message context menu; the
+    /// answer lands in `Session::message_menu_actions`.
+    GetMessageMenuActions {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
     /// MED4: `getWebPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:14794`).
     /// The URL rides `Session::instant_view_urls` keyed by `RequestId`
     /// (the purpose stays `Copy`). Success lands in

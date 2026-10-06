@@ -81,6 +81,9 @@ pub struct Session {
     pub media_library: MediaLibrary,
     /// Reaction options for the message whose reaction picker is open.
     pub message_reaction_options: Option<MessageReactionOptions>,
+    /// What the open message context menu may offer (`messageProperties`).
+    pub message_menu_actions:
+        Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)>,
     /// Member counts from `updateSupergroup` / `updateBasicGroup` (the
     /// header's fallback before full info loads), keyed by group id.
     pub supergroup_member_counts: HashMap<i64, i32>,
@@ -984,6 +987,7 @@ impl Session {
             mention_search: None,
             media_library: MediaLibrary::default(),
             message_reaction_options: None,
+            message_menu_actions: None,
             supergroup_member_counts: HashMap::new(),
             basic_group_member_counts: HashMap::new(),
             chat_online_counts: HashMap::new(),

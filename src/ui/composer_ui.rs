@@ -1059,12 +1059,27 @@ impl QuillApp {
                 AttachmentKind::Document => (IconName::File, "File"),
                 AttachmentKind::VideoNote => (IconName::Video, "Video message"),
             };
+            // Photos and videos show as preview tiles (the photo itself),
+            // files as compact rows — Telegram Desktop's send box shows the
+            // picture rather than the file name.
+            let is_media = matches!(
+                attachment.kind,
+                AttachmentKind::Photo | AttachmentKind::Video
+            );
+            let media = match attachment.kind {
+                AttachmentKind::Photo => AttachmentMedia::new().src(attachment.path.clone()),
+                _ => AttachmentMedia::new().child(Icon::new(icon)),
+            };
+            let card = Attachment::new()
+                .id(("composer-attach-item", index as u64))
+                .tooltip(attachment.file_name.clone());
+            let card = if is_media {
+                card.axis(Axis::Vertical)
+            } else {
+                card.small()
+            };
             group = group.child(
-                Attachment::new()
-                    .id(("composer-attach-item", index as u64))
-                    .small()
-                    .tooltip(attachment.file_name.clone())
-                    .media(AttachmentMedia::new().child(Icon::new(icon)))
+                card.media(media)
                     .content(
                         AttachmentContent::new()
                             .title(AttachmentTitle::new(attachment.file_name.clone()))

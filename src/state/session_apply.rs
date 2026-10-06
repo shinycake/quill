@@ -2363,7 +2363,15 @@ impl Session {
             // `messageProperties`. The driver gates the chained
             // `getMessageLink` on `can_get_link` before `apply` takes
             // the pending request; nothing to reduce here.
-            EnvelopePayload::MessageProperties { .. } => {}
+            EnvelopePayload::MessageProperties(actions) => {
+                if let Some(RequestPurpose::GetMessageMenuActions {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.message_menu_actions = Some((chat_id, message_id, actions));
+                }
+            }
             // Phase C2f: `inviteGroupCallParticipant` answer. A success
             // clears any earlier invite error; the three failure
             // variants surface honestly via `group_call_error` (shown

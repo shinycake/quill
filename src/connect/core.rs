@@ -303,7 +303,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // M1 fix-up: capture the `getMessageProperties` answer for the
         // "Share link" gate before `apply` takes the pending request.
         let link_gate: Option<(ChatId, MessageId, bool)> = match &owned.envelope.payload {
-            EnvelopePayload::MessageProperties { can_get_link } => owned
+            EnvelopePayload::MessageProperties(actions) => owned
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
@@ -311,7 +311,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     RequestPurpose::GetMessageLinkProperties {
                         chat_id,
                         message_id,
-                    } => Some((chat_id, message_id, *can_get_link)),
+                    } => Some((chat_id, message_id, actions.can_get_link)),
                     _ => None,
                 }),
             _ => None,

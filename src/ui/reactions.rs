@@ -50,6 +50,9 @@ impl QuillApp {
             let _ = live
                 .driver
                 .fetch_message_reactions(menu.chat_id, menu.message_id);
+            let _ = live
+                .driver
+                .fetch_message_menu_actions(menu.chat_id, menu.message_id);
         }
         cx.notify();
     }

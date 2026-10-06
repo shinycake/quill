@@ -90,8 +90,22 @@ pub struct ComposerAttachment {
     pub file_name: String,
 }
 
+/// The media kind a file is sent as when dropped or pasted, by extension:
+/// formats Telegram sends as photos or videos. Anything else is a file.
+pub fn media_kind_for(path: &Path) -> Option<AttachmentKind> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "webp" => Some(AttachmentKind::Photo),
+        "mp4" | "mov" | "m4v" => Some(AttachmentKind::Video),
+        _ => None,
+    }
+}
+
 impl ComposerAttachment {
-    /// Append an explicit OS file drop as documents, preserving the draft on failure.
+    /// Append an explicit OS file drop (or pasted files), preserving the
+    /// draft on failure. Like Telegram Desktop, a drop of only photos and
+    /// videos becomes media (an album); anything else is sent as files,
+    /// since albums can't mix documents with media.
     pub fn append_dropped_files(
         list: &mut Vec<Self>,
         paths: &[PathBuf],
@@ -102,9 +116,20 @@ impl ComposerAttachment {
         if paths.len() > crate::album::ALBUM_MAX_ITEMS.saturating_sub(list.len()) {
             return Err("Attach at most 10 files at a time.");
         }
+        let media: Option<Vec<AttachmentKind>> = paths.iter().map(|p| media_kind_for(p)).collect();
+        let media = media.filter(|_| {
+            list.iter()
+                .all(|att| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
+        });
         let picked = paths
             .iter()
-            .map(|path| Self::pick(path, AttachmentKind::Document))
+            .enumerate()
+            .map(|(ix, path)| {
+                let kind = media
+                    .as_ref()
+                    .map_or(AttachmentKind::Document, |kinds| kinds[ix]);
+                Self::pick(path, kind)
+            })
             .collect::<Option<Vec<_>>>()
             .ok_or("Could not attach files. Drop existing files, not folders.")?;
         list.extend(picked);
@@ -1801,6 +1826,24 @@ mod tests {
         ComposerAttachment::push_attachment(&mut list, video_note);
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].kind, AttachmentKind::VideoNote);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dropped_photos_and_videos_become_media_and_mixed_drops_files() {
+        let root = scratch("media-drop");
+        let (photo, clip, doc) = (root.join("a.JPG"), root.join("b.mov"), root.join("c.pdf"));
+        for path in [&photo, &clip, &doc] {
+            fs::write(path, [1]).unwrap();
+        }
+        let mut list = Vec::new();
+        ComposerAttachment::append_dropped_files(&mut list, &[photo.clone(), clip.clone()])
+            .unwrap();
+        let kinds: Vec<_> = list.iter().map(|att| att.kind).collect();
+        assert_eq!(kinds, [AttachmentKind::Photo, AttachmentKind::Video]);
+        let mut mixed = Vec::new();
+        ComposerAttachment::append_dropped_files(&mut mixed, &[photo, doc]).unwrap();
+        assert!(mixed.iter().all(|att| att.kind == AttachmentKind::Document));
         let _ = fs::remove_dir_all(&root);
     }
 
