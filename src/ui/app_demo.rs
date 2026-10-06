@@ -1583,6 +1583,8 @@ impl QuillApp {
             pinned_cursor: HashMap::new(),
             hidden_pinned: HashMap::new(),
             pinned_list_open: false,
+            inline_videos: Default::default(),
+            inline_tick: Default::default(),
             group_call_title_dialog: None,
             group_call_start_dialog: None,
             group_call_invite_open: false,

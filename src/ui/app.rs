@@ -324,6 +324,10 @@ pub struct QuillApp {
     pub(super) hidden_pinned: HashMap<i64, MessageId>,
     /// The open chat's pinned-messages list (bar's list button).
     pub(super) pinned_list_open: bool,
+    /// Muted, looping inline players for visible videos and GIFs.
+    pub(super) inline_videos: std::cell::RefCell<super::inline_video::InlineVideos>,
+    /// Whether the inline-playback redraw tick is running.
+    pub(super) inline_tick: std::cell::Cell<bool>,
     /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
     /// a secret chat (TGX `SecretChatContextBotAlert`) — the stashed
     /// query is inserted on Confirm.

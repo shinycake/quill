@@ -133,20 +133,29 @@ impl QuillApp {
 
     /// Sandbox-checked local path of the current item's full video clip.
     pub(super) fn viewer_clip_path(&self, item: &MediaViewerItem) -> Option<PathBuf> {
-        let play_id = item.play_file_id?;
+        self.playable_clip_path(item.chat_id, item.message_id, item.play_file_id?)
+    }
+
+    /// A message's clip as a local path the player may open: inside the
+    /// account's media folders, or for a video you sent, the original file
+    /// you picked (TDLib's local copy of an upload, which it won't download
+    /// again). Like Telegram Desktop, that original plays while it exists.
+    pub(super) fn playable_clip_path(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        play_id: FileId,
+    ) -> Option<PathBuf> {
         let roots = self.media_display_roots();
         let session = self.session()?;
         let path = session.files.get(&play_id.0)?.usable_path()?;
         if let Some(path) = sandboxed_display_path(path, &roots) {
             return Some(path.to_path_buf());
         }
-        // A video you sent keeps pointing at the original file you picked
-        // (TDLib's local copy of an upload); TDLib won't download it again.
-        // Like Telegram Desktop, play that original while it still exists.
         let outgoing = session
             .histories
-            .get(&item.chat_id.0)
-            .and_then(|history| history.messages.get(&item.message_id.0))
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
             .is_some_and(|message| message.is_outgoing);
         outgoing
             .then(|| std::fs::canonicalize(path).ok())

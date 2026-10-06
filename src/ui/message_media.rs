@@ -432,6 +432,7 @@ pub(super) fn animation_attachment(
     media_roots: &[PathBuf],
     playing: bool,
     frame: Option<Arc<RenderImage>>,
+    inline: Option<super::inline_video::InlineFrame>,
     sponsored: Option<(ChatId, i64)>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -461,7 +462,10 @@ pub(super) fn animation_attachment(
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = animation.is_secret || animation.has_spoiler;
     let (frame_w, frame_h) = media_frame(animation.width, animation.height);
-    let picture = if !blocked && let Some(path) = visual {
+    let live = inline.is_some();
+    let picture = if let Some(inline) = inline {
+        inline_surface(inline, frame_w, frame_h)
+    } else if !blocked && let Some(path) = visual {
         img(path)
             .id(("gif-img", row_id))
             .w(frame_w)
@@ -517,7 +521,8 @@ pub(super) fn animation_attachment(
                         .text_color(gpui_kit::white())
                         .child("GIF"),
                 )
-                .when(!blocked, |this| {
+                // Autoplaying GIFs show no play control (Telegram Desktop).
+                .when(!blocked && !live, |this| {
                     this.child(
                         div()
                             .absolute()
@@ -566,6 +571,7 @@ pub(super) fn video_attachment(
     media_roots: &[PathBuf],
     playing: bool,
     frame: Option<&std::path::Path>,
+    inline: Option<super::inline_video::InlineFrame>,
     sponsored: Option<(ChatId, i64)>,
     // Phase 4.5: `(chat_id, message_id)` when a click should open the
     // fullscreen viewer (history rows only; sponsored rows pass `None`).
@@ -579,7 +585,12 @@ pub(super) fn video_attachment(
     let mime = video.mime_type.clone();
     let start_timestamp = video.start_timestamp;
     let play_label = if playing { "Pause" } else { "Play" };
-    let duration = format_voice_duration(video.duration);
+    // Autoplaying: the time left and a muted mark (Telegram Desktop).
+    let live_remaining = inline.as_ref().map(|inline| inline.remaining_secs);
+    let duration = match live_remaining {
+        Some(Some(left)) => format_voice_duration(left.ceil() as i32),
+        _ => format_voice_duration(video.duration),
+    };
     let visual = if playing {
         frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
     } else {
@@ -600,7 +611,10 @@ pub(super) fn video_attachment(
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = video.is_secret || video.has_spoiler;
     let (frame_w, frame_h) = media_frame(video.width, video.height);
-    let picture = if !blocked && let Some(path) = visual {
+    let live = inline.is_some();
+    let picture = if let Some(inline) = inline {
+        inline_surface(inline, frame_w, frame_h)
+    } else if !blocked && let Some(path) = visual {
         img(path)
             .id(("video-img", row_id))
             .w(frame_w)
@@ -674,9 +688,19 @@ pub(super) fn video_attachment(
                         .bg(gpui_kit::black().opacity(0.5))
                         .text_xs()
                         .text_color(gpui_kit::white())
-                        .child(duration),
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(duration)
+                        .when(live, |this| {
+                            this.child(
+                                Icon::new(gpui_kit::assets::IconName::VolumeX)
+                                    .size(px(12.))
+                                    .text_color(gpui_kit::white()),
+                            )
+                        }),
                 )
-                .when(!blocked, |this| {
+                .when(!blocked && !live, |this| {
                     this.child(
                         div()
                             .absolute()
@@ -1903,5 +1927,33 @@ mod tests {
         assert_eq!(document_kind_label("notes", "text/plain"), "PLAIN");
         assert_eq!(document_kind_label("", ""), "");
         assert_eq!(document_kind_label("weird.verylongext", ""), "");
+    }
+}
+
+/// An autoplaying clip's current frame, cropped to the media frame.
+fn inline_surface(
+    inline: super::inline_video::InlineFrame,
+    frame_w: Pixels,
+    frame_h: Pixels,
+) -> AnyElement {
+    #[cfg(target_os = "macos")]
+    {
+        div()
+            .w(frame_w)
+            .h(frame_h)
+            .rounded_md()
+            .overflow_hidden()
+            .child(
+                gpui_kit::surface(inline.buffer)
+                    .w(frame_w)
+                    .h(frame_h)
+                    .object_fit(ObjectFit::Cover),
+            )
+            .into_any_element()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = inline;
+        div().w(frame_w).h(frame_h).into_any_element()
     }
 }

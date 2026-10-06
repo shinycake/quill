@@ -5,6 +5,7 @@ mod auth_recovery;
 mod chat_theme;
 mod clipboard_files;
 mod force_reply;
+mod inline_video;
 mod native_video;
 mod privacy;
 mod selectable_text;

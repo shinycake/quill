@@ -206,6 +206,10 @@ impl QuillApp {
         if animation.is_secret || animation.has_spoiler {
             return;
         }
+        // MP4 GIFs autoplay on the native inline player (`inline_video`).
+        if super::native_video::SUPPORTED && animation.mime_type != "image/gif" {
+            return;
+        }
         let Some(file_id) = animation.play_file_id().filter(|id| {
             session
                 .files
