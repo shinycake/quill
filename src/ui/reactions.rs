@@ -323,9 +323,26 @@ impl QuillApp {
                         .role(gpui_kit::Role::Button)
                         .aria_label("Show all reactions")
                         .child(Icon::new(gpui_kit::assets::IconName::ChevronDown).size(px(16.)))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.reactions_expanded = true;
-                            cx.notify();
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            // With custom emoji allowed, Telegram Desktop
+                            // expands into the full selector (search, every
+                            // reaction, custom packs); otherwise the grid.
+                            let custom = this
+                                .session()
+                                .and_then(|s| s.message_reaction_options.as_ref())
+                                .is_some_and(|o| o.allow_custom_emoji);
+                            let position = this.message_menu.map(|menu| menu.position);
+                            match position {
+                                Some(position) if custom => {
+                                    this.open_reaction_selector(
+                                        chat_id, message_id, position, window, cx,
+                                    );
+                                }
+                                _ => {
+                                    this.reactions_expanded = true;
+                                    cx.notify();
+                                }
+                            }
                         })),
                 );
             }

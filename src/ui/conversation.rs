@@ -536,17 +536,20 @@ impl QuillApp {
                         .relative()
                         // The emoji / sticker / GIF popover floats above the
                         // composer, anchored to its left edge.
-                        .when(self.media_panel_open(), |this| {
-                            let panel = self.media_panel(cx);
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .left(px(8.))
-                                    .bottom(relative(1.))
-                                    .pb_1()
-                                    .child(panel),
-                            )
-                        })
+                        .when(
+                            self.media_panel_open() && self.media_panel.reaction.is_none(),
+                            |this| {
+                                let panel = self.media_panel(cx);
+                                this.child(
+                                    div()
+                                        .absolute()
+                                        .left(px(8.))
+                                        .bottom(relative(1.))
+                                        .pb_1()
+                                        .child(panel),
+                                )
+                            },
+                        )
                         .when(
                             show_attach && !self.rich_editor_open && !self.recording_active(),
                             |this| {

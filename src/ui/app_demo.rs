@@ -962,6 +962,20 @@ impl QuillApp {
                 .placeholder("Search emoji")
                 .auto_grow(1, 1)
         });
+        let reaction_search_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search emoji")
+                .auto_grow(1, 1)
+        });
+        cx.subscribe(
+            &reaction_search_input,
+            |_this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        )
+        .detach();
         cx.subscribe(&emoji_search_input, |_this, _, event: &InputEvent, cx| {
             // The panel's rows follow the query on the next render.
             if matches!(event, InputEvent::Change) {
@@ -1390,6 +1404,7 @@ impl QuillApp {
             sticker_search_input,
             media_panel: super::media_panel::MediaPanel::default(),
             emoji_search_input,
+            reaction_search_input,
             emoji_set_search_input,
             emoji_status_hours_input,
             gif_search_input,
