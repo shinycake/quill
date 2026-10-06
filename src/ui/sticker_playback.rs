@@ -366,13 +366,23 @@ impl QuillApp {
         chat: &quill::state::ChatSummary,
         cx: &mut Context<QuillApp>,
     ) -> HashMap<i64, ImageSource> {
+        self.custom_emoji_images(&chat.last_preview_style.entities, cx)
+    }
+
+    /// Images for the custom emoji among `entities`: animated when
+    /// decoded, the still meanwhile; unresolved ones are absent.
+    pub(super) fn custom_emoji_images(
+        &self,
+        entities: &[quill::text::TextEntity],
+        cx: &mut Context<QuillApp>,
+    ) -> HashMap<i64, ImageSource> {
         use quill::text::TextEntityKind;
         let mut out = HashMap::new();
         let Some(session) = self.session() else {
             return out;
         };
         let roots = self.media_display_roots();
-        for entity in &chat.last_preview_style.entities {
+        for entity in entities {
             let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
                 continue;
             };

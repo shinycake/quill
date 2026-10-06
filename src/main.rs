@@ -65,7 +65,12 @@ gpui_kit::assets::icon_assets!(
         VolumeX,
         PictureInPicture2,
         Bookmark,
-        Bot
+        Bot,
+        Quote,
+        Copy,
+        CircleCheck,
+        PinOff,
+        CircleStop
     ]
 );
 

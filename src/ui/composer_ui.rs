@@ -908,18 +908,58 @@ impl QuillApp {
         reply: &ComposerReplyTo,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let preview = reply.preview.clone();
-        // Slice G1: show the quoted part when the reply carries one.
-        let quote_label = reply
-            .quote
+        // Telegram Desktop: "Reply to {sender}" over the message preview,
+        // custom emoji included.
+        let message = self
+            .session()
+            .and_then(|s| s.histories.get(&reply.chat_id.0))
+            .and_then(|h| h.messages.get(&reply.message_id.0))
+            .cloned();
+        let sender = message
             .as_ref()
-            .map(|quote| format!("❝{}❞", quote.text));
-        composer_context_bar(
+            .and_then(|m| m.sender)
+            .and_then(|sender| self.session().map(|s| (s, sender)))
+            .and_then(|(session, sender)| match sender {
+                quill::telegram::envelope::MessageSender::User { user_id } => {
+                    session.user(user_id).map(|u| u.display_name())
+                }
+                quill::telegram::envelope::MessageSender::Chat { chat_id } => {
+                    session.chats.get(&chat_id).map(|c| c.title.clone())
+                }
+            });
+        let title = sender.map_or_else(|| "Reply".to_string(), |name| format!("Reply to {name}"));
+        // Slice G1: show the quoted part when the reply carries one.
+        let preview: AnyElement = match (&reply.quote, message.as_ref().map(|m| &m.content)) {
+            (Some(quote), _) => div()
+                .text_sm()
+                .truncate()
+                .child(format!("❝{}❞", quote.text))
+                .into_any_element(),
+            (None, Some(quill::telegram::envelope::MessageContent::Text(text))) => {
+                let emoji = self.custom_emoji_images(&text.entities, cx);
+                div()
+                    .text_sm()
+                    .child(super::chatlist_style::chat_list_preview_line(
+                        None,
+                        &text.text,
+                        &text.entities,
+                        &emoji,
+                        cx,
+                    ))
+                    .into_any_element()
+            }
+            _ => div()
+                .text_sm()
+                .truncate()
+                .child(reply.preview.clone())
+                .into_any_element(),
+        };
+        composer_context_bar_rich(
             "composer-reply-quote",
             gpui_kit::assets::IconName::Reply,
             accent().into(),
-            "Reply",
-            quote_label.unwrap_or(preview),
+            title,
+            preview,
             None,
             Button::new("cancel-reply")
                 .icon(gpui_kit::assets::IconName::X)
@@ -945,6 +985,36 @@ fn composer_context_bar(
     color: Hsla,
     title: impl Into<SharedString>,
     preview: impl Into<SharedString>,
+    trailing: Option<AnyElement>,
+    close: Button,
+    cx: &App,
+) -> impl IntoElement {
+    let preview: SharedString = preview.into();
+    composer_context_bar_rich(
+        id,
+        icon,
+        color,
+        title,
+        div()
+            .text_sm()
+            .truncate()
+            .text_color(cx.theme().muted_foreground)
+            .child(preview)
+            .into_any_element(),
+        trailing,
+        close,
+        cx,
+    )
+}
+
+/// [`composer_context_bar`] with a rendered preview (custom emoji, quotes).
+#[allow(clippy::too_many_arguments)]
+fn composer_context_bar_rich(
+    id: &'static str,
+    icon: gpui_kit::assets::IconName,
+    color: Hsla,
+    title: impl Into<SharedString>,
+    preview: AnyElement,
     trailing: Option<AnyElement>,
     close: Button,
     cx: &App,
@@ -975,10 +1045,9 @@ fn composer_context_bar(
                 )
                 .child(
                     div()
-                        .text_sm()
-                        .truncate()
+                        .min_w_0()
                         .text_color(cx.theme().muted_foreground)
-                        .child(preview.into()),
+                        .child(preview),
                 ),
         )
         .when_some(trailing, |this, trailing| this.child(trailing))
