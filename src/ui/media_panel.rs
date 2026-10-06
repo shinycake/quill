@@ -624,12 +624,10 @@ impl QuillApp {
     }
 
     fn custom_emoji_cell(&self, id: u64, item: StickerItem, cx: &mut Context<Self>) -> AnyElement {
-        // Like stickers, the emoji under the cursor animates.
+        // Every visible custom emoji animates (Telegram Desktop); the
+        // small emoji playback cache keeps that affordable.
         let file_id = item.file_id;
-        let hovered = self.media_panel.hovered == Some(file_id);
-        let animated = hovered
-            .then(|| self.custom_emoji_image(file_id, item.format, cx))
-            .flatten();
+        let animated = self.custom_emoji_image(file_id, item.format, cx);
         let still = self.panel_still(&item);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         let fallback: SharedString = item.emoji.clone().into();

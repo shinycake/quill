@@ -30,3 +30,10 @@ frames into a shared cache.
 ## Verified live
 Hovered Retro Font emoji animate in the picker; sent to Saved Messages,
 they render big, without a bubble, and animate.
+
+## Follow-up: every visible picker emoji animates
+Owner: "custom emojis are still not animating in the picker" (hover-only
+wasn't Telegram Desktop's behavior). The emoji cache now decodes at 56 px
+with at most 36 frames per loop, keeps 160 clips (~70 MB at worst) and
+runs 3 decoders. With that, every visible picker emoji requests its
+animation. Verified live: Candy Font letters animate untouched.

@@ -145,13 +145,15 @@ impl Rlottie {
 }
 
 pub fn decode_tgs(path: &Path, cancelled: &AtomicBool) -> Result<StickerFrames, String> {
-    decode_tgs_sized(path, STICKER_EDGE, cancelled)
+    decode_tgs_sized(path, STICKER_EDGE, MAX_STICKER_FRAMES, cancelled)
 }
 
-/// [`decode_tgs`] at `edge` × `edge` px (custom emoji decode smaller).
+/// [`decode_tgs`] at `edge` × `edge` px with at most `max_frames` frames
+/// (custom emoji decode smaller and shorter).
 pub fn decode_tgs_sized(
     path: &Path,
     edge: usize,
+    max_frames: usize,
     cancelled: &AtomicBool,
 ) -> Result<StickerFrames, String> {
     let data = tgs_json(path)?;
@@ -196,7 +198,7 @@ pub fn decode_tgs_sized(
     {
         return Err("Invalid animated sticker duration".into());
     }
-    let count = total.min(MAX_STICKER_FRAMES);
+    let count = total.min(max_frames.max(1));
     let mut frames = Vec::with_capacity(count);
     for index in 0..count {
         if cancelled.load(Ordering::SeqCst) {
@@ -228,14 +230,22 @@ pub fn decode_webm(
     child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
     cancelled: &AtomicBool,
 ) -> Result<crate::video::ViewerFrames, String> {
-    decode_webm_sized(path, cache, STICKER_EDGE, child, cancelled)
+    decode_webm_sized(
+        path,
+        cache,
+        STICKER_EDGE,
+        MAX_STICKER_FRAMES,
+        child,
+        cancelled,
+    )
 }
 
-/// [`decode_webm`] at `edge` px wide.
+/// [`decode_webm`] at `edge` px wide with at most `max_frames` frames.
 pub fn decode_webm_sized(
     path: &Path,
     cache: &Path,
     edge: usize,
+    max_frames: usize,
     child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
     cancelled: &AtomicBool,
 ) -> Result<crate::video::ViewerFrames, String> {
@@ -244,7 +254,8 @@ pub fn decode_webm_sized(
     if probe.duration > 30 {
         return Err("Video sticker is too long".into());
     }
-    let fps = (MAX_STICKER_FRAMES as f64 / f64::from(probe.duration.max(1) + 1)).min(24.0);
+    let max_frames = max_frames.max(1);
+    let fps = (max_frames as f64 / f64::from(probe.duration.max(1) + 1)).min(24.0);
     // VP9's native ffmpeg decoder drops alpha; libvpx preserves the sticker surface.
     let frames = crate::video::extract_frames(
         path,
@@ -252,7 +263,7 @@ pub fn decode_webm_sized(
         0,
         fps,
         edge as i32,
-        MAX_STICKER_FRAMES as i32,
+        max_frames as i32,
         Some((child, cancelled)),
         Some("libvpx-vp9"),
     )?;
