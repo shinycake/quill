@@ -234,11 +234,7 @@ impl Render for QuillApp {
             // Capture phase: with message text selected, ⌘C copies it even
             // while the composer has focus.
             .capture_action(cx.listener(|_this, _: &CopyAction, window, cx| {
-                if gpui_kit::base::TextSelection::has_selection(window, cx) {
-                    // Message text ends in em spaces that reserve room for
-                    // the time; they're layout, not content.
-                    let text = gpui_kit::base::TextSelection::selected_text(window, cx)
-                        .replace('\u{2003}', "");
+                if let Some((_, text)) = super::selectable_text::selected_message_text(window, cx) {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                     cx.stop_propagation();
                 }

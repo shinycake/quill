@@ -237,13 +237,14 @@ fn message_actions_button(
         )
         .tooltip("Message actions")
         .accessibility_label("Message actions")
-        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
             this.open_message_menu(
                 MessageMenuState {
                     chat_id,
                     message_id,
                     position: event.position(),
                 },
+                window,
                 cx,
             );
         }))

@@ -1738,13 +1738,14 @@ impl QuillApp {
                     // the click position (window coordinates).
                     .on_mouse_down(
                         MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                             this.open_message_menu(
                                 MessageMenuState {
                                     chat_id: row_chat,
                                     message_id: row_msg,
                                     position: event.position,
                                 },
+                                window,
                                 cx,
                             );
                         }),

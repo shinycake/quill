@@ -43,8 +43,18 @@ pub(super) fn apply_ready_reactions(
 
 impl QuillApp {
     /// Open the message menu and ask which reactions the message may get.
-    pub(super) fn open_message_menu(&mut self, menu: MessageMenuState, cx: &mut Context<Self>) {
+    pub(super) fn open_message_menu(
+        &mut self,
+        menu: MessageMenuState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.message_menu = Some(menu);
+        // A right-click keeps the text selection; the menu then acts on it
+        // (Telegram Desktop's Quote & Reply, Copy Selected Text).
+        self.message_menu_selection = super::selectable_text::selected_message_text(window, cx)
+            .filter(|(key, _)| *key == (menu.chat_id.0, menu.message_id.0 as u64))
+            .map(|(_, text)| text);
         self.reactions_expanded = false;
         if let Some(live) = self.live.as_mut() {
             let _ = live
