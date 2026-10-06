@@ -14,6 +14,19 @@ use crate::telegram::requests::{
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// Recent and favorite stickers for the photo editor's Stickers mode,
+    /// without opening the panel.
+    pub fn fetch_editor_stickers(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.sticker_request_favorites()?;
+        self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
+            get_recent_stickers(id, false)
+        })?;
+        Ok(())
+    }
+
     /// Open the sticker panel and load installed regular sets
     /// (`getInstalledStickerSets` + `stickerTypeRegular`).
     pub fn open_sticker_panel(&mut self) -> Result<Option<RequestId>, ConnectSendError> {

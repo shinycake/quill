@@ -4,6 +4,7 @@ mod appearance;
 mod auth_recovery;
 mod chat_theme;
 mod clipboard_files;
+mod editor_art;
 mod force_reply;
 mod frame_clock;
 mod inline_video;
