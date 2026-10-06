@@ -647,11 +647,26 @@ pub(super) fn session_history_row(
         .clone()
         .filter(|_| message.forward_info.is_none());
     let chips = message.reaction_chips();
+    // Telegram Desktop shows who reacted (small avatars) instead of a
+    // count when there are at most three known reactors, outside channels.
+    let in_channel = session
+        .and_then(|s| s.chats.get(&message.chat_id.0))
+        .is_some_and(|chat| {
+            matches!(
+                chat.kind,
+                quill::telegram::envelope::ChatKind::Supergroup {
+                    is_channel: true,
+                    ..
+                }
+            )
+        });
+    let has_chips = !chips.is_empty();
     let chip_row = (!chips.is_empty()).then(|| {
         let mut row = div()
             .id(("reaction-chips", message_id.0 as u64))
             .flex()
             .flex_wrap()
+            .items_center()
             .gap_1()
             .mt_1();
         for (index, chip) in chips.into_iter().enumerate() {
@@ -660,6 +675,15 @@ pub(super) fn session_history_row(
             };
             let count = chip.total_count;
             let chosen = chip.is_chosen;
+            let reactors: Vec<(String, Option<PathBuf>)> =
+                (!in_channel && count <= 3 && chip.recent_senders.len() == count as usize)
+                    .then(|| {
+                        chip.recent_senders
+                            .iter()
+                            .map(|sender| reactor_avatar(sender, session, media_roots))
+                            .collect()
+                    })
+                    .unwrap_or_default();
             let glyph: AnyElement = match &choice {
                 quill::state::ReactionChoice::Emoji(emoji) => div()
                     .child(super::reactions::emoji_presentation(emoji))
@@ -703,8 +727,38 @@ pub(super) fn session_history_row(
                         this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
                     }))
                     .child(glyph)
-                    .child(count.to_string()),
+                    .map(|this| {
+                        if reactors.is_empty() {
+                            this.child(count.to_string())
+                        } else {
+                            // Overlapping 18 px avatars of who reacted.
+                            this.child(div().flex().items_center().children(
+                                reactors.iter().enumerate().map(|(ix, (name, photo))| {
+                                    div()
+                                        .when(ix > 0, |this| this.ml(px(-5.)))
+                                        .rounded_full()
+                                        .border_1()
+                                        .border_color(bg_subtle())
+                                        .child(super::message_text::kit_avatar_element(
+                                            name,
+                                            photo.as_deref(),
+                                            px(18.),
+                                        ))
+                                }),
+                            ))
+                        }
+                    }),
             );
+        }
+        // Telegram Desktop keeps the time on the reactions' line.
+        if let Some(footer) = message_footer_meta(
+            message.date,
+            message.pending,
+            receipt,
+            views,
+            signature.clone(),
+        ) {
+            row = row.child(div().ml_auto().pl_2().child(footer));
         }
         row
     });
@@ -1059,6 +1113,10 @@ pub(super) fn session_history_row(
                 signature.clone(),
             );
         }
+        if has_chips {
+            // The reaction row carries the time.
+            chrome.footer = None;
+        }
         chrome.footer_inline = footer_inline;
         chrome.footer_overlay = footer_overlay;
         chrome.media_led = media_led;
@@ -1202,4 +1260,35 @@ fn custom_emoji_chip_glyph(
             .bg(text_muted().opacity(0.3))
             .into_any_element(),
     }
+}
+
+/// A reactor's avatar: name and (sandboxed) photo for a user or chat.
+fn reactor_avatar(
+    sender: &quill::telegram::envelope::MessageSender,
+    session: Option<&Session>,
+    media_roots: &[PathBuf],
+) -> (String, Option<PathBuf>) {
+    use quill::telegram::envelope::MessageSender;
+    let Some(session) = session else {
+        return (String::new(), None);
+    };
+    let (name, photo) = match sender {
+        MessageSender::User { user_id } => (
+            session
+                .user(*user_id)
+                .map(|u| u.display_name())
+                .unwrap_or_default(),
+            session.user_photo_path(*user_id),
+        ),
+        MessageSender::Chat { chat_id } => (
+            session
+                .chats
+                .get(chat_id)
+                .map(|c| c.title.clone())
+                .unwrap_or_default(),
+            session.chat_photo_path(ChatId(*chat_id)),
+        ),
+    };
+    let photo = photo.and_then(|path| sandboxed_display_path(path, media_roots));
+    (name, photo)
 }

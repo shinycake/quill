@@ -345,6 +345,24 @@ fn message_bubble_with_quote(
             Hsla::from(text_bright())
         })
         .when(rtl, |this| this.text_right())
+        // Telegram Desktop names a group sender inside the bubble, on its
+        // first line, in the sender's color. Bubble-less rows (stickers,
+        // round videos, big emoji) keep the name above instead.
+        .when_some(sender.clone().filter(|_| !look.plain), |this, sender| {
+            this.child(
+                div()
+                    .id("sender")
+                    .role(Role::Label)
+                    .aria_label(sender.clone())
+                    .when(media_led, |this| this.px_2().pt_1())
+                    .pb_0p5()
+                    .text_size(look.font * 0.93)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .when_some(sender_color, |this, color| this.text_color(color))
+                    .child(sender),
+            )
+        })
         .when_some(quote, |this, quote| this.child(quote))
         .when_some(body_el, |this, body_el| this.child(body_el))
         .when(!rich_body && has_body, |this| {
@@ -443,7 +461,7 @@ fn message_bubble_with_quote(
     let mut message = component::message::Message::new()
         .alignment(alignment)
         .content(component::message::MessageContent::new().bubble(bubble));
-    if let Some(sender) = sender {
+    if let Some(sender) = sender.filter(|_| look.plain) {
         message = message.header(
             component::message::MessageHeader::new().child(
                 div()

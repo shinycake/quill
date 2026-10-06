@@ -47,12 +47,15 @@ impl ReactionType {
     }
 }
 
-/// `messageReaction` (TDLib 1.8.67). `used_sender_id` / recent senders stay out.
+/// `messageReaction` (TDLib 1.8.67). `used_sender_id` stays out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageReaction {
     pub reaction_type: ReactionType,
     pub total_count: i32,
     pub is_chosen: bool,
+    /// Who reacted most recently (`recent_sender_ids`): small reactions
+    /// show their avatars instead of a count, as in Telegram Desktop.
+    pub recent_senders: Vec<MessageSender>,
 }
 
 impl MessageReaction {
@@ -158,6 +161,7 @@ pub fn toggle_chosen_emoji_reaction(
             reaction_type: ReactionType::emoji(emoji),
             total_count: 1,
             is_chosen: true,
+            recent_senders: Vec::new(),
         });
     }
     reactions
@@ -227,6 +231,13 @@ pub(crate) fn parse_message_reaction(value: &Value) -> Option<MessageReaction> {
             .get("is_chosen")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        recent_senders: value
+            .get("recent_sender_ids")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|sender| super::message::parse_message_sender(Some(sender)).ok())
+            .collect(),
     })
 }
 

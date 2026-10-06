@@ -390,6 +390,7 @@ fn message_interaction_info_and_update_are_typed() {
                     reaction_type: ReactionType::emoji("❤"),
                     total_count: 3,
                     is_chosen: true,
+                    recent_senders: Vec::new(),
                 }],
                 are_tags: false,
             }),
