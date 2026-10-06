@@ -1048,6 +1048,7 @@ impl QuillApp {
                 _ => AttachmentMedia::new().child(Icon::new(icon)),
             };
             let spoiler = attachment.spoiler;
+            let is_photo = attachment.kind == AttachmentKind::Photo;
             let card = Attachment::new()
                 .id(("composer-attach-item", index as u64))
                 .tooltip(attachment.file_name.clone());
@@ -1070,21 +1071,34 @@ impl QuillApp {
                     // video in the send box.
                     .when(is_media, |card| {
                         card.actions(
-                            AttachmentActions::new().child(
-                                Button::new(("composer-attach-spoiler", index as u64))
-                                    .icon(IconName::EyeOff)
-                                    .xsmall()
-                                    .ghost()
-                                    .selected(spoiler)
-                                    .tooltip(if spoiler {
-                                        "Remove spoiler"
-                                    } else {
-                                        "Hide with spoiler"
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.toggle_attachment_spoiler(index, cx);
-                                    })),
-                            ),
+                            AttachmentActions::new()
+                                .when(is_photo, |actions| {
+                                    actions.child(
+                                        Button::new(("composer-attach-edit", index as u64))
+                                            .icon(IconName::Pencil)
+                                            .xsmall()
+                                            .ghost()
+                                            .tooltip("Edit")
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.open_photo_editor(index, cx);
+                                            })),
+                                    )
+                                })
+                                .child(
+                                    Button::new(("composer-attach-spoiler", index as u64))
+                                        .icon(IconName::EyeOff)
+                                        .xsmall()
+                                        .ghost()
+                                        .selected(spoiler)
+                                        .tooltip(if spoiler {
+                                            "Remove spoiler"
+                                        } else {
+                                            "Hide with spoiler"
+                                        })
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.toggle_attachment_spoiler(index, cx);
+                                        })),
+                                ),
                         )
                     }),
             );

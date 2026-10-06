@@ -8,6 +8,8 @@ mod force_reply;
 mod frame_clock;
 mod inline_video;
 mod native_video;
+mod photo_edit;
+mod photo_editor;
 mod privacy;
 mod selectable_text;
 mod selection_mode;

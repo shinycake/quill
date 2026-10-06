@@ -1659,6 +1659,7 @@ impl QuillApp {
             group_confirm_dialog: None,
             message_menu_selection: None,
             media_viewer: MediaViewer::closed(),
+            photo_editor: None,
             viewer_zoom: ViewerZoom::new(),
             viewer_frame: (720.0, 480.0),
             viewer_drag: None,
