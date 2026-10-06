@@ -105,6 +105,10 @@ pub struct ChatSummary {
     /// for own messages, the author signature for signed channel posts,
     /// else the chat title — the list doesn't parse `sender_id`).
     pub last_preview_sender: String,
+    /// The last message's photo minithumbnail: the chat list shows it
+    /// small before the preview text, as Telegram Desktop does. Never set
+    /// for secret or spoiler photos.
+    pub last_preview_thumb: Option<std::sync::Arc<crate::telegram::envelope::MiniThumbnail>>,
     /// Identity, date and direction of `chat.last_message` for the row's
     /// timestamp and outgoing receipt; `None` for an empty chat.
     pub last_message: Option<ChatLastMessage>,

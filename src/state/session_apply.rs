@@ -2440,6 +2440,14 @@ impl Session {
             let content = effective_content(&message.content, message.ephemeral.as_ref());
             chat.last_preview = content.preview();
             chat.last_preview_style = preview_style(content, &chat.last_preview);
+            chat.last_preview_thumb = match content {
+                MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => photo
+                    .minithumbnail
+                    .clone()
+                    .filter(|mini| !mini.data.is_empty())
+                    .map(std::sync::Arc::new),
+                _ => None,
+            };
             chat.last_preview_sender = preview_sender_name(
                 message.is_outgoing,
                 message.author_signature.as_deref(),
@@ -2454,6 +2462,7 @@ impl Session {
         } else {
             chat.last_preview = String::new();
             chat.last_preview_style = ChatPreviewStyle::default();
+            chat.last_preview_thumb = None;
             chat.last_preview_sender = String::new();
             chat.last_message = None;
         }

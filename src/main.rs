@@ -64,7 +64,8 @@ gpui_kit::assets::icon_assets!(
         Volume2,
         VolumeX,
         PictureInPicture2,
-        Bookmark
+        Bookmark,
+        Bot
     ]
 );
 

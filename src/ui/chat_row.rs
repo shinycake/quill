@@ -374,6 +374,24 @@ impl QuillApp {
                     self.session().is_some_and(|s| s.is_saved_messages(chat.id)),
                     self.session().and_then(|s| s.chat_preview_sender(chat)),
                     self.preview_emoji_images(chat, cx),
+                    match chat.kind {
+                        ChatKind::BasicGroup { .. }
+                        | ChatKind::Supergroup {
+                            is_channel: false, ..
+                        } => Some(IconName::Users),
+                        ChatKind::Supergroup {
+                            is_channel: true, ..
+                        } => Some(IconName::Megaphone),
+                        ChatKind::Private { user_id }
+                            if self
+                                .session()
+                                .and_then(|s| s.user(user_id.0))
+                                .is_some_and(|u| u.is_bot) =>
+                        {
+                            Some(IconName::Bot)
+                        }
+                        _ => None,
+                    },
                     cx,
                 )
                 .into_any_element()
@@ -476,6 +494,8 @@ pub(super) fn session_chat_row(
     preview_sender: Option<String>,
     // Images for custom emoji in the preview.
     preview_emoji: std::collections::HashMap<i64, ImageSource>,
+    // Telegram Desktop marks groups, channels and bots before the title.
+    kind_icon: Option<IconName>,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
@@ -669,6 +689,9 @@ pub(super) fn session_chat_row(
                                                 ))
                                             },
                                         )
+                                        .when_some(kind_icon, |this, icon| {
+                                            this.child(row_glyph(icon, cx.theme().muted_foreground))
+                                        })
                                         .child(
                                             div().font_semibold().min_w_0().truncate().child(title),
                                         )
@@ -739,6 +762,26 @@ pub(super) fn session_chat_row(
                                                         .text_xs()
                                                         .text_color(accent())
                                                         .child(format!("{sender}: ")),
+                                                )
+                                            },
+                                        )
+                                        .when_some(
+                                            chat.last_preview_thumb.clone().filter(|_| from_last),
+                                            |this, mini| {
+                                                this.child(
+                                                    img(ImageSource::Image(std::sync::Arc::new(
+                                                        gpui_kit::Image::from_bytes(
+                                                            gpui_kit::ImageFormat::Jpeg,
+                                                            mini.data.clone(),
+                                                        ),
+                                                    )))
+                                                    .id(("preview-thumb", id.0 as u64))
+                                                    .size(px(18.))
+                                                    .aspect_square()
+                                                    .flex_none()
+                                                    .mr_1()
+                                                    .rounded_sm()
+                                                    .object_fit(ObjectFit::Cover),
                                                 )
                                             },
                                         )
