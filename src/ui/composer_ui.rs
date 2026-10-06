@@ -6,8 +6,8 @@ use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::attachment::{
-    Attachment, AttachmentContent, AttachmentDescription, AttachmentGroup, AttachmentMedia,
-    AttachmentTitle,
+    Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentGroup,
+    AttachmentMedia, AttachmentTitle,
 };
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -15,7 +15,9 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::{AttachmentKind, ComposerEdit, ComposerReplyTo, find_urls};
+use quill::composer::{
+    AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, find_urls,
+};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::state::{RequestPurpose, Session};
@@ -1037,10 +1039,15 @@ impl QuillApp {
                 attachment.kind,
                 AttachmentKind::Photo | AttachmentKind::Video
             );
+            // An image sent as a file still previews as the picture.
+            let image_file = attachment.kind == AttachmentKind::Document
+                && quill::composer::media_kind_for(&attachment.path) == Some(AttachmentKind::Photo);
             let media = match attachment.kind {
                 AttachmentKind::Photo => AttachmentMedia::new().src(attachment.path.clone()),
+                _ if image_file => AttachmentMedia::new().src(attachment.path.clone()),
                 _ => AttachmentMedia::new().child(Icon::new(icon)),
             };
+            let spoiler = attachment.spoiler;
             let card = Attachment::new()
                 .id(("composer-attach-item", index as u64))
                 .tooltip(attachment.file_name.clone());
@@ -1058,11 +1065,39 @@ impl QuillApp {
                     )
                     .on_remove(cx.listener(move |this, _, _, cx| {
                         this.remove_attachment(index, cx);
-                    })),
+                    }))
+                    // Telegram Desktop's "Hide with spoiler" on a photo or
+                    // video in the send box.
+                    .when(is_media, |card| {
+                        card.actions(
+                            AttachmentActions::new().child(
+                                Button::new(("composer-attach-spoiler", index as u64))
+                                    .icon(IconName::EyeOff)
+                                    .xsmall()
+                                    .ghost()
+                                    .selected(spoiler)
+                                    .tooltip(if spoiler {
+                                        "Remove spoiler"
+                                    } else {
+                                        "Hide with spoiler"
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.toggle_attachment_spoiler(index, cx);
+                                    })),
+                            ),
+                        )
+                    }),
             );
         }
         let several = self.pending_attachments.len() >= 2;
         let grouped = self.composer_group_media_effective();
+        // Telegram Desktop's "Send without compression".
+        let can_files = ComposerAttachment::can_send_as_files(&self.pending_attachments);
+        let as_files = can_files
+            && self
+                .pending_attachments
+                .iter()
+                .all(|attachment| attachment.kind == AttachmentKind::Document);
         let remember = self
             .session()
             .map(|s| s.media_prefs.remember_media_grouping)
@@ -1115,6 +1150,20 @@ impl QuillApp {
                     .items_center()
                     .gap_4()
                     .text_sm()
+                    .when(can_files, |row| {
+                        row.child(
+                            Checkbox::new("composer-send-as-files")
+                                .label("Send without compression")
+                                .checked(as_files)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    ComposerAttachment::set_send_as_files(
+                                        &mut this.pending_attachments,
+                                        !as_files,
+                                    );
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .when(several, |row| {
                         row.child(
                             Checkbox::new("composer-group-media")

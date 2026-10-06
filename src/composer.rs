@@ -88,6 +88,8 @@ pub struct ComposerAttachment {
     pub path: PathBuf,
     pub kind: AttachmentKind,
     pub file_name: String,
+    /// Send hidden behind a spoiler (`has_spoiler`; photos and videos).
+    pub spoiler: bool,
 }
 
 /// The media kind a file is sent as when dropped or pasted, by extension:
@@ -102,6 +104,31 @@ pub fn media_kind_for(path: &Path) -> Option<AttachmentKind> {
 }
 
 impl ComposerAttachment {
+    /// Telegram Desktop's "Send without compression": every attachment
+    /// goes as a file (`as_files`), or back to photo/video where the file
+    /// is one. All at once, since an album can't mix files and media.
+    pub fn set_send_as_files(list: &mut [Self], as_files: bool) {
+        for attachment in list {
+            match (as_files, media_kind_for(&attachment.path)) {
+                (true, Some(_)) => {
+                    attachment.kind = AttachmentKind::Document;
+                    attachment.spoiler = false;
+                }
+                (false, Some(kind)) if attachment.kind == AttachmentKind::Document => {
+                    attachment.kind = kind;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Whether the tray can switch between files and compressed media:
+    /// some attachment is a photo or video file.
+    pub fn can_send_as_files(list: &[Self]) -> bool {
+        list.iter()
+            .any(|attachment| media_kind_for(&attachment.path).is_some())
+    }
+
     /// Append an explicit OS file drop (or pasted files), preserving the
     /// draft on failure. Like Telegram Desktop, a drop of only photos and
     /// videos becomes media (an album); anything else is sent as files,
@@ -149,6 +176,7 @@ impl ComposerAttachment {
             path,
             kind,
             file_name,
+            spoiler: false,
         })
     }
 
@@ -1598,6 +1626,38 @@ mod custom_emoji_markup_tests {
         // still apply to the bracketed part).
         let (_, entities) = parse_format_markup("![x](tg://emoji?id=abc)");
         assert!(entities.iter().all(|e| e.kind != FormatKind::CustomEmoji));
+    }
+}
+
+#[cfg(test)]
+mod send_as_files_tests {
+    use super::*;
+
+    fn attachment(name: &str, kind: AttachmentKind) -> ComposerAttachment {
+        ComposerAttachment {
+            path: PathBuf::from(format!("/tmp/{name}")),
+            kind,
+            file_name: name.to_string(),
+            spoiler: true,
+        }
+    }
+
+    #[test]
+    fn send_as_files_switches_media_both_ways_and_drops_spoilers() {
+        let mut list = vec![
+            attachment("a.jpg", AttachmentKind::Photo),
+            attachment("b.mp4", AttachmentKind::Video),
+            attachment("notes.txt", AttachmentKind::Document),
+        ];
+        assert!(ComposerAttachment::can_send_as_files(&list));
+        ComposerAttachment::set_send_as_files(&mut list, true);
+        assert!(list.iter().all(|a| a.kind == AttachmentKind::Document));
+        assert!(!list[0].spoiler);
+        ComposerAttachment::set_send_as_files(&mut list, false);
+        assert_eq!(list[0].kind, AttachmentKind::Photo);
+        assert_eq!(list[1].kind, AttachmentKind::Video);
+        assert_eq!(list[2].kind, AttachmentKind::Document);
+        assert!(!ComposerAttachment::can_send_as_files(&list[2..]));
     }
 }
 

@@ -9,7 +9,7 @@ use super::message_media::{
     photo_attachment, sticker_attachment, venue_row, video_attachment, video_note_attachment,
     voice_note_row,
 };
-use super::message_media::{file_is_downloading, photo_display_path};
+use super::message_media::{file_is_downloading, media_frame, photo_display_path, spoiler_cover};
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,
 };
@@ -774,17 +774,58 @@ pub(super) fn session_history_row(
         }
         row
     });
+    // A spoiler stays covered until clicked; once revealed, it renders as
+    // the plain media it is.
+    let media_revealed =
+        revealed.contains(&(message.chat_id.0, message.id.0 as u64, u64::MAX, false));
     let extra_media = match effective_content(&message.content, message.ephemeral.as_ref()) {
-        MessageContent::Photo(photo) => Some(photo_attachment(
-            message.id.0 as u64,
-            photo,
-            files,
-            downloading,
-            media_roots,
-            None,
-            Some((message.chat_id, message.id)),
-            cx,
-        )),
+        MessageContent::Photo(photo) if photo.has_spoiler && !media_revealed => {
+            let (frame_w, frame_h) = photo
+                .largest_size()
+                .or_else(|| photo.thumb_size())
+                .map(|size| media_frame(size.width, size.height))
+                .unwrap_or_else(|| media_frame(0, 0));
+            Some(spoiler_cover(
+                message.id.0 as u64,
+                message.chat_id,
+                message.id,
+                photo.minithumbnail.as_ref(),
+                photo.open_file_id(),
+                frame_w,
+                frame_h,
+                cx,
+            ))
+        }
+        MessageContent::Video(video) if video.has_spoiler && !media_revealed => {
+            let (frame_w, frame_h) = media_frame(video.width, video.height);
+            Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, cx))
+        }
+        MessageContent::Animation(animation) if animation.has_spoiler && !media_revealed => {
+            let (frame_w, frame_h) = media_frame(animation.width, animation.height);
+            Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, cx))
+        }
+        MessageContent::Photo(photo) => {
+            let unveiled;
+            let photo = if photo.has_spoiler {
+                unveiled = quill::telegram::envelope::PhotoContent {
+                    has_spoiler: false,
+                    ..photo.clone()
+                };
+                &unveiled
+            } else {
+                photo
+            };
+            Some(photo_attachment(
+                message.id.0 as u64,
+                photo,
+                files,
+                downloading,
+                media_roots,
+                None,
+                Some((message.chat_id, message.id)),
+                cx,
+            ))
+        }
         MessageContent::Document(doc) => Some(document_chip(
             message.id.0 as u64,
             doc,

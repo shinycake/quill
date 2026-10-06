@@ -119,6 +119,7 @@ fn driver_send_snapshot_rejects_overlong_caption() {
             path: std::path::PathBuf::from("/tmp/does-not-exist.png"),
             kind: AttachmentKind::Photo,
             file_name: "does-not-exist.png".to_string(),
+            spoiler: false,
         }),
     );
     let sent_before = recorder.snapshot().len();
@@ -139,6 +140,7 @@ fn driver_send_snapshot_rejects_overlong_caption() {
             path: std::path::PathBuf::from("/tmp/does-not-exist.png"),
             kind: AttachmentKind::Photo,
             file_name: "does-not-exist.png".to_string(),
+            spoiler: false,
         }),
     );
     let err = driver.send_snapshot(&snap).unwrap_err();
@@ -173,11 +175,13 @@ fn driver_send_album_rejects_overlong_caption() {
                 path: std::path::PathBuf::from("/tmp/a.png"),
                 kind: AttachmentKind::Photo,
                 file_name: "a.png".to_string(),
+                spoiler: false,
             },
             ComposerAttachment {
                 path: std::path::PathBuf::from("/tmp/b.png"),
                 kind: AttachmentKind::Photo,
                 file_name: "b.png".to_string(),
+                spoiler: false,
             },
         ],
     );
