@@ -23,8 +23,9 @@ pub(super) struct StickerJob {
     cancel: Arc<AtomicBool>,
     child: Arc<Mutex<Option<std::process::Child>>>,
 }
-/// Which playback cache: stickers decode at 128 px and keep 16 clips;
-/// custom emoji are small and many, so 64 px and 48 clips.
+/// Which playback cache. Stickers decode at 128 px (16 clips). Custom emoji
+/// are small and many — every visible one animates, as in Telegram
+/// Desktop — so 56 px, at most 36 frames, 160 clips (~70 MB at worst).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PlaybackSize {
     Sticker,
@@ -35,14 +36,29 @@ impl PlaybackSize {
     fn edge(self) -> u32 {
         match self {
             Self::Sticker => 128,
-            Self::Emoji => 64,
+            Self::Emoji => 56,
         }
     }
 
     fn capacity(self) -> usize {
         match self {
             Self::Sticker => 16,
-            Self::Emoji => 48,
+            Self::Emoji => 160,
+        }
+    }
+
+    fn max_frames(self) -> usize {
+        match self {
+            Self::Sticker => quill::sticker_playback::MAX_STICKER_FRAMES,
+            Self::Emoji => 36,
+        }
+    }
+
+    /// Concurrent decodes.
+    fn decoders(self) -> usize {
+        match self {
+            Self::Sticker => 2,
+            Self::Emoji => 3,
         }
     }
 }
@@ -105,7 +121,7 @@ impl QuillApp {
         if cache.clips.contains_key(&id.0)
             || cache.jobs.contains_key(&id.0)
             || cache.failed.contains(&id.0)
-            || cache.jobs.len() >= 2
+            || cache.jobs.len() >= size.decoders()
         {
             return;
         }
@@ -147,6 +163,7 @@ impl QuillApp {
             },
         );
         let edge = size.edge();
+        let max_frames = size.max_frames();
         let dir =
             quill::animation::gif_frame_cache_dir(id.0).join(format!("sticker-{edge}-{epoch}"));
         cx.spawn(async move |this, cx| {
@@ -159,6 +176,7 @@ impl QuillApp {
                                 let decoded = quill::sticker_playback::decode_tgs_sized(
                                     &path,
                                     edge as usize,
+                                    max_frames,
                                     &cancel,
                                 )?;
                                 let frames = decoded
@@ -191,6 +209,7 @@ impl QuillApp {
                                     &path,
                                     &dir,
                                     edge as usize,
+                                    max_frames,
                                     &child,
                                     &cancel,
                                 )?;
