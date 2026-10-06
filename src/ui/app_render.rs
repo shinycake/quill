@@ -655,6 +655,14 @@ impl QuillApp {
     /// its timer and schedules the re-render that hides it; failures stay
     /// up longer than confirmations.
     fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> bool {
+        // `QUILL_TRACE_STATUS=1`: print every status note (toasted or not)
+        // to stderr, for diagnosing a live session.
+        if self.status_note != self.status_traced {
+            self.status_traced = self.status_note.clone();
+            if !self.status_note.is_empty() && std::env::var_os("QUILL_TRACE_STATUS").is_some() {
+                eprintln!("status: {}", self.status_note);
+            }
+        }
         if self.live.is_none()
             || self.status_note.is_empty()
             || !status_note_is_toast(&self.status_note)

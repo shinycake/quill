@@ -135,11 +135,23 @@ impl QuillApp {
     pub(super) fn viewer_clip_path(&self, item: &MediaViewerItem) -> Option<PathBuf> {
         let play_id = item.play_file_id?;
         let roots = self.media_display_roots();
-        self.session()?
-            .files
-            .get(&play_id.0)?
-            .usable_path()
-            .and_then(|path| sandboxed_display_path(path, &roots).map(|p| p.to_path_buf()))
+        let session = self.session()?;
+        let path = session.files.get(&play_id.0)?.usable_path()?;
+        if let Some(path) = sandboxed_display_path(path, &roots) {
+            return Some(path.to_path_buf());
+        }
+        // A video you sent keeps pointing at the original file you picked
+        // (TDLib's local copy of an upload); TDLib won't download it again.
+        // Like Telegram Desktop, play that original while it still exists.
+        let outgoing = session
+            .histories
+            .get(&item.chat_id.0)
+            .and_then(|history| history.messages.get(&item.message_id.0))
+            .is_some_and(|message| message.is_outgoing);
+        outgoing
+            .then(|| std::fs::canonicalize(path).ok())
+            .flatten()
+            .filter(|path| path.is_file())
     }
 
     /// Start viewer playback when the current item is a video whose clip is
@@ -169,6 +181,13 @@ impl QuillApp {
                     self.viewer_pending_play = Some((item.message_id, play_id));
                     self.request_media_download(play_id, None, cx);
                 }
+            }
+            ViewerVideoStart::PlayNow | ViewerVideoStart::ExtractFrames
+                if super::native_video::SUPPORTED && !self.viewer_demo_sync_frames =>
+            {
+                self.viewer_pending_play = None;
+                let path = path.expect("clip checked local by decide_viewer_video_start");
+                self.play_native_viewer_video(&item, &path, cx);
             }
             ViewerVideoStart::PlayNow => {
                 self.viewer_pending_play = None;
@@ -564,6 +583,30 @@ impl QuillApp {
         }
     }
 
+    /// Play the viewer clip with the native player: real-time hardware
+    /// decode with its own audio, drawn frame by frame (no extraction).
+    pub(super) fn play_native_viewer_video(
+        &mut self,
+        item: &MediaViewerItem,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        self.begin_viewer_video(item, path, cx);
+        match super::native_video::NativeVideo::open(path) {
+            Ok(mut video) => {
+                video.set_volume(self.playback_volume);
+                video.play();
+                video.set_rate(self.playback_speed as f32);
+                self.viewer_native = Some(video);
+            }
+            Err(err) => {
+                self.stop_viewer_video();
+                self.playback_error = Some(err);
+            }
+        }
+        cx.notify();
+    }
+
     /// Spawn ffplay `-nodisp` (audio only) for the viewer clip. The video
     /// frames render in-viewer from `viewer_video_frames`; ffplay only
     /// supplies the soundtrack. `-autoexit` ends the child at the clip's
@@ -605,12 +648,25 @@ impl QuillApp {
         if let Some(clock) = self.viewer_clock.as_mut() {
             clock.pause();
         }
+        if let Some(video) = self.viewer_native.as_mut() {
+            video.pause();
+        }
         self.kill_viewer_player();
         cx.notify();
     }
 
     /// Resume from the frozen clock position.
     pub(super) fn resume_viewer_video(&mut self, cx: &mut Context<Self>) {
+        if let Some(video) = self.viewer_native.as_mut() {
+            video.play();
+            video.set_rate(self.playback_speed as f32);
+            if let Some(clock) = self.viewer_clock.as_mut() {
+                clock.seek(video.position_secs());
+                clock.resume();
+            }
+            cx.notify();
+            return;
+        }
         let offset = self.viewer_clock.as_ref().map(|c| c.elapsed_secs());
         let path = self.viewer_video_path.clone();
         match (offset, path) {
@@ -651,6 +707,7 @@ impl QuillApp {
     /// other player starts.
     pub(super) fn stop_viewer_video(&mut self) {
         self.pip_window = None;
+        self.viewer_native = None;
         self.kill_viewer_player();
         self.kill_viewer_extraction();
         self.viewer_video = None;
@@ -906,6 +963,11 @@ impl QuillApp {
         };
         clock.seek(secs);
         let offset = clock.elapsed_secs();
+        if let Some(video) = self.viewer_native.as_mut() {
+            video.seek(offset);
+            cx.notify();
+            return;
+        }
         if clock.is_playing()
             && let Some(path) = self.viewer_video_path.clone()
         {
@@ -996,7 +1058,13 @@ impl QuillApp {
                 restarted = true;
             }
         }
-        if let Some(clock) = self.viewer_clock.as_mut() {
+        if let Some(video) = self.viewer_native.as_mut() {
+            video.set_rate(next as f32);
+            if let Some(clock) = self.viewer_clock.as_mut() {
+                clock.set_rate(next);
+            }
+            restarted = true;
+        } else if let Some(clock) = self.viewer_clock.as_mut() {
             let offset = clock.elapsed_secs();
             let was_playing = clock.is_playing();
             clock.set_rate(next);
@@ -1045,7 +1113,9 @@ impl QuillApp {
                 .unwrap_or(0.0);
             self.restart_player_at(offset);
         }
-        if self.viewer_clock.as_ref().is_some_and(|c| c.is_playing())
+        if let Some(video) = self.viewer_native.as_ref() {
+            video.set_volume(self.playback_volume);
+        } else if self.viewer_clock.as_ref().is_some_and(|c| c.is_playing())
             && let Some(path) = self.viewer_video_path.clone()
         {
             let offset = self
@@ -1145,6 +1215,24 @@ impl QuillApp {
                         if !active {
                             return false;
                         }
+                        // The native player owns time: the clock mirrors
+                        // its position, and its end pauses (the last frame
+                        // stays; Play starts over).
+                        if let Some(video) = this.viewer_native.as_mut() {
+                            let playing = video.is_playing();
+                            let position = video.position_secs();
+                            if let Some(error) = video.error() {
+                                this.playback_error = Some(error);
+                            }
+                            if let Some(clock) = this.viewer_clock.as_mut() {
+                                clock.seek(position);
+                                if !playing && clock.is_playing() {
+                                    clock.pause();
+                                }
+                            }
+                            cx.notify();
+                            return true;
+                        }
                         let finished = this
                             .viewer_clock
                             .as_ref()
@@ -1222,6 +1310,14 @@ impl QuillApp {
         // needs).
         self.sync_viewer_seek_slider(window, cx);
         self.sync_viewer_volume_slider(window, cx);
+        // Native playback draws a new frame every display refresh.
+        if self
+            .viewer_native
+            .as_mut()
+            .is_some_and(|video| video.is_playing())
+        {
+            window.request_animation_frame();
+        }
         let item = self
             .media_viewer
             .current()
@@ -1337,7 +1433,25 @@ impl QuillApp {
         let zoom = self.viewer_zoom;
         let (zoom_w, zoom_h) = (media_w * zoom.zoom, media_h * zoom.zoom);
         let (pan_x, pan_y) = zoom.pan;
-        let content: AnyElement = {
+        // The native player's current frame, drawn straight from the GPU.
+        #[cfg(target_os = "macos")]
+        let native_frame = (item.kind == MediaViewerKind::Video)
+            .then(|| self.viewer_native.as_mut().and_then(|video| video.frame()))
+            .flatten();
+        #[cfg(not(target_os = "macos"))]
+        let native_frame: Option<()> = None;
+        let content: AnyElement = if let Some(_frame) = native_frame {
+            #[cfg(target_os = "macos")]
+            {
+                gpui_kit::surface(_frame)
+                    .w(px(zoom_w))
+                    .h(px(zoom_h))
+                    .object_fit(ObjectFit::Contain)
+                    .into_any_element()
+            }
+            #[cfg(not(target_os = "macos"))]
+            div().into_any_element()
+        } else {
             // Pre-decoded video frame and thumbnail both render through
             // `img`; the frame is an `ImageSource::Render` (synchronous),
             // the thumbnail a path (async-loaded once, then cached). MED1:

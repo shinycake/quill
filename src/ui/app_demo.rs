@@ -1170,7 +1170,7 @@ impl QuillApp {
                             // Enter completed the highlighted mention.
                         } else if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
-                        } else if !text.trim().is_empty() {
+                        } else if !text.trim().is_empty() || !this.pending_attachments.is_empty() {
                             this.submit_composer(
                                 quill::composer::send_text_on_enter(
                                     text,
@@ -1659,6 +1659,8 @@ impl QuillApp {
             playback_error: None,
             composer_group_media: None,
             viewer_video_frames: Vec::new(),
+            viewer_native: None,
+            status_traced: String::new(),
             viewer_video_fps: 0.0,
             viewer_frame_cache_file: None,
             viewer_extracting: false,

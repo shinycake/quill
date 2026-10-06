@@ -780,8 +780,12 @@ impl QuillApp {
                                                     let text =
                                                         this.composer.read(cx).value().to_string();
                                                     // Same guard as
-                                                    // Enter-to-send.
-                                                    if !text.trim().is_empty() {
+                                                    // Enter-to-send: text, or
+                                                    // attachments without a
+                                                    // caption.
+                                                    if !text.trim().is_empty()
+                                                        || !this.pending_attachments.is_empty()
+                                                    {
                                                         this.submit_composer(text, window, cx);
                                                     }
                                                 })),

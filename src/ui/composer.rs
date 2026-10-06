@@ -515,6 +515,13 @@ impl QuillApp {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
             return false;
         }
+        // GPUI's macOS clipboard reads only text and image data; files
+        // copied in Finder are file URLs, read from the pasteboard here.
+        let copied_files = super::clipboard_files::copied_file_paths();
+        if !copied_files.is_empty() {
+            self.attach_dropped_files(&copied_files, cx);
+            return true;
+        }
         let Some(item) = cx.read_from_clipboard() else {
             return false;
         };

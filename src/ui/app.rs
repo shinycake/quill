@@ -632,6 +632,11 @@ pub struct QuillApp {
     /// frames without an async load round trip per frame. Empty until
     /// extraction + decode finish; the thumbnail shows meanwhile.
     pub(super) viewer_video_frames: Vec<Arc<RenderImage>>,
+    /// The native player (AVFoundation on macOS) for the viewer clip; when
+    /// set it replaces ffplay audio and the extracted frames.
+    pub(super) viewer_native: Option<super::native_video::NativeVideo>,
+    /// The last status note printed by `QUILL_TRACE_STATUS`.
+    pub(super) status_traced: String,
     /// Frame rate of `viewer_video_frames`, for clock → frame-index mapping.
     pub(super) viewer_video_fps: f64,
     /// File ID whose frames are in `viewer_video_frames` (cache invalidation).
