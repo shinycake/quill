@@ -82,6 +82,42 @@ impl Stroke {
     }
 }
 
+/// A sticker or emoji placed on the photo: its picture, its center in
+/// normalized coordinates, and its width as a fraction of the photo's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Placed {
+    pub image: RgbaImage,
+    pub center: (f32, f32),
+    pub width: f32,
+}
+
+impl Placed {
+    /// Height over width of the picture.
+    pub fn aspect(&self) -> f32 {
+        let (width, height) = self.image.dimensions();
+        height as f32 / width.max(1) as f32
+    }
+
+    /// After a quarter turn of a `photo_w`×`photo_h` photo: the picture
+    /// turns too and keeps its size on screen.
+    pub fn rotated_ccw(&self, photo_w: u32, photo_h: u32) -> Self {
+        let (x, y) = self.center;
+        Placed {
+            image: rotate_ccw(&self.image),
+            center: (y, 1.0 - x),
+            width: self.width * photo_w as f32 / photo_h.max(1) as f32 * self.aspect(),
+        }
+    }
+
+    pub fn flipped(&self) -> Self {
+        Placed {
+            image: flip(&self.image),
+            center: (1.0 - self.center.0, self.center.1),
+            width: self.width,
+        }
+    }
+}
+
 /// Turn the image a quarter counterclockwise (Telegram Desktop's rotate).
 pub fn rotate_ccw(image: &RgbaImage) -> RgbaImage {
     image::imageops::rotate270(image)
@@ -91,8 +127,14 @@ pub fn flip(image: &RgbaImage) -> RgbaImage {
     image::imageops::flip_horizontal(image)
 }
 
-/// The final picture: strokes painted at full resolution, then cropped.
-pub fn render(image: &RgbaImage, crop: CropRect, strokes: &[Stroke]) -> RgbaImage {
+/// The final picture: strokes painted at full resolution, stickers and
+/// emoji laid over them, then cropped.
+pub fn render(
+    image: &RgbaImage,
+    crop: CropRect,
+    strokes: &[Stroke],
+    placed: &[Placed],
+) -> RgbaImage {
     let mut canvas = image.clone();
     let (width, height) = canvas.dimensions();
     let side = width.min(height) as f32;
@@ -119,6 +161,15 @@ pub fn render(image: &RgbaImage, crop: CropRect, strokes: &[Stroke]) -> RgbaImag
             }
             last = point;
         }
+    }
+    for item in placed {
+        let w = (item.width * width as f32).round().max(1.0) as u32;
+        let h = (w as f32 * item.aspect()).round().max(1.0) as u32;
+        let picture =
+            image::imageops::resize(&item.image, w, h, image::imageops::FilterType::Triangle);
+        let x = (item.center.0 * width as f32 - w as f32 / 2.0).round() as i64;
+        let y = (item.center.1 * height as f32 - h as f32 / 2.0).round() as i64;
+        image::imageops::overlay(&mut canvas, &picture, x, y);
     }
     let crop = crop.clamped();
     let x = (crop.x * width as f32).round() as u32;
@@ -199,6 +250,7 @@ mod tests {
                 h: 1.0,
             },
             &[stroke],
+            &[],
         );
         assert_eq!(out.dimensions(), (50, 50));
         // The stroke crosses the middle row.
@@ -210,5 +262,23 @@ mod tests {
     fn rotate_turns_dimensions() {
         let image = RgbaImage::new(30, 10);
         assert_eq!(rotate_ccw(&image).dimensions(), (10, 30));
+    }
+
+    #[test]
+    fn placed_pictures_composite_and_follow_rotation() {
+        let photo = RgbaImage::from_pixel(100, 50, Rgba([0, 0, 0, 255]));
+        let dot = Placed {
+            image: RgbaImage::from_pixel(10, 10, Rgba([0, 255, 0, 255])),
+            center: (0.5, 0.5),
+            width: 0.2,
+        };
+        let out = render(&photo, CropRect::FULL, &[], &[dot.clone()]);
+        assert_eq!(out.get_pixel(50, 25)[1], 255);
+        assert_eq!(out.get_pixel(5, 5)[1], 0);
+        // A 20 px wide square on a 100×50 photo stays 20 px wide when the
+        // photo turns to 50×100.
+        let turned = dot.rotated_ccw(100, 50);
+        assert!((turned.width - 0.4).abs() < 1e-6);
+        assert_eq!(turned.center, (0.5, 0.5));
     }
 }
