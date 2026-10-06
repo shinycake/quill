@@ -1,7 +1,7 @@
 //! conversation header, typing indicators.
 
 use super::app::{PaneMode, QuillApp, pane_placeholder};
-use super::chat_row::{chat_avatar, compact_count};
+use super::chat_row::compact_count;
 use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
 use super::history::{album_history_row, history_skeleton, session_history_row};
@@ -26,7 +26,7 @@ use quill::state::{
     ChatSearchJump, ChatSummary, HistoryMessage, InfoPanelTarget, OutboxReceipt, Session,
 };
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender, format_ttl_setting};
+use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -104,10 +104,8 @@ impl QuillApp {
                 username,
                 member_count: (members > 0).then_some(members),
                 online_count: online,
-                discussion_chat_id: session.discussion_chat_id(chat_id),
             })
         });
-        let discuss_chat_id = extras.as_ref().and_then(|ex| ex.discussion_chat_id);
         // Your own chat reads "Saved Messages" with a bookmark and no
         // presence line, as in Telegram Desktop.
         let saved = actions.is_some_and(|(chat_id, _, _, _)| {
@@ -193,25 +191,12 @@ impl QuillApp {
         } else {
             (ttl_line.clone(), false)
         };
-        let photo = actions.and_then(|(chat_id, _, _, _)| {
-            let roots = self.media_display_roots();
-            session
-                .and_then(|s| s.chat_photo_path(chat_id))
-                .and_then(|path| sandboxed_display_path(path, &roots))
-        });
         let identity = div()
             .id("conversation-identity")
             .flex()
             .items_center()
             .gap_3()
             .min_w_0()
-            .when(actions.is_some(), |this| {
-                this.child(if saved {
-                    super::chat_row::saved_messages_avatar(38.)
-                } else {
-                    chat_avatar(&title_text, photo.as_deref(), 38.).into_any_element()
-                })
-            })
             .child(
                 div()
                     .flex()
@@ -261,26 +246,6 @@ impl QuillApp {
             .gap_2()
             .child(identity)
             .when(actions.is_some(), |this| {
-                // Phase B1: secret chats get a "Close secret chat" action
-                // (`closeSecretChat`, schema 1.8.67 line 15242) instead of
-                // the folder picker — closing is permanent.
-                let is_secret = self
-                    .session()
-                    .and_then(|s| s.chats.get(&chat_id.0))
-                    .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
-                // Phase B4: the self-destruct timer picker is only usable
-                // in Ready secret chats — Pending/Closed chats can't send
-                // (`can_post` is false there), and the driver would
-                // reject the request.
-                let ttl_ready = self
-                    .session()
-                    .and_then(|s| s.chats.get(&chat_id.0))
-                    .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }) && c.can_post());
-                let ttl_button_label = self
-                    .session()
-                    .and_then(|s| s.chats.get(&chat_id.0))
-                    .map(|c| format!("⏱ {}", format_ttl_setting(c.message_auto_delete_time)))
-                    .unwrap_or_else(|| "⏱ Off".to_string());
                 // Phase C3a: voice-chat affordance for groups/channels —
                 // join the live voice chat, or start one when none is
                 // live. Signaling only (no audio transport yet).
@@ -355,41 +320,25 @@ impl QuillApp {
                                     })),
                             )
                         })
-                        // Phase B1: close a secret chat (confirm banner
-                        // below, like delete confirm).
-                        .when(is_secret, |this| {
+                        // Telegram Desktop's third-column toggle: shows or
+                        // hides the chat's info panel.
+                        .when_some(info_target, |this, target| {
+                            let open = self
+                                .session()
+                                .is_some_and(|s| s.open_info_panel == Some(target));
                             this.child(
-                                Button::new("chat-close-secret")
-                                    .label("Close secret chat")
+                                Button::new("chat-info-toggle")
+                                    .icon(gpui_kit::assets::IconName::PanelRight)
                                     .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.open_close_secret_chat_confirm(chat_id, cx);
-                                    })),
-                            )
-                        })
-                        // Phase B4: self-destruct timer picker for Ready
-                        // secret chats (`setChatMessageAutoDeleteTime`,
-                        // schema 1.8.67 line 13454).
-                        .when(ttl_ready, |this| {
-                            this.child(
-                                Button::new("chat-ttl")
-                                    .label(ttl_button_label.clone())
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.ttl_picker_open = !this.ttl_picker_open;
-                                        cx.notify();
-                                    })),
-                            )
-                        })
-                        // Parity slice: jump to the linked discussion group
-                        // (`linked_chat_id`) when the channel has one.
-                        .when_some(discuss_chat_id, |this, discussion_id| {
-                            this.child(
-                                Button::new("chat-discuss")
-                                    .label("Discuss")
-                                    .ghost()
+                                    .selected(open)
+                                    .tooltip(if open { "Hide info" } else { "Show info" })
+                                    .accessibility_label("Toggle chat info")
                                     .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.select_listed_chat(ChatId(discussion_id), window, cx);
+                                        if open {
+                                            this.close_info_panel(cx);
+                                        } else {
+                                            this.open_info_panel_target(target, window, cx);
+                                        }
                                     })),
                             )
                         })
