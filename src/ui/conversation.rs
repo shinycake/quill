@@ -1479,6 +1479,8 @@ impl QuillApp {
         // pages older history (the driver dedupes in-flight requests and
         // reports exhaustion; the loader notifies only when a request was
         // actually sent, so this cannot notify-loop while pinned at top).
+        // Inline players for rows that don't render this pass stop.
+        self.inline_videos.borrow_mut().begin_render();
         let weak = cx.weak_entity();
         super::selectable_text::selection_viewport(
             div()
@@ -1634,6 +1636,7 @@ impl QuillApp {
             }
             HistoryRow::Single(inputs) => {
                 let message = &inputs.message;
+                let inline = self.inline_frame(message, cx);
                 let row = session_history_row(
                     message,
                     files,
@@ -1657,6 +1660,7 @@ impl QuillApp {
                     self.message_custom_emoji_frames(message, cx),
                     inputs.video_playing,
                     inputs.video_frame.clone(),
+                    inline,
                     &self.spoiler_revealed,
                     inputs.is_secret,
                     self.session(),

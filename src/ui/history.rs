@@ -417,6 +417,8 @@ pub(super) fn session_history_row(
     animated_emoji: HashMap<i64, Arc<RenderImage>>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
+    // The row's clip playing inline (muted autoplay), if any.
+    inline: Option<super::inline_video::InlineFrame>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Phase B4: whether the row's chat is a secret chat — selects the
     // "Self-destruct" vs "Auto-delete" service-row wording.
@@ -826,6 +828,7 @@ pub(super) fn session_history_row(
             media_roots,
             animation_playing,
             animation_frame,
+            inline,
             None,
             cx,
         )),
@@ -837,6 +840,7 @@ pub(super) fn session_history_row(
             media_roots,
             video_playing,
             video_frame.as_deref(),
+            inline,
             None,
             Some((message.chat_id, message.id)),
             cx,

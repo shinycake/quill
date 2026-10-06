@@ -119,6 +119,7 @@ pub(super) fn sponsored_message_row(
                     media_roots,
                     false,
                     None,
+                    None,
                     Some((chat_id, message.message_id)),
                     cx,
                 ))
@@ -134,6 +135,7 @@ pub(super) fn sponsored_message_row(
                     downloading,
                     media_roots,
                     false,
+                    None,
                     None,
                     Some((chat_id, message.message_id)),
                     None,

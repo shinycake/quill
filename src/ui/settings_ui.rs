@@ -682,11 +682,33 @@ impl QuillApp {
                                 this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
                                 if !on {
                                     this.stop_animation_playback();
+                                    this.inline_videos.borrow_mut().clear();
                                 }
                                 cx.notify();
                             })),
                     )
                     .child(div().text_sm().child("Autoplay GIFs")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .child(
+                        Switch::new("media-pref-autoplay-videos")
+                            .checked(self.session().is_none_or(|s| s.media_prefs.autoplay_videos))
+                            .accessibility_label("Autoplay videos")
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                this.set_media_pref(|prefs| prefs.autoplay_videos = on, cx);
+                                if !on {
+                                    this.inline_videos.borrow_mut().clear();
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(div().text_sm().child("Autoplay videos")),
             )
             .child(
                 div()

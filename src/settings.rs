@@ -244,6 +244,10 @@ pub const AUTO_DOWNLOAD_MAX_BYTES: i64 = 50 * 1024 * 1024;
 pub struct MediaPrefs {
     #[serde(default = "default_true")]
     pub autoplay_gifs: bool,
+    /// Telegram Desktop's "Autoplay videos": downloaded videos play muted
+    /// and looped in the chat.
+    #[serde(default = "default_true")]
+    pub autoplay_videos: bool,
     #[serde(default = "default_true")]
     pub dynamic_emoji_pack_order: bool,
     #[serde(default)]
@@ -303,6 +307,7 @@ impl Default for MediaPrefs {
     fn default() -> Self {
         Self {
             autoplay_gifs: true,
+            autoplay_videos: true,
             dynamic_emoji_pack_order: true,
             recent_emoji_packs: Vec::new(),
             recent_custom_emoji_ids: Vec::new(),
@@ -1023,6 +1028,7 @@ mod tests {
         assert!(MediaPrefs::default().default_grouping());
         let prefs = MediaPrefs {
             autoplay_gifs: false,
+            autoplay_videos: false,
             dynamic_emoji_pack_order: false,
             recent_emoji_packs: vec![2, 1],
             remember_media_grouping: true,
