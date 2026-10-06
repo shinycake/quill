@@ -7,6 +7,8 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::ids::ChatId;
+use quill::telegram::envelope::ChatKind;
 
 #[derive(Clone, Copy)]
 pub(super) enum NavigationAction {
@@ -224,8 +226,15 @@ impl QuillApp {
         let archived = chat.is_some_and(|c| c.in_archive);
         let live = self.live.is_some();
         let owner = cx.entity().downgrade();
+        // Chat-kind actions live in this menu, as in Telegram Desktop's
+        // top-bar menu: a secret chat's auto-delete timer and close, and
+        // a channel's discussion group.
+        let chat_id = chat.map(|c| c.id);
+        let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
+        let ttl_ready = is_secret && chat.is_some_and(|c| c.can_post());
+        let discussion = chat_id.and_then(|id| self.session()?.discussion_chat_id(id));
         Button::new("chat-more-menu")
-            .label("⋯")
+            .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
             .accessibility_label("Chat actions")
             .on_click(|event, window, cx| {
@@ -236,7 +245,6 @@ impl QuillApp {
                     );
                 }
             })
-            .tooltip("Chat actions")
             .dropdown_menu(move |mut menu, _, _| {
                 for (label, action, visible) in [
                     (
@@ -269,6 +277,36 @@ impl QuillApp {
                     menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| this.navigate(action, window, cx));
                     }));
+                }
+                if let Some(discussion) = discussion {
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new("View discussion").on_click(
+                        move |_, window, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.select_listed_chat(ChatId(discussion), window, cx);
+                            });
+                        },
+                    ));
+                }
+                if ttl_ready {
+                    let owner = owner.clone();
+                    menu =
+                        menu.item(PopupMenuItem::new("Auto-Delete").on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.ttl_picker_open = true;
+                                cx.notify();
+                            });
+                        }));
+                }
+                if let Some(chat_id) = chat_id.filter(|_| is_secret) {
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new("Close secret chat").on_click(
+                        move |_, _, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.open_close_secret_chat_confirm(chat_id, cx);
+                            });
+                        },
+                    ));
                 }
                 menu
             })

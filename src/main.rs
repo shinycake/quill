@@ -70,7 +70,9 @@ gpui_kit::assets::icon_assets!(
         Copy,
         CircleCheck,
         PinOff,
-        CircleStop
+        CircleStop,
+        EllipsisVertical,
+        PanelRight
     ]
 );
 
