@@ -750,6 +750,9 @@ pub struct Session {
     /// Slice G2: `chat.has_welcome_messages` (schema 1.8.67, line 3627)
     /// / `updateChatHasWelcomeMessages` (line 10600), keyed by chat id.
     pub chat_has_welcome_messages: HashMap<i64, bool>,
+    /// Chats whose content is protected (`chat.has_protected_content`,
+    /// schema 1.8.67 line 3598): no saving, forwarding or copying.
+    pub protected_chats: HashSet<i64>,
     /// Slice G2: the welcome-message pack per chat
     /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
     pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
@@ -1196,6 +1199,7 @@ impl Session {
             supergroup_change_info_right: HashMap::new(),
             supergroup_send_welcome_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
+            protected_chats: HashSet::new(),
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),

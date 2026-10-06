@@ -234,8 +234,12 @@ impl Render for QuillApp {
             // Capture phase: with message text selected, ⌘C copies it even
             // while the composer has focus.
             .capture_action(cx.listener(|_this, _: &CopyAction, window, cx| {
-                if let Some((_, text)) = super::selectable_text::selected_message_text(window, cx) {
-                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                if let Some(((chat_id, _), text)) =
+                    super::selectable_text::selected_message_text(window, cx)
+                {
+                    if !_this.refuse_protected_copy(ChatId(chat_id), cx) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
                     cx.stop_propagation();
                 }
             }))
@@ -752,7 +756,9 @@ fn status_note_is_toast(note: &str) -> bool {
         "too large",
         "unsupported",
     ];
-    const RESTRICTION: [&str; 8] = [
+    const RESTRICTION: [&str; 10] = [
+        "disabled by admins",
+        "is restricted",
         "premium",
         "slow mode",
         "wait ",

@@ -350,6 +350,20 @@ impl Session {
         })
     }
 
+    /// Whether the chat's content is protected from saving, forwarding
+    /// and copying (`chat.has_protected_content`).
+    pub fn chat_has_protected_content(&self, chat_id: ChatId) -> bool {
+        self.protected_chats.contains(&chat_id.0)
+    }
+
+    pub(crate) fn set_chat_protected(&mut self, chat_id: i64, protected: bool) {
+        if protected {
+            self.protected_chats.insert(chat_id);
+        } else {
+            self.protected_chats.remove(&chat_id);
+        }
+    }
+
     /// Slice G2: cached `chat.has_welcome_messages` (schema 1.8.67, line
     /// 3627).
     pub fn chat_has_welcome_messages_flag(&self, chat_id: ChatId) -> bool {

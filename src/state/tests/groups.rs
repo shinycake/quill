@@ -1484,6 +1484,35 @@ fn g2_welcome_pack_and_flag_cached() {
 }
 
 #[test]
+fn protected_content_flag_tracks_chat_and_update() {
+    // `chat.has_protected_content` arrives with the chat and changes via
+    // `updateChatHasProtectedContent`; copying is refused while it's set.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"g","type":{"@type":"chatTypeSupergroup","supergroup_id":26,"is_channel":false},"unread_count":0,"has_protected_content":true}}"#,
+    );
+    assert!(session.chat_has_protected_content(ChatId(14)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatHasProtectedContent","chat_id":14,"has_protected_content":false}"#,
+    );
+    assert!(!session.chat_has_protected_content(ChatId(14)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatHasProtectedContent","chat_id":15,"has_protected_content":true}"#,
+    );
+    assert!(session.chat_has_protected_content(ChatId(15)));
+}
+
+#[test]
 fn g2_chat_boost_status_cached() {
     // Slice G2: the `getChatBoostStatus` answer is cached per chat.
     let (mut session, sink) = session();

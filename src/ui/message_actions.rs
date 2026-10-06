@@ -24,6 +24,34 @@ use quill::telegram::envelope::{
 use std::sync::Arc;
 use std::time::Instant;
 impl QuillApp {
+    /// Telegram Desktop's refusal for copying out of a protected chat;
+    /// true when the chat is protected (and the note was shown).
+    pub(super) fn refuse_protected_copy(
+        &mut self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        if !session.chat_has_protected_content(chat_id) {
+            return false;
+        }
+        let kind = session.chats.get(&chat_id.0).map(|chat| chat.kind.clone());
+        self.status_note = match kind {
+            Some(ChatKind::Supergroup {
+                is_channel: true, ..
+            }) => "Sorry, copying from this channel is disabled by admins.",
+            Some(ChatKind::Private { .. } | ChatKind::Secret { .. }) | None => {
+                "Sorry, copying from this chat is restricted."
+            }
+            _ => "Sorry, copying from this group is disabled by admins.",
+        }
+        .into();
+        cx.notify();
+        true
+    }
+
     /// M1: right-click message context menu — Reply, Copy, Forward, Pin,
     /// Share link, Retry (failed sends), Delete. Rendered absolute at the
     /// click position; any click on the backdrop closes it.
@@ -159,7 +187,14 @@ impl QuillApp {
             Some(selected) => Some(("Copy Selected Text", selected)),
             None => copyable.map(|text| ("Copy Text", text)),
         };
-        if let Some((label, text)) = copy.filter(|_| allows(true, |a| a.can_be_copied)) {
+        // Protected chats allow neither copying nor forwarding, before
+        // TDLib's per-message answer arrives too.
+        let protected = self
+            .session()
+            .is_some_and(|session| session.chat_has_protected_content(chat_id));
+        if let Some((label, text)) =
+            copy.filter(|_| !protected && allows(true, |a| a.can_be_copied))
+        {
             item!(
                 40,
                 gpui_kit::assets::IconName::Copy,
@@ -177,6 +212,7 @@ impl QuillApp {
         }
         let is_secret = matches!(chat_kind, Some(ChatKind::Secret { .. }));
         if !is_secret
+            && !protected
             && allows(true, |a| a.can_be_forwarded)
             && quill::composer::ForwardDraft::from_message(chat_id, message_id, message.pending)
                 .is_some()

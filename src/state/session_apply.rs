@@ -124,6 +124,7 @@ impl Session {
                 message_auto_delete_time,
                 video_chat,
                 has_welcome_messages,
+                has_protected_content,
                 unread_mention_count,
                 unread_reaction_count,
                 can_be_reported,
@@ -131,6 +132,7 @@ impl Session {
                 positions,
                 last_message,
             } => {
+                self.set_chat_protected(chat_id.0, has_protected_content);
                 self.apply_update_new_chat(
                     chat_id,
                     title,
@@ -387,6 +389,10 @@ impl Session {
                 self.chat_has_welcome_messages
                     .insert(chat_id, has_welcome_messages);
             }
+            EnvelopePayload::UpdateChatHasProtectedContent {
+                chat_id,
+                has_protected_content,
+            } => self.set_chat_protected(chat_id, has_protected_content),
             // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line
             // 13917) — correlated via the pending request's `chat_id`.
             EnvelopePayload::ChatBoostStatus { level, boost_count } => {
