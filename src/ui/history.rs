@@ -956,7 +956,19 @@ pub(super) fn session_history_row(
         && views.is_none()
         && signature.is_none()
         && chip_row.is_none();
-    let reserve_footer = tail_empty && message.date > 0;
+    // A message ending in a right-to-left line takes its time on a line of
+    // its own (Telegram Desktop): that line ends at the bubble's left.
+    let ends_rtl = match effective_content(&message.content, message.ephemeral.as_ref()) {
+        MessageContent::Text(text) => quill::text::last_line_is_rtl(&text.text),
+        MessageContent::Photo(photo) => quill::text::last_line_is_rtl(&photo.caption),
+        MessageContent::Document(doc) => quill::text::last_line_is_rtl(&doc.caption),
+        MessageContent::Animation(animation) => quill::text::last_line_is_rtl(&animation.caption),
+        MessageContent::Video(video) => quill::text::last_line_is_rtl(&video.caption),
+        MessageContent::VoiceNote(note) => quill::text::last_line_is_rtl(&note.caption),
+        MessageContent::Audio(audio) => quill::text::last_line_is_rtl(&audio.caption),
+        _ => false,
+    };
+    let reserve_footer = tail_empty && message.date > 0 && !ends_rtl;
     // M2: ephemeral content replaces the regular content for rendering
     // (bot-built flows show the ephemeral variant to the current user).
     let text_body = match effective_content(&message.content, message.ephemeral.as_ref()) {

@@ -299,6 +299,33 @@ pub fn openable_http_url(url: &str) -> bool {
             .all(|ch| !ch.is_whitespace() && !ch.is_control())
 }
 
+/// Whether `text` reads right to left: its first character with a strong
+/// direction is Hebrew, Arabic or another RTL script (the Unicode
+/// bidi "first strong" rule Telegram Desktop uses to align a paragraph).
+pub fn is_rtl_text(text: &str) -> bool {
+    for c in text.chars() {
+        let code = c as u32;
+        let rtl = matches!(code,
+            0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF);
+        if rtl {
+            return true;
+        }
+        if c.is_alphabetic() {
+            return false;
+        }
+    }
+    false
+}
+
+/// Direction of the last non-empty line of `text` (where a message's time
+/// footer sits).
+pub fn last_line_is_rtl(text: &str) -> bool {
+    text.lines()
+        .rev()
+        .find(|line| line.chars().any(char::is_alphabetic))
+        .is_some_and(is_rtl_text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -731,5 +758,16 @@ mod tests {
         );
         assert_eq!(runs.len(), 1);
         assert!(runs[0].style.quote && runs[0].style.bold);
+    }
+
+    #[test]
+    fn rtl_detection_follows_the_first_strong_character() {
+        assert!(is_rtl_text("שלום world"));
+        assert!(is_rtl_text("12, ❤️ תודה"));
+        assert!(!is_rtl_text("hello שלום"));
+        assert!(!is_rtl_text("123 !!"));
+        assert!(is_rtl_text("مرحبا"));
+        assert!(last_line_is_rtl("hello\nתודה דה\n"));
+        assert!(!last_line_is_rtl("שלום\nok"));
     }
 }
