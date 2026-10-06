@@ -375,7 +375,9 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
         !recorder
             .snapshot()
             .iter()
-            .any(|j| j.contains("\"@type\":\"searchChatMessages\""))
+            .any(|j| j.contains("\"@type\":\"searchChatMessages\"")
+                // Opening the chat fetches its pinned list; that's not search.
+                && !j.contains("searchMessagesFilterPinned"))
     );
     assert!(driver.commit_debounced_chat_search(t1).unwrap().is_none());
     assert!(driver.commit_debounced_chat_search(t2).unwrap().is_none());
@@ -387,7 +389,10 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
     let search_json = sent
         .iter()
         .rev()
-        .find(|j| j.contains("\"@type\":\"searchChatMessages\""))
+        .find(|j| {
+            j.contains("\"@type\":\"searchChatMessages\"")
+                && !j.contains("searchMessagesFilterPinned")
+        })
         .expect("searchChatMessages");
     let v: Value = serde_json::from_str(search_json).unwrap();
     assert_eq!(v["query"], "hello");
