@@ -353,37 +353,43 @@ impl Render for QuillApp {
                 this.cancel_search(window, cx);
             }))
             // Parity slice 5: left/right step the media viewer; `0` resets
-            // zoom. The handlers no-op unless the viewer is open, and only
-            // then stop propagation — otherwise the keystroke still reaches
-            // text inputs (composer caret movement keeps working).
+            // zoom. Only while the viewer is open: otherwise the handler
+            // propagates, so the keystroke reaches the focused input (an
+            // action handler stops propagation unless told to propagate,
+            // which used to eat the composer's arrow keys and "0").
             .on_action(cx.listener(|this, _: &ViewerPrev, _, cx| {
                 if this.media_viewer.is_open() {
                     this.step_media_viewer(-1, cx);
-                    cx.stop_propagation();
+                } else {
+                    cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerNext, _, cx| {
                 if this.media_viewer.is_open() {
                     this.step_media_viewer(1, cx);
-                    cx.stop_propagation();
+                } else {
+                    cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerZoomReset, _, cx| {
                 if this.media_viewer.is_open() {
                     this.viewer_reset_zoom(cx);
-                    cx.stop_propagation();
+                } else {
+                    cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerZoomIn, _, cx| {
                 if this.media_viewer.is_open() {
                     this.viewer_zoom_step(true, cx);
-                    cx.stop_propagation();
+                } else {
+                    cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerZoomOut, _, cx| {
                 if this.media_viewer.is_open() {
                     this.viewer_zoom_step(false, cx);
-                    cx.stop_propagation();
+                } else {
+                    cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &SubmitPhone, window, cx| {
