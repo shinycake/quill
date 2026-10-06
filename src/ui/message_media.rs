@@ -704,6 +704,15 @@ pub(super) fn video_attachment(
                                                 cx,
                                             );
                                         }
+                                        // With the native player, videos play in
+                                        // the media viewer (Telegram Desktop's
+                                        // behavior); inline frames otherwise.
+                                        if super::native_video::SUPPORTED
+                                            && let Some((chat_id, message_id)) = viewer
+                                        {
+                                            this.open_media_viewer(chat_id, message_id, cx);
+                                            return;
+                                        }
                                         this.toggle_video_playback(
                                             message_id,
                                             play_id,
