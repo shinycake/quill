@@ -129,6 +129,10 @@ impl QuillApp {
             .id("command-menu")
             .flex()
             .flex_col()
+            // A compact popup that scrolls (Telegram Desktop), not a
+            // list covering the whole chat.
+            .max_h(px(320.))
+            .overflow_y_scroll()
             .mx_4()
             .mb_2()
             .rounded_md()

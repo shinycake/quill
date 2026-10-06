@@ -718,25 +718,28 @@ impl QuillApp {
                                 .items_end()
                                 .gap_2()
                                 .when(show_attach, |row| {
-                                    row.child(self.attach_menu_button(polls_allowed, cx))
-                                        .child(
-                                            Button::new("composer-emoji")
-                                                .icon(IconName::FaceSlightlySmiling)
-                                                .ghost()
-                                                .tooltip(if self.sticker_panel_open() {
-                                                    "Close stickers"
-                                                } else {
-                                                    "Stickers"
-                                                })
-                                                .accessibility_label("Stickers")
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.toggle_media_panel(
-                                                        super::media_panel::PanelTab::Emoji,
-                                                        cx,
-                                                    );
-                                                })),
-                                        )
-                                        .child(self.format_menu_button(cx))
+                                    row.when_some(self.bot_menu_button(cx), |row, button| {
+                                        row.child(button)
+                                    })
+                                    .child(self.attach_menu_button(polls_allowed, cx))
+                                    .child(
+                                        Button::new("composer-emoji")
+                                            .icon(IconName::FaceSlightlySmiling)
+                                            .ghost()
+                                            .tooltip(if self.sticker_panel_open() {
+                                                "Close stickers"
+                                            } else {
+                                                "Stickers"
+                                            })
+                                            .accessibility_label("Stickers")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_media_panel(
+                                                    super::media_panel::PanelTab::Emoji,
+                                                    cx,
+                                                );
+                                            })),
+                                    )
+                                    .child(self.format_menu_button(cx))
                                 })
                                 .child(
                                     div().flex_1().min_w_0().child(

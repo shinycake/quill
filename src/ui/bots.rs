@@ -597,6 +597,16 @@ impl QuillApp {
         let bot_id = session.bot_user_id_for_chat(open)?;
         let info: BotInfo = session.bot_info_for_chat(open)?.clone();
         let start_param = session.bot_start_params.get(&open.0).cloned();
+        // Telegram Desktop shows the bot card only in an empty chat (or
+        // while a START link waits); once there are messages it's a normal
+        // conversation, with commands behind the composer's Menu button.
+        let empty = session
+            .histories
+            .get(&open.0)
+            .is_none_or(|history| history.messages.is_empty());
+        if !empty && start_param.is_none() {
+            return None;
+        }
         let blocked = session.chats.get(&open.0).is_some_and(|chat| chat.blocked);
         let username = session
             .users
@@ -881,6 +891,47 @@ impl QuillApp {
     /// Phase 3.1: insert a tapped bot command into the composer. Empty
     /// composer → the bare command; otherwise appended after a space (3.3
     /// owns the full `/` menu).
+    /// Telegram Desktop's bot "Menu" button left of the composer: the bot's
+    /// web menu when it has one, else the `/` command list.
+    pub(super) fn bot_menu_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        let open = session.open_chat?;
+        let info = session.bot_info_for_chat(open)?;
+        let url = info
+            .menu_button
+            .as_ref()
+            .map(|menu| (menu.text.clone(), menu.url.clone()))
+            .filter(|(_, url)| !url.is_empty());
+        if url.is_none() && info.commands.is_empty() {
+            return None;
+        }
+        let label = url
+            .as_ref()
+            .map(|(text, _)| text.clone())
+            .filter(|text| !text.is_empty())
+            .unwrap_or_else(|| "Menu".to_string());
+        Some(
+            Button::new("bot-menu")
+                .icon(IconName::Menu)
+                .label(label)
+                .small()
+                .primary()
+                .rounded_full()
+                .tooltip("Bot menu")
+                .on_click(cx.listener(move |this, _, window, cx| match &url {
+                    Some((_, url)) => this.open_message_url(url, cx),
+                    None => {
+                        this.composer.update(cx, |input, cx| {
+                            input.set_value("/", window, cx);
+                            input.focus(window, cx);
+                        });
+                        this.sync_command_menu(cx);
+                    }
+                }))
+                .into_any_element(),
+        )
+    }
+
     pub(super) fn insert_bot_command(
         &mut self,
         command: &str,
