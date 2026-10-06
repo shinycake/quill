@@ -1785,6 +1785,10 @@ impl QuillApp {
                             || this.close_command_menu(cx)
                     })
                     .unwrap_or(false),
+                // Telegram Desktop: Space plays/pauses the viewer's video.
+                "space" => menu_app
+                    .update(cx, |this, cx| this.toggle_viewer_video_on_space(cx))
+                    .unwrap_or(false),
                 "up" => menu_app
                     .update(cx, |this, cx| {
                         this.step_inline_results(-1, cx)

@@ -1619,10 +1619,52 @@ impl QuillApp {
                 let speed_label = Self::speed_label(self.playback_speed);
                 let muted = self.playback_volume < 0.01;
                 let volume_pct = (self.playback_volume * 100.0).round() as i32;
-                div()
+                // Telegram Desktop's player panel: the seek bar spans the
+                // panel with elapsed / remaining time at its ends; below it
+                // play/pause, volume, then speed and picture-in-picture.
+                let remaining = format!(
+                    "-{}",
+                    format_voice_duration((total - elapsed).max(0.0) as i32)
+                );
+                use gpui_kit::assets::IconName as Lucide;
+                let icon_button = |id: &'static str, icon: Lucide, label: &'static str| {
+                    Button::new((id, row_id))
+                        .icon(icon)
+                        .ghost()
+                        .text_color(gpui_kit::white())
+                        .tooltip(label)
+                        .accessibility_label(label)
+                };
+                let time = |text: String| {
+                    div()
+                        .flex_none()
+                        .min_w(px(44.))
+                        .text_xs()
+                        .text_color(gpui_kit::white().opacity(0.85))
+                        .child(text)
+                };
+                let seek_row = div()
                     .flex()
                     .items_center()
                     .gap_2()
+                    .child(time(format_voice_duration(elapsed as i32)))
+                    .child(
+                        // The slider thumb overhangs its track; the padding
+                        // keeps it clear of the labels beside it.
+                        div().flex_1().px_2().when_some(
+                            self.viewer_seek_slider.clone(),
+                            |this, slider| {
+                                this.child(
+                                    Slider::new(&slider).bg(accent()).text_color(text_on_fill()),
+                                )
+                            },
+                        ),
+                    )
+                    .child(time(remaining).text_right());
+                let controls_row = div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
                     .child(if extracting {
                         div()
                             .text_sm()
@@ -1630,71 +1672,79 @@ impl QuillApp {
                             .child("Loading video…")
                             .into_any_element()
                     } else {
-                        Button::new(("media-viewer-play", row_id))
-                            .label(if playing { "❚❚ Pause" } else { "▶ Play" })
-                            .custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_viewer_video(cx);
-                            }))
-                            .into_any_element()
+                        icon_button(
+                            "media-viewer-play",
+                            if playing { Lucide::Pause } else { Lucide::Play },
+                            if playing {
+                                "Pause (Space)"
+                            } else {
+                                "Play (Space)"
+                            },
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.toggle_viewer_video(cx);
+                        }))
+                        .into_any_element()
                     })
-                    .child(div().text_sm().text_color(gpui_kit::white()).child(label))
-                    .when(
-                        cfg!(target_os = "macos") && !self.viewer_video_frames.is_empty(),
-                        |this| {
-                            this.child(
-                                Button::new("media-viewer-pip")
-                                    .label("Picture-in-Picture")
-                                    .accessibility_label("Picture-in-Picture")
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.open_video_pip(cx)),
-                                    ),
-                            )
-                        },
+                    .child(
+                        icon_button(
+                            "media-viewer-mute",
+                            if muted {
+                                Lucide::VolumeX
+                            } else {
+                                Lucide::Volume2
+                            },
+                            if muted { "Unmute" } else { "Mute" },
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.toggle_playback_mute(cx);
+                        })),
                     )
-                    // MED1: seek slider (created in `begin_viewer_video`).
-                    .when_some(self.viewer_seek_slider.clone(), |this, slider| {
+                    .when_some(self.viewer_volume_slider.clone(), |this, slider| {
                         this.child(
-                            div().w(px(180.)).child(
+                            div().w(px(96.)).px_2().child(
                                 Slider::new(&slider).bg(accent()).text_color(text_on_fill()),
                             ),
                         )
                     })
-                    // MED1: playback speed (TGX 0.5x–2x).
+                    .child(div().flex_1())
                     .child(
                         Button::new(("media-viewer-speed", row_id))
                             .label(speed_label)
-                            .custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
+                            .ghost()
+                            .text_color(gpui_kit::white())
+                            .tooltip("Playback speed")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cycle_playback_speed(cx);
                             })),
                     )
-                    // MED1: volume slider + mute toggle.
-                    .when_some(self.viewer_volume_slider.clone(), |this, slider| {
-                        this.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1()
-                                .child(div().w(px(80.)).child(
-                                    Slider::new(&slider).bg(accent()).text_color(text_on_fill()),
-                                ))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(text_on_fill())
-                                        .child(format!("{volume_pct}%")),
-                                ),
-                        )
-                    })
-                    .child(
-                        Button::new(("media-viewer-mute", row_id))
-                            .label(if muted { "Unmute" } else { "Mute" })
-                            .custom(ButtonCustomVariant::new(cx).foreground(text_on_fill().into()))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_playback_mute(cx);
-                            })),
-                    )
+                    .when(
+                        cfg!(target_os = "macos") && !self.viewer_video_frames.is_empty(),
+                        |this| {
+                            this.child(
+                                icon_button(
+                                    "media-viewer-pip",
+                                    Lucide::PictureInPicture2,
+                                    "Picture-in-Picture",
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| this.open_video_pip(cx))),
+                            )
+                        },
+                    );
+                let _ = (label, volume_pct);
+                div()
+                    .id(("media-viewer-player", row_id))
+                    .w(px(640.))
+                    .max_w_full()
+                    .px_4()
+                    .py_2()
+                    .rounded_xl()
+                    .bg(gpui_kit::black().opacity(0.6))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(seek_row)
+                    .child(controls_row)
                     .into_any_element()
             } else {
                 let clip_downloading = item
@@ -1730,7 +1780,7 @@ impl QuillApp {
         // Parity slice 5: zoom controls share a row with the video
         // transport — − / % / + / Reset, then Play/Pause + elapsed/total.
         let zoom_pct = format!("{}%", (zoom.zoom * 100.0).round() as i32);
-        let mut transport = div()
+        let transport = div()
             .flex()
             .items_center()
             .gap_2()
@@ -1767,10 +1817,11 @@ impl QuillApp {
                         this.viewer_reset_zoom(cx);
                     })),
             );
-        if let Some(controls) = video_controls {
-            transport = transport.child(controls);
-        }
-        let transport = transport.into_any_element();
+        // Videos get the player panel; zoom controls are for photos.
+        let transport = match video_controls {
+            Some(controls) => controls,
+            None => transport.into_any_element(),
+        };
         let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
             rich_text_line(
                 &item.caption,
