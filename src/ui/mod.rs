@@ -10,6 +10,7 @@ mod inline_video;
 mod native_video;
 mod privacy;
 mod selectable_text;
+mod selection_mode;
 mod story_areas;
 mod synthetic;
 mod updates;

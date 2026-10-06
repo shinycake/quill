@@ -40,6 +40,29 @@ impl Session {
         }
     }
 
+    /// The display name of a message's author: you, the sending user or
+    /// chat, else the chat's title (channel posts).
+    pub fn message_author_name(&self, message: &HistoryMessage) -> String {
+        let user_name = |user_id: i64| self.users.get(&user_id).map(|user| user.display_name());
+        let name = if message.is_outgoing {
+            self.my_user_id.and_then(user_name)
+        } else {
+            match message.sender {
+                Some(MessageSender::User { user_id }) => user_name(user_id),
+                Some(MessageSender::Chat { chat_id }) => {
+                    self.chats.get(&chat_id).map(|chat| chat.title.clone())
+                }
+                None => None,
+            }
+        };
+        name.or_else(|| {
+            self.chats
+                .get(&message.chat_id.0)
+                .map(|chat| chat.title.clone())
+        })
+        .unwrap_or_default()
+    }
+
     /// TDLib's `is_premium` option when known, else the own user record.
     pub fn my_is_premium(&self) -> bool {
         self.premium_option.unwrap_or_else(|| {
