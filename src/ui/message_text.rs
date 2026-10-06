@@ -974,6 +974,8 @@ fn inline_paragraph(
         }
     }
     let label = text.clone();
+    // Right-to-left paragraphs align right in the bubble (Telegram Desktop).
+    let rtl = quill::text::is_rtl_text(&text);
     if let Some(reserve) = reserve {
         // Em spaces track the font size, so `reserve / font` of them span
         // the footer's width at any text size.
@@ -1022,6 +1024,7 @@ fn inline_paragraph(
         .role(Role::Label)
         .aria_label(label)
         .min_w_0()
+        .when(rtl, |this| this.w_full().text_right())
         .child(paragraph)
         .into_any_element()
 }
