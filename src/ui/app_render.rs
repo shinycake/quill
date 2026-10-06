@@ -10,7 +10,7 @@ use super::actions::{
 use super::app::QuillApp;
 use super::shell::title_bar;
 use gpui_kit::component::alert::Alert;
-use gpui_kit::component::input::Paste as PasteAction;
+use gpui_kit::component::input::{Copy as CopyAction, Paste as PasteAction};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -228,6 +228,21 @@ impl Render for QuillApp {
             .size_full()
             .relative()
             .bg(cx.theme().background)
+            // Window-wide text selection: message text can be selected and
+            // copied (Telegram Desktop), across messages too.
+            .child(gpui_kit::base::TextSelectionLayer)
+            // Capture phase: with message text selected, ⌘C copies it even
+            // while the composer has focus.
+            .capture_action(cx.listener(|_this, _: &CopyAction, window, cx| {
+                if gpui_kit::base::TextSelection::has_selection(window, cx) {
+                    // Message text ends in em spaces that reserve room for
+                    // the time; they're layout, not content.
+                    let text = gpui_kit::base::TextSelection::selected_text(window, cx)
+                        .replace('\u{2003}', "");
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    cx.stop_propagation();
+                }
+            }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
             }))

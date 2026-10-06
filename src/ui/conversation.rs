@@ -1530,68 +1530,77 @@ impl QuillApp {
         // reports exhaustion; the loader notifies only when a request was
         // actually sent, so this cannot notify-loop while pinned at top).
         let weak = cx.weak_entity();
-        div()
-            .id(id)
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            // kit Phase 7: screen-reader landmark for the message history.
-            .role(Role::Log)
-            .aria_label(format!("Message history — {sender_name}"))
-            // Settings → Appearance: chat wallpaper (solid color behind
-            // the message list; None keeps the theme background).
-            .when_some(self.appearance.wallpaper_rgb, |this, color| {
-                this.bg(rgb(color))
-            })
-            .child(
-                MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
-                    let gif_view = weak.clone();
-                    cx.defer(move |cx| {
-                        let _ = gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
-                    });
-                    if ix == 0 {
-                        let weak = weak.clone();
-                        cx.defer(move |cx| {
-                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
-                        });
-                    }
-                    // Prefetch the next newer page a few rows before the
-                    // window's end so reading on rarely waits.
-                    if has_newer && ix + NEWER_PREFETCH_ROWS >= count {
-                        let weak = weak.clone();
-                        cx.defer(move |cx| {
-                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_newer(cx));
-                        });
-                    }
-                    weak.update(cx, |this, cx| this.render_history_row(ix, cx))
-                        .unwrap_or_else(|_| div().into_any_element())
+        super::selectable_text::selection_viewport(
+            div()
+                .id(id)
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                // kit Phase 7: screen-reader landmark for the message history.
+                .role(Role::Log)
+                .aria_label(format!("Message history — {sender_name}"))
+                // Settings → Appearance: chat wallpaper (solid color behind
+                // the message list; None keeps the theme background).
+                .when_some(self.appearance.wallpaper_rgb, |this, color| {
+                    this.bg(rgb(color))
                 })
-                // The kit's default row wrapper pads every non-last row with
-                // pb_8 (32px); override to pb_1 to restore the old gap_1
-                // density. The kit also supplies row px and list py, so the
-                // outer div needs neither.
-                .with_row_style(StyleRefinement::default().pb_1())
-                // Jump to latest: shows the unread count, and replaces a
-                // window that stops short of the latest message instead of
-                // only scrolling to its end.
-                .with_jump_button_renderer({
-                    let jump = cx.weak_entity();
-                    move |button| {
-                        button
-                            .when(unread_count > 0, |button| {
-                                button.label(unread_count.to_string())
-                            })
-                            .on_click(move |_, _, cx| {
+                .child(
+                    MessageScroller::new(
+                        id,
+                        self.history_scroller.clone(),
+                        move |ix, _window, cx| {
+                            let gif_view = weak.clone();
+                            cx.defer(move |cx| {
                                 let _ =
-                                    jump.update(cx, |this, cx| this.jump_to_latest_messages(cx));
-                            })
-                    }
-                })
-                .size_full()
-                .min_h_0(),
-            )
-            .into_any_element()
+                                    gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
+                            });
+                            if ix == 0 {
+                                let weak = weak.clone();
+                                cx.defer(move |cx| {
+                                    let _ =
+                                        weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
+                                });
+                            }
+                            // Prefetch the next newer page a few rows before the
+                            // window's end so reading on rarely waits.
+                            if has_newer && ix + NEWER_PREFETCH_ROWS >= count {
+                                let weak = weak.clone();
+                                cx.defer(move |cx| {
+                                    let _ =
+                                        weak.update(cx, |this, cx| this.maybe_auto_load_newer(cx));
+                                });
+                            }
+                            weak.update(cx, |this, cx| this.render_history_row(ix, cx))
+                                .unwrap_or_else(|_| div().into_any_element())
+                        },
+                    )
+                    // The kit's default row wrapper pads every non-last row with
+                    // pb_8 (32px); override to pb_1 to restore the old gap_1
+                    // density. The kit also supplies row px and list py, so the
+                    // outer div needs neither.
+                    .with_row_style(StyleRefinement::default().pb_1())
+                    // Jump to latest: shows the unread count, and replaces a
+                    // window that stops short of the latest message instead of
+                    // only scrolling to its end.
+                    .with_jump_button_renderer({
+                        let jump = cx.weak_entity();
+                        move |button| {
+                            button
+                                .when(unread_count > 0, |button| {
+                                    button.label(unread_count.to_string())
+                                })
+                                .on_click(move |_, _, cx| {
+                                    let _ = jump
+                                        .update(cx, |this, cx| this.jump_to_latest_messages(cx));
+                                })
+                        }
+                    })
+                    .size_full()
+                    .min_h_0(),
+                ),
+        )
+        .into_any_element()
     }
 
     /// kit Phase 3: resolve one virtualized history row to its element —

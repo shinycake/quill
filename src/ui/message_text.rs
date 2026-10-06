@@ -988,14 +988,20 @@ fn inline_paragraph(
             },
         ));
     }
+    let full: SharedString = text.clone().into();
     let styled = StyledText::new(text)
         .with_highlights(highlights)
         .with_font_family_overrides(mono);
     let owner = cx.entity().downgrade();
-    let paragraph = InteractiveText::new(
+    let paragraph = super::selectable_text::SelectableRichText::new(
         format!("msg-par-{}-{}-{first_index}", msg_key.1, is_caption as u8),
+        full,
         styled,
     )
+    .selection_color(accent().opacity(0.35).into())
+    .message(msg_key)
+    // Messages read top to bottom by id; paragraphs within one in order.
+    .document_order(msg_key.1.saturating_mul(1024) + first_index as u64 * 2 + is_caption as u64)
     .on_click(click_ranges, move |ix, _, cx| {
         let Some(action) = actions.get(ix).cloned() else {
             return;

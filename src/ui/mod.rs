@@ -7,6 +7,7 @@ mod clipboard_files;
 mod force_reply;
 mod native_video;
 mod privacy;
+mod selectable_text;
 mod story_areas;
 mod synthetic;
 mod updates;
