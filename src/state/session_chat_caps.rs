@@ -350,6 +350,33 @@ impl Session {
         })
     }
 
+    /// The chat's pinned messages, newest first: the fetched list, or
+    /// until it arrives, the pinned rows of loaded history. Rows in loaded
+    /// history win, as they carry edits.
+    pub fn pinned_list(&self, chat_id: ChatId) -> Vec<&HistoryMessage> {
+        let history = self.histories.get(&chat_id.0);
+        match self.pinned_messages.get(&chat_id.0) {
+            Some(list) => list
+                .iter()
+                .map(|message| {
+                    history
+                        .and_then(|history| history.messages.get(&message.id.0))
+                        .unwrap_or(message)
+                })
+                .collect(),
+            None => history
+                .map(|history| {
+                    history
+                        .messages
+                        .values()
+                        .rev()
+                        .filter(|message| message.is_pinned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
     /// Whether the chat's content is protected from saving, forwarding
     /// and copying (`chat.has_protected_content`).
     pub fn chat_has_protected_content(&self, chat_id: ChatId) -> bool {

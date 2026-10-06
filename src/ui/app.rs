@@ -316,6 +316,14 @@ pub struct QuillApp {
     /// Phase B1: pending "Close secret chat" confirm for the open chat
     /// (`closeSecretChat`, schema 1.8.67 line 15242).
     pub(super) pending_close_secret_chat: Option<ChatId>,
+    /// Pinned bar position per chat: index into the pinned list, newest
+    /// first. A click on the bar jumps there and steps to the next older.
+    pub(super) pinned_cursor: HashMap<i64, usize>,
+    /// Chats whose pinned bar was hidden, with the newest pinned message
+    /// at the time: the bar returns when a newer message is pinned.
+    pub(super) hidden_pinned: HashMap<i64, MessageId>,
+    /// The open chat's pinned-messages list (bar's list button).
+    pub(super) pinned_list_open: bool,
     /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
     /// a secret chat (TGX `SecretChatContextBotAlert`) — the stashed
     /// query is inserted on Confirm.

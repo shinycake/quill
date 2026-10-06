@@ -75,6 +75,10 @@ pub enum RequestPurpose {
     SearchPublicChats,
     AddRecentlyFoundChat,
     SearchChatMessages,
+    /// The open chat's pinned messages: `searchChatMessages` with
+    /// `searchMessagesFilterPinned` (schema 1.8.67, line 6316), newest
+    /// first. Feeds the pinned bar (Telegram Desktop's pinned tracker).
+    GetPinnedMessages,
     /// Slice media-shared-gallery: one `searchChatMessages` page for a
     /// gallery tab. `generation` is the `SharedMediaState` generation at
     /// send time — late answers drop on mismatch.

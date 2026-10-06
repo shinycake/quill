@@ -3,7 +3,6 @@
 use super::app::QuillApp;
 use super::chat_row::{ChatPreviewState, chat_preview_line};
 use super::message_text::message_rich_block;
-use super::pressable::PressableDiv;
 use super::search_ui::chat_search_jump_note;
 use super::*;
 use gpui_kit::component::button::*;
@@ -16,7 +15,7 @@ use quill::connect::PREVIEW_HISTORY_LIMIT;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::{ChatId, MessageId};
 use quill::poll::can_stop_poll;
-use quill::state::{HistoryMessage, RequestPurpose, effective_preview};
+use quill::state::{RequestPurpose, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     ChatKind, MUTE_FOREVER, MessageContent, PollType, effective_content,
@@ -1194,74 +1193,278 @@ impl QuillApp {
         }
     }
 
+    /// Telegram Desktop's pinned bar: the pinned message at the bar's
+    /// position, titled "Pinned message", "Previous message" or
+    /// "Pinned message #N"; a segment per pinned message on the left. A
+    /// click jumps to it and steps to the next older one. The right
+    /// button unpins (or hides) a lone pin, or lists several.
     pub(super) fn pinned_message_banner(
         &self,
-        message: &HistoryMessage,
+        chat_id: ChatId,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let chat_id = message.chat_id;
-        let message_id = message.id;
-        let preview = effective_preview(message);
-        // M1: tdesktop shows "Unpin all" when the chat pins more than one
-        // message (`unpinAllChatMessages`, schema 1.8.67 line 13565).
-        let pinned_count = self
-            .session()
-            .and_then(|session| session.histories.get(&chat_id.0))
-            .map(|history| history.messages.values().filter(|m| m.is_pinned).count())
-            .unwrap_or(0);
-        div()
-            .id("pinned-message-bar")
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(bg_canvas())
-            .child(
-                div()
-                    .id("pinned-message-jump")
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .flex_1()
-                    .role(gpui_kit::Role::Button)
-                    .aria_label("Go to pinned message")
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.jump_to_pinned_message(message_id, cx);
-                    }))
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(accent())
-                            .child("Pinned message"),
-                    )
-                    .child(div().text_sm().text_color(text_primary()).child(preview)),
-            )
-            .child(
-                Button::new("unpin-banner")
-                    .label("Unpin")
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.unpin_from_banner(chat_id, message_id, cx);
-                    })),
-            )
-            .when(pinned_count > 1, |this| {
-                this.child(
-                    Button::new("unpin-all-banner")
-                        .label("Unpin all")
-                        .ghost()
+    ) -> Option<AnyElement> {
+        let session = self.session()?;
+        let list = session.pinned_list(chat_id);
+        let newest = list.first()?.id;
+        if self.hidden_pinned.get(&chat_id.0) == Some(&newest) {
+            return None;
+        }
+        let count = list.len();
+        let index = self
+            .pinned_cursor
+            .get(&chat_id.0)
+            .copied()
+            .unwrap_or(0)
+            .min(count - 1);
+        let message_id = list[index].id;
+        let preview = effective_preview(list[index]);
+        let title = if index == 0 {
+            "Pinned message".to_string()
+        } else if count == 2 {
+            "Previous message".to_string()
+        } else {
+            format!("Pinned message #{}", count - index)
+        };
+        let can_pin = session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_pin_messages());
+        // Up to four segments, oldest on top; the window follows the
+        // shown message.
+        let shown = count.min(4);
+        let position = count - 1 - index;
+        let start = position.saturating_sub(shown - 1).min(count - shown);
+        let segments = (0..shown).map(|segment| {
+            div()
+                .flex_1()
+                .w(px(2.))
+                .rounded_full()
+                .bg(if start + segment == position {
+                    accent()
+                } else {
+                    accent().opacity(0.35)
+                })
+        });
+        let right = if count == 1 {
+            Button::new("pinned-bar-close")
+                .icon(gpui_kit::assets::IconName::X)
+                .ghost()
+                .small()
+                .tooltip(if can_pin { "Unpin" } else { "Hide" })
+                .accessibility_label(if can_pin {
+                    "Unpin message"
+                } else {
+                    "Hide pinned message"
+                })
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    let app = cx.entity().downgrade();
+                    if can_pin {
+                        confirm(
+                            window,
+                            cx,
+                            "Would you like to unpin this message?",
+                            "Unpin",
+                            move |cx| {
+                                let _ = app.update(cx, |this, cx| {
+                                    this.unpin_from_banner(chat_id, message_id, cx);
+                                });
+                            },
+                        );
+                    } else {
+                        confirm_hide_pinned(window, cx, app, chat_id, newest);
+                    }
+                }))
+        } else {
+            Button::new("pinned-bar-list")
+                .icon(gpui_kit::assets::IconName::List)
+                .ghost()
+                .small()
+                .selected(self.pinned_list_open)
+                .tooltip("Pinned messages")
+                .accessibility_label("Pinned messages")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.pinned_list_open = !this.pinned_list_open;
+                    cx.notify();
+                }))
+        };
+        Some(
+            div()
+                .id("pinned-message-bar")
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_1p5()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .bg(bg_canvas())
+                .child(
+                    div()
+                        .id("pinned-message-jump")
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .min_w_0()
+                        .flex_1()
+                        .role(gpui_kit::Role::Button)
+                        .aria_label("Go to pinned message")
+                        .tab_index(0)
+                        .cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.unpin_all_messages(chat_id, cx);
-                        })),
+                            this.jump_to_pinned_message(message_id, cx);
+                            this.pinned_cursor.insert(chat_id.0, (index + 1) % count);
+                            cx.notify();
+                        }))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.))
+                                .h(px(34.))
+                                .children(segments),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_medium()
+                                        .text_color(accent())
+                                        .child(title),
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .truncate()
+                                        .text_color(text_primary())
+                                        .child(preview),
+                                ),
+                        ),
                 )
-            })
+                .child(right)
+                .into_any_element(),
+        )
+    }
+
+    /// The pinned bar's list (Telegram Desktop's pinned-messages section,
+    /// as a panel): every pinned message, newest first; a click jumps
+    /// there. The footer unpins all, or for readers hides the bar.
+    pub(super) fn pinned_list_panel(
+        &self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session = self.session()?;
+        let list = session.pinned_list(chat_id);
+        let newest = list.first()?.id;
+        let count = list.len();
+        let can_pin = session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.can_pin_messages());
+        let hover = cx.theme().accent;
+        let now = quill::local_time::civil_local(quill::local_time::now_unix());
+        let rows = list.iter().enumerate().map(|(index, message)| {
+            let message_id = message.id;
+            div()
+                .id(("pinned-list-row", message_id.0 as u64))
+                .flex()
+                .flex_col()
+                .px_3()
+                .py_1p5()
+                .rounded_md()
+                .cursor_pointer()
+                .hover(|style| style.bg(hover))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(quill::local_time::day_label(
+                            &quill::local_time::civil_local(i64::from(message.date)),
+                            &now,
+                        )),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .truncate()
+                        .text_color(text_primary())
+                        .child(effective_preview(message)),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.jump_to_pinned_message(message_id, cx);
+                    this.pinned_cursor.insert(chat_id.0, index);
+                    this.pinned_list_open = false;
+                    cx.notify();
+                }))
+        });
+        let noun = if count == 1 { "message" } else { "messages" };
+        let footer = if can_pin {
+            Button::new("pinned-list-unpin-all")
+                .label(if count == 1 {
+                    "Unpin 1 message".to_string()
+                } else {
+                    format!("Unpin all {count} messages")
+                })
+                .ghost()
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    let app = cx.entity().downgrade();
+                    confirm(
+                        window,
+                        cx,
+                        "Do you want to unpin all messages?",
+                        "Unpin",
+                        move |cx| {
+                            let _ = app.update(cx, |this, cx| {
+                                this.pinned_list_open = false;
+                                this.unpin_all_messages(chat_id, cx);
+                            });
+                        },
+                    );
+                }))
+        } else {
+            Button::new("pinned-list-hide")
+                .label("Don't show pinned messages")
+                .ghost()
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    let app = cx.entity().downgrade();
+                    confirm_hide_pinned(window, cx, app, chat_id, newest);
+                }))
+        };
+        Some(
+            div()
+                .id("pinned-list-panel")
+                .flex()
+                .flex_col()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .bg(bg_canvas())
+                .child(
+                    div()
+                        .px_3()
+                        .pt_2()
+                        .text_xs()
+                        .font_medium()
+                        .text_color(accent())
+                        .child(format!("{count} pinned {noun}")),
+                )
+                .child(
+                    div()
+                        .id("pinned-list-rows")
+                        .flex()
+                        .flex_col()
+                        .px_1()
+                        .py_1()
+                        .max_h(px(280.))
+                        .overflow_y_scroll()
+                        .children(rows),
+                )
+                .child(div().flex().justify_center().pb_1().child(footer))
+                .into_any_element(),
+        )
     }
 
     pub(super) fn jump_to_replied_message(
@@ -1280,4 +1483,52 @@ impl QuillApp {
         }
         cx.notify();
     }
+}
+
+/// A confirmation in Telegram Desktop's style: the question, Cancel and
+/// a primary action that runs `on_confirm`.
+fn confirm(
+    window: &mut Window,
+    cx: &mut App,
+    question: &'static str,
+    action: &'static str,
+    on_confirm: impl Fn(&mut App) + 'static,
+) {
+    let on_confirm = std::rc::Rc::new(on_confirm);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let on_confirm = on_confirm.clone();
+        alert
+            .description(question)
+            .ok_text(action)
+            .cancel_text("Cancel")
+            .show_cancel(true)
+            .on_ok(move |_, _, cx| {
+                on_confirm(cx);
+                true
+            })
+    });
+}
+
+/// Hide the pinned bar until a newer message is pinned (Telegram
+/// Desktop's "Don't show pinned messages" for readers).
+fn confirm_hide_pinned(
+    window: &mut Window,
+    cx: &mut App,
+    app: WeakEntity<QuillApp>,
+    chat_id: ChatId,
+    newest: MessageId,
+) {
+    confirm(
+        window,
+        cx,
+        "Do you want to hide the pinned message bar? It will stay hidden until a new message is pinned.",
+        "Hide",
+        move |cx| {
+            let _ = app.update(cx, |this, cx| {
+                this.hidden_pinned.insert(chat_id.0, newest);
+                this.pinned_list_open = false;
+                cx.notify();
+            });
+        },
+    );
 }

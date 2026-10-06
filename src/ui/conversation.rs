@@ -830,7 +830,6 @@ impl QuillApp {
             }
             ChatSearchJump::None | ChatSearchJump::Missing { .. } => None,
         });
-        let pinned = session.and_then(|s| s.open_chat_pinned_message()).cloned();
         let chat_actions = open.and_then(|id| {
             session.and_then(|s| s.chats.get(&id.0)).and_then(|chat| {
                 chat.supported().then_some((
@@ -911,9 +910,11 @@ impl QuillApp {
             .when(self.folder_menu_open, |this| {
                 this.child(self.folder_menu_panel(cx))
             })
-            .when_some(pinned, |this, message| {
-                this.child(self.pinned_message_banner(&message, cx))
-            })
+            .children(open.and_then(|chat_id| self.pinned_message_banner(chat_id, cx)))
+            .children(
+                open.filter(|_| self.pinned_list_open)
+                    .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
+            )
             .when(self.forward_picker_open, |this| {
                 this.child(self.forward_picker_panel(cx))
             })

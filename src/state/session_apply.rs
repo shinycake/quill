@@ -1263,6 +1263,11 @@ impl Session {
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.is_pinned = is_pinned;
                 });
+                // An unpin leaves the pinned list at once; a pin is added
+                // by the refetch the driver sends for the open chat.
+                if !is_pinned && let Some(list) = self.pinned_messages.get_mut(&chat_id.0) {
+                    list.retain(|message| message.id != message_id);
+                }
             }
             EnvelopePayload::UpdateMessageContentOpened {
                 chat_id,
@@ -1323,6 +1328,9 @@ impl Session {
                 } else {
                     message_ids
                 };
+                if let Some(list) = self.pinned_messages.get_mut(&chat_id.0) {
+                    list.retain(|message| !message_ids.contains(&message.id));
+                }
                 let history = self.histories.entry(chat_id.0).or_default();
                 for id in message_ids.iter().copied() {
                     // Permanent or "became inaccessible": either way the

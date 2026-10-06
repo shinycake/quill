@@ -267,6 +267,20 @@ impl Session {
             }
             return;
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPinnedMessages) {
+            if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                for message in &messages {
+                    self.remember_files(&message.files);
+                }
+                let mut rows: Vec<HistoryMessage> = messages
+                    .into_iter()
+                    .map(|message| history_message(message, false))
+                    .collect();
+                rows.sort_by(|a, b| b.id.0.cmp(&a.id.0));
+                self.pinned_messages.insert(chat_id.0, rows);
+            }
+            return;
+        }
         if self.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
