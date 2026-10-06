@@ -1,21 +1,16 @@
 //! Streaming bot reply display, using existing text and rich-block renderers.
 use super::app::QuillApp;
-use super::message_text::{message_rich_block, rich_text_line};
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::ids::{ChatId, MessageId};
-use quill::rich::RichBlock;
+use quill::ids::ChatId;
 use quill::state::{RequestPurpose, unix_ms_now};
-use quill::telegram::envelope::MessageContent;
-use std::collections::HashMap;
 
 impl QuillApp {
     pub(super) fn pending_bot_reply(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let chat_id = session.open_chat?;
-        let topic_id = session.open_topic.unwrap_or(0);
-        let draft = session.pending_bot_messages.get(&(chat_id.0, topic_id))?;
+        let (topic_id, draft) = super::bot_stream::open_chat_draft(session)?;
         if draft.expires_at_ms <= unix_ms_now() {
             return None;
         }
@@ -27,84 +22,43 @@ impl QuillApp {
             RequestPurpose::StopPendingMessage { topic_id, draft_id },
             chat_id,
         );
-        let key = (
-            chat_id.0 ^ i64::MIN,
-            draft_id.unsigned_abs() & (u64::MAX >> 2),
-        );
-        let font = px(self.appearance.font_size_px as f32);
-        let body = match &draft.content {
-            MessageContent::Text(text) if !text.text.is_empty() => rich_text_line(
-                &text.text,
-                &text.entities,
-                key,
-                false,
-                &self.spoiler_revealed,
-                font,
-                // Draft previews don't resolve custom emoji in this slice.
-                &HashMap::new(),
-                cx,
-            ),
-            MessageContent::RichMessage(rich) => {
-                let mut rich = rich.clone();
-                // Drafts have no server message ID for callback buttons or full-message fetches.
-                rich.is_full = true;
-                rich.blocks
-                    .retain(|block| !matches!(block, RichBlock::ButtonRow { .. }));
-                for block in &mut rich.blocks {
-                    if let RichBlock::Paragraph { buttons, .. } = block {
-                        buttons.clear();
-                    }
-                }
-                message_rich_block(
-                    key,
-                    chat_id,
-                    MessageId(0),
-                    &rich,
-                    &self.spoiler_revealed,
-                    font,
-                    cx,
-                )
-            }
-            _ => div().child("Thinking…").into_any_element(),
-        };
+        // The reply itself renders in the history as the bot's next
+        // message (`bot_stream`); this bar only offers Stop.
+        if !can_stop && !failed {
+            return None;
+        }
         let mut row = div()
             .id("pending-bot-reply")
             .flex()
-            .flex_col()
+            .items_center()
+            .justify_center()
             .gap_2()
-            .px_3()
-            .py_2()
-            .max_h(px(260.))
-            .overflow_y_scroll()
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded_md()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if stopped {
-                        "Bot reply · stopped"
+            .py_1();
+        if can_stop {
+            row = row.child(
+                Button::new("stop-bot-draft")
+                    .icon(gpui_kit::assets::IconName::CircleStop)
+                    .label(if stopping {
+                        "Stopping…"
+                    } else if stopped {
+                        "Stopped"
                     } else {
-                        "Bot reply · generating"
-                    }),
-            )
-            .child(body);
+                        "Stop generating"
+                    })
+                    .small()
+                    .ghost()
+                    .disabled(stopping || stopped)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.stop_bot_draft(chat_id, topic_id, draft_id, cx);
+                    })),
+            );
+        }
         if failed {
             row = row.child(
                 div()
                     .text_xs()
+                    .text_color(cx.theme().muted_foreground)
                     .child("Could not stop the reply. Try again."),
-            );
-        }
-        if can_stop {
-            row = row.child(
-                Button::new("stop-bot-draft")
-                    .label(if stopping { "Stopping…" } else { "Stop" })
-                    .disabled(stopping)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.stop_bot_draft(chat_id, topic_id, draft_id, cx);
-                    })),
             );
         }
         Some(row.into_any_element())

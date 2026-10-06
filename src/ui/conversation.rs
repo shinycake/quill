@@ -1044,6 +1044,8 @@ impl QuillApp {
         self.playback_speed.to_bits().hash(&mut hasher);
         self.playback_volume.to_bits().hash(&mut hasher);
         self.playback_error.hash(&mut hasher);
+        // A bot's streaming reply grows the last row every frame.
+        self.stream_rows_hash().hash(&mut hasher);
         Some(hasher.finish())
     }
 
@@ -1306,6 +1308,30 @@ impl QuillApp {
                         })));
                     }
                 }
+            }
+            // A bot's streaming reply (`updatePendingMessage`) is its next
+            // incoming message, growing as it arrives (Telegram Desktop).
+            if let Some(message) = self.streaming_bot_message(cx) {
+                let (sender, receipt, sender_avatar, run_start) = row_chrome(&message, true);
+                rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
+                    sender,
+                    receipt,
+                    sender_avatar,
+                    highlighted: false,
+                    run_start,
+                    day_label: None,
+                    unread_divider: false,
+                    selected_forward: false,
+                    quote_preview: None,
+                    forward_from: None,
+                    seek_bar: None,
+                    animation_playing: false,
+                    animation_frame: None,
+                    video_playing: false,
+                    video_frame: None,
+                    is_secret: false,
+                    message,
+                })));
             }
             // kit Phase 3: sync the scroller state with the new row list.
             let count = rows.len();
