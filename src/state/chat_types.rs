@@ -67,6 +67,8 @@ pub struct ChatLastMessage {
     /// Unix seconds.
     pub date: i32,
     pub is_outgoing: bool,
+    /// Who sent it: group previews name the sender ("Dad: …").
+    pub sender: Option<MessageSender>,
 }
 
 #[derive(Debug, Clone)]

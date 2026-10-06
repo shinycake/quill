@@ -353,6 +353,15 @@ impl Session {
                 }));
             }
         }
+        // Custom emoji in chat-list previews.
+        for chat in self.chats.values() {
+            ids.extend(chat.last_preview_style.entities.iter().filter_map(
+                |entity| match entity.kind {
+                    TextEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id),
+                    _ => None,
+                },
+            ));
+        }
         if let Some(options) = &self.message_reaction_options {
             ids.extend(options.all().into_iter().filter_map(|choice| match choice {
                 crate::state::ReactionChoice::CustomEmoji(id) => Some(id),

@@ -6,6 +6,40 @@ impl Session {
     /// schema 1.8.67 line 2403) — gates `premiumFeatureRichMessages`
     /// ("The ability to send rich messages"). False until our own user
     /// object arrives.
+    /// The chat with yourself (TDLib: a private chat whose id is your user
+    /// id), shown as "Saved Messages" with a bookmark.
+    pub fn is_saved_messages(&self, chat_id: ChatId) -> bool {
+        self.my_user_id == Some(chat_id.0)
+    }
+
+    /// Who wrote a chat's last message, for group previews ("Dad: hi",
+    /// "You: hi"), as Telegram Desktop shows them. `None` for private
+    /// chats and channels, which show the text alone.
+    pub fn chat_preview_sender(&self, chat: &ChatSummary) -> Option<String> {
+        let group = matches!(
+            chat.kind,
+            ChatKind::BasicGroup { .. }
+                | ChatKind::Supergroup {
+                    is_channel: false,
+                    ..
+                }
+        );
+        let last = chat.last_message.filter(|_| group)?;
+        if last.is_outgoing {
+            return Some("You".to_string());
+        }
+        match last.sender? {
+            MessageSender::User { user_id } => self.users.get(&user_id).map(|user| {
+                if user.first_name.trim().is_empty() {
+                    user.display_name()
+                } else {
+                    user.first_name.clone()
+                }
+            }),
+            MessageSender::Chat { chat_id } => self.chats.get(&chat_id).map(|c| c.title.clone()),
+        }
+    }
+
     /// TDLib's `is_premium` option when known, else the own user record.
     pub fn my_is_premium(&self) -> bool {
         self.premium_option.unwrap_or_else(|| {

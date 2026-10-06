@@ -203,6 +203,25 @@ pub(super) fn chat_avatar(
     kit_avatar_element(name, photo_path, px(size))
 }
 
+/// Saved Messages' avatar: a bookmark on the accent color (Telegram
+/// Desktop draws it instead of your own photo).
+pub(super) fn saved_messages_avatar(size: f32) -> AnyElement {
+    div()
+        .size(px(size))
+        .flex_none()
+        .rounded_full()
+        .bg(accent())
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            Icon::new(IconName::Bookmark)
+                .size(px(size * 0.45))
+                .text_color(gpui_kit::white()),
+        )
+        .into_any_element()
+}
+
 /// Parity slice: compact subscriber/member counts for the header
 /// ("12.3K", "1.2M").
 pub(super) fn compact_count(count: i32) -> String {
@@ -352,6 +371,9 @@ impl QuillApp {
                         self.appearance.chat_list_media_icons,
                         self.appearance.chat_list_rich_preview,
                     ),
+                    self.session().is_some_and(|s| s.is_saved_messages(chat.id)),
+                    self.session().and_then(|s| s.chat_preview_sender(chat)),
+                    self.preview_emoji_images(chat, cx),
                     cx,
                 )
                 .into_any_element()
@@ -448,10 +470,21 @@ pub(super) fn session_chat_row(
     // Slice chatlist-list-style: preview line count, media icons, and
     // formatted preview (Settings → Appearance → Chat list rows).
     row_style: ChatListRowStyle,
+    // The chat with yourself: "Saved Messages" with a bookmark avatar.
+    saved: bool,
+    // Group previews lead with the sender ("Dad: …", "You: …").
+    preview_sender: Option<String>,
+    // Images for custom emoji in the preview.
+    preview_emoji: std::collections::HashMap<i64, ImageSource>,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
-    let title = chat.title.clone();
+    let title: String = if saved {
+        "Saved Messages".to_string()
+    } else {
+        chat.title.clone()
+    };
+    let online = online && !saved;
     // Slice CL2: cloned for the pin-drag ghost (the row itself moves
     // `title` below).
     let drag_title = title.clone();
@@ -466,10 +499,22 @@ pub(super) fn session_chat_row(
     } else {
         None
     };
-    let entities: &[TextEntity] = if row_style.rich_preview && from_last {
+    // Custom emoji are content, not formatting: they show even when the
+    // rich preview (bold, italic…) is off.
+    let custom_only: Vec<TextEntity>;
+    let entities: &[TextEntity] = if !from_last {
+        &[]
+    } else if row_style.rich_preview {
         &chat.last_preview_style.entities
     } else {
-        &[]
+        custom_only = chat
+            .last_preview_style
+            .entities
+            .iter()
+            .filter(|e| matches!(e.kind, quill::text::TextEntityKind::CustomEmoji { .. }))
+            .cloned()
+            .collect();
+        &custom_only
     };
     // Slice CL1: a marked-as-unread chat shows the unread badge even
     // with zero unread messages (official clients show a dot); the count
@@ -586,7 +631,11 @@ pub(super) fn session_chat_row(
                 // avatar while multi-select is active.
                 .when(selecting, |this| this.child(select_check(id, checked)))
                 .child(with_presence_dot(
-                    chat_avatar(&title, photo_path, CHAT_ROW_AVATAR),
+                    if saved {
+                        saved_messages_avatar(CHAT_ROW_AVATAR)
+                    } else {
+                        chat_avatar(&title, photo_path, CHAT_ROW_AVATAR).into_any_element()
+                    },
                     online,
                     13.,
                     cx,
@@ -674,11 +723,35 @@ pub(super) fn session_chat_row(
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .child(div().flex_1().min_w_0().child(
-                                    super::chatlist_style::chat_list_preview_line(
-                                        icon, &preview, entities, cx,
-                                    ),
-                                ))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .min_w_0()
+                                        .items_center()
+                                        .when_some(
+                                            preview_sender.filter(|_| from_last),
+                                            |this, sender| {
+                                                this.child(
+                                                    div()
+                                                        .flex_none()
+                                                        .text_xs()
+                                                        .text_color(accent())
+                                                        .child(format!("{sender}: ")),
+                                                )
+                                            },
+                                        )
+                                        .child(div().min_w_0().flex_1().child(
+                                            super::chatlist_style::chat_list_preview_line(
+                                                icon,
+                                                &preview,
+                                                entities,
+                                                &preview_emoji,
+                                                cx,
+                                            ),
+                                        )),
+                                )
                                 // Slice CL3: TGX order — ♥ reactions, @ mentions,
                                 // then the unread counter at the trailing edge.
                                 .child(

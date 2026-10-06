@@ -108,7 +108,16 @@ impl QuillApp {
             })
         });
         let discuss_chat_id = extras.as_ref().and_then(|ex| ex.discussion_chat_id);
-        let title_text = title.to_string();
+        // Your own chat reads "Saved Messages" with a bookmark and no
+        // presence line, as in Telegram Desktop.
+        let saved = actions.is_some_and(|(chat_id, _, _, _)| {
+            self.session().is_some_and(|s| s.is_saved_messages(chat_id))
+        });
+        let title_text = if saved {
+            "Saved Messages".to_string()
+        } else {
+            title.to_string()
+        };
         let muted_fg = cx.theme().muted_foreground;
         // Phase B4: chat-level auto-delete / self-destruct timer status
         // (`chat.message_auto_delete_time`, schema 1.8.67 lines 3616 /
@@ -137,7 +146,7 @@ impl QuillApp {
             Some(InfoPanelTarget::User(user_id)) => Some(user_id),
             _ => None,
         };
-        let presence = private_user.and_then(|user_id| {
+        let presence = private_user.filter(|_| !saved).and_then(|user_id| {
             let user = session?.user(user_id)?;
             if user.is_bot {
                 Some(("bot".to_string(), false))
@@ -197,7 +206,11 @@ impl QuillApp {
             .gap_3()
             .min_w_0()
             .when(actions.is_some(), |this| {
-                this.child(chat_avatar(&title_text, photo.as_deref(), 38.))
+                this.child(if saved {
+                    super::chat_row::saved_messages_avatar(38.)
+                } else {
+                    chat_avatar(&title_text, photo.as_deref(), 38.).into_any_element()
+                })
             })
             .child(
                 div()

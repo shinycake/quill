@@ -359,6 +359,48 @@ impl QuillApp {
         out
     }
 
+    /// Images for the custom emoji in a chat-list preview: animated when
+    /// decoded, the still meanwhile.
+    pub(super) fn preview_emoji_images(
+        &self,
+        chat: &quill::state::ChatSummary,
+        cx: &mut Context<QuillApp>,
+    ) -> HashMap<i64, ImageSource> {
+        use quill::text::TextEntityKind;
+        let mut out = HashMap::new();
+        let Some(session) = self.session() else {
+            return out;
+        };
+        let roots = self.media_display_roots();
+        for entity in &chat.last_preview_style.entities {
+            let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
+                continue;
+            };
+            let Some(item) = session
+                .emoji
+                .custom_emoji_stickers
+                .iter()
+                .find(|item| item.custom_emoji_id == Some(custom_emoji_id))
+            else {
+                continue;
+            };
+            let source = self
+                .custom_emoji_image(item.file_id, item.format, cx)
+                .map(ImageSource::from)
+                .or_else(|| {
+                    item.display_file_id()
+                        .and_then(|file| session.files.get(&file.0))
+                        .and_then(|file| file.usable_path())
+                        .and_then(|path| sandboxed_display_path(path, &roots))
+                        .map(ImageSource::from)
+                });
+            if let Some(source) = source {
+                out.insert(custom_emoji_id, source);
+            }
+        }
+        out
+    }
+
     /// The animated frames of a custom emoji (small, many on screen).
     pub(super) fn custom_emoji_image(
         &self,
