@@ -1038,8 +1038,8 @@ pub(super) fn message_text_block(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = msg_key.1;
-    let font = if big_emoji && text.entities.is_empty() && text.link_preview.is_none() {
-        match quill::emoji_catalog::big_emoji_count(&text.text) {
+    let font = if big_emoji && text.link_preview.is_none() {
+        match quill::emoji_catalog::big_emoji_count_with_entities(&text.text, &text.entities) {
             Some(1) => font.max(px(40.)),
             Some(2) => font.max(px(36.)),
             Some(3) => font.max(px(32.)),

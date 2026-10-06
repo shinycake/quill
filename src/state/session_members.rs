@@ -6,10 +6,13 @@ impl Session {
     /// schema 1.8.67 line 2403) — gates `premiumFeatureRichMessages`
     /// ("The ability to send rich messages"). False until our own user
     /// object arrives.
+    /// TDLib's `is_premium` option when known, else the own user record.
     pub fn my_is_premium(&self) -> bool {
-        self.my_user_id
-            .and_then(|me| self.users.get(&me))
-            .is_some_and(|user| user.is_premium)
+        self.premium_option.unwrap_or_else(|| {
+            self.my_user_id
+                .and_then(|me| self.users.get(&me))
+                .is_some_and(|user| user.is_premium)
+        })
     }
 
     /// Record own channel membership from `getChatMember` / `updateChatMember`.

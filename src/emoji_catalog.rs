@@ -51,6 +51,39 @@ pub fn search<'a>(
 }
 
 /// One to three plain emoji, counting flags, skin tones and ZWJ sequences as units.
+/// [`big_emoji_count`] for a message with entities: each custom-emoji span
+/// counts as one emoji, and any other entity rules big emoji out.
+pub fn big_emoji_count_with_entities(
+    text: &str,
+    entities: &[crate::text::TextEntity],
+) -> Option<usize> {
+    use crate::text::TextEntityKind;
+    let mut rest = String::with_capacity(text.len());
+    let mut custom = 0;
+    let mut at = 0;
+    let mut spans: Vec<_> = entities.iter().collect();
+    spans.sort_by_key(|e| e.utf8_start);
+    for entity in spans {
+        if !matches!(entity.kind, TextEntityKind::CustomEmoji { .. })
+            || entity.utf8_start < at
+            || entity.utf8_end > text.len()
+        {
+            return None;
+        }
+        rest.push_str(text.get(at..entity.utf8_start)?);
+        custom += 1;
+        at = entity.utf8_end;
+    }
+    rest.push_str(text.get(at..)?);
+    let plain = if rest.trim().is_empty() {
+        0
+    } else {
+        big_emoji_count(&rest)?
+    };
+    let count = custom + plain;
+    (count > 0 && count <= 3).then_some(count)
+}
+
 pub fn big_emoji_count(text: &str) -> Option<usize> {
     use std::collections::HashSet;
     use std::sync::OnceLock;
@@ -91,6 +124,38 @@ impl MediaPrefs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn custom_emoji_count_as_big_emoji() {
+        use crate::text::{TextEntity, TextEntityKind};
+        let custom = |start: usize, end: usize| TextEntity {
+            utf8_start: start,
+            utf8_end: end,
+            kind: TextEntityKind::CustomEmoji { custom_emoji_id: 1 },
+        };
+        // "🔠🔠" (4 bytes each), both custom.
+        assert_eq!(
+            big_emoji_count_with_entities("🔠🔠", &[custom(0, 4), custom(4, 8)]),
+            Some(2)
+        );
+        // A custom emoji plus a plain emoji.
+        assert_eq!(
+            big_emoji_count_with_entities("🔠 😀", &[custom(0, 4)]),
+            Some(2)
+        );
+        // Text next to it, or a non-emoji entity, is not big.
+        assert_eq!(
+            big_emoji_count_with_entities("🔠 hi", &[custom(0, 4)]),
+            None
+        );
+        let bold = TextEntity {
+            utf8_start: 0,
+            utf8_end: 4,
+            kind: TextEntityKind::Bold,
+        };
+        assert_eq!(big_emoji_count_with_entities("😀", &[bold]), None);
+        assert_eq!(big_emoji_count_with_entities("😀", &[]), Some(1));
+    }
+
     #[test]
     fn big_emoji_uses_graphemes_and_excludes_text() {
         assert_eq!(big_emoji_count(" 👩🏽‍💻 🇺🇸 ❤️ "), Some(3));

@@ -55,6 +55,18 @@ impl Session {
             // media-send captions); every other option parses but is
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
+                if name == "my_id"
+                    && let OptionValue::Integer(id) = &value
+                    && *id > 0
+                {
+                    self.my_user_id = Some(*id);
+                }
+                if name == "is_premium" {
+                    self.premium_option = match &value {
+                        OptionValue::Boolean(on) => Some(*on),
+                        _ => Some(false),
+                    };
+                }
                 if name == "gift_text_length_max"
                     && let OptionValue::Integer(limit) = &value
                 {

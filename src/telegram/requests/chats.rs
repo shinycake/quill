@@ -375,7 +375,13 @@ pub fn set_chat_draft_message(
     let draft_message = match text {
         None if reply_to.is_none() => Value::Null,
         text => {
-            let body = text.unwrap_or("");
+            // Composer markup becomes entities, as on send, so other
+            // clients show the formatting instead of the raw markers.
+            let (body, entities) = crate::composer::parse_format_markup(text.unwrap_or(""));
+            let entities: Vec<Value> = entities
+                .iter()
+                .map(super::messages::format_entity_json)
+                .collect();
             json!({
                 "@type": "draftMessage",
                 "reply_to": send_reply_value(reply_to),
@@ -385,7 +391,7 @@ pub fn set_chat_draft_message(
                     "text": {
                         "@type": "formattedText",
                         "text": body,
-                        "entities": []
+                        "entities": entities
                     },
                     "link_preview_options": Value::Null
                 },

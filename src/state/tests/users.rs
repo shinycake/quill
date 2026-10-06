@@ -294,3 +294,44 @@ fn a6_block_ok_updates_cached_blocked() {
     );
     assert!(session.user_full_infos.get(&31).expect("info").blocked);
 }
+
+/// A live session never sends `getMe`: the own id and Premium state come
+/// from the options TDLib pushes after authorization.
+#[test]
+fn own_id_and_premium_come_from_tdlib_options() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUser","user":{"id":77,"first_name":"Me","type":{"@type":"userTypeRegular"},"is_premium":false}}"#,
+    );
+    assert_eq!(session.my_user_id, None);
+    assert!(!session.my_is_premium());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":"77"}}"#,
+    );
+    assert_eq!(session.my_user_id, Some(77));
+    assert!(!session.my_is_premium(), "falls back to the user record");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueBoolean","value":true}}"#,
+    );
+    assert!(
+        session.my_is_premium(),
+        "the option wins over a stale record"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueEmpty"}}"#,
+    );
+    assert!(!session.my_is_premium());
+}
