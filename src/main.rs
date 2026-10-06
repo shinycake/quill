@@ -81,7 +81,9 @@ gpui_kit::assets::icon_assets!(
         Ban,
         Flag,
         ListChecks,
-        MessageSquareDot
+        MessageSquareDot,
+        Crop,
+        Undo2
     ]
 );
 
