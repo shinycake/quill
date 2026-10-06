@@ -2449,6 +2449,7 @@ impl Session {
                 id: message.id,
                 date: message.date,
                 is_outgoing: message.is_outgoing,
+                sender: message.sender,
             });
         } else {
             chat.last_preview = String::new();

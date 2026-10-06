@@ -16,6 +16,8 @@ pub(crate) fn chat_list_preview_line(
     icon: Option<&str>,
     preview: &str,
     entities: &[TextEntity],
+    // Images for the preview's custom emoji (animated when decoded).
+    emoji: &std::collections::HashMap<i64, ImageSource>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let mut line = div()
@@ -31,8 +33,20 @@ pub(crate) fn chat_list_preview_line(
     if entities.is_empty() {
         return line.child(preview.to_string()).into_any_element();
     }
-    for run in styled_runs(preview, entities) {
+    let key = line_key(preview);
+    for (index, run) in styled_runs(preview, entities).into_iter().enumerate() {
         if run.text.is_empty() {
+            continue;
+        }
+        if let Some(source) = run.custom_emoji_id.and_then(|id| emoji.get(&id)) {
+            line = line.child(
+                img(source.clone())
+                    .id(SharedString::from(format!("preview-emoji-{key}-{index}")))
+                    .size(px(14.))
+                    .aspect_square()
+                    .object_fit(ObjectFit::Contain)
+                    .flex_none(),
+            );
             continue;
         }
         let style = &run.style;
@@ -58,4 +72,13 @@ pub(crate) fn chat_list_preview_line(
         line = line.child(el);
     }
     line.into_any_element()
+}
+
+/// A stable per-preview key for element ids (GPUI animates an image
+/// only when it has an id).
+fn line_key(preview: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    preview.hash(&mut hasher);
+    hasher.finish()
 }

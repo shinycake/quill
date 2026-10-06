@@ -63,7 +63,8 @@ gpui_kit::assets::icon_assets!(
         Star,
         Volume2,
         VolumeX,
-        PictureInPicture2
+        PictureInPicture2,
+        Bookmark
     ]
 );
 
