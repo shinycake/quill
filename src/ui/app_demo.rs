@@ -928,7 +928,7 @@ impl QuillApp {
         let submit_on_enter = chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Message")
+                .placeholder("Write a message...")
                 .auto_grow(1, 8)
                 .submit_on_enter(submit_on_enter)
         });
