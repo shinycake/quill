@@ -119,4 +119,94 @@ impl QuillApp {
         };
         (!text.trim().is_empty()).then_some((draft.from_chat_id, text))
     }
+
+    /// "Delete N" for the selection: Telegram Desktop's confirmation, with
+    /// "delete for everyone" (checked by default) when every selected
+    /// message is yours and the chat isn't Saved Messages.
+    pub(super) fn confirm_delete_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = self.pending_forward.as_ref() else {
+            return;
+        };
+        let (chat_id, ids) = (draft.from_chat_id, draft.message_ids.clone());
+        let Some(session) = self.session() else {
+            return;
+        };
+        let all_outgoing = session.histories.get(&chat_id.0).is_some_and(|history| {
+            ids.iter().all(|id| {
+                history
+                    .messages
+                    .get(&id.0)
+                    .is_some_and(|message| message.is_outgoing)
+            })
+        });
+        let revoke_label = (all_outgoing && !session.is_saved_messages(chat_id)).then(|| {
+            match session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
+                Some(quill::telegram::envelope::ChatKind::Private { user_id }) => session
+                    .user(user_id.0)
+                    .map(|user| format!("Also delete for {}", user.first_name))
+                    .unwrap_or_else(|| "Delete for everyone".into()),
+                _ => "Delete for everyone".into(),
+            }
+        });
+        let question = if ids.len() == 1 {
+            "Do you want to delete this message?".to_string()
+        } else {
+            format!("Do you want to delete {} messages?", ids.len())
+        };
+        let revoke = std::rc::Rc::new(std::cell::Cell::new(true));
+        let app = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (app, ids, revoke) = (app.clone(), ids.clone(), revoke.clone());
+            let checkbox_state = revoke.clone();
+            let label = revoke_label.clone();
+            alert
+                .description(question.clone())
+                .when_some(label, |alert, label| {
+                    alert.content(move |content, _, _| {
+                        let state = checkbox_state.clone();
+                        content.child(
+                            gpui_kit::component::checkbox::Checkbox::new("delete-selection-revoke")
+                                .label(label.clone())
+                                .checked(state.get())
+                                .on_click(move |checked, window, _| {
+                                    state.set(*checked);
+                                    window.refresh();
+                                }),
+                        )
+                    })
+                })
+                .ok_text("Delete")
+                .cancel_text("Cancel")
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    let revoke = revoke.get();
+                    let ids = ids.clone();
+                    let _ = app.update(cx, |this, cx| {
+                        this.delete_selection(chat_id, &ids, revoke, cx);
+                    });
+                    true
+                })
+        });
+    }
+
+    fn delete_selection(
+        &mut self,
+        chat_id: ChatId,
+        ids: &[MessageId],
+        revoke: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
+                self.status_note = "could not delete messages".into();
+            }
+        } else if self.demo_session.is_some() {
+            for id in ids {
+                self.apply_demo_delete(chat_id, *id);
+            }
+        }
+        self.pending_forward = None;
+        self.forward_picker_open = false;
+        cx.notify();
+    }
 }

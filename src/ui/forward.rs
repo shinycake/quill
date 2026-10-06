@@ -317,6 +317,13 @@ impl QuillApp {
                             })),
                     )
                     .child(
+                        Button::new("delete-selection")
+                            .label("Delete")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.confirm_delete_selection(window, cx);
+                            })),
+                    )
+                    .child(
                         Button::new("open-forward-picker")
                             .label("Forward")
                             .on_click(cx.listener(|this, _, window, cx| {

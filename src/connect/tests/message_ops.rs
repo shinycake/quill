@@ -1277,6 +1277,24 @@ fn driver_delete_confirm_shape_and_tombstone() {
         Err(ConnectSendError::InvalidRequest)
     );
 
+    // Selection mode: one request for several messages; "delete for
+    // everyone" only when they're all your own.
+    driver
+        .delete_selected(ChatId(7), &[MessageId(50), MessageId(60)], true)
+        .unwrap();
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["message_ids"], serde_json::json!([50, 60]));
+    assert_eq!(v["revoke"], false, "a mixed selection deletes only for me");
+    driver
+        .delete_selected(ChatId(7), &[MessageId(60)], true)
+        .unwrap();
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["revoke"], true);
+    assert_eq!(
+        driver.delete_selected(ChatId(7), &[MessageId(60), MessageId(999)], true),
+        Err(ConnectSendError::InvalidRequest)
+    );
+
     let confirm = DeleteConfirm::own(ChatId(7), MessageId(60), true, false).unwrap();
     let extra = driver.delete_confirmed(&confirm).unwrap();
     let json = recorder.snapshot().last().cloned().expect("deleteMessages");
