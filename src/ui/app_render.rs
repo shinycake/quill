@@ -229,7 +229,7 @@ impl Render for QuillApp {
             .relative()
             .bg(cx.theme().background)
             // Window-wide text selection: message text can be selected and
-            // copied (Telegram Desktop), across messages too.
+            // copied within a message (Telegram Desktop).
             .child(gpui_kit::base::TextSelectionLayer)
             // Capture phase: with message text selected, ⌘C copies it even
             // while the composer has focus.
