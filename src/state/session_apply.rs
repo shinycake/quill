@@ -1465,6 +1465,17 @@ impl Session {
                     self.blocked_error = false;
                 }
             }
+            EnvelopePayload::Count { count } => {
+                if let Some(RequestPurpose::GetChatMessageCount { filter }) =
+                    pending.map(|p| p.purpose)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.chat_media_counts
+                        .entry(chat_id.0)
+                        .or_default()
+                        .insert(filter, count);
+                }
+            }
             EnvelopePayload::FoundChatMessages {
                 messages,
                 total_count,
@@ -1828,15 +1839,18 @@ impl Session {
                 }
             }
             EnvelopePayload::UserFullInfo {
+                extras,
                 bot_info,
                 bio,
                 photo,
                 photo_id,
                 blocked,
-            } => self
-                .apply_user_full_info(bot_info, bio, photo, photo_id, blocked, pending, extra, seq),
+            } => self.apply_user_full_info(
+                bot_info, bio, photo, photo_id, blocked, extras, pending, extra, seq,
+            ),
             EnvelopePayload::UpdateUserFullInfo {
                 user_id,
+                extras,
                 bot_info,
                 bio,
                 photo,
@@ -1856,6 +1870,7 @@ impl Session {
                         photo_file_id,
                         photo_id,
                         blocked,
+                        extras,
                     },
                 );
             }

@@ -54,8 +54,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatInviteLinks, Some(chat_id));
+        // `creator_user_id` must be an administrator — yourself unless you
+        // own the chat (schema 1.8.67, line 14133); 0 is rejected (400).
+        let creator = self.session.my_user_id.unwrap_or(0);
         if let Err(err) = self.sender.send_json(&get_chat_invite_links(
-            extra, chat_id.0, 0, false, 0, "", 100,
+            extra, chat_id.0, creator, false, 0, "", 100,
         )) {
             self.session.requests.take(extra);
             self.session.invite_links.remove(&chat_id.0);

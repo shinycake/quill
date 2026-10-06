@@ -421,6 +421,7 @@ fn user_full_info_bot_info_parsed() {
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::UserFullInfo {
+            extras: _,
             bot_info,
             bio,
             photo,

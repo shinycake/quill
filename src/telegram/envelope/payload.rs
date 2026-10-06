@@ -41,6 +41,9 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 files,
             })
         }
+        "count" => Ok(EnvelopePayload::Count {
+            count: value.get("count").and_then(Value::as_i64).unwrap_or(0) as i32,
+        }),
         "updateStopMessageDraft" => Ok(EnvelopePayload::UpdateStopMessageDraft {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             forum_topic_id: i32::try_from(int53(value.get("forum_topic_id"))?)
@@ -1626,6 +1629,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             user_id: int53(value.get("id"))?,
         }),
         "userFullInfo" => Ok(EnvelopePayload::UserFullInfo {
+            extras: super::envelope_types::parse_user_profile_extras(Some(&value)),
             bot_info: parse_bot_info(value.get("bot_info")),
             bio: parse_formatted_text(value.get("bio")),
             photo: parse_user_full_info_photo(&value),
@@ -1634,6 +1638,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         }),
         "updateUserFullInfo" => Ok(EnvelopePayload::UpdateUserFullInfo {
             user_id: UserId(int53(value.get("user_id"))?),
+            extras: super::envelope_types::parse_user_profile_extras(value.get("user_full_info")),
             bot_info: parse_bot_info(
                 value
                     .get("user_full_info")

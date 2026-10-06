@@ -546,6 +546,11 @@ pub enum EnvelopePayload {
         total_count: i32,
         sender_ids: Vec<i64>,
     },
+    /// `count` — the answer to `getChatMessageCount` (schema 1.8.67,
+    /// line 10068).
+    Count {
+        count: i32,
+    },
     /// `foundChatMessages` — `searchChatMessages`.
     FoundChatMessages {
         total_count: i32,
@@ -930,6 +935,9 @@ pub enum EnvelopePayload {
     /// `userFullInfo.bio:formattedText`) and the preferred profile-photo
     /// file (from `userFullInfo.photo:chatPhoto` sizes) are kept.
     UserFullInfo {
+        /// `userFullInfo.birthdate` and `group_in_common_count` (schema
+        /// 1.8.67, line 2468) for the profile panel.
+        extras: UserProfileExtras,
         bot_info: Option<BotInfo>,
         bio: String,
         /// Preferred size's `photo:file` from `chatPhoto.sizes`
@@ -947,6 +955,7 @@ pub enum EnvelopePayload {
     /// the user id is explicit here.
     UpdateUserFullInfo {
         user_id: UserId,
+        extras: UserProfileExtras,
         bot_info: Option<BotInfo>,
         bio: String,
         photo: Option<ParsedFile>,
@@ -1431,5 +1440,52 @@ pub struct MessageActions {
 impl MessageActions {
     pub fn can_be_deleted(&self) -> bool {
         self.can_be_deleted_only_for_self || self.can_be_deleted_for_all_users
+    }
+}
+
+/// Profile details from `userFullInfo` beyond the bio: the birthday and
+/// how many groups you share with the user.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UserProfileExtras {
+    pub birthdate: Option<Birthdate>,
+    pub groups_in_common: i32,
+}
+
+/// `birthdate` (schema 1.8.67, line 868); the year is optional (0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Birthdate {
+    pub day: u8,
+    pub month: u8,
+    pub year: Option<i32>,
+}
+
+pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> UserProfileExtras {
+    let Some(info) = info else {
+        return UserProfileExtras::default();
+    };
+    let field = |value: &serde_json::Value, key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+    };
+    let birthdate = info
+        .get("birthdate")
+        .filter(|value| !value.is_null())
+        .and_then(|value| {
+            let (day, month, year) = (
+                field(value, "day"),
+                field(value, "month"),
+                field(value, "year"),
+            );
+            ((1..=31).contains(&day) && (1..=12).contains(&month)).then(|| Birthdate {
+                day: day as u8,
+                month: month as u8,
+                year: (year > 0).then_some(year as i32),
+            })
+        });
+    UserProfileExtras {
+        birthdate,
+        groups_in_common: field(info, "group_in_common_count").max(0) as i32,
     }
 }

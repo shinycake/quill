@@ -209,6 +209,7 @@ fn user_full_info_bio_parsed() {
         .unwrap();
     match env.payload {
         EnvelopePayload::UserFullInfo {
+            extras: _,
             bio,
             bot_info,
             photo,
