@@ -127,6 +127,8 @@ pub struct QuillApp {
     pub(super) emoji_status_hours_input: Entity<TextareaState>,
     pub(super) emoji_set_search_input: Entity<TextareaState>,
     pub(super) emoji_search_input: Entity<TextareaState>,
+    /// The reaction selector's own search (cleared on each open).
+    pub(super) reaction_search_input: Entity<TextareaState>,
     pub(super) gif_search_input: Entity<TextareaState>,
     pub(super) marketplace_open: bool,
     pub(super) marketplace_name_input: Entity<TextareaState>,

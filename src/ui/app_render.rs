@@ -632,6 +632,32 @@ impl Render for QuillApp {
             .when_some(self.message_menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
+            // The expanded reaction selector, where the menu was.
+            .when_some(self.media_panel.reaction, |this, target| {
+                let panel = self.media_panel(cx);
+                this.child(
+                    div()
+                        .id("reaction-selector-layer")
+                        .occlude()
+                        .absolute()
+                        .inset_0()
+                        .child(
+                            div()
+                                .id("reaction-selector-backdrop")
+                                .absolute()
+                                .inset_0()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_media_panel(cx);
+                                })),
+                        )
+                        .child(
+                            anchored()
+                                .position(target.position)
+                                .snap_to_window_with_margin(px(8.))
+                                .child(panel),
+                        ),
+                )
+            })
             // Slice CL1: right-click chat-row context menu.
             .when_some(self.chat_menu, |this, menu| {
                 this.child(self.chat_menu_overlay(menu, cx))
