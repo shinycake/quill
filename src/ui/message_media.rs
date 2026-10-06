@@ -832,12 +832,21 @@ pub(super) fn video_note_attachment(
     media_roots: &[PathBuf],
     playing: bool,
     frame: Option<&std::path::Path>,
+    inline: Option<super::inline_video::InlineFrame>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
     let play_id = note.play_file_id().unwrap_or(FileId(0));
     let thumb_id = note.thumb_file_id().unwrap_or(FileId(0));
-    let duration = format_voice_duration(note.duration);
+    // Playing with sound: the time left (Telegram Desktop).
+    let duration = match inline.as_ref() {
+        Some(inline) if inline.sound => {
+            format_voice_duration(inline.remaining_secs.unwrap_or(0.0).ceil() as i32)
+        }
+        _ => format_voice_duration(note.duration),
+    };
+    let live = inline.is_some();
+    let sounding = inline.as_ref().is_some_and(|inline| inline.sound);
     let visual = if playing {
         frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
     } else {
@@ -857,40 +866,44 @@ pub(super) fn video_note_attachment(
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = note.is_secret;
-    let unseen = !outgoing && !note.is_viewed && !playing;
-    let has_visual = !blocked && visual.is_some();
-    let picture = match visual.filter(|_| !blocked) {
-        // GPUI clips overflow to rectangles: the image and the placeholder
-        // round themselves.
-        Some(path) => img(path)
-            .id(("video-note-img", row_id))
-            .size_full()
-            .rounded_full()
-            .object_fit(ObjectFit::Cover)
-            .with_fallback(|| {
-                div()
-                    .size_full()
-                    .rounded_full()
-                    .bg(fill_muted())
-                    .into_any_element()
-            })
-            .into_any_element(),
-        None => div()
-            .size_full()
-            .rounded_full()
-            .bg(fill_muted())
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(blocked, |this| {
-                this.child(
+    let unseen = !outgoing && !note.is_viewed && !playing && !sounding;
+    let has_visual = !blocked && (live || visual.is_some());
+    let picture = if let Some(inline) = inline {
+        round_inline_surface(inline)
+    } else {
+        match visual.filter(|_| !blocked) {
+            // GPUI clips overflow to rectangles: the image and the placeholder
+            // round themselves.
+            Some(path) => img(path)
+                .id(("video-note-img", row_id))
+                .size_full()
+                .rounded_full()
+                .object_fit(ObjectFit::Cover)
+                .with_fallback(|| {
                     div()
-                        .text_xs()
-                        .text_color(text_muted())
-                        .child("Video message"),
-                )
-            })
-            .into_any_element(),
+                        .size_full()
+                        .rounded_full()
+                        .bg(fill_muted())
+                        .into_any_element()
+                })
+                .into_any_element(),
+            None => div()
+                .size_full()
+                .rounded_full()
+                .bg(fill_muted())
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(blocked, |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child("Video message"),
+                    )
+                })
+                .into_any_element(),
+        }
     };
     let disc = if downloading_now && !has_visual {
         MediaDisc::Progress(download_fraction(play_id, files))
@@ -902,6 +915,20 @@ pub(super) fn video_note_attachment(
     let viewed = note.is_viewed;
     let toggle = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
         if blocked {
+            return;
+        }
+        // A muted inline loop: play it once with sound (Telegram Desktop).
+        if live {
+            if this
+                .inline_videos
+                .borrow_mut()
+                .toggle_sound(chat_id.0, message_id.0)
+            {
+                if !viewed {
+                    this.mark_voice_opened(chat_id, message_id);
+                }
+                cx.notify();
+            }
             return;
         }
         this.toggle_video_playback(
@@ -929,11 +956,11 @@ pub(super) fn video_note_attachment(
                 .overflow_hidden()
                 .group(MEDIA_VISUAL_GROUP)
                 // An unseen incoming note carries an accent ring.
-                .when(unseen, |this| {
+                .when(unseen && !live, |this| {
                     this.border_2().border_color(cx.theme().primary)
                 })
                 .role(gpui_kit::Role::Button)
-                .aria_label(if playing {
+                .aria_label(if playing || sounding {
                     "Pause video message"
                 } else {
                     "Play video message"
@@ -942,7 +969,19 @@ pub(super) fn video_note_attachment(
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| toggle(this, cx)))
                 .child(picture)
-                .when(!blocked, |this| {
+                // Over the video's mask, so the ring stays visible.
+                .when(unseen && live, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .rounded_full()
+                            .border_2()
+                            .border_color(cx.theme().primary),
+                    )
+                })
+                // A looping round video shows no play control.
+                .when(!blocked && !live, |this| {
                     this.child(
                         div()
                             .absolute()
@@ -1956,4 +1995,30 @@ fn inline_surface(
         let _ = inline;
         div().w(frame_w).h(frame_h).into_any_element()
     }
+}
+
+/// A round video message's current frame: the square video under a mask
+/// in the history's color that leaves only the circle.
+fn round_inline_surface(inline: super::inline_video::InlineFrame) -> AnyElement {
+    let diameter = px(VIDEO_NOTE_DIAMETER);
+    // Twice the size for Retina edges.
+    let mask = super::inline_video::circle_mask(VIDEO_NOTE_DIAMETER as u32 * 2, inline.backdrop);
+    #[cfg(target_os = "macos")]
+    let video = gpui_kit::surface(inline.buffer)
+        .size(diameter)
+        .object_fit(ObjectFit::Cover)
+        .into_any_element();
+    #[cfg(not(target_os = "macos"))]
+    let video = div().size(diameter).into_any_element();
+    div()
+        .relative()
+        .size(diameter)
+        .child(video)
+        .child(
+            img(ImageSource::Render(mask))
+                .absolute()
+                .inset_0()
+                .size(diameter),
+        )
+        .into_any_element()
 }
