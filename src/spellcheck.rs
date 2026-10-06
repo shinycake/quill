@@ -279,7 +279,10 @@ fn tokenize(text: &str) -> Vec<(&str, usize, usize)> {
             if rest.starts_with("://")
                 || (word.eq_ignore_ascii_case("www") && rest.starts_with('.'))
             {
-                while i < text.len() && !(bytes[i] as char).is_whitespace() {
+                // Byte-wise: only ASCII whitespace is a whole character
+                // (`0xA0` as a char is U+00A0, but here it is the tail
+                // of a multi-byte character such as 🔠).
+                while i < text.len() && !bytes[i].is_ascii_whitespace() {
                     i += 1;
                 }
                 continue;
@@ -424,6 +427,18 @@ mod tests {
             "WELL-KNOWN"
         );
         assert_eq!(match_capitalization("---", "the"), "the");
+    }
+
+    #[test]
+    fn urls_followed_by_emoji_keep_char_boundaries() {
+        // 🔠 ends in byte 0xA0, which as a lone char is a no-break space.
+        let sc = checker();
+        let text = "![🔠](tg://emoji?id=1)![🔠](tg://emoji?id=2) teh";
+        let miss = sc.check_words(text);
+        assert_eq!(miss.len(), 1);
+        assert_eq!(&text[miss[0].start..miss[0].end], "teh");
+        let tokens = tokenize("https://x.y/🔠a b");
+        assert!(tokens.iter().all(|(word, ..)| *word != "a"));
     }
 
     #[test]

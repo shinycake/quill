@@ -38,12 +38,17 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
     if content.get("@type").and_then(Value::as_str) != Some("draftMessageContentText") {
         return None;
     }
-    let text = content
-        .get("text")
+    // Formatting comes back as composer markup, so a draft synced from
+    // another client (or echoed after our own save) keeps it.
+    let formatted = content.get("text");
+    let plain = formatted
         .and_then(|formatted| formatted.get("text"))
         .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+        .unwrap_or("");
+    let text = crate::composer::entities_to_markup(
+        plain,
+        &super::message_content::parse_text_entities(plain, formatted),
+    );
     let (reply_to_message_id, quote) = match value.get("reply_to") {
         Some(reply)
             if reply.get("@type").and_then(Value::as_str) == Some("inputMessageReplyToMessage") =>

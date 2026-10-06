@@ -648,9 +648,12 @@ pub struct Session {
     pub(crate) sponsored_report_target: Option<(ChatId, i64)>,
     /// Last `reportChatSponsoredMessage` outcome note.
     pub last_sponsored_report: Option<SponsoredReportOutcome>,
-    /// Own user id from `getMe` (TDLib 1.8.67). `None` until the first
-    /// `getMe` response; needed to resolve `getChatMember` ownership.
+    /// Own user id: TDLib's `my_id` option (pushed after authorization),
+    /// or a `getMe` answer. `None` until either arrives.
     pub my_user_id: Option<i64>,
+    /// TDLib's `is_premium` option: the account's current Premium state.
+    /// `None` until the option arrives.
+    pub premium_option: Option<bool>,
     /// Slice CL2: archive auto-settings from `getArchiveChatListSettings`
     /// (schema 1.8.67, line 13421). `None` until the first fetch; the
     /// archive-settings panel fetches on open (TGX
@@ -1159,6 +1162,7 @@ impl Session {
             sponsored_report_target: None,
             last_sponsored_report: None,
             my_user_id: None,
+            premium_option: None,
             archive_chat_list_settings: None,
             archive_settings_loading: false,
             archive_settings_open: false,

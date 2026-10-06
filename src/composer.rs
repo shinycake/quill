@@ -712,6 +712,101 @@ pub fn parse_format_markup(text: &str) -> (String, Vec<ComposerEntity>) {
     (parser.out, parser.entities)
 }
 
+/// Composer markup for `text` and its TDLib entities: the inverse of
+/// [`parse_format_markup`], used to restore drafts that come back from
+/// Telegram. Kinds the markup can't express (URLs, mentions, …) stay plain
+/// text; TDLib detects those again on send.
+pub fn entities_to_markup(text: &str, entities: &[crate::text::TextEntity]) -> String {
+    use crate::text::TextEntityKind as K;
+    // (byte position, is_open, key, marker), sorted by position, closes
+    // before opens, then key descending: opens key on their end (outer
+    // span opens first), closes on their start (inner span closes first).
+    let mut inserts: Vec<(usize, bool, usize, String)> = Vec::new();
+    // The markup has no nesting (inner markers stay literal), so keep a
+    // set of non-overlapping spans: custom emoji first, then links, then
+    // longer spans.
+    let rank = |kind: &K| match kind {
+        K::CustomEmoji { .. } => 0,
+        K::TextUrl { .. } => 1,
+        _ => 2,
+    };
+    let mut ordered: Vec<&crate::text::TextEntity> = entities
+        .iter()
+        .filter(|e| {
+            e.utf8_start < e.utf8_end
+                && e.utf8_end <= text.len()
+                && text.is_char_boundary(e.utf8_start)
+                && text.is_char_boundary(e.utf8_end)
+                && matches!(
+                    e.kind,
+                    K::Bold
+                        | K::Italic
+                        | K::Underline
+                        | K::Strikethrough
+                        | K::Spoiler
+                        | K::Code
+                        | K::Pre
+                        | K::PreCode { .. }
+                        | K::TextUrl { .. }
+                        | K::CustomEmoji { .. }
+                        | K::BlockQuote
+                        | K::ExpandableBlockQuote
+                )
+        })
+        .collect();
+    ordered.sort_by_key(|e| (rank(&e.kind), std::cmp::Reverse(e.utf8_end - e.utf8_start)));
+    let mut kept: Vec<&crate::text::TextEntity> = Vec::new();
+    for entity in ordered {
+        if kept
+            .iter()
+            .all(|k| entity.utf8_end <= k.utf8_start || entity.utf8_start >= k.utf8_end)
+        {
+            kept.push(entity);
+        }
+    }
+    for entity in kept {
+        let (start, end) = (entity.utf8_start, entity.utf8_end);
+        let pair = match &entity.kind {
+            K::Bold => ("**".to_string(), "**".to_string()),
+            K::Italic => ("*".to_string(), "*".to_string()),
+            K::Underline => ("__".to_string(), "__".to_string()),
+            K::Strikethrough => ("~~".to_string(), "~~".to_string()),
+            K::Spoiler => ("||".to_string(), "||".to_string()),
+            K::Code => ("`".to_string(), "`".to_string()),
+            K::Pre => ("```\n".to_string(), "\n```".to_string()),
+            K::PreCode { language } => (format!("```{language}\n"), "\n```".to_string()),
+            K::TextUrl { url } => ("[".to_string(), format!("]({url})")),
+            K::CustomEmoji { custom_emoji_id } => (
+                "![".to_string(),
+                format!("](tg://emoji?id={custom_emoji_id})"),
+            ),
+            K::BlockQuote | K::ExpandableBlockQuote => {
+                inserts.push((start, true, end, "> ".to_string()));
+                for (offset, _) in text[start..end].match_indices('\n') {
+                    let line = start + offset + 1;
+                    if line < end {
+                        inserts.push((line, true, end, "> ".to_string()));
+                    }
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        inserts.push((start, true, end, pair.0));
+        inserts.push((end, false, start, pair.1));
+    }
+    inserts.sort_by(|a, b| (a.0, a.1, b.2).cmp(&(b.0, b.1, a.2)));
+    let mut out = String::with_capacity(text.len() + inserts.len() * 4);
+    let mut at = 0;
+    for (pos, _, _, marker) in inserts {
+        out.push_str(&text[at..pos]);
+        out.push_str(&marker);
+        at = pos;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
 /// The `@name` being typed at the end of the composer: the text after an
 /// `@` that starts a word, made of letters, digits and `_` only. `Some("")`
 /// right after a bare `@`; `None` once a space or other character follows.
@@ -2212,5 +2307,78 @@ mod tests {
         assert_eq!(quote_position("hello", "xyz"), None);
         // First occurrence wins.
         assert_eq!(quote_position("aa aa", "aa"), Some(0));
+    }
+}
+
+#[cfg(test)]
+mod entities_to_markup_tests {
+    use super::*;
+    use crate::text::{TextEntity, TextEntityKind as K};
+
+    fn entity(text: &str, part: &str, kind: K) -> TextEntity {
+        let start = text.find(part).unwrap();
+        TextEntity {
+            utf8_start: start,
+            utf8_end: start + part.len(),
+            kind,
+        }
+    }
+
+    #[test]
+    fn rebuilds_markup_that_parses_back_to_the_same_text() {
+        let text = "hi very bold text 🔠 link";
+        let entities = vec![
+            entity(text, "very bold text", K::Bold),
+            entity(text, "bold", K::Italic),
+            entity(
+                text,
+                "🔠",
+                K::CustomEmoji {
+                    custom_emoji_id: 42,
+                },
+            ),
+            entity(
+                text,
+                "link",
+                K::TextUrl {
+                    url: "https://t.me".into(),
+                },
+            ),
+        ];
+        let markup = entities_to_markup(text, &entities);
+        assert_eq!(
+            markup,
+            "hi **very bold text** ![🔠](tg://emoji?id=42) [link](https://t.me)"
+        );
+        let (clean, parsed) = parse_format_markup(&markup);
+        assert_eq!(clean, text);
+        let kinds: Vec<_> = parsed.iter().map(|e| e.kind).collect();
+        assert!(kinds.contains(&FormatKind::CustomEmoji));
+        assert!(kinds.contains(&FormatKind::Bold));
+        assert!(kinds.contains(&FormatKind::TextUrl));
+        // The markup can't nest: a custom emoji inside bold keeps the emoji.
+        let text = "a 🔠 b";
+        let markup = entities_to_markup(
+            text,
+            &[
+                entity(text, "a 🔠 b", K::Bold),
+                entity(text, "🔠", K::CustomEmoji { custom_emoji_id: 7 }),
+            ],
+        );
+        assert_eq!(markup, "a ![🔠](tg://emoji?id=7) b");
+    }
+
+    #[test]
+    fn quotes_code_and_unknown_kinds() {
+        let text = "a\nb\nc x";
+        let entities = vec![
+            entity(text, "a\nb", K::BlockQuote),
+            entity(text, "x", K::Url),
+        ];
+        assert_eq!(entities_to_markup(text, &entities), "> a\n> b\nc x");
+        let code = "run it";
+        let entities = vec![entity(code, "it", K::Code)];
+        assert_eq!(entities_to_markup(code, &entities), "run `it`");
+        assert_eq!(entities_to_markup("plain", &[]), "plain");
     }
 }
