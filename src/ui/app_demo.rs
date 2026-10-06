@@ -1596,6 +1596,7 @@ impl QuillApp {
             playback_tick: false,
             playback_positions: HashMap::new(),
             sticker_playback: Default::default(),
+            emoji_playback: Default::default(),
             playing_animation: None,
             animation_frames: Vec::new(),
             autoplayed_gifs: Default::default(),
@@ -1777,6 +1778,7 @@ impl QuillApp {
                 "escape" => menu_app
                     .update(cx, |this, cx| {
                         this.close_context_menus(cx)
+                            || this.close_media_viewer_on_escape(cx)
                             || this.close_media_panel(cx)
                             || this.close_inline_results(cx)
                             || this.close_mention_menu(cx)

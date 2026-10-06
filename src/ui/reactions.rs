@@ -57,6 +57,15 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Escape closes the media viewer (after any menu over it).
+    pub(super) fn close_media_viewer_on_escape(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.media_viewer.is_open() {
+            return false;
+        }
+        self.close_media_viewer(cx);
+        true
+    }
+
     /// Escape closes an open message or chat context menu first.
     pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
         if self.message_menu.is_none() && self.chat_menu.is_none() {
