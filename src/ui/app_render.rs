@@ -301,10 +301,14 @@ impl Render for QuillApp {
                     .update(cx, |input, cx| input.focus(window, cx));
             }))
             // Parity slice (platform-paste-image): the kit Textarea's paste is
-            // text-only; this bubbled handler attaches clipboard images when
-            // the composer has focus.
-            .on_action(cx.listener(|this, _: &PasteAction, window, cx| {
-                this.paste_image_from_clipboard(window, cx);
+            // text-only, and GPUI stops an action at the first handler, so a
+            // bubbling handler never ran. This one captures (runs before the
+            // focused textarea): clipboard images and copied files become
+            // attachments; anything else falls through to the text paste.
+            .capture_action(cx.listener(|this, _: &PasteAction, window, cx| {
+                if this.paste_image_from_clipboard(window, cx) {
+                    cx.stop_propagation();
+                }
             }))
             .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {
                 window.focus(&this.focus_sidebar, cx);
@@ -651,7 +655,10 @@ impl QuillApp {
     /// its timer and schedules the re-render that hides it; failures stay
     /// up longer than confirmations.
     fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.live.is_none() || self.status_note.is_empty() {
+        if self.live.is_none()
+            || self.status_note.is_empty()
+            || !status_note_is_toast(&self.status_note)
+        {
             return false;
         }
         if self.status_note != self.status_seen {
@@ -678,6 +685,46 @@ impl QuillApp {
     }
 }
 
+/// Whether a status note deserves a toast. Like Telegram Desktop, only
+/// failures, restrictions (Premium, slow mode, permissions) and
+/// confirmations of actions with no visible result (copied, saved) toast.
+/// Progress chatter ("sending…", "reaction updated") stays silent: the
+/// screen already shows it, e.g. the bubble's sending clock.
+fn status_note_is_toast(note: &str) -> bool {
+    let lower = note.to_lowercase();
+    const FAILURE: [&str; 13] = [
+        "fail",
+        "could not",
+        "couldn't",
+        "can't",
+        "cannot",
+        "error",
+        "offline",
+        "denied",
+        "not allowed",
+        "unavailable",
+        "not available",
+        "too large",
+        "unsupported",
+    ];
+    const RESTRICTION: [&str; 8] = [
+        "premium",
+        "slow mode",
+        "wait ",
+        "need",
+        "requires",
+        "only ",
+        "limit",
+        "will send when",
+    ];
+    const CONFIRMATION: [&str; 5] = ["copied", "saved to", "exported", "downloaded", "link"];
+    FAILURE
+        .iter()
+        .chain(RESTRICTION.iter())
+        .chain(CONFIRMATION.iter())
+        .any(|word| lower.contains(word))
+}
+
 /// How long a status note stays on screen.
 fn status_toast_duration(note: &str) -> std::time::Duration {
     let lower = note.to_lowercase();
@@ -693,4 +740,31 @@ fn status_toast_duration(note: &str) -> std::time::Duration {
     .iter()
     .any(|word| lower.contains(word));
     std::time::Duration::from_millis(if failure { 6000 } else { 3000 })
+}
+
+#[cfg(test)]
+mod toast_tests {
+    use super::status_note_is_toast;
+
+    #[test]
+    fn only_failures_restrictions_and_invisible_confirmations_toast() {
+        for shown in [
+            "could not send rich message",
+            "Custom emoji need Telegram Premium",
+            "Slow mode: wait 12s before sending",
+            "copied to clipboard",
+            "Couldn't send the message.",
+        ] {
+            assert!(status_note_is_toast(shown), "{shown}");
+        }
+        for silent in [
+            "sending…",
+            "sticker sent",
+            "reaction updated",
+            "updating reaction…",
+            "react",
+        ] {
+            assert!(!status_note_is_toast(silent), "{silent}");
+        }
+    }
 }

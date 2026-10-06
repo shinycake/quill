@@ -493,9 +493,7 @@ pub enum EnvelopePayload {
     /// if messageProperties.can_get_link" (schema line 12056), so the
     /// driver gates the link request on it instead of letting "Share
     /// link" silently 400.
-    MessageProperties {
-        can_get_link: bool,
-    },
+    MessageProperties(MessageActions),
     /// B4: `pollVoters` (TDLib 1.8.67, `schema/td_api.tl:2854`) — the
     /// `getPollVoters` answer (schema line 12941). `total_count` is the
     /// approximate total; `voters` is one page of senders, in server
@@ -1402,4 +1400,26 @@ pub enum ParseError {
     InvalidJson,
     MissingField,
     BadInt,
+}
+
+/// The `messageProperties` flags the message context menu needs (TDLib
+/// 1.8.67, `schema/td_api.tl:6262`): Telegram Desktop shows an action only
+/// when the message allows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MessageActions {
+    pub can_be_copied: bool,
+    pub can_be_deleted_only_for_self: bool,
+    pub can_be_deleted_for_all_users: bool,
+    pub can_be_edited: bool,
+    pub can_be_forwarded: bool,
+    pub can_be_pinned: bool,
+    pub can_be_replied: bool,
+    pub can_get_link: bool,
+    pub can_get_message_thread: bool,
+}
+
+impl MessageActions {
+    pub fn can_be_deleted(&self) -> bool {
+        self.can_be_deleted_only_for_self || self.can_be_deleted_for_all_users
+    }
 }

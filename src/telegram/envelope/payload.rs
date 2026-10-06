@@ -704,12 +704,20 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         }),
         // M1 fix-up: only `can_get_link` is kept (see the
         // `MessageProperties` payload docs).
-        "messageProperties" => Ok(EnvelopePayload::MessageProperties {
-            can_get_link: value
-                .get("can_get_link")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        }),
+        "messageProperties" => {
+            let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+            Ok(EnvelopePayload::MessageProperties(MessageActions {
+                can_be_copied: flag("can_be_copied"),
+                can_be_deleted_only_for_self: flag("can_be_deleted_only_for_self"),
+                can_be_deleted_for_all_users: flag("can_be_deleted_for_all_users"),
+                can_be_edited: flag("can_be_edited"),
+                can_be_forwarded: flag("can_be_forwarded"),
+                can_be_pinned: flag("can_be_pinned"),
+                can_be_replied: flag("can_be_replied"),
+                can_get_link: flag("can_get_link"),
+                can_get_message_thread: flag("can_get_message_thread"),
+            }))
+        }
         // B4: `pollVoters` — the `getPollVoters` answer. Unparseable
         // senders are dropped; the list never misattributes a vote.
         "pollVoters" => Ok(EnvelopePayload::PollVoters {

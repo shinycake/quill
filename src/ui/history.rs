@@ -425,13 +425,27 @@ pub(super) fn session_history_row(
     look: BubbleLook,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    // Stickers and round video messages stand on their own, without a bubble.
-    let look = if matches!(
-        message.content,
-        MessageContent::Sticker(_) | MessageContent::VideoNote(_)
-    ) {
+    // Stickers, round video messages and emoji-only messages (the ones
+    // drawn big) stand on their own, without a bubble, as in Telegram
+    // Desktop. Their time then sits on the chat background, so it takes
+    // the theme's text color instead of the bubble's.
+    let emoji_only = match &message.content {
+        MessageContent::Text(text) => {
+            text.link_preview.is_none()
+                && session.is_none_or(|s| s.media_prefs.big_emoji)
+                && quill::emoji_catalog::big_emoji_count_with_entities(&text.text, &text.entities)
+                    .is_some()
+        }
+        _ => false,
+    };
+    let look = if emoji_only
+        || matches!(
+            message.content,
+            MessageContent::Sticker(_) | MessageContent::VideoNote(_)
+        ) {
         BubbleLook {
             plain: true,
+            text: cx.theme().foreground,
             ..look
         }
     } else {

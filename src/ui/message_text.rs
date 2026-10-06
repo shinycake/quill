@@ -309,22 +309,24 @@ pub(super) fn caption_above_media(content: &MessageContent) -> bool {
 }
 
 /// kit Phase 4: in-bubble footer — `HH:MM` plus the outgoing delivery
-/// state (`…` while pending, `✓` sent, `✓✓` read). Incoming rows show
-/// just the time. `None` when the message carries no date (nothing to
-/// stamp) — the footer hides instead of inventing a time.
+/// state as Telegram Desktop draws it: a clock while sending, one check
+/// when sent, the joined double check when read. Incoming rows show just
+/// the time. `None` when the message carries no date (nothing to stamp) —
+/// the footer hides instead of inventing a time.
 pub(super) fn message_footer(
     date: i32,
     pending: bool,
     receipt: OutboxReceipt,
 ) -> Option<AnyElement> {
+    use gpui_kit::assets::IconName;
     let time = message_time_hhmm(date)?;
-    let marks = if pending {
-        "…"
+    let mark = if pending {
+        Some(IconName::Clock)
     } else {
         match receipt {
-            OutboxReceipt::Read => "✓✓",
-            OutboxReceipt::Sent => "✓",
-            OutboxReceipt::None => "",
+            OutboxReceipt::Read => Some(IconName::CheckCheck),
+            OutboxReceipt::Sent => Some(IconName::Check),
+            OutboxReceipt::None => None,
         }
     };
     let status = if pending {
@@ -337,19 +339,20 @@ pub(super) fn message_footer(
         }
     };
     let accessible = format!("{time} {status}");
-    let text = if marks.is_empty() {
-        time
-    } else {
-        format!("{time} {marks}")
-    };
     Some(
         div()
             .id("message-time")
             .role(Role::Label)
             .aria_label(accessible)
+            .flex()
+            .items_center()
+            .gap(px(3.))
             .text_xs()
             .opacity(0.7)
-            .child(text)
+            .child(time)
+            .when_some(mark, |this, icon| {
+                this.child(Icon::new(icon).size(px(14.)).flex_none())
+            })
             .into_any_element(),
     )
 }

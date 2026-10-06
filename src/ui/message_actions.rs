@@ -49,9 +49,36 @@ impl QuillApp {
         let delete_confirm =
             DeleteConfirm::for_message(chat_id, message_id, message.is_outgoing, message.pending);
         let pinned = message.is_pinned;
+        // What TDLib says this message allows (`messageProperties`), as
+        // Telegram Desktop gates its menu. Until it arrives (a local call,
+        // milliseconds), channel posts offer only what any reader can do.
+        let actions = self
+            .session()
+            .and_then(|s| s.message_menu_actions)
+            .filter(|(c, m, _)| *c == chat_id && *m == message_id)
+            .map(|(_, _, actions)| actions);
+        let chat_kind = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .map(|chat| chat.kind.clone());
+        let is_channel_post = matches!(
+            chat_kind,
+            Some(ChatKind::Supergroup {
+                is_channel: true,
+                ..
+            })
+        );
+        let is_shared_chat = matches!(chat_kind, Some(ChatKind::Supergroup { .. }));
+        let allows = |local: bool, flag: fn(&quill::telegram::envelope::MessageActions) -> bool| {
+            actions.map_or(local, |a| flag(&a))
+        };
+        let can_reply = allows(!is_channel_post, |a| a.can_be_replied);
 
         let mut panel = div()
             .id("message-menu-panel")
+            // Clicks inside the panel (the reaction strip's plain cells)
+            // must not reach the backdrop, which closes the menu.
+            .occlude()
             .flex()
             .flex_col()
             .min_w(px(180.))
@@ -81,21 +108,23 @@ impl QuillApp {
                 );
             };
         }
-        item!("menu-reply", "Reply", this, window, cx, {
-            this.begin_reply_from_message(chat_id, message_id, window, cx);
-            this.message_menu = None;
-            cx.notify();
-        });
+        if can_reply {
+            item!("menu-reply", "Reply", this, window, cx, {
+                this.begin_reply_from_message(chat_id, message_id, window, cx);
+                this.message_menu = None;
+                cx.notify();
+            });
+        }
         // Slice G1: partial-message quote (`inputTextQuote`, schema
         // 1.8.67 line 3056) — only for messages with copyable text.
-        if copyable.is_some() {
+        if can_reply && copyable.is_some() {
             item!("menu-quote-reply", "Quote reply", this, window, cx, {
                 this.open_quote_reply_dialog(chat_id, message_id, window, cx);
                 this.message_menu = None;
                 cx.notify();
             });
         }
-        if let Some(text) = copyable {
+        if let Some(text) = copyable.filter(|_| allows(true, |a| a.can_be_copied)) {
             item!("menu-copy", "Copy", this, _window, cx, {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                 this.status_note = "copied to clipboard".into();
@@ -103,11 +132,9 @@ impl QuillApp {
                 cx.notify();
             });
         }
-        let is_secret = self
-            .session()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        let is_secret = matches!(chat_kind, Some(ChatKind::Secret { .. }));
         if !is_secret
+            && allows(true, |a| a.can_be_forwarded)
             && quill::composer::ForwardDraft::from_message(chat_id, message_id, message.pending)
                 .is_some()
         {
@@ -128,14 +155,16 @@ impl QuillApp {
             message.is_outgoing,
             message.pending,
             &message.content,
-        ) {
+        )
+        .filter(|_| allows(true, |a| a.can_be_edited))
+        {
             item!("menu-edit", "Edit", this, window, cx, {
                 this.begin_edit(edit.clone(), window, cx);
                 this.message_menu = None;
                 cx.notify();
             });
         }
-        if message.can_pin() {
+        if allows(message.can_pin() && !is_channel_post, |a| a.can_be_pinned) {
             let label = if pinned { "Unpin" } else { "Pin" };
             item!("menu-toggle-pin", label, this, _window, cx, {
                 this.toggle_pin_message(chat_id, message_id, cx);
@@ -143,7 +172,7 @@ impl QuillApp {
                 cx.notify();
             });
         }
-        if !is_secret {
+        if allows(is_shared_chat, |a| a.can_get_link) {
             item!("menu-share", "Copy message link", this, _window, cx, {
                 this.share_message_link(chat_id, message_id, cx);
                 this.message_menu = None;
@@ -168,18 +197,7 @@ impl QuillApp {
         // Slice G2: channel-post comment threads (`getMessageThreadHistory`,
         // schema 1.8.67, line 11839). The dialog shows an honest error
         // when the post has no discussion thread.
-        let is_channel_post = self.session().is_some_and(|session| {
-            session.chats.get(&chat_id.0).is_some_and(|chat| {
-                matches!(
-                    chat.kind,
-                    ChatKind::Supergroup {
-                        is_channel: true,
-                        ..
-                    }
-                )
-            })
-        });
-        if is_channel_post {
+        if is_channel_post && allows(false, |a| a.can_get_message_thread) {
             item!("menu-comments", "View comments", this, window, cx, {
                 this.open_comment_thread_dialog(chat_id, message_id, window, cx);
                 this.message_menu = None;
@@ -193,7 +211,9 @@ impl QuillApp {
                 cx.notify();
             });
         }
-        if let Some(confirm) = delete_confirm {
+        if let Some(confirm) =
+            delete_confirm.filter(|_| allows(!is_channel_post, |a| a.can_be_deleted()))
+        {
             item!("menu-delete", "Delete", this, _window, cx, {
                 this.begin_delete(confirm.clone(), cx);
                 this.message_menu = None;

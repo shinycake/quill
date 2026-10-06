@@ -50,8 +50,22 @@ impl QuillApp {
             let _ = live
                 .driver
                 .fetch_message_reactions(menu.chat_id, menu.message_id);
+            let _ = live
+                .driver
+                .fetch_message_menu_actions(menu.chat_id, menu.message_id);
         }
         cx.notify();
+    }
+
+    /// Escape closes an open message or chat context menu first.
+    pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.message_menu.is_none() && self.chat_menu.is_none() {
+            return false;
+        }
+        self.message_menu = None;
+        self.chat_menu = None;
+        cx.notify();
+        true
     }
 
     /// Add or remove the user's `choice` on a message.

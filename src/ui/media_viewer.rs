@@ -1471,6 +1471,8 @@ impl QuillApp {
                         this.viewer_reset_zoom(cx);
                     }
                 }))
+                // The media itself never closes the viewer.
+                .occlude()
         };
         // Parity slice 5: video transport under the visual. ffplay runs
         // `-nodisp` for audio only (no GPUI video element in this stack);
@@ -1678,7 +1680,11 @@ impl QuillApp {
                     .tooltip(label)
                     .accessibility_label(label)
             };
+        // Every control surface occludes: GPUI delivers a click to all
+        // hitboxes under the cursor down to the first occluding one, so
+        // without it the backdrop below also gets the click and closes.
         let top_bar = div()
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -1840,6 +1846,7 @@ impl QuillApp {
             .when_some(prev, |this, prev| {
                 this.child(
                     div()
+                        .occlude()
                         .absolute()
                         .left(px(16.))
                         .top(px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0))
@@ -1849,6 +1856,7 @@ impl QuillApp {
             .when_some(next, |this, next| {
                 this.child(
                     div()
+                        .occlude()
                         .absolute()
                         .right(px(16.))
                         .top(px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0))
@@ -1857,6 +1865,7 @@ impl QuillApp {
             })
             .child(
                 div()
+                    .occlude()
                     .absolute()
                     .left_0()
                     .right_0()

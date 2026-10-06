@@ -506,23 +506,33 @@ impl QuillApp {
     /// text (image-only clipboards insert "" — a no-op); this bubbled handler
     /// then adds the image. No-ops everywhere except the composer so search
     /// boxes and dialogs keep their plain text paste.
+    /// Returns whether the paste was taken as attachments.
     pub(super) fn paste_image_from_clipboard(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
-            return;
+            return false;
         }
         let Some(item) = cx.read_from_clipboard() else {
-            return;
+            return false;
         };
+        // Files copied in Finder arrive as paths: attach them like a drop.
+        let paths = item.entries.iter().find_map(|entry| match entry {
+            ClipboardEntry::ExternalPaths(paths) => Some(paths.paths().to_vec()),
+            _ => None,
+        });
+        if let Some(paths) = paths.filter(|paths| !paths.is_empty()) {
+            self.attach_dropped_files(&paths, cx);
+            return true;
+        }
         let image = item.entries.iter().find_map(|entry| match entry {
             ClipboardEntry::Image(image) => Some(image),
             _ => None,
         });
         let Some(image) = image else {
-            return;
+            return false;
         };
         let extension = match image.format {
             ImageFormat::Png => "png",
@@ -551,6 +561,7 @@ impl QuillApp {
             }
         }
         cx.notify();
+        true
     }
 
     /// Drop one picked file; the batch options reset with the last one.
