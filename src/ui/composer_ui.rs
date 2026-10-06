@@ -174,9 +174,17 @@ impl QuillApp {
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .when(highlighted, |this| this.bg(cx.theme().selection))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.pick_command_menu_index(index, window, cx);
-                }))
+                // On press, not click: the press moves focus off the
+                // composer, whose blur closes this menu before a click
+                // could land. Telegram Desktop sends a clicked command.
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        window.prevent_default();
+                        this.send_command_menu_index(index, window, cx);
+                    }),
+                )
                 .child(div().text_sm().flex_1().min_w_0().child(label));
             if item.is_ephemeral {
                 row = row.child(
@@ -1187,9 +1195,16 @@ impl QuillApp {
                     .cursor_pointer()
                     .when(index == selected, |this| this.bg(cx.theme().selection))
                     .hover(|style| style.bg(cx.theme().accent))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.pick_mention_index(index, window, cx);
-                    }))
+                    // On press: the composer's blur closes this menu
+                    // before a click could land.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.prevent_default();
+                            this.pick_mention_index(index, window, cx);
+                        }),
+                    )
                     .child(super::message_text::kit_avatar_element(
                         &name,
                         photo.as_deref(),

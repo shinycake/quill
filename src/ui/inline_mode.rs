@@ -500,9 +500,16 @@ impl QuillApp {
                             .cursor_pointer()
                             .pressable(cx.theme())
                             .when(highlighted, |this| this.bg(cx.theme().selection))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.pick_inline_row(&row, window, cx);
-                            }))
+                            // On press: the composer's blur closes the
+                            // results before a click could land.
+                            .on_mouse_down(
+                                gpui_kit::MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    window.prevent_default();
+                                    this.pick_inline_row(&row, window, cx);
+                                }),
+                            )
                             .child(div().text_sm().child(label)),
                     );
                 }
@@ -521,9 +528,16 @@ impl QuillApp {
                             .cursor_pointer()
                             .pressable(cx.theme())
                             .when(highlighted, |this| this.bg(cx.theme().selection))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.pick_inline_row(&row, window, cx);
-                            }))
+                            // On press: the composer's blur closes the
+                            // results before a click could land.
+                            .on_mouse_down(
+                                gpui_kit::MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    window.prevent_default();
+                                    this.pick_inline_row(&row, window, cx);
+                                }),
+                            )
                             .child(
                                 div()
                                     .text_sm()

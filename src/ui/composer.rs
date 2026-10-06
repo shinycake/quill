@@ -1468,6 +1468,34 @@ impl QuillApp {
         self.close_command_menu(cx);
     }
 
+    /// A clicked command is sent at once (Telegram Desktop's bot command
+    /// list): the composer's `/`-token is dropped, any other text stays.
+    pub(super) fn send_command_menu_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items = self
+            .command_menu_state(cx)
+            .map(|(_, items)| items)
+            .unwrap_or_default();
+        let Some(item) = items.get(index) else {
+            return;
+        };
+        let command = format!("/{}", item.command.trim_start_matches('/'));
+        let current = self.composer.read(cx).value().to_string();
+        let rest = strip_command_menu_trigger(&current)
+            .unwrap_or(current.as_str())
+            .to_string();
+        self.close_command_menu(cx);
+        self.composer.update(cx, |input, cx| {
+            input.set_value(rest.trim_end(), window, cx);
+            input.focus(window, cx);
+        });
+        self.submit_composer(command, window, cx);
+    }
+
     /// Phase 3.2: `inlineKeyboardButtonTypeCopyText` — copy to the clipboard.
     pub(super) fn copy_inline_text(&mut self, text: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
