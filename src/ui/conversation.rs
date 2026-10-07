@@ -480,7 +480,7 @@ impl QuillApp {
                 .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
         });
         let dust = self.vanish_overlay();
-        let call_bar = self.call_bar(cx);
+        let call_bar = self.call_bar(cx).or_else(|| self.group_call_bar(cx));
         div()
             .relative()
             .flex()

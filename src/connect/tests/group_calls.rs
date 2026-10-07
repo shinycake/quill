@@ -1017,3 +1017,24 @@ fn group_screen_share_rejected_without_screen_source() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Muting yourself in a voice chat silences the microphone and tells
+/// Telegram, so everyone sees it (it used to only flip a local flag).
+#[test]
+fn group_call_self_mute_reaches_the_microphone_and_telegram() {
+    let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &group_participant_json(7, true, "null", "null"),
+    );
+    driver.toggle_group_call_self_mute();
+    assert_eq!(handle.group_mutes(), vec![(555, true)]);
+    let sent = sent_request(&recorder, "toggleGroupCallParticipantIsMuted");
+    assert_eq!(sent["participant_id"]["user_id"], 7);
+    assert_eq!(sent["is_muted"], true);
+    driver.toggle_group_call_self_mute();
+    assert_eq!(handle.group_mutes(), vec![(555, true), (555, false)]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -166,10 +166,6 @@ pub fn danger_pale() -> Rgba {
     pick(0xff8a8a, 0xa40e26, None)
 }
 #[inline]
-pub fn danger_vivid() -> Rgba {
-    pick(0xff6b6b, 0xd1242c, None)
-}
-#[inline]
 pub fn danger_dark() -> Rgba {
     pick(0xd44a3a, 0x8c1d18, None)
 }
@@ -210,10 +206,6 @@ pub fn warning_text() -> Rgba {
     pick(0xffd479, 0x9a6700, None)
 }
 #[inline]
-pub fn warning_soft() -> Rgba {
-    pick(0xffc861, 0x9a6700, None)
-}
-#[inline]
 pub fn warning_orange() -> Rgba {
     // Former `ORANGE`: poll-restriction labels. Dark value is the exact
     // pre-migration 0xf0883e; light reuses the primer dark-amber text value.
@@ -222,10 +214,6 @@ pub fn warning_orange() -> Rgba {
 #[inline]
 pub fn warning_bg() -> Rgba {
     pick(0x2a2318, 0xfff8c5, Some(0x2e230a))
-}
-#[inline]
-pub fn warning_bg_deep() -> Rgba {
-    pick(0x3a2a10, 0xfff8c5, Some(0x2e230a))
 }
 // --- surfaces ---
 #[inline]

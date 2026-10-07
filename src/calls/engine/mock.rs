@@ -42,6 +42,7 @@ struct MockInner {
     /// (initialized via `start_screen_share`, cleared by `stop_screen_share`).
     presentations: Vec<i32>,
     group_leaves: Vec<i32>,
+    group_mutes: Vec<(i32, bool)>,
 }
 
 /// Phase C2b: deterministic in-memory engine used by driver tests.
@@ -212,6 +213,14 @@ impl MockEngine {
             .lock()
             .expect("mock call engine")
             .p2p_screen_share_changes
+            .clone()
+    }
+
+    pub fn group_mutes(&self) -> Vec<(i32, bool)> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .group_mutes
             .clone()
     }
 
@@ -569,6 +578,15 @@ impl CallEngine for MockEngine {
             .expect("mock call engine")
             .presentations
             .contains(&group_call_id)
+    }
+
+    fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
+        self.inner
+            .lock()
+            .expect("mock call engine")
+            .group_mutes
+            .push((group_call_id, muted));
+        Ok(())
     }
 
     fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError> {

@@ -253,6 +253,8 @@ pub(crate) fn retained_call_media(
 #[derive(Clone, Default)]
 pub(crate) struct GroupCallMedia {
     pub(crate) chat_id: i64,
+    /// Your microphone is muted in this group call.
+    pub(crate) muted: bool,
     pub(crate) camera_enabled: bool,
     pub(crate) camera: Option<String>,
     /// endpoint -> full source, mirroring the engine's subscriptions.

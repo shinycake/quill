@@ -78,6 +78,7 @@ mod folders;
 mod forward;
 mod gifs_ui;
 mod group_admin_panels;
+mod group_call_panel;
 mod group_call_ui;
 mod group_calls;
 mod group_invites;

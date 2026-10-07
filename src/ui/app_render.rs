@@ -109,6 +109,7 @@ impl Render for QuillApp {
         self.ensure_call_tick(cx);
         // The call window and its sounds follow the call.
         self.sync_call_window(cx);
+        self.sync_group_call_window(cx);
         self.sync_call_sounds();
         // MED4b: debounced `getLinkPreview` prefetch for the
         // detected-URL chip (spawns at most one timer per new URL).
