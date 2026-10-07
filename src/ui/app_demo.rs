@@ -1587,6 +1587,7 @@ impl QuillApp {
             animation_demand: Default::default(),
             frame_clock_running: Default::default(),
             stream_reveal: Default::default(),
+            vanishing: Default::default(),
             group_call_title_dialog: None,
             group_call_start_dialog: None,
             group_call_invite_open: false,

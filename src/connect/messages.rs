@@ -1203,8 +1203,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // M1: extract the borrow before the mutable `request` call below.
-        let revoke = confirm.revoke && message.is_outgoing;
+        // For everyone only where the UI offered it: TDLib's
+        // `can_be_deleted_for_all_users` (or, before that arrives, your own
+        // messages). `can_revoke` carries that decision.
+        let revoke = confirm.revoke && confirm.can_revoke;
         let extra = self
             .session
             .request(RequestPurpose::DeleteMessages, Some(confirm.chat_id));

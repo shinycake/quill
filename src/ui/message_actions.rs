@@ -365,6 +365,16 @@ impl QuillApp {
                 }
             );
         }
+        // Telegram Desktop offers "delete for everyone" exactly when TDLib
+        // allows it (`can_be_deleted_for_all_users`), never in Saved
+        // Messages; until the properties arrive, for your own messages.
+        let saved = self.session().is_some_and(|s| s.is_saved_messages(chat_id));
+        let can_revoke = !saved && allows(message.is_outgoing, |a| a.can_be_deleted_for_all_users);
+        let delete_confirm = delete_confirm.map(|mut confirm| {
+            confirm.can_revoke = can_revoke;
+            confirm.revoke = can_revoke;
+            confirm
+        });
         if let Some(confirm) =
             delete_confirm.filter(|_| allows(!is_channel_post, |a| a.can_be_deleted()))
         {
@@ -374,10 +384,10 @@ impl QuillApp {
                 "menu-delete",
                 "Delete",
                 this,
-                _window,
+                window,
                 cx,
                 {
-                    this.begin_delete(confirm.clone(), cx);
+                    this.open_delete_dialog(confirm.clone(), window, cx);
                     this.message_menu = None;
                     cx.notify();
                 }

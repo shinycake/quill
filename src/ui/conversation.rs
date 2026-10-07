@@ -1046,6 +1046,7 @@ impl QuillApp {
         self.playback_error.hash(&mut hasher);
         // A bot's streaming reply grows the last row every frame.
         self.stream_rows_hash().hash(&mut hasher);
+        self.vanish_rows_hash().hash(&mut hasher);
         Some(hasher.finish())
     }
 
@@ -1090,7 +1091,9 @@ impl QuillApp {
             .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
             .unwrap_or((None, false, 0));
         let unread_count = chat.map_or(0, |chat| chat.unread_count);
-        if let Some(messages) = messages {
+        if let Some(mut messages) = messages {
+            // Deleted messages dissolve in place before they go.
+            self.merge_vanishing(&mut messages, cx);
             let mut divider_placed = false;
             let mut first_unread = |message: &HistoryMessage| {
                 let first = !divider_placed
@@ -1304,6 +1307,7 @@ impl QuillApp {
                             video_playing,
                             video_frame,
                             is_secret,
+                            vanishing: self.vanish_progress(message.id),
                             message,
                         })));
                     }
@@ -1330,6 +1334,7 @@ impl QuillApp {
                     video_playing: false,
                     video_frame: None,
                     is_secret: false,
+                    vanishing: None,
                     message,
                 })));
             }
@@ -1663,6 +1668,23 @@ impl QuillApp {
             HistoryRow::Single(inputs) => {
                 let message = &inputs.message;
                 let inline = self.inline_frame(message, cx);
+                // A covered spoiler's dust shimmers (gently: 20 fps).
+                let spoiler = match &message.content {
+                    MessageContent::Photo(photo) => photo.has_spoiler,
+                    MessageContent::Video(video) => video.has_spoiler,
+                    MessageContent::Animation(animation) => animation.has_spoiler,
+                    _ => false,
+                };
+                if spoiler
+                    && !self.spoiler_revealed.contains(&(
+                        message.chat_id.0,
+                        message.id.0 as u64,
+                        u64::MAX,
+                        false,
+                    ))
+                {
+                    self.request_animation_tick(20, cx);
+                }
                 let row = session_history_row(
                     message,
                     files,
@@ -1699,6 +1721,7 @@ impl QuillApp {
                 let (row_chat, row_msg) = (message.chat_id, message.id);
                 let selection_overlay =
                     self.selection_overlay(row_chat, row_msg, message.pending, cx);
+                let (vanishing, outgoing) = (inputs.vanishing, message.is_outgoing);
                 let highlighted = inputs.highlighted;
                 let selected_forward = inputs.selected_forward;
                 let failed = message.failed;
@@ -1767,6 +1790,15 @@ impl QuillApp {
                         )
                     })
                     .children(selection_overlay)
+                    .when_some(vanishing, |this, progress| {
+                        this.opacity((1.0 - progress).powi(2))
+                            .child(super::vanish::vanish_dust(
+                                row_msg.0 as u64,
+                                outgoing,
+                                progress,
+                                cx.theme().foreground,
+                            ))
+                    })
                     .into_any_element()
             }
         }

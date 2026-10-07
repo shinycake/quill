@@ -38,6 +38,9 @@ pub(crate) struct HistoryRowInputs {
     pub(crate) video_playing: bool,
     pub(crate) video_frame: Option<PathBuf>,
     pub(crate) is_secret: bool,
+    /// Delete animation progress (0..1) while the deleted message
+    /// dissolves; `None` for live messages.
+    pub(crate) vanishing: Option<f32>,
 }
 
 /// kit Phase 3: one virtualized history row — a single message or a media

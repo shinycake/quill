@@ -2039,35 +2039,41 @@ pub(super) fn spoiler_cover(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let key = (chat_id.0, message_id.0 as u64, u64::MAX, false);
+    // A smooth blur of the inline minithumbnail (scaled up and blurred
+    // once, cached): the raw 40 px JPEG scaled to the frame shows blocks.
     let preview = minithumbnail
         .filter(|mini| !mini.data.is_empty())
-        .map(|mini| {
-            img(ImageSource::Image(Arc::new(gpui_kit::Image::from_bytes(
-                gpui_kit::ImageFormat::Jpeg,
-                mini.data.clone(),
-            ))))
-            .absolute()
-            .inset_0()
-            .size_full()
-            .object_fit(ObjectFit::Cover)
+        .and_then(|mini| blurred_preview(row_id, &mini.data))
+        .map(|blurred| {
+            img(ImageSource::Render(blurred))
+                .absolute()
+                .inset_0()
+                .size_full()
+                .object_fit(ObjectFit::Cover)
         });
-    let shade = if preview.is_some() { 0.45 } else { 0.15 };
+    let shade = if preview.is_some() { 0.25 } else { 0.1 };
     let (width, height) = (frame_w / px(1.), frame_h / px(1.));
-    // Deterministic dust per message: ~1 dot per 300 px², max 220.
-    let count = ((width * height / 300.0) as u64).clamp(40, 220);
+    // Telegram's spoiler: dense, fine grains that shimmer and drift. One
+    // per ~55 px², capped; their phase follows a shared clock.
+    let count = ((width * height / 55.0) as u64).clamp(120, 1100);
+    let time = spoiler_clock();
     let dust = (0..count).map(|index| {
-        let mut seed = row_id ^ index.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let mut seed = (row_id ^ index.wrapping_mul(0x9E37_79B9_7F4A_7C15)) | 1;
         let mut next = || {
             seed ^= seed << 13;
             seed ^= seed >> 7;
             seed ^= seed << 17;
             (seed % 10_000) as f32 / 10_000.0
         };
-        let (x, y, size, alpha) = (next(), next(), 1.0 + next() * 1.6, 0.35 + next() * 0.55);
+        let (x, y, phase, speed) = (next(), next(), next() * 6.283, 0.6 + next() * 1.4);
+        let size = 0.9 + next() * 0.8;
+        let drift_x = (time * 0.35 * speed + phase).sin() * 3.0;
+        let drift_y = (time * 0.5 * speed + phase * 1.7).cos() * 3.0;
+        let alpha = 0.25 + 0.65 * (0.5 + 0.5 * (time * 1.6 * speed + phase).sin());
         div()
             .absolute()
-            .left(px(x * width))
-            .top(px(y * height))
+            .left(px(x * width + drift_x))
+            .top(px(y * height + drift_y))
             .size(px(size))
             .rounded_full()
             .bg(gpui_kit::white().opacity(alpha))
@@ -2100,4 +2106,48 @@ pub(super) fn spoiler_cover(
             cx.notify();
         }))
         .into_any_element()
+}
+
+/// Seconds on the shared spoiler-dust clock.
+fn spoiler_clock() -> f32 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_secs_f32()
+}
+
+/// The minithumbnail scaled up and Gaussian-blurred, cached per message.
+fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
+    use std::cell::RefCell;
+    thread_local! {
+        static CACHE: RefCell<HashMap<u64, Arc<RenderImage>>> = RefCell::new(HashMap::new());
+    }
+    if let Some(hit) = CACHE.with(|cache| cache.borrow().get(&row_id).cloned()) {
+        return Some(hit);
+    }
+    let small = image::load_from_memory(jpeg).ok()?.to_rgba8();
+    let (w, h) = small.dimensions();
+    let scale = 160.0 / w.max(h).max(1) as f32;
+    let large = image::imageops::resize(
+        &small,
+        ((w as f32 * scale) as u32).max(1),
+        ((h as f32 * scale) as u32).max(1),
+        image::imageops::FilterType::Triangle,
+    );
+    let mut blurred = image::imageops::blur(&large, 6.0);
+    for pixel in blurred.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    let render = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+        image::Frame::new(blurred),
+    ])));
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() > 256 {
+            cache.clear();
+        }
+        cache.insert(row_id, render.clone());
+    });
+    Some(render)
 }
