@@ -1106,6 +1106,79 @@ pub(super) fn session_history_row(
             caption_below_el = el;
         }
     }
+    // A just-revealed spoiler: its cover fades out over the media.
+    let reveal_key = (message.chat_id.0, message.id.0 as u64, u64::MAX, false);
+    let extra_media = match (
+        extra_media,
+        media_revealed
+            .then(|| super::spoiler_fx::reveal_fade(reveal_key))
+            .flatten(),
+    ) {
+        (Some(media), Some(cover_opacity)) => {
+            let cover = match effective_content(&message.content, message.ephemeral.as_ref()) {
+                MessageContent::Photo(photo) if photo.has_spoiler => {
+                    let (frame_w, frame_h) = photo
+                        .largest_size()
+                        .or_else(|| photo.thumb_size())
+                        .map(|size| media_frame(size.width, size.height))
+                        .unwrap_or_else(|| media_frame(0, 0));
+                    Some(spoiler_cover(
+                        message.id.0 as u64,
+                        message.chat_id,
+                        message.id,
+                        photo.minithumbnail.as_ref(),
+                        None,
+                        frame_w,
+                        frame_h,
+                        cx,
+                    ))
+                }
+                MessageContent::Video(video) if video.has_spoiler => {
+                    let (frame_w, frame_h) = media_frame(video.width, video.height);
+                    Some(spoiler_cover(
+                        message.id.0 as u64,
+                        message.chat_id,
+                        message.id,
+                        None,
+                        None,
+                        frame_w,
+                        frame_h,
+                        cx,
+                    ))
+                }
+                MessageContent::Animation(animation) if animation.has_spoiler => {
+                    let (frame_w, frame_h) = media_frame(animation.width, animation.height);
+                    Some(spoiler_cover(
+                        message.id.0 as u64,
+                        message.chat_id,
+                        message.id,
+                        None,
+                        None,
+                        frame_w,
+                        frame_h,
+                        cx,
+                    ))
+                }
+                _ => None,
+            };
+            Some(match cover {
+                Some(cover) => div()
+                    .relative()
+                    .child(media)
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .opacity(cover_opacity)
+                            .child(cover),
+                    )
+                    .into_any_element(),
+                None => media,
+            })
+        }
+        (media, _) => media,
+    };
     // Photo/GIF/video bubbles without a reply or forward header: the
     // picture sits on a thin inset and a caption gets its own padding.
     let media_led = header.is_none()

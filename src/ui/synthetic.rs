@@ -330,6 +330,9 @@ fn message_bubble_with_quote(
     // `look.text` overrides the text color; plain mode renders the kit
     // `Ghost` variant (no surface, padding, or border).
     let bubble_content = component::bubble::BubbleContent::new()
+        .relative()
+        // Where a delete's dust starts.
+        .child(super::vanish::bubble_tracker(row.id as i64))
         .when(!look.plain, |this| {
             this.bg(if row.outgoing {
                 accent_strong()

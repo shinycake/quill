@@ -479,7 +479,9 @@ impl QuillApp {
                 .and_then(|s| s.chats.get(&id.0))
                 .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
         });
+        let dust = self.vanish_overlay();
         div()
+            .relative()
             .flex()
             .flex_col()
             .flex_1()
@@ -816,6 +818,8 @@ impl QuillApp {
                 )
             })
             .when_some(self.channel_footer(cx), |this, footer| this.child(footer))
+            // A deleted message's dust drifts over everything.
+            .children(dust)
     }
 
     pub(super) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1690,15 +1694,14 @@ impl QuillApp {
                     MessageContent::Animation(animation) => animation.has_spoiler,
                     _ => false,
                 };
+                let key = (message.chat_id.0, message.id.0 as u64, u64::MAX, false);
+                // lib_ui draws spoiler frames every 33 ms; a reveal fades
+                // the cover out.
                 if spoiler
-                    && !self.spoiler_revealed.contains(&(
-                        message.chat_id.0,
-                        message.id.0 as u64,
-                        u64::MAX,
-                        false,
-                    ))
+                    && (!self.spoiler_revealed.contains(&key)
+                        || super::spoiler_fx::reveal_fade(key).is_some())
                 {
-                    self.request_animation_tick(20, cx);
+                    self.request_animation_tick(30, cx);
                 }
                 let row = session_history_row(
                     message,
@@ -1736,13 +1739,14 @@ impl QuillApp {
                 let (row_chat, row_msg) = (message.chat_id, message.id);
                 let selection_overlay =
                     self.selection_overlay(row_chat, row_msg, message.pending, cx);
-                let (vanishing, outgoing) = (inputs.vanishing, message.is_outgoing);
+                let vanishing = inputs.vanishing;
                 let highlighted = inputs.highlighted;
                 let selected_forward = inputs.selected_forward;
                 let failed = message.failed;
                 let run_start = inputs.run_start;
-                div()
+                let element = div()
                     .relative()
+                    .child(super::vanish::row_tracker(row_msg.0))
                     .when(run_start, |this| this.pt_2())
                     // Jump target, forward selection and failed sends tint
                     // the whole row instead of outlining it: no border or
@@ -1805,16 +1809,11 @@ impl QuillApp {
                         )
                     })
                     .children(selection_overlay)
-                    .when_some(vanishing, |this, progress| {
-                        this.opacity((1.0 - progress).powi(2))
-                            .child(super::vanish::vanish_dust(
-                                row_msg.0 as u64,
-                                outgoing,
-                                progress,
-                                cx.theme().foreground,
-                            ))
-                    })
-                    .into_any_element()
+                    .into_any_element();
+                match vanishing {
+                    Some(t) => self.ghost_row(row_msg, t, element),
+                    None => element,
+                }
             }
         }
     }
