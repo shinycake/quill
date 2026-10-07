@@ -83,7 +83,10 @@ gpui_kit::assets::icon_assets!(
         ListChecks,
         MessageSquareDot,
         Crop,
-        Undo2
+        Undo2,
+        MicOff,
+        VideoOff,
+        ScreenShare
     ]
 );
 

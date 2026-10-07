@@ -480,6 +480,7 @@ impl QuillApp {
                 .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
         });
         let dust = self.vanish_overlay();
+        let call_bar = self.call_bar(cx);
         div()
             .relative()
             .flex()
@@ -487,6 +488,7 @@ impl QuillApp {
             .flex_1()
             .min_w_0()
             .min_h_0()
+            .children(call_bar)
             .child(history)
             // Phase C2i: busy-decline banner — the calls that arrived
             // while another call was active were declined with

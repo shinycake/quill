@@ -68,6 +68,9 @@ pub struct CallSummary {
     /// Human-readable end line (reason-aware).
     pub end_line: String,
     pub need_rating: bool,
+    /// An outgoing call the peer declined before it connected: tdesktop
+    /// shows "line busy" with Redial / Cancel.
+    pub busy: bool,
     /// `need_debug_information` / `need_log` are out of this slice
     /// (no media log exists; debug-info upload is C2) — kept so the
     /// end screen can say so honestly.
@@ -301,7 +304,17 @@ impl CallSummary {
             }
             _ => ("Call ended".to_string(), false, false, false),
         };
+        let busy = call.is_outgoing
+            && duration_secs == 0
+            && matches!(
+                call.state,
+                CallState::Discarded {
+                    reason: crate::telegram::envelope::CallDiscardReason::Declined,
+                    ..
+                }
+            );
         CallSummary {
+            busy,
             call_id: call.id,
             user_id: call.user_id,
             is_outgoing: call.is_outgoing,

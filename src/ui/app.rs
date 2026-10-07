@@ -512,6 +512,16 @@ pub struct QuillApp {
     /// (keeps the overlay's ringing/connected clock fresh). Mirrors
     /// `voice_tick`.
     pub(super) call_tick_active: bool,
+    /// The call window (tdesktop's call panel), and its bookkeeping: a
+    /// call whose window you closed stays closed until the call bar
+    /// reopens it; an incoming call raises it once.
+    pub(super) call_window: Option<AnyWindowHandle>,
+    pub(super) call_window_opening: bool,
+    pub(super) call_window_raised: bool,
+    pub(super) call_window_closed_by_user: Option<i32>,
+    pub(super) call_ended_at: Option<(i32, std::time::Instant)>,
+    pub(super) call_sounds: super::call_sounds::CallSounds,
+    pub(super) call_sound_marks: super::call_sounds::SoundMarks,
     /// History row whose voice note is playing.
     pub(super) playing_voice: Option<MessageId>,
     /// History row whose music file (`messageAudio`) is playing. Shares `voice_player`.
