@@ -196,6 +196,7 @@ impl QuillApp {
         revoke: bool,
         cx: &mut Context<Self>,
     ) {
+        self.begin_vanish(chat_id, ids);
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
                 self.status_note = "could not delete messages".into();
@@ -208,5 +209,64 @@ impl QuillApp {
         self.pending_forward = None;
         self.forward_picker_open = false;
         cx.notify();
+    }
+
+    /// Telegram Desktop's delete box for one message: "Do you want to delete
+    /// this message?" with "Also delete for {name}" (private chats) or
+    /// "Delete for everyone", checked by default, when deleting for everyone
+    /// is possible.
+    pub(super) fn open_delete_dialog(
+        &mut self,
+        confirm: quill::composer::DeleteConfirm,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let label = confirm.can_revoke.then(|| {
+            let session = self.session();
+            match session
+                .and_then(|s| s.chats.get(&confirm.chat_id.0))
+                .map(|chat| &chat.kind)
+            {
+                Some(quill::telegram::envelope::ChatKind::Private { user_id }) => session
+                    .and_then(|s| s.user(user_id.0))
+                    .map(|user| format!("Also delete for {}", user.first_name))
+                    .unwrap_or_else(|| "Delete for everyone".into()),
+                _ => "Delete for everyone".into(),
+            }
+        });
+        let revoke = std::rc::Rc::new(std::cell::Cell::new(confirm.revoke));
+        let app = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (app, revoke, confirm) = (app.clone(), revoke.clone(), confirm.clone());
+            let checkbox_state = revoke.clone();
+            alert
+                .description("Do you want to delete this message?")
+                .when_some(label.clone(), |alert, label| {
+                    alert.content(move |content, _, _| {
+                        let state = checkbox_state.clone();
+                        content.child(
+                            gpui_kit::component::checkbox::Checkbox::new("delete-message-revoke")
+                                .label(label.clone())
+                                .checked(state.get())
+                                .on_click(move |checked, window, _| {
+                                    state.set(*checked);
+                                    window.refresh();
+                                }),
+                        )
+                    })
+                })
+                .ok_text("Delete")
+                .cancel_text("Cancel")
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    let mut confirm = confirm.clone();
+                    confirm.revoke = confirm.can_revoke && revoke.get();
+                    let _ = app.update(cx, |this, cx| {
+                        this.pending_delete = Some(confirm);
+                        this.confirm_delete(cx);
+                    });
+                    true
+                })
+        });
     }
 }

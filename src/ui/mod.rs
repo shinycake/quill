@@ -17,6 +17,7 @@ mod selection_mode;
 mod story_areas;
 mod synthetic;
 mod updates;
+mod vanish;
 
 pub(crate) use account_lifecycle::*;
 pub(crate) use accounts::*;

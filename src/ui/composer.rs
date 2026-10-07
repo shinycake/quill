@@ -11,9 +11,9 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::{
     AttachmentKind, CommandMenuItem, ComposerAttachment, ComposerEdit, ComposerReplyTo,
-    ComposerScheduling, ComposerSnapshot, DeleteConfirm, FormatAction, SendOptions,
-    apply_format_markup, begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply,
-    cancel_reply_draft, clear_format_markup, command_menu_trigger, filter_command_menu_items,
+    ComposerScheduling, ComposerSnapshot, FormatAction, SendOptions, apply_format_markup,
+    begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply, cancel_reply_draft,
+    clear_format_markup, command_menu_trigger, filter_command_menu_items,
     strip_command_menu_trigger,
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -1641,12 +1641,6 @@ impl QuillApp {
         }
     }
 
-    pub(super) fn begin_delete(&mut self, confirm: DeleteConfirm, cx: &mut Context<Self>) {
-        self.pending_delete = Some(confirm);
-        self.status_note = "confirm delete".into();
-        cx.notify();
-    }
-
     pub(super) fn cancel_delete(&mut self, cx: &mut Context<Self>) {
         self.pending_delete = None;
         self.status_note = "delete cancelled".into();
@@ -1657,6 +1651,7 @@ impl QuillApp {
         let Some(confirm) = self.pending_delete.take() else {
             return;
         };
+        self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
         if self.live.is_some() {
             let result = self
                 .live

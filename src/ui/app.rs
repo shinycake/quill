@@ -332,6 +332,8 @@ pub struct QuillApp {
     pub(super) frame_clock_running: std::cell::Cell<bool>,
     /// Smooth reveal of a bot's streaming reply (`bot_stream`).
     pub(super) stream_reveal: std::cell::RefCell<super::bot_stream::StreamReveal>,
+    /// Deleted messages still dissolving (`vanish`).
+    pub(super) vanishing: std::cell::RefCell<Vec<super::vanish::Vanishing>>,
     /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
     /// a secret chat (TGX `SecretChatContextBotAlert`) — the stashed
     /// query is inserted on Confirm.

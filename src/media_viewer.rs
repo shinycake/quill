@@ -344,7 +344,9 @@ pub fn collect_media_items(messages: &[HistoryMessage]) -> Vec<MediaViewerItem> 
 
 fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
     match &message.content {
-        MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => {
+        // Spoilers are viewable once revealed (the cover takes the click
+        // before that), as in Telegram Desktop; secret media never.
+        MessageContent::Photo(photo) if !photo.is_secret => {
             let largest = photo.open_file_id()?;
             let mut display = vec![largest];
             if let Some(thumb) = photo.thumb_size()
@@ -376,7 +378,7 @@ fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
                     .filter(|(w, h)| *w > 0 && *h > 0),
             })
         }
-        MessageContent::Video(video) if !video.is_secret && !video.has_spoiler => {
+        MessageContent::Video(video) if !video.is_secret => {
             let thumb = video.thumb_file_id.filter(|id| id.0 != 0);
             let download = thumb.unwrap_or(video.file_id);
             if download.0 == 0 {
@@ -749,7 +751,7 @@ mod tests {
     }
 
     #[test]
-    fn secret_and_spoiler_media_are_excluded() {
+    fn secret_media_is_excluded_but_spoilers_open_once_revealed() {
         let mut secret = photo_message(7, 5, vec![(70, 100, 100)], "");
         if let MessageContent::Photo(photo) = &mut secret.content {
             photo.is_secret = true;
@@ -759,7 +761,8 @@ mod tests {
             video.has_spoiler = true;
         }
         let items = collect_media_items(&[secret, spoiler]);
-        assert!(items.is_empty());
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].message_id, MessageId(6));
     }
 
     #[test]
