@@ -41,6 +41,8 @@ pub(super) struct SelectableRichText {
     selection_color: Hsla,
     document_order: u64,
     message: Option<(i64, u64)>,
+    /// Hidden spoiler runs and their specks' opacity.
+    spoilers: Vec<(Range<usize>, f32)>,
 }
 
 impl SelectableRichText {
@@ -54,7 +56,15 @@ impl SelectableRichText {
             selection_color: gpui_kit::hsla(0.58, 0.8, 0.6, 0.35),
             document_order: 0,
             message: None,
+            spoilers: Vec::new(),
         }
+    }
+
+    /// Byte ranges drawn as spoiler specks in the text's color (the text
+    /// itself is styled invisible by the caller), with their opacity.
+    pub(super) fn spoilers(mut self, spoilers: Vec<(Range<usize>, f32)>) -> Self {
+        self.spoilers = spoilers;
+        self
     }
 
     /// Reading order among all selectable text in the window: a selection
@@ -273,6 +283,26 @@ impl Element for SelectableRichText {
             window,
             cx,
         );
+        if !self.spoilers.is_empty() {
+            let color = window.text_style().color;
+            let line_height = layout.line_height();
+            for (range, opacity) in &self.spoilers {
+                let (Some(start), Some(end)) = (
+                    layout.position_for_index(range.start),
+                    layout.position_for_index(range.end),
+                ) else {
+                    continue;
+                };
+                for rect in selection_quads(start, end, layout.bounds(), line_height) {
+                    super::spoiler_fx::paint_text_specks(
+                        rect,
+                        bounds.origin,
+                        color.opacity(color.a * opacity),
+                        window,
+                    );
+                }
+            }
+        }
 
         // Links and spoilers: a press and release without a drag.
         if let Some(handler) = self.on_click.clone() {

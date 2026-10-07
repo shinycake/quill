@@ -28,6 +28,69 @@ pub(super) struct InlineFrame {
     pub(super) sound: bool,
     /// The history's background, for masks drawn over the video.
     pub(super) backdrop: Hsla,
+    /// Position through the clip, `0.0..=1.0`, once its duration is known.
+    pub(super) progress: Option<f32>,
+    /// A round video message's seek ring: how far it has sprung out
+    /// (0 hidden, 1 shown, briefly above 1 while springing) and how far
+    /// its dot has grown under a drag.
+    pub(super) seek_shown: f32,
+    pub(super) seek_grabbed: f32,
+}
+
+/// tdesktop `VideoMessageSeek`: the ring shows in 220 ms (ease-out-back),
+/// hides in 150 ms, and the dot grows or shrinks in 150 ms.
+const SEEK_SHOW: f32 = 0.22;
+const SEEK_HIDE: f32 = 0.15;
+const SEEK_GRAB: f32 = 0.15;
+
+/// `anim::easeOutBack`: overshoots a little, then settles.
+fn ease_out_back(t: f32) -> f32 {
+    const S: f32 = 1.70158;
+    let t = t - 1.0;
+    t * t * ((S + 1.0) * t + S) + 1.0
+}
+
+/// A value that eases between 0 and 1 when its target flips.
+#[derive(Clone, Copy)]
+struct Toggle {
+    on: bool,
+    since: std::time::Instant,
+    from: f32,
+}
+
+impl Toggle {
+    fn new() -> Self {
+        Self {
+            on: false,
+            since: std::time::Instant::now(),
+            from: 0.0,
+        }
+    }
+
+    /// Point it at `on`, starting from wherever it is now.
+    fn set(&mut self, on: bool, show: f32, hide: f32, spring: bool) {
+        if self.on != on {
+            self.from = self.value(show, hide, spring).clamp(0.0, 1.0);
+            self.on = on;
+            self.since = std::time::Instant::now();
+        }
+    }
+
+    fn value(&self, show: f32, hide: f32, spring: bool) -> f32 {
+        let elapsed = self.since.elapsed().as_secs_f32();
+        if self.on {
+            let t = (elapsed / show).min(1.0);
+            let eased = if spring { ease_out_back(t) } else { t };
+            self.from + (1.0 - self.from) * eased
+        } else {
+            let t = (elapsed / hide).min(1.0);
+            self.from * (1.0 - t)
+        }
+    }
+
+    fn settled(&self, show: f32, hide: f32) -> bool {
+        self.since.elapsed().as_secs_f32() >= if self.on { show } else { hide }
+    }
 }
 
 #[derive(Default)]
@@ -44,6 +107,12 @@ struct Slot {
     video: super::native_video::NativeVideo,
     seen: u64,
     sound: bool,
+    /// Paused by a click while playing with sound.
+    paused: bool,
+    /// Dragging along the seek ring: whether it was playing before.
+    seeking: Option<bool>,
+    seek_shown: Toggle,
+    seek_grabbed: Toggle,
 }
 
 impl InlineVideos {
@@ -69,29 +138,109 @@ impl InlineVideos {
         self.players.clear();
     }
 
-    /// Play a running clip once from the start with sound (muting any
-    /// other), or back to its muted loop. False when it isn't running.
+    /// A click on a running clip (tdesktop's round video message): a
+    /// muted loop plays once from the start with sound (muting any other),
+    /// a sounding one pauses, a paused one resumes. False when it isn't
+    /// running.
     #[cfg(target_os = "macos")]
     pub(super) fn toggle_sound(&mut self, chat_id: i64, message_id: i64) -> bool {
         let key = (chat_id, message_id);
-        let Some(on) = self.players.get(&key).map(|slot| !slot.sound) else {
+        let Some(slot) = self.players.get_mut(&key) else {
             return false;
         };
+        if slot.sound {
+            slot.paused = !slot.paused;
+            if slot.paused {
+                slot.video.pause();
+            } else {
+                slot.video.play();
+            }
+            return true;
+        }
         for (other, slot) in &mut self.players {
             if *other != key && slot.sound {
                 slot.sound = false;
+                slot.paused = false;
                 slot.video.set_volume(0.0);
-            }
-        }
-        if let Some(slot) = self.players.get_mut(&key) {
-            slot.sound = on;
-            slot.video.set_volume(if on { 1.0 } else { 0.0 });
-            if on {
-                slot.video.seek(0.0);
                 slot.video.play();
             }
         }
+        if let Some(slot) = self.players.get_mut(&key) {
+            slot.sound = true;
+            slot.paused = false;
+            slot.video.set_volume(1.0);
+            slot.video.seek(0.0);
+            slot.video.play();
+        }
         true
+    }
+
+    /// Drag along a sounding clip's seek ring to `fraction` of it: the
+    /// clip holds still while dragged and resumes on release if it was
+    /// playing.
+    #[cfg(target_os = "macos")]
+    pub(super) fn seek_to(&mut self, chat_id: i64, message_id: i64, fraction: f32) -> bool {
+        let Some(slot) = self.players.get_mut(&(chat_id, message_id)) else {
+            return false;
+        };
+        if !slot.sound {
+            return false;
+        }
+        if slot.seeking.is_none() {
+            slot.seeking = Some(!slot.paused);
+            slot.video.pause();
+        }
+        if let Some(total) = slot.video.duration_secs() {
+            slot.video.seek(f64::from(fraction.clamp(0.0, 1.0)) * total);
+        }
+        true
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn end_seek(&mut self, chat_id: i64, message_id: i64) {
+        if let Some(slot) = self.players.get_mut(&(chat_id, message_id))
+            && let Some(was_playing) = slot.seeking.take()
+        {
+            slot.paused = !was_playing;
+            if was_playing {
+                slot.video.play();
+            }
+        }
+    }
+
+    pub(super) fn is_seeking(&self, chat_id: i64, message_id: i64) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.players
+                .get(&(chat_id, message_id))
+                .is_some_and(|slot| slot.seeking.is_some())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (chat_id, message_id);
+            false
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn seek_to(&mut self, _chat_id: i64, _message_id: i64, _fraction: f32) -> bool {
+        false
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn end_seek(&mut self, _chat_id: i64, _message_id: i64) {}
+
+    /// Whether a seek ring is still springing in or out.
+    pub(super) fn seek_animating(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.players.values().any(|slot| {
+                !slot.seek_shown.settled(SEEK_SHOW, SEEK_HIDE)
+                    || !slot.seek_grabbed.settled(SEEK_GRAB, SEEK_GRAB)
+            })
+        }
+        #[cfg(not(target_os = "macos"))]
+        false
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -119,6 +268,10 @@ impl InlineVideos {
                     video,
                     seen: render,
                     sound: false,
+                    paused: false,
+                    seeking: None,
+                    seek_shown: Toggle::new(),
+                    seek_grabbed: Toggle::new(),
                 })
             }
         };
@@ -127,24 +280,37 @@ impl InlineVideos {
             return None;
         }
         // Loop: `play` rewinds a clip that reached its end. A clip played
-        // with sound goes back to its muted loop.
-        if !slot.video.is_playing() {
+        // with sound goes back to its muted loop; a paused or dragged one
+        // holds still.
+        let held = slot.paused || slot.seeking.is_some();
+        if !held && !slot.video.is_playing() {
             if slot.sound {
                 slot.sound = false;
                 slot.video.set_volume(0.0);
             }
             slot.video.play();
         }
+        slot.seek_shown
+            .set(slot.sound && held, SEEK_SHOW, SEEK_HIDE, true);
+        slot.seek_grabbed
+            .set(slot.seeking.is_some(), SEEK_GRAB, SEEK_GRAB, false);
         let buffer = slot.video.frame()?;
         let remaining_secs = slot
             .video
             .duration_secs()
             .map(|total| (total - slot.video.position_secs()).max(0.0));
+        let progress = slot
+            .video
+            .duration_secs()
+            .map(|total| (slot.video.position_secs() / total).clamp(0.0, 1.0) as f32);
         Some(InlineFrame {
             buffer,
             remaining_secs,
             sound: slot.sound,
             backdrop: gpui_kit::black(),
+            progress,
+            seek_shown: slot.seek_shown.value(SEEK_SHOW, SEEK_HIDE, true),
+            seek_grabbed: slot.seek_grabbed.value(SEEK_GRAB, SEEK_GRAB, false),
         })
     }
 
@@ -225,8 +391,12 @@ impl QuillApp {
             .frame(chat_id.0, message_id.0, || {
                 self.playable_clip_path(chat_id, message_id, file_id)
             });
-        if self.inline_videos.borrow().active() {
-            self.request_animation_tick(30, cx);
+        {
+            let videos = self.inline_videos.borrow();
+            if videos.active() {
+                // Seek rings spring in and out more smoothly at 60.
+                self.request_animation_tick(if videos.seek_animating() { 60 } else { 30 }, cx);
+            }
         }
         // Masks over the video blend into the history behind it.
         let backdrop = self

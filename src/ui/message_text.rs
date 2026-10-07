@@ -575,21 +575,35 @@ fn paint_text_run(
         !style.spoiler || revealed.contains(&(msg_key.0, msg_key.1, index as u64, is_caption));
     if !revealed {
         let key = (msg_key.0, msg_key.1, index as u64, is_caption);
+        // The text keeps its room but is invisible; specks in the text's
+        // color drift over it (tdesktop).
+        let specks = canvas(
+            |_, _, _| {},
+            |bounds, _, window, _| {
+                let color = window.text_style().color;
+                super::spoiler_fx::paint_text_specks(bounds, bounds.origin, color, window);
+            },
+        )
+        .absolute()
+        .inset_0()
+        .size_full();
         return div()
             .id(run_id)
+            .relative()
             .role(Role::Button)
             .aria_label("Reveal spoiler")
-            .bg(fill_muted())
-            .rounded_sm()
-            .px_1()
-            .text_color(fill_muted())
             .cursor_pointer()
-            .pressable(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.spoiler_revealed.insert(key);
+                super::spoiler_fx::mark_revealed(key);
                 cx.notify();
             }))
-            .child(run.text.clone())
+            .child(
+                div()
+                    .text_color(gpui_kit::transparent_black())
+                    .child(run.text.clone()),
+            )
+            .child(specks)
             .into_any_element();
     }
     if let Some(id) = run.custom_emoji_id
@@ -918,6 +932,7 @@ fn inline_paragraph(
     let mut mono: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
     let mut click_ranges = Vec::new();
     let mut actions = Vec::new();
+    let mut spoilers: Vec<(std::ops::Range<usize>, f32)> = Vec::new();
     for (offset, run) in runs.iter().enumerate() {
         if run.text.is_empty() {
             continue;
@@ -960,10 +975,21 @@ fn inline_paragraph(
             click_ranges.push(range.clone());
             actions.push(InlineAction::Link(href.clone()));
         }
+        // tdesktop hides spoiler text under drifting specks of its color;
+        // a revealed run's specks fade out over the text.
         if hidden {
-            // Opaque until clicked: text and background share one color.
-            highlight.color = Some(fill_muted().into());
-            highlight.background_color = Some(fill_muted().into());
+            spoilers.push((range.clone(), 1.));
+        } else if style.spoiler
+            && let Some(fade) = super::spoiler_fx::reveal_fade(key)
+        {
+            spoilers.push((range.clone(), fade));
+        }
+        if hidden {
+            // GPUI blends a highlight color over the text's, so a clear
+            // color changes nothing: fade the glyphs out instead.
+            highlight.color = None;
+            highlight.fade_out = Some(1.);
+            highlight.background_color = None;
             click_ranges.retain(|existing| existing != &range);
             actions.truncate(click_ranges.len());
             click_ranges.push(range.clone());
@@ -1012,10 +1038,12 @@ fn inline_paragraph(
             InlineAction::Link(href) => this.open_message_url(&href, cx),
             InlineAction::RevealSpoiler(key) => {
                 this.spoiler_revealed.insert(key);
+                super::spoiler_fx::mark_revealed(key);
                 cx.notify();
             }
         });
-    });
+    })
+    .spoilers(spoilers);
     div()
         .id(format!(
             "msg-par-wrap-{}-{}-{first_index}",

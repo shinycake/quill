@@ -868,6 +868,17 @@ pub(super) fn video_note_attachment(
     let blocked = note.is_secret;
     let unseen = !outgoing && !note.is_viewed && !playing && !sounding;
     let has_visual = !blocked && (live || visual.is_some());
+    // tdesktop's seek ring over a round video playing with sound.
+    let seek_ring = inline.as_ref().filter(|inline| inline.sound).map(|inline| {
+        super::round_seek::round_seek_overlay(
+            chat_id.0,
+            message_id.0,
+            inline.progress.unwrap_or(0.),
+            inline.seek_shown,
+            inline.seek_grabbed,
+            cx,
+        )
+    });
     let picture = if let Some(inline) = inline {
         round_inline_surface(inline)
     } else {
@@ -969,6 +980,7 @@ pub(super) fn video_note_attachment(
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| toggle(this, cx)))
                 .child(picture)
+                .children(seek_ring)
                 // Over the video's mask, so the ring stays visible.
                 .when(unseen && live, |this| {
                     this.child(
@@ -2051,33 +2063,18 @@ pub(super) fn spoiler_cover(
                 .size_full()
                 .object_fit(ObjectFit::Cover)
         });
-    let shade = if preview.is_some() { 0.25 } else { 0.1 };
-    let (width, height) = (frame_w / px(1.), frame_h / px(1.));
-    // Telegram's spoiler: dense, fine grains that shimmer and drift. One
-    // per ~55 px², capped; their phase follows a shared clock.
-    let count = ((width * height / 55.0) as u64).clamp(120, 1100);
-    let time = spoiler_clock();
-    let dust = (0..count).map(|index| {
-        let mut seed = (row_id ^ index.wrapping_mul(0x9E37_79B9_7F4A_7C15)) | 1;
-        let mut next = || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed % 10_000) as f32 / 10_000.0
-        };
-        let (x, y, phase, speed) = (next(), next(), next() * 6.283, 0.6 + next() * 1.4);
-        let size = 0.9 + next() * 0.8;
-        let drift_x = (time * 0.35 * speed + phase).sin() * 3.0;
-        let drift_y = (time * 0.5 * speed + phase * 1.7).cos() * 3.0;
-        let alpha = 0.25 + 0.65 * (0.5 + 0.5 * (time * 1.6 * speed + phase).sin());
-        div()
-            .absolute()
-            .left(px(x * width + drift_x))
-            .top(px(y * height + drift_y))
-            .size(px(size))
-            .rounded_full()
-            .bg(gpui_kit::white().opacity(alpha))
-    });
+    // lib_ui `kImageSpoilerDarkenAlpha` (32 / 255) over the preview.
+    let shade = if preview.is_some() { 0.125 } else { 0.1 };
+    // tdesktop's spoiler "mess": the shared, pre-rendered speck tile.
+    let dust = canvas(
+        |_, _, _| {},
+        |bounds, _, window, _| {
+            super::spoiler_fx::paint_media_specks(bounds, window);
+        },
+    )
+    .absolute()
+    .inset_0()
+    .size_full();
     div()
         .id(("spoiler-cover", row_id))
         .relative()
@@ -2093,28 +2090,20 @@ pub(super) fn spoiler_cover(
                 .inset_0()
                 .bg(gpui_kit::black().opacity(shade)),
         )
-        .children(dust)
+        .child(dust)
         .role(gpui_kit::Role::Button)
         .aria_label("Reveal spoiler")
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
             this.spoiler_revealed.insert(key);
+            super::spoiler_fx::mark_revealed(key);
             if let Some(file_id) = download {
                 this.request_media_download(file_id, None, cx);
             }
             cx.notify();
         }))
         .into_any_element()
-}
-
-/// Seconds on the shared spoiler-dust clock.
-fn spoiler_clock() -> f32 {
-    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    START
-        .get_or_init(std::time::Instant::now)
-        .elapsed()
-        .as_secs_f32()
 }
 
 /// The minithumbnail scaled up and Gaussian-blurred, cached per message.
