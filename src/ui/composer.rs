@@ -449,55 +449,49 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn attach_local(&mut self, kind: AttachmentKind, cx: &mut Context<Self>) {
-        // Phase S1: round video notes need secret-chat layer ≥ 66 (TGX
-        // `chatSupportsRoundVideos`); an older peer client gets the
-        // `SecretChatFeatureUnsupported` notice instead of a broken send.
-        if matches!(kind, AttachmentKind::VideoNote)
-            && let Some((name, layer)) = self.open_secret_chat_peer_layer()
-            && layer < 66
-        {
-            self.status_note = format!(
-                "{name}'s Telegram client doesn't support this feature. \
-                 They need to install an update first."
-            );
-            cx.notify();
+    /// The attach menu's "Photo or video" / "File": Telegram Desktop's
+    /// "Choose Files" dialog. Picked photos and videos join the album;
+    /// anything else, or everything when `as_files`, goes as files.
+    /// `QUILL_ATTACH_PHOTO` / `QUILL_ATTACH_FILE` skip the dialog for live
+    /// testing; the offline demo attaches its fixtures instead.
+    pub(super) fn pick_attachments(&mut self, as_files: bool, cx: &mut Context<Self>) {
+        let env_key = if as_files {
+            "QUILL_ATTACH_FILE"
+        } else {
+            "QUILL_ATTACH_PHOTO"
+        };
+        let preset = std::env::var_os(env_key).map(PathBuf::from).or_else(|| {
+            (self.live.is_none() && self.demo_session.is_some()).then(|| {
+                demo_media_allowlist().join(if as_files {
+                    "demo-notes.txt"
+                } else {
+                    "demo-thumb.png"
+                })
+            })
+        });
+        if let Some(path) = preset {
+            self.attach_picked(vec![path], as_files, cx);
             return;
         }
-        // Explicit user action → pick. Prefer QUILL_ATTACH_PHOTO / QUILL_ATTACH_FILE /
-        // QUILL_ATTACH_VIDEO when set (live testing); otherwise the demo fixtures
-        // under docs/screenshots.
-        // Never read paths from TDLib JSON for send.
-        let env_key = match kind {
-            AttachmentKind::Photo => "QUILL_ATTACH_PHOTO",
-            AttachmentKind::Document => "QUILL_ATTACH_FILE",
-            AttachmentKind::Video => "QUILL_ATTACH_VIDEO",
-            AttachmentKind::VideoNote => "QUILL_ATTACH_VIDEO_NOTE",
-        };
-        let path = std::env::var_os(env_key)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| match kind {
-                AttachmentKind::Photo => demo_media_allowlist().join("demo-thumb.png"),
-                AttachmentKind::Document => demo_media_allowlist().join("demo-notes.txt"),
-                AttachmentKind::Video => demo_media_allowlist().join("demo-clip.mp4"),
-                AttachmentKind::VideoNote => demo_media_allowlist().join("demo-video-note.mp4"),
-            });
-        match ComposerAttachment::pick(&path, kind) {
-            Some(att) => {
-                let name = att.file_name.clone();
-                let before = self.pending_attachments.len();
-                ComposerAttachment::push_attachment(&mut self.pending_attachments, att);
-                self.status_note = if self.pending_attachments.len() == before {
-                    format!("album is full ({before})")
-                } else {
-                    format!("attached {name}")
-                };
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Choose Files".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = picker.await {
+                let _ = this.update(cx, |this, cx| this.attach_picked(paths, as_files, cx));
             }
-            None => {
-                self.status_note = "could not attach file".into();
-            }
+        })
+        .detach();
+    }
+
+    fn attach_picked(&mut self, paths: Vec<PathBuf>, as_files: bool, cx: &mut Context<Self>) {
+        self.attach_dropped_files(&paths, cx);
+        if as_files {
+            ComposerAttachment::set_send_as_files(&mut self.pending_attachments, true);
         }
-        cx.notify();
     }
 
     /// Parity slice (platform-paste-image): on Paste, if the composer has

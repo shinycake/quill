@@ -1602,6 +1602,8 @@ impl QuillApp {
             record_locked: false,
             record_discard_confirm: false,
             voice_tick: false,
+            recording_auto_send: false,
+            round_preview: Default::default(),
             slow_mode_tick_chat: None,
             self_destruct_tick_chat: None,
             call_tick_active: false,

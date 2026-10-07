@@ -525,10 +525,11 @@ impl QuillApp {
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
-                    .timer(Duration::from_millis(200))
+                    .timer(Duration::from_millis(100))
                     .await;
                 let cont = this
                     .update(cx, |this, cx| {
+                        this.check_recording(cx);
                         let recording = this.recording_active();
                         if let Some(capture) = this.voice_capture.as_mut() {
                             capture.sample_bar();

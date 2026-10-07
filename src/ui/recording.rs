@@ -95,6 +95,13 @@ impl QuillApp {
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
         }
+        self.with_capture_access(false, Self::begin_voice_capture, cx);
+    }
+
+    fn begin_voice_capture(&mut self, cx: &mut Context<Self>) {
+        if self.recording_active() {
+            return;
+        }
         match VoiceCapture::start() {
             Ok(capture) => {
                 self.voice_capture = Some(capture);
@@ -116,11 +123,30 @@ impl QuillApp {
         if self.pending_edit.is_some() || self.recording_active() {
             return;
         }
+        // Phase S1: round video notes need secret-chat layer ≥ 66 (TGX
+        // `chatSupportsRoundVideos`).
+        if let Some((name, layer)) = self.open_secret_chat_peer_layer()
+            && layer < 66
+        {
+            self.status_note = format!(
+                "{name}'s Telegram client doesn't support this feature. \
+                 They need to install an update first."
+            );
+            cx.notify();
+            return;
+        }
         if self.gif_panel_open() {
             self.close_gif_panel(cx);
         }
         if self.sticker_panel_open() {
             self.close_sticker_panel(cx);
+        }
+        self.with_capture_access(true, Self::begin_video_note_capture, cx);
+    }
+
+    fn begin_video_note_capture(&mut self, cx: &mut Context<Self>) {
+        if self.recording_active() {
+            return;
         }
         let hq = self
             .session()
@@ -136,6 +162,31 @@ impl QuillApp {
                 self.status_note = err;
             }
         }
+        cx.notify();
+    }
+
+    /// A capture that stopped by itself: a video message that reached the
+    /// 60 s limit is sent (as tdesktop does); a failed start (no camera or
+    /// microphone access) ends the recording with the reason.
+    pub(super) fn check_recording(&mut self, cx: &mut Context<Self>) {
+        if let Some(ended) = self.video_note_capture.as_mut().and_then(|c| c.ended()) {
+            match ended {
+                Ok(()) => {
+                    self.recording_auto_send = true;
+                    cx.notify();
+                }
+                Err(reason) => self.fail_recording(reason, cx),
+            }
+            return;
+        }
+        if let Some(reason) = self.voice_capture.as_mut().and_then(|c| c.failure()) {
+            self.fail_recording(reason, cx);
+        }
+    }
+
+    fn fail_recording(&mut self, reason: String, cx: &mut Context<Self>) {
+        self.cancel_recording(cx);
+        self.status_note = reason;
         cx.notify();
     }
 
@@ -304,10 +355,28 @@ impl QuillApp {
         // not leak into the next recording.
         self.record_locked = false;
         self.record_discard_confirm = false;
-        let draft = match capture.finish() {
+        self.sync_voice_action();
+        cx.notify();
+        // ffmpeg finishes the file after the stop signal: off the main thread.
+        let finished = cx.background_spawn(async move { capture.finish() });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = finished.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.send_finished_video_note(result, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn send_finished_video_note(
+        &mut self,
+        result: Result<quill::video::VideoNoteDraft, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let draft = match result {
             Ok(draft) => draft,
             Err(err) => {
-                self.sync_voice_action();
                 self.status_note = err;
                 cx.notify();
                 return;

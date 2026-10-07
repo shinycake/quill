@@ -6,6 +6,7 @@
 //! message plays once with sound when clicked, then loops muted again.
 
 use super::app::QuillApp;
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageContent;
@@ -227,7 +228,12 @@ impl QuillApp {
         if self.inline_videos.borrow().active() {
             self.request_animation_tick(30, cx);
         }
-        frame
+        // Masks over the video blend into the history behind it.
+        let backdrop = self
+            .appearance
+            .wallpaper_rgb
+            .map_or(cx.theme().background, |color| rgb(color).into());
+        frame.map(|frame| InlineFrame { backdrop, ..frame })
     }
 }
 
