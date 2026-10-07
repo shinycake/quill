@@ -10,7 +10,6 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
-use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::MessageSender;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -243,7 +242,6 @@ impl QuillApp {
     pub(super) fn toggle_group_call_self_mute(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.toggle_group_call_self_mute();
-            self.status_note = "Muted (local — no audio path yet).".into();
         } else if let Some(session) = self.demo_session.as_mut() {
             let muted = !session
                 .active_group_call
@@ -849,55 +847,5 @@ impl QuillApp {
             self.status_note = "In-call chat needs a live connection.".into();
         }
         cx.notify();
-    }
-
-    /// Phase C3a: not-joined tracked call — show the join prompt card.
-    /// (Handled inside `group_call_card` via `call.is_joined`.)
-    pub(super) fn group_call_join_prompt(
-        &self,
-        call: &ActiveGroupCall,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .id("group-call-join")
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap_2()
-            .p_4()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().background)
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child("A voice chat is live"),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "{} participant{}",
-                        call.participant_count,
-                        if call.participant_count == 1 { "" } else { "s" }
-                    )),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Join to connect video."),
-            )
-            .child(
-                Button::new("group-call-join-btn")
-                    .label("Join voice chat")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.join_active_group_call(cx);
-                    })),
-            )
-            .into_any_element()
     }
 }

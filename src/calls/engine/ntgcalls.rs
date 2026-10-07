@@ -186,6 +186,37 @@ impl NtgcallsEngine {
     /// Phase C2g: (re)issue the group call's capture sources from the
     /// retained config. Group calls carry no audio transport in this
     /// slice — only the camera, and only while it is enabled.
+    /// Put the group transport's microphone in the tracked mute state.
+    fn apply_group_mute(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let media = self
+            .group_calls
+            .get(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        if !media.connected {
+            return Ok(());
+        }
+        let (chat_id, muted) = (media.chat_id, media.muted);
+        let instance = self.ensure_instance()?;
+        let mut state = false;
+        // SAFETY: the instance and output pointer are valid for the
+        // duration of this synchronous C call.
+        let rc = unsafe {
+            if muted {
+                (self.api.ntg_mute)(instance.as_ptr(), chat_id, &mut state)
+            } else {
+                (self.api.ntg_unmute)(instance.as_ptr(), chat_id, &mut state)
+            }
+        };
+        if rc == NTG_OK {
+            Ok(())
+        } else {
+            Err(EngineError::Engine {
+                op: if muted { "ntg_mute" } else { "ntg_unmute" },
+                code: rc,
+            })
+        }
+    }
+
     fn issue_group_sources(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let media = self
             .group_calls
@@ -194,6 +225,11 @@ impl NtgcallsEngine {
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         let instance = self.ensure_instance()?;
         let camera = native_input(media.camera.as_deref())?;
+        // The system's default microphone and output, as for 1:1 calls:
+        // without them a voice chat is silent both ways.
+        let mic = self.device_input(None, MediaDeviceKind::Microphone)?;
+        let speaker = self.device_input(None, MediaDeviceKind::Speaker)?;
+        let mut mic_audio = audio_description(mic.as_ref());
         let mut camera_video = ntg_video_description {
             media_source: NTG_MEDIA_SOURCE_DEVICE,
             // Telegram's group video default.
@@ -206,7 +242,7 @@ impl NtgcallsEngine {
             keep_open: false,
         };
         let capture = ntg_media_description {
-            microphone: null_mut(),
+            microphone: &mut mic_audio,
             speaker: null_mut(),
             camera: if media.camera_enabled {
                 &mut camera_video
@@ -231,7 +267,31 @@ impl NtgcallsEngine {
                 code: rc,
             });
         }
-        Ok(())
+        // Everyone else's voices: the call mixes them into its playback
+        // "microphone" receiver, which names the output device.
+        let mut speaker_audio = audio_description(speaker.as_ref());
+        let playback = ntg_media_description {
+            microphone: &mut speaker_audio,
+            speaker: null_mut(),
+            camera: null_mut(),
+            screen: null_mut(),
+        };
+        // SAFETY: as above.
+        let rc = unsafe {
+            (self.api.ntg_set_stream_sources)(
+                instance.as_ptr(),
+                media.chat_id,
+                NTG_STREAM_MODE_PLAYBACK,
+                playback,
+            )
+        };
+        if rc != NTG_OK {
+            return Err(EngineError::Engine {
+                op: "ntg_set_stream_sources",
+                code: rc,
+            });
+        }
+        self.apply_group_mute(group_call_id)
     }
 
     /// Phase C2i: desktop-capture video description for screen-share
@@ -759,6 +819,14 @@ impl CallEngine for NtgcallsEngine {
         Ok(offer)
     }
 
+    fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
+        self.group_calls
+            .get_mut(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?
+            .muted = muted;
+        self.apply_group_mute(group_call_id)
+    }
+
     fn connect_group_call(
         &mut self,
         group_call_id: i32,
@@ -790,8 +858,6 @@ impl CallEngine for NtgcallsEngine {
                 code: rc,
             });
         }
-        // Group calls have no audio transport in this slice; the capture
-        // sources carry only the camera when it is enabled.
         let media = self
             .group_calls
             .get_mut(&group_call_id)

@@ -134,6 +134,14 @@ pub trait CallEngine {
     /// leaves a stray native presentation.
     fn presentation_active(&self, group_call_id: i32) -> bool;
 
+    /// app -> engine; mute or unmute your microphone in a group call
+    /// (`ntg_mute` / `ntg_unmute` on its chat). Kept for the next
+    /// connect when the transport isn't up yet.
+    fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
+        let _ = (group_call_id, muted);
+        Ok(())
+    }
+
     /// Phase C2g: app -> engine; tear down the group transport
     /// (`ntg_stop` on the chat id). Unknown group call ids succeed.
     fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError>;

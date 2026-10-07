@@ -213,7 +213,7 @@ pub struct LiveStoryJoinIntent {
 impl ActiveGroupCall {
     /// Blank tracked call for a newly seen call id. Participant state
     /// repopulates from updates.
-    pub(crate) fn fresh(id: i32) -> Self {
+    pub fn fresh(id: i32) -> Self {
         ActiveGroupCall {
             id,
             title: String::new(),

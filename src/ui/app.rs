@@ -516,6 +516,12 @@ pub struct QuillApp {
     /// call whose window you closed stays closed until the call bar
     /// reopens it; an incoming call raises it once.
     pub(super) call_window: Option<AnyWindowHandle>,
+    /// The voice / video chat window, as for 1:1 calls; the in-call
+    /// chat shows under the members when asked.
+    pub(super) group_call_window: Option<AnyWindowHandle>,
+    pub(super) group_call_window_opening: bool,
+    pub(super) group_call_window_closed_by_user: Option<i32>,
+    pub(super) group_call_chat_shown: bool,
     pub(super) call_window_opening: bool,
     pub(super) call_window_raised: bool,
     pub(super) call_window_closed_by_user: Option<i32>,

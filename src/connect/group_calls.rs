@@ -83,6 +83,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .as_deref_mut()
                 .expect("available engine")
                 .connect_group_call(group_call_id, &answer, video_enabled);
+            // Join muted if you muted before the transport was up.
+            if result.is_ok() {
+                let muted = self
+                    .session
+                    .active_group_call
+                    .as_ref()
+                    .is_some_and(|call| call.is_muted_self);
+                if let Some(engine) = self.call_engine.as_deref_mut() {
+                    let _ = engine.set_group_muted(group_call_id, muted);
+                }
+            }
             let connected = result.is_ok();
             if let Some(call) = self.session.active_group_call.as_mut() {
                 match result {
@@ -694,13 +705,27 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C3a: local-only self mute toggle. There is no TDLib "mute
     /// self" for group calls outside the join parameters — the UI labels
     /// this honestly as local-only; the state rides on the next (re)join.
+    /// Mute or unmute yourself in the joined group call: the
+    /// microphone goes quiet at once (the engine), and Telegram learns
+    /// it so everyone sees the muted icon
+    /// (`toggleGroupCallParticipantIsMuted` on yourself).
     pub fn toggle_group_call_self_mute(&mut self) {
-        let muted = !self
-            .session
-            .active_group_call
-            .as_ref()
-            .is_some_and(|c| c.is_muted_self);
+        let Some(call) = self.session.active_group_call.as_ref() else {
+            return;
+        };
+        let (group_call_id, muted) = (call.id, !call.is_muted_self);
+        let me = call
+            .participants
+            .iter()
+            .find(|p| p.is_current_user)
+            .map(|p| p.participant_id);
         self.session.set_group_call_self_muted(muted);
+        if let Some(engine) = self.call_engine.as_deref_mut() {
+            let _ = engine.set_group_muted(group_call_id, muted);
+        }
+        if let Some(me) = me {
+            let _ = self.toggle_group_call_participant_muted(me, muted);
+        }
     }
 
     /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` (schema 1.8.67,
