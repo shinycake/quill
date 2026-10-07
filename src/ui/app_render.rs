@@ -23,6 +23,9 @@ impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Rows the history list painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
+        if std::mem::take(&mut self.recording_auto_send) {
+            cx.defer_in(window, |this, window, cx| this.send_recording(window, cx));
+        }
         let status_toast = self.status_toast_visible(cx);
         let menu_open = self.message_menu.is_some() || self.chat_menu.is_some();
         if menu_open && !self.context_menu_was_open {

@@ -497,6 +497,10 @@ pub struct QuillApp {
     /// MED2: the record bar is showing the discard-confirmation row.
     pub(super) record_discard_confirm: bool,
     pub(super) voice_tick: bool,
+    /// A video message reached its time limit: send it next frame.
+    pub(super) recording_auto_send: bool,
+    /// The live camera image while a video message records.
+    pub(super) round_preview: std::cell::RefCell<super::round_record::RoundPreview>,
     /// Phase A1: the open chat whose slow-mode countdown is ticking
     /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
     pub(super) slow_mode_tick_chat: Option<ChatId>,
@@ -895,8 +899,10 @@ impl QuillApp {
         if primary.is_empty() {
             primary
         } else {
-            quill::video::with_viewer_frame_cache(quill::video::with_video_frame_cache(
-                quill::animation::with_gif_frame_cache(primary),
+            quill::voice::with_capture_root(quill::video::with_viewer_frame_cache(
+                quill::video::with_video_frame_cache(quill::animation::with_gif_frame_cache(
+                    primary,
+                )),
             ))
         }
     }

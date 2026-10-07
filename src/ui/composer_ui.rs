@@ -978,19 +978,29 @@ impl QuillApp {
                 }
             })
             .dropdown_menu(move |mut menu, _, _| {
-                for (label, icon, kind) in [
-                    ("Photo", IconName::Image, AttachmentKind::Photo),
-                    ("Video", IconName::Film, AttachmentKind::Video),
-                    ("File", IconName::File, AttachmentKind::Document),
-                    ("Video message", IconName::Video, AttachmentKind::VideoNote),
+                for (label, icon, as_files) in [
+                    ("Photo or video", IconName::Image, false),
+                    ("File", IconName::File, true),
                 ] {
                     let owner = owner.clone();
                     menu = menu.item(PopupMenuItem::new(label).icon(icon).on_click(
                         move |_, _, cx| {
-                            let _ = owner.update(cx, |this, cx| this.attach_local(kind, cx));
+                            let _ =
+                                owner.update(cx, |this, cx| this.pick_attachments(as_files, cx));
                         },
                     ));
                 }
+                // Telegram Desktop records round videos from the record
+                // button; this item starts one too, so it is easy to find.
+                let video_owner = owner.clone();
+                menu = menu.item(
+                    PopupMenuItem::new("Video message")
+                        .icon(IconName::Video)
+                        .on_click(move |_, _, cx| {
+                            let _ = video_owner
+                                .update(cx, |this, cx| this.start_video_note_recording(cx));
+                        }),
+                );
                 let poll_owner = owner.clone();
                 let gif_owner = owner.clone();
                 menu.separator()

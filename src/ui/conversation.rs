@@ -517,6 +517,21 @@ impl QuillApp {
                                 )
                             },
                         )
+                        // tdesktop shows the recording video message as a
+                        // camera circle over the chat.
+                        .when_some(self.round_record_overlay(cx), |this, circle| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .left_0()
+                                    .right_0()
+                                    .bottom(relative(1.))
+                                    .pb(px(24.))
+                                    .flex()
+                                    .justify_center()
+                                    .child(circle),
+                            )
+                        })
                         .when(
                             show_attach && !self.rich_editor_open && !self.recording_active(),
                             |this| {
