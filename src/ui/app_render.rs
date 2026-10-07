@@ -107,6 +107,9 @@ impl Render for QuillApp {
         // Phase C1: keep the call overlay's ringing / connected clock
         // fresh while a call is tracked (same 1s task pattern).
         self.ensure_call_tick(cx);
+        // The call window and its sounds follow the call.
+        self.sync_call_window(cx);
+        self.sync_call_sounds();
         // MED4b: debounced `getLinkPreview` prefetch for the
         // detected-URL chip (spawns at most one timer per new URL).
         self.maybe_prefetch_link_preview(cx);

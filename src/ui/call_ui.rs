@@ -19,10 +19,15 @@ impl QuillApp {
     /// the C2 libtgvoip spike, not faked here).
     pub(super) fn call_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if session.active_call.is_none()
-            && session.call_summary.is_none()
-            && session.call_error.is_none()
-        {
+        // The call itself lives in the call window; the main window only
+        // asks for a rating afterwards, or reports a failure to start.
+        let rating = session
+            .call_summary
+            .as_ref()
+            .is_some_and(|summary| summary.need_rating && !summary.rating_sent)
+            && session.active_call.is_none();
+        let failed = session.call_error.is_some() && session.active_call.is_none();
+        if !rating && !failed {
             return None;
         }
         Some(self.call_card(cx).into_any_element())
