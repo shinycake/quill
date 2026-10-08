@@ -8,6 +8,29 @@ use super::*;
 use crate::subsection_tabs::SubsectionTabsMode;
 use crate::telegram::envelope::{ForumTopicInfoUpdate, ForumTopicUpdate, ParsedMessage};
 
+/// `QUILL_TRACE_TOPICS=1`: print every write of a topic's unread count with
+/// its source, to compare Quill's badges with TDLib's answers. Temporary.
+pub(crate) fn trace_topic_unread(source: &str, chat_id: i64, topic: &ForumTopic) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_TOPICS").is_some()) {
+        eprintln!(
+            "quill topics: {source} chat={chat_id} topic={} unread={} read_inbox={} last={}",
+            topic.forum_topic_id,
+            topic.unread_count,
+            topic.last_read_inbox_message_id,
+            topic.last_message_id
+        );
+    }
+}
+
+/// A topic read up to (or past) its last message has nothing unread,
+/// whatever count came with it.
+pub(crate) fn settle_topic_unread(topic: &mut ForumTopic) {
+    if topic.last_message_id != 0 && topic.last_read_inbox_message_id >= topic.last_message_id {
+        topic.unread_count = 0;
+    }
+}
+
 /// The bot-side topic flags of a private chat (`userTypeBot`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BotTopics {
@@ -192,11 +215,8 @@ impl Session {
         topic.notification_settings = update.notification_settings;
         if update.last_read_inbox_message_id > topic.last_read_inbox_message_id {
             topic.last_read_inbox_message_id = update.last_read_inbox_message_id;
-            if topic.last_message_id != 0
-                && topic.last_read_inbox_message_id >= topic.last_message_id
-            {
-                topic.unread_count = 0;
-            }
+            settle_topic_unread(topic);
+            trace_topic_unread("updateForumTopic", update.chat_id, topic);
         }
     }
 
@@ -224,10 +244,12 @@ impl Session {
 
     /// A `getForumTopic` answer: TDLib's state for one topic replaces the
     /// cached entry (or adds it).
-    pub(crate) fn replace_forum_topic(&mut self, chat_id: ChatId, topic: ForumTopic) {
+    pub(crate) fn replace_forum_topic(&mut self, chat_id: ChatId, mut topic: ForumTopic) {
         let Some(topics) = self.forum_topics.get_mut(&chat_id.0) else {
             return;
         };
+        settle_topic_unread(&mut topic);
+        trace_topic_unread("getForumTopic", chat_id.0, &topic);
         match topics
             .iter_mut()
             .find(|t| t.forum_topic_id == topic.forum_topic_id)
@@ -248,6 +270,7 @@ impl Session {
             topic.unread_count = 0;
             topic.last_read_inbox_message_id =
                 topic.last_read_inbox_message_id.max(topic.last_message_id);
+            trace_topic_unread("markRead(local)", chat_id.0, topic);
         }
     }
 }

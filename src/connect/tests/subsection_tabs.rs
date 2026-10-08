@@ -2,7 +2,7 @@
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
-use crate::ids::ChatId;
+use crate::ids::{ChatId, MessageId};
 use crate::platform::MemorySecretStore;
 use crate::settings::load_media_prefs;
 use crate::subsection_tabs::SubsectionTabsMode;
@@ -243,6 +243,91 @@ fn bot_private_chat_topic_select_sends_exact_request() {
     ingest(
         &mut driver,
         r#"{"@type":"updateNewMessage","message":{"id":701,"chat_id":41,"is_outgoing":true,"topic_id":{"@type":"messageTopicForum","forum_topic_id":12},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"thanks","entities":[]}}}}"#,
+    );
+    assert_eq!(
+        driver.session.ordered_forum_topics(ChatId(41))[0].unread_count,
+        0
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Live regression (Hermesio, "make this into a"): the list said 0 unread,
+/// opening the topic loaded its messages and the badge came back as 16.
+/// Opening a topic must read what is on screen *as topic history*
+/// (`messageSourceForumTopicHistory`, also for rows already seen in "All"),
+/// and a `forumTopic` answer whose read position covers the last message
+/// shows no badge whatever count it carries.
+#[test]
+fn opening_topic_reads_it_and_never_resurrects_a_stale_count() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(&mut driver, &bot_user_json(41, true, true));
+    ingest(&mut driver, &bot_chat_json(41));
+    driver.select_chat(ChatId(41)).unwrap();
+    let extra = sent(&recorder, "getForumTopics")[0]["@extra"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let topic = |unread: i32, read: i64| {
+        format!(
+            r#""info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":5,"name":"make this into a","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":{{"id":800,"chat_id":41,"is_outgoing":false,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":5}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"done","entities":[]}}}}}},"order":"5","is_pinned":false,"unread_count":{unread},"last_read_inbox_message_id":{read}"#
+        )
+    };
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"forumTopics","@extra":"{extra}","total_count":1,"topics":[{{{}}}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+            topic(0, 800)
+        ),
+    );
+    assert_eq!(
+        driver.session.ordered_forum_topics(ChatId(41))[0].unread_count,
+        0
+    );
+
+    // Row 800 was already seen (and read) in "All".
+    driver
+        .session
+        .histories
+        .entry(41)
+        .or_default()
+        .viewed
+        .insert(800);
+
+    driver.select_topic(5).unwrap();
+    driver.view_messages(ChatId(41), &[MessageId(800)]).unwrap();
+    let views = sent(&recorder, "viewMessages");
+    let view = views.last().expect("topic rows are read again");
+    assert_eq!(view["message_ids"][0], 800);
+    assert_eq!(view["source"]["@type"], "messageSourceForumTopicHistory");
+
+    // TDLib's per-topic answer may carry a count computed from the loaded
+    // messages; the read position covers the last message, so no badge.
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateForumTopic","chat_id":41,"forum_topic_id":5,"is_pinned":false,"last_read_inbox_message_id":800,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{"@type":"chatNotificationSettings"},"draft_message":null}"#,
+    );
+    let refetch = sent(&recorder, "getForumTopic");
+    let extra = refetch.last().unwrap()["@extra"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"forumTopic","@extra":"{extra}",{}}}"#,
+            topic(16, 800)
+        ),
     );
     assert_eq!(
         driver.session.ordered_forum_topics(ChatId(41))[0].unread_count,

@@ -93,3 +93,18 @@
   "A topic in a forum supergroup chat or a chat with a bot").
 - Demo capture gained `QUILL_DEMO_CLICK="x,y;s:x,y,dy"` (demo-capture builds only):
   left clicks / scroll-wheel steps at window points before the capture.
+- Second live re-test: real clicks switch topics; the earlier failure came from an
+  accessibility press that sends no mouse event. Press-to-select is reverted, because
+  Telegram Desktop's slider activates on release.
+- Badge came back after opening a topic (list 0, then 16 once the topic was open). Topic
+  rows were read with `messageSourceChatHistory`, and rows already seen in "All" were
+  never read again. So TDLib's read position for the topic stayed behind, and its
+  `forumTopic` count was computed from the newly loaded messages. Now:
+  - a topic view reads its rows with `messageSourceForumTopicHistory`;
+  - selecting a topic clears the chat's viewed set, so on-screen rows are read again as
+    topic history;
+  - any topic whose read position covers its last message shows no badge, whatever count
+    TDLib sends.
+  Regression test: `opening_topic_reads_it_and_never_resurrects_a_stale_count`.
+- `QUILL_TRACE_TOPICS=1` (temporary) prints every unread-count write with its source:
+  `getForumTopics`, `getForumTopic`, `updateForumTopic`, `markRead(local)`.

@@ -1602,6 +1602,15 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetForumTopics)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
+                    let mut topics = topics;
+                    for topic in &mut topics {
+                        super::session_subsection_tabs::settle_topic_unread(topic);
+                        super::session_subsection_tabs::trace_topic_unread(
+                            "getForumTopics",
+                            chat_id.0,
+                            topic,
+                        );
+                    }
                     self.forum_topics.insert(chat_id.0, topics);
                 }
             }

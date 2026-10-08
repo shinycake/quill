@@ -227,13 +227,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::ViewMessages, Some(chat_id));
-        match self.sender.send_json(&view_messages(
-            extra,
-            chat_id,
-            &ids,
-            "messageSourceChatHistory",
-            true,
-        )) {
+        // A topic view reads its rows as topic history
+        // (`messageSourceForumTopicHistory`, schema 1.8.67 line 3213), so
+        // TDLib advances that topic's read position — as Telegram Desktop
+        // does when a topic's messages are on screen.
+        let source = if self.session.open_topic.is_some() {
+            "messageSourceForumTopicHistory"
+        } else {
+            "messageSourceChatHistory"
+        };
+        match self
+            .sender
+            .send_json(&view_messages(extra, chat_id, &ids, source, true))
+        {
             Ok(()) => {
                 self.session.begin_viewing(chat_id, &ids);
                 Ok(Some(extra))

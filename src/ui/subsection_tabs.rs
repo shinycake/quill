@@ -234,15 +234,6 @@ impl QuillApp {
             .text_sm()
             .font_semibold()
             .text_color(text)
-            // Activate on press (a click that spans re-renders of the busy
-            // live history still lands); `on_click` keeps keyboard activation.
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.select_subsection_tab(tab, cx);
-                }),
-            )
             .on_click(cx.listener(move |this, _, _, cx| this.select_subsection_tab(tab, cx)))
             .child(div().whitespace_nowrap().child(label))
             .when(unread > 0, |this| this.child(count_pill(unread, muted, cx)))
@@ -304,15 +295,6 @@ impl QuillApp {
             .aria_selected(active)
             .aria_label(label.clone())
             .tab_index(0)
-            // Activate on press (a click that spans re-renders of the busy
-            // live history still lands); `on_click` keeps keyboard activation.
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.select_subsection_tab(tab, cx);
-                }),
-            )
             .on_click(cx.listener(move |this, _, _, cx| this.select_subsection_tab(tab, cx)))
             .child(div().relative().child(icon).when(unread > 0, |this| {
                 this.child(
