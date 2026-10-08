@@ -96,7 +96,7 @@ case "$OS" in
       -install_name @rpath/libquillvideo.dylib -o "$PREFIX/lib/libquillvideo.dylib"
     ;;
   windows)
-    gcc -O2 -shared -Wall -Wextra -Werror -static-libgcc -static \
+    gcc -O2 -shared -Wall -Wextra -Werror -static-libgcc \
       -I"$PREFIX/include" "$SHIM" -L"$PREFIX/lib" "${LIBS[@]}" -o "$PREFIX/bin/quillvideo.dll"
     ;;
 esac
