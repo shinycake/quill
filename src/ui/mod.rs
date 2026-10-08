@@ -90,6 +90,7 @@ mod demo_setup;
 mod downloads;
 mod drafts;
 mod emoji_sets;
+mod entity_links;
 mod event_log;
 mod folders;
 mod forward;

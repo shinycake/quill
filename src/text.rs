@@ -69,8 +69,7 @@ pub fn contains_canary(haystack: &str, needle: &str) -> bool {
 /// TDLib `textEntity` offsets are UTF-16. Callers convert them to UTF-8 byte
 /// indices before storing a span. Entity type constructors are verified
 /// against `schema/td_api.tl` (1.8.67, lines 5719–5785); anything not listed
-/// here (mentions, hashtags, phone numbers, bank-card numbers, media
-/// timestamps, dates, …) stays unparsed and unstyled.
+/// here stays unparsed and unstyled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextEntityKind {
     /// `textEntityTypeUrl` — the substring is the HTTP URL.
@@ -103,6 +102,28 @@ pub enum TextEntityKind {
     /// renders as the custom emoji's sticker image; the span text stays as
     /// the fallback when the sticker isn't resolved.
     CustomEmoji { custom_emoji_id: i64 },
+    /// `textEntityTypeMention` — `@username`; opens the chat or profile.
+    Mention,
+    /// `textEntityTypeMentionName user_id:int53` — a name that links to a
+    /// user without a username; opens the profile.
+    MentionName { user_id: i64 },
+    /// `textEntityTypeHashtag` — `#tag`; searches for it.
+    Hashtag,
+    /// `textEntityTypeCashtag` — `$USD`; searches for it.
+    Cashtag,
+    /// `textEntityTypeBotCommand` — `/command` or `/command@bot`.
+    BotCommand,
+    /// `textEntityTypeEmailAddress` — opens the mail client.
+    EmailAddress,
+    /// `textEntityTypePhoneNumber` — offers copy.
+    PhoneNumber,
+    /// `textEntityTypeBankCardNumber` — offers copy.
+    BankCardNumber,
+    /// `textEntityTypeMediaTimestamp media_timestamp:int32` — seeks the
+    /// message's (or the replied message's) audio or video.
+    MediaTimestamp { seconds: i32 },
+    /// `textEntityTypeDateTime unix_time:int32` — offers copy of the date.
+    DateTime { unix_time: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +134,32 @@ pub struct TextEntity {
 }
 
 impl TextEntity {
+    /// The click target of a non-URL interactive entity over `text`.
+    pub fn interactive_target(&self, text: &str) -> Option<LinkTarget> {
+        let covered = || text.get(self.utf8_start..self.utf8_end).map(str::to_string);
+        Some(match &self.kind {
+            TextEntityKind::Mention => LinkTarget::Mention(covered()?),
+            TextEntityKind::MentionName { user_id } => LinkTarget::MentionName {
+                user_id: *user_id,
+                label: covered()?,
+            },
+            TextEntityKind::Hashtag => LinkTarget::Hashtag(covered()?),
+            TextEntityKind::Cashtag => LinkTarget::Cashtag(covered()?),
+            TextEntityKind::BotCommand => LinkTarget::BotCommand(covered()?),
+            TextEntityKind::EmailAddress => LinkTarget::Email(covered()?),
+            TextEntityKind::PhoneNumber => LinkTarget::Phone(covered()?),
+            TextEntityKind::BankCardNumber => LinkTarget::BankCard(covered()?),
+            TextEntityKind::MediaTimestamp { seconds } => {
+                LinkTarget::MediaTimestamp { seconds: *seconds }
+            }
+            TextEntityKind::DateTime { unix_time } => LinkTarget::DateTime {
+                unix_time: *unix_time,
+                label: covered()?,
+            },
+            _ => return None,
+        })
+    }
+
     /// URL passed to the OS opener. Only `http` and `https` (no shell).
     pub fn open_href<'a>(&'a self, text: &'a str) -> Option<&'a str> {
         let raw = match &self.kind {
@@ -125,6 +172,87 @@ impl TextEntity {
     }
 }
 
+/// What a clickable entity does (everything `TextEntityKind` marks as
+/// interactive). Carried by [`TextRun::link`] so the UI can act on a click,
+/// build the link context menu and decide whether to confirm a hidden URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkTarget {
+    /// An `http(s)` link. `label` is the visible text of a `textUrl`
+    /// (`None` for a bare `textEntityTypeUrl`, whose text is the URL).
+    Url {
+        url: String,
+        label: Option<String>,
+    },
+    /// `@username`, including the `@`.
+    Mention(String),
+    MentionName {
+        user_id: i64,
+        label: String,
+    },
+    /// `#tag`, including the `#`.
+    Hashtag(String),
+    /// `$TAG`, including the `$`.
+    Cashtag(String),
+    /// `/command` or `/command@bot`, including the `/`.
+    BotCommand(String),
+    Email(String),
+    Phone(String),
+    BankCard(String),
+    MediaTimestamp {
+        seconds: i32,
+    },
+    DateTime {
+        unix_time: i32,
+        label: String,
+    },
+}
+
+impl LinkTarget {
+    /// The text "Copy …" puts on the clipboard.
+    pub fn copy_text(&self) -> Option<&str> {
+        match self {
+            Self::Url { url, .. } => Some(url),
+            Self::Mention(text)
+            | Self::Hashtag(text)
+            | Self::Cashtag(text)
+            | Self::Email(text)
+            | Self::Phone(text)
+            | Self::BankCard(text)
+            | Self::BotCommand(text) => Some(text),
+            Self::MentionName { .. } | Self::MediaTimestamp { .. } | Self::DateTime { .. } => None,
+        }
+    }
+
+    /// Telegram Desktop's context-menu label for copying this link
+    /// (`lng_context_copy_link` / `_mention` / `_hashtag` / `_email`).
+    pub fn copy_label(&self) -> Option<&'static str> {
+        match self {
+            Self::Url { .. } => Some("Copy Link"),
+            Self::Mention(_) => Some("Copy Username"),
+            Self::Hashtag(_) | Self::Cashtag(_) => Some("Copy Hashtag"),
+            Self::Email(_) => Some("Copy Email Address"),
+            Self::Phone(_) => Some("Copy Phone Number"),
+            Self::BankCard(_) => Some("Copy Card Number"),
+            Self::BotCommand(_) => Some("Copy Command"),
+            Self::MentionName { .. } | Self::MediaTimestamp { .. } | Self::DateTime { .. } => None,
+        }
+    }
+
+    /// Tooltip text on hover (Telegram Desktop `ClickHandler::tooltip`):
+    /// the URL of a hidden `textUrl`, the number of a phone link, and the
+    /// date of a `dateTime` is left out (its text already shows it).
+    pub fn tooltip(&self) -> Option<String> {
+        match self {
+            Self::Url {
+                url,
+                label: Some(label),
+            } if label.trim() != url.trim() => Some(url.clone()),
+            Self::Phone(number) => Some(number.clone()),
+            _ => None,
+        }
+    }
+}
+
 /// One painted slice of message text. `href` is set for clickable links;
 /// `style` carries the Phase 4.1 entity styling for the same slice;
 /// `custom_emoji_id` is set when the slice is a custom emoji (rendered as
@@ -133,6 +261,9 @@ impl TextEntity {
 pub struct TextRun {
     pub text: String,
     pub href: Option<String>,
+    /// The interactive entity covering the slice, if any (a superset of
+    /// `href`, which only holds openable web links).
+    pub link: Option<LinkTarget>,
     pub style: RunStyle,
     pub custom_emoji_id: Option<i64>,
 }
@@ -209,6 +340,7 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
         }
         let mut style = RunStyle::default();
         let mut href: Option<String> = None;
+        let mut link: Option<LinkTarget> = None;
         let mut custom_emoji_id: Option<i64> = None;
         for entity in &spans {
             if entity.utf8_start > start || entity.utf8_end < end {
@@ -217,7 +349,34 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
             match &entity.kind {
                 TextEntityKind::Url | TextEntityKind::TextUrl { .. } => {
                     if href.is_none() {
-                        href = entity.open_href(text).map(str::to_string);
+                        href = entity.open_href(text).map(str::to_string).or_else(|| {
+                            // A bare `example.com` entity has no scheme;
+                            // Telegram Desktop opens it as `http://…`.
+                            matches!(entity.kind, TextEntityKind::Url)
+                                .then(|| schemeless_url(&text[entity.utf8_start..entity.utf8_end]))
+                                .flatten()
+                        });
+                        if link.is_none() {
+                            link = href.as_ref().map(|url| LinkTarget::Url {
+                                url: url.clone(),
+                                label: matches!(entity.kind, TextEntityKind::TextUrl { .. })
+                                    .then(|| text[entity.utf8_start..entity.utf8_end].to_string()),
+                            });
+                        }
+                    }
+                }
+                TextEntityKind::Mention
+                | TextEntityKind::MentionName { .. }
+                | TextEntityKind::Hashtag
+                | TextEntityKind::Cashtag
+                | TextEntityKind::BotCommand
+                | TextEntityKind::EmailAddress
+                | TextEntityKind::PhoneNumber
+                | TextEntityKind::BankCardNumber
+                | TextEntityKind::MediaTimestamp { .. }
+                | TextEntityKind::DateTime { .. } => {
+                    if link.is_none() {
+                        link = entity.interactive_target(text);
                     }
                 }
                 TextEntityKind::CustomEmoji {
@@ -249,6 +408,7 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
         if let Some(last) = runs.last_mut()
             && last.style == style
             && last.href == href
+            && last.link == link
             && last.custom_emoji_id == custom_emoji_id
         {
             last.text.push_str(&slice);
@@ -256,6 +416,7 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
             runs.push(TextRun {
                 text: slice,
                 href,
+                link,
                 style,
                 custom_emoji_id,
             });
@@ -282,6 +443,18 @@ pub fn collapsed_quote_len(text: &str) -> usize {
     text.match_indices('\n')
         .nth(QUOTE_COLLAPSE_LINES - 1)
         .map_or(text.len(), |(index, _)| index)
+}
+
+/// `https://` + `raw` for a scheme-less web address such as `example.com/a`
+/// (a `textEntityTypeUrl` carries the text as written); `None` when `raw`
+/// already has a scheme, has no dot, or would not be an openable link.
+pub fn schemeless_url(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.contains("://") || raw.contains('@') || !raw.contains('.') {
+        return None;
+    }
+    let url = format!("https://{raw}");
+    openable_http_url(&url).then_some(url)
 }
 
 /// `http`/`https` only, no whitespace or control characters (passed to xdg-open/open).
