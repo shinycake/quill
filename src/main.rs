@@ -265,7 +265,6 @@ fn ui_main(args: &[String]) {
     if forwarded_to_running_instance(args) {
         return;
     }
-    quill::scheme_registration::register_url_scheme();
 
     // Demo windows can run beside the live app without touching its private caches.
     quill::local_path::sweep_media_caches();
