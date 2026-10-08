@@ -51,7 +51,7 @@ cargo test --no-default-features
 cargo build --features ui --release
 ```
 
-On macOS, `bash scripts/macos-package-smoke.sh` copies the binary into `dist/Quill.app`. Nested `libtdjson` is included only when `QUILL_TDJSON_PATH` points at a locally built library (see `docs/native-bundle.md`).
+On macOS, `bash scripts/macos-package-smoke.sh` copies the binary into `dist/Quill.app`. Nested `libtdjson` is included only when `QUILL_TDJSON_PATH` points at a locally built library (see `docs/native-bundle.md`); its OpenSSL dylibs are bundled automatically and `scripts/check-bundle-macho.sh` fails the step if anything references a non-system absolute path. `QUILL_BIN=<path>` skips the cargo build and packages an existing binary.
 
 ## Native TDLib (optional)
 
