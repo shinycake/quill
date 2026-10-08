@@ -50,7 +50,7 @@ libcrypto.3.dylib: @rpath/libcrypto.3.dylib, /usr/lib/libSystem.B.dylib
 | Platform | Status |
 |---|---|
 | macOS | Fixed and enforced by the package script and the CI package job. |
-| Linux | No AppImage/deb/tarball packaging exists. The only release artifact is the bare binary from `scripts/package-update-binary.sh`. `ffi.rs` already looks for `libtdjson.so` next to the exe, in `Frameworks`, and so on. Added `$ORIGIN` rpath to the TDLib build so a bundled `libssl.so.3`/`libcrypto.so.3` beside `libtdjson.so` is found. Not verifiable from a Mac. |
+| Linux | Superseded by `codex-linux-package.md` (tarball + ELF checker + CI job). Originally: no AppImage/deb/tarball packaging existed. The only release artifact is the bare binary from `scripts/package-update-binary.sh`. `ffi.rs` already looks for `libtdjson.so` next to the exe, in `Frameworks`, and so on. Added `$ORIGIN` rpath to the TDLib build so a bundled `libssl.so.3`/`libcrypto.so.3` beside `libtdjson.so` is found. Not verifiable from a Mac. |
 | Windows | No packaging, CI job, or release asset exists (`package-update-binary.sh` only accepts `macos\|linux` names; `vendor-ntgcalls.sh` supports only Linux x86_64 and macOS arm64). `tdjson.dll` is looked up next to the exe by `ffi.rs`. Nothing to fix in place; needs a design. |
 
 ## Follow-ups (cannot be done from a Mac)

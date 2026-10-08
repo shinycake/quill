@@ -34,8 +34,9 @@ sudo apt-get install libgtk-3-dev
 
 Without it the build fails in the `gdk-pixbuf-sys` build script
 (`gdk-3.0.pc` missing). Not needed on macOS (tray-icon uses Cocoa there).
-CI's Linux job does not build `--features ui`, so this dependency is
-documented here rather than CI-enforced.
+The `linux-fmt-clippy-test` job does not build `--features ui`; the separate
+`linux-package` job does (see below), with the full apt list in
+`.github/workflows/ci.yml`.
 
 ## Tests (Linux CI)
 
@@ -53,6 +54,10 @@ cargo build --features ui --release
 
 On macOS, `bash scripts/macos-package-smoke.sh` copies the binary into `dist/Quill.app`. Nested `libtdjson` is included only when `QUILL_TDJSON_PATH` points at a locally built library (see `docs/native-bundle.md`); its OpenSSL dylibs are bundled automatically and `scripts/check-bundle-macho.sh` fails the step if anything references a non-system absolute path. `QUILL_BIN=<path>` skips the cargo build and packages an existing binary.
 
+## Linux package
+
+`bash scripts/linux-package.sh` (after `cargo build --release --features ui`, `scripts/build-tdlib.sh`, `scripts/build-rlottie.sh`, `scripts/vendor-ntgcalls.sh`) writes `dist/linux/quill-linux-x86_64/` and `quill-linux-x86_64-bundle.tar.gz`: `quill` plus `lib/` (tdjson, ntgcalls, rlottie, bundled OpenSSL 3), RUNPATH `$ORIGIN/lib`, a `.desktop` file, icon, `install.sh` and a README. `scripts/check-bundle-elf.sh <dir>` fails if any ELF needs a library that is neither bundled nor an allowed system library. Needs `patchelf`. The CI `linux-package` job runs all of this and uploads the tarball. Details: `docs/decisions/codex-linux-package.md`.
+
 ## Native TDLib (optional)
 
 Ordinary `cargo test` / `cargo run` do **not** fetch or execute tdjson. To build the pinned runtime:
@@ -61,7 +66,7 @@ Ordinary `cargo test` / `cargo run` do **not** fetch or execute tdjson. To build
 2. `bash scripts/build-tdlib.sh`
 3. `export QUILL_TDJSON_PATH=$PWD/native/prefix/lib/libtdjson.dylib` (or `.so`)
 
-The loader searches, in order: `QUILL_TDJSON_PATH`, then paths relative to the executable (`Contents/Frameworks`, …). It does **not** search Homebrew prefixes.
+The loader searches, in order: `QUILL_TDJSON_PATH`, then paths relative to the executable (`lib/`, `Frameworks`, `Contents/Frameworks`, …). It does **not** search Homebrew prefixes.
 
 ## Live connect
 
