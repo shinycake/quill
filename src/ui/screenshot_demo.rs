@@ -263,6 +263,9 @@ pub enum ScreenshotDemo {
     /// fully visible and a long quote collapsed to 3 lines with a kit ghost
     /// "Show more" affordance (parity:msg-blockquote-expandable).
     ReadyBlockquoteExpandable,
+    /// RTL composer demo: a Hebrew / mixed / multi-paragraph draft chosen by
+    /// `QUILL_DEMO_RTL=he|mixed|lines` (default `he`).
+    ReadyRtlComposer,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting

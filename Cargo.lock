@@ -2598,8 +2598,6 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64bb52b29a8dcdc8d3f595b8b0839c076f237572ab601ba4577d3da8ae085728"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2630,6 +2628,8 @@ dependencies = [
  "smallvec",
  "smol",
  "tracing",
+ "unicode-bidi",
+ "unicode-bidi-mirroring",
  "unicode-segmentation",
  "web-time",
  "windows 0.58.0",
@@ -5936,6 +5936,8 @@ dependencies = [
  "spellbook",
  "thiserror 2.0.20",
  "tray-icon",
+ "unicode-bidi",
+ "unicode-bidi-mirroring",
  "unicode-segmentation",
  "ureq",
  "windows 0.62.2",
