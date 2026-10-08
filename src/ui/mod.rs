@@ -121,6 +121,7 @@ mod payments;
 mod polls;
 mod pressable;
 mod profile;
+mod profile_modal;
 mod reactions;
 mod recording;
 mod round_record;

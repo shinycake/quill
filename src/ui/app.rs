@@ -308,6 +308,9 @@ pub struct QuillApp {
     /// Slice CL: the open peek preview — hovered/press-and-hold chat,
     /// or `None`. Transient; never an open chat.
     pub(super) chat_preview: Option<ChatPreviewState>,
+    /// Profile layer opened from a sender avatar (tdesktop's
+    /// `Info::LayerWidget`); presents `session.open_info_panel`.
+    pub(super) profile_modal: Option<super::profile_modal::ProfileModal>,
     /// Slice CL: an in-progress long press on a chat-list row — the
     /// row's chat id + press start, for the peek preview.
     pub(super) preview_press: Option<(ChatId, Instant)>,

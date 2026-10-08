@@ -713,3 +713,46 @@ fn cl_chat_preview_cached_for_unopened_chat() {
             .contains("Could not load preview")
     );
 }
+
+#[test]
+fn avatar_click_routes_to_the_senders_profile() {
+    // tdesktop `Element::fromLink`: user -> user profile (bots too), a
+    // chat sender (anonymous admin / channel) -> that chat's profile.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for chat in [
+        r#"{"id":-1001,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":1001,"is_channel":false},"unread_count":0}"#,
+        r#"{"id":-1002,"title":"Channel","type":{"@type":"chatTypeSupergroup","supergroup_id":1002,"is_channel":true},"unread_count":0}"#,
+        r#"{"id":-5,"title":"Basic","type":{"@type":"chatTypeBasicGroup","basic_group_id":5},"unread_count":0}"#,
+    ] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"updateNewChat","chat":{chat}}}"#),
+        );
+    }
+    assert_eq!(
+        session.avatar_profile_target(MessageSender::User { user_id: 77 }),
+        Some(InfoPanelTarget::User(77))
+    );
+    // Anonymous admin: the group itself is the sender.
+    assert_eq!(
+        session.avatar_profile_target(MessageSender::Chat { chat_id: -1001 }),
+        Some(InfoPanelTarget::Supergroup(1001))
+    );
+    // A channel posting into its discussion group.
+    assert_eq!(
+        session.avatar_profile_target(MessageSender::Chat { chat_id: -1002 }),
+        Some(InfoPanelTarget::Supergroup(1002))
+    );
+    assert_eq!(
+        session.avatar_profile_target(MessageSender::Chat { chat_id: -5 }),
+        Some(InfoPanelTarget::BasicGroup(5))
+    );
+    // Unknown chat: nothing to open.
+    assert_eq!(
+        session.avatar_profile_target(MessageSender::Chat { chat_id: -999 }),
+        None
+    );
+}

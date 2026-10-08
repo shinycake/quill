@@ -286,6 +286,11 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // The profile layer fades out before anything beneath it.
+        if self.profile_modal_active() {
+            self.close_profile_modal(cx);
+            return;
+        }
         // The composer's link dialog closes first.
         if self.composer_link_dialog.is_some() {
             self.close_composer_link_dialog(window, cx);
