@@ -123,6 +123,181 @@ jobs:
             dist/linux/quill-linux-x86_64-bundle.tar.gz.sha256
           if-no-files-found: error
 
+  # Windows jobs are not required checks (docs/decisions/codex-windows-package.md).
+  # windows-build: the UI release binary + core tests. windows-native: TDLib and
+  # rlottie from source, ntgcalls prebuilt (cached). windows-package: assemble,
+  # check and smoke the zip.
+  windows-build:
+    name: windows-build
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - name: build release ui
+        run: cargo build --release --features ui --locked
+      - name: tests (core + replay)
+        run: cargo test --no-default-features --locked -- --nocapture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-exe
+          path: target/release/quill.exe
+          retention-days: 3
+          if-no-files-found: error
+
+  windows-native:
+    name: windows-native
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: restore TDLib build
+        id: tdlib-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: native/prefix
+          key: tdlib-windows-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
+      # Incremental state (sources + objects) so a failure late in the cold
+      # build does not cost another 45 minutes. Saved even when the build fails.
+      - name: restore TDLib work tree
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            native/td
+            native/build
+          key: tdlib-windows-work-${{ github.run_id }}
+          restore-keys: tdlib-windows-work-
+      - name: build TDLib
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: scripts/build-tdlib-windows.ps1
+      - name: save TDLib work tree
+        if: always() && steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            native/td
+            native/build
+          key: tdlib-windows-work-${{ github.run_id }}
+      - name: save TDLib build
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native/prefix
+          key: tdlib-windows-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
+      - name: vendor ntgcalls (checksum pinned)
+        shell: bash
+        run: bash scripts/vendor-ntgcalls.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-native
+          path: |
+            native/prefix/bin/*.dll
+            vendor/ntgcalls/lib/Release/ntgcalls.dll
+          retention-days: 3
+          if-no-files-found: error
+
+  windows-rlottie:
+    name: windows-rlottie
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: restore rlottie build
+        id: rlottie-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/rlottie/prefix
+          key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1') }}
+      - name: build rlottie
+        if: steps.rlottie-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: scripts/build-rlottie-windows.ps1
+      - name: save rlottie build
+        if: steps.rlottie-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor/rlottie/prefix
+          key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1') }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-rlottie
+          path: vendor/rlottie/prefix/bin/rlottie.dll
+          retention-days: 3
+          if-no-files-found: error
+
+  windows-package:
+    name: windows-package
+    runs-on: windows-latest
+    needs: [windows-build, windows-native, windows-rlottie]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-exe
+          path: target/release
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-native
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-rlottie
+          path: vendor/rlottie/prefix/bin
+      - name: package
+        shell: pwsh
+        run: scripts/windows-package.ps1
+      - name: check package (PE dependencies)
+        shell: pwsh
+        run: scripts/check-bundle-pe.ps1 dist/windows/quill-windows-x86_64
+      - name: checker negative test (unbundled OpenSSL must fail)
+        shell: pwsh
+        run: |
+          Copy-Item -Recurse dist/windows/quill-windows-x86_64 "$env:RUNNER_TEMP/neg"
+          Remove-Item "$env:RUNNER_TEMP/neg/libcrypto-3-x64.dll"
+          pwsh -NoProfile -File scripts/check-bundle-pe.ps1 "$env:RUNNER_TEMP/neg"
+          if ($LASTEXITCODE -eq 0) { throw 'checker accepted a package missing libcrypto' }
+          $global:LASTEXITCODE = 0
+      - name: run from the extracted zip (clean PATH)
+        shell: pwsh
+        run: |
+          $x = Join-Path $env:RUNNER_TEMP 'extract'
+          Expand-Archive dist/windows/quill-windows-x86_64.zip $x
+          $dir = Join-Path $x 'quill-windows-x86_64'
+          . scripts/windows-common.ps1
+          $v = Invoke-QuillExe (Join-Path $dir 'quill.exe') @('--version')
+          Write-Host $v
+          if ($v -notmatch '^Quill \d') { throw "unexpected --version output: $v" }
+          $info = Invoke-QuillExe (Join-Path $dir 'quill.exe') @('--build-info')
+          if ($info -ne 'ui') { throw "unexpected --build-info output: $info" }
+          pwsh -NoProfile -File scripts/check-bundle-load.ps1 $dir
+          if ($LASTEXITCODE -ne 0) { throw 'bundle load check failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-x86_64
+          path: |
+            dist/windows/quill-windows-x86_64.zip
+            dist/windows/quill-windows-x86_64.zip.sha256
+          if-no-files-found: error
+
   # The required macos-ui-build check is dispatched after source review through
   # quill-ui-build.yml. Public PR workflows must never target the personal Mac.
 
