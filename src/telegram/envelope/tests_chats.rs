@@ -679,3 +679,19 @@ fn update_option_parses_caption_length_max() {
         }
     ));
 }
+
+#[test]
+fn parses_unread_count_updates() {
+    let msg = parse_envelope(
+        r#"{"@type":"updateUnreadMessageCount","chat_list":{"@type":"chatListArchive"},"unread_count":30,"unread_unmuted_count":-4}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        msg.payload,
+        EnvelopePayload::UpdateUnreadMessageCount {
+            list: ChatList::Archive,
+            unread_count: 30,
+            unread_unmuted_count: 0,
+        }
+    ));
+}

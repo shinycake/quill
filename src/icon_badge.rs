@@ -15,8 +15,8 @@
 //!   The window handle is registered once by `set_native_window`.
 //!
 //! The count is [`tray::badge_count`] — the same `BadgePrefs`-governed
-//! total as the system tray badge (muted chats included by default,
-//! archived excluded, saturating sum). There is deliberately no second
+//! total as the system tray badge (TDLib's server-side totals; muted and
+//! archived chats included by default, like Telegram Desktop). There is deliberately no second
 //! unread definition here.
 //!
 //! `sync_icon_badge` is called from the 1s UI-thread timer in `main.rs`

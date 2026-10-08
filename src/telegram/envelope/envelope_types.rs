@@ -134,6 +134,23 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         list: ChatList,
     },
+    /// `updateUnreadMessageCount`: server-side unread-message totals for a
+    /// whole chat list (schema 1.8.67, line 10877).
+    UpdateUnreadMessageCount {
+        list: ChatList,
+        unread_count: i32,
+        unread_unmuted_count: i32,
+    },
+    /// `updateUnreadChatCount`: server-side unread-chat totals for a whole
+    /// chat list, marked-as-unread chats included (schema line 10886).
+    UpdateUnreadChatCount {
+        list: ChatList,
+        total_count: i32,
+        unread_count: i32,
+        unread_unmuted_count: i32,
+        marked_as_unread_count: i32,
+        marked_as_unread_unmuted_count: i32,
+    },
     UpdateChatReadInbox {
         chat_id: ChatId,
         last_read_inbox_message_id: MessageId,
