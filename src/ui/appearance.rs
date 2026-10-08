@@ -326,6 +326,7 @@ impl QuillApp {
                 // (the tag TDLib gets in `setTdlibParameters`).
                 body = body.child(this.appearance_language_section(cx));
                 body = body.child(this.general_autostart_section(cx));
+                body = body.child(this.general_link_handler_section(cx));
                 body = body.child(this.update_settings_section(cx));
                 // Tray-dependent switches only exist while a tray icon does:
                 // a hidden window with no tray to reopen it from would
@@ -864,6 +865,71 @@ impl QuillApp {
             "Start Quill automatically when you sign in to this device.",
             control.into_any_element(),
         )
+    }
+
+    /// "Open Telegram links with Quill": opt-in default handler for `tg:`
+    /// links (`quill::link_handler`). Quill never claims it on its own.
+    /// Windows/Linux get a switch; macOS cannot hand the scheme back to
+    /// another app, so it gets a one-way "Make default" button.
+    fn general_link_handler_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        use quill::link_handler::{self, ControlKind, LinkHandlerState};
+        let state = link_handler::state();
+        let ours = state == LinkHandlerState::Ours;
+        let unavailable = matches!(state, LinkHandlerState::Unavailable(_));
+        let hint = if unavailable {
+            link_handler::status_text(&state)
+        } else {
+            format!(
+                "{} {}",
+                link_handler::status_text(&state),
+                link_handler::turn_off_note()
+            )
+        };
+        let control: AnyElement = match link_handler::control_kind() {
+            ControlKind::Button if ours => div()
+                .text_sm()
+                .child("Quill is the default")
+                .into_any_element(),
+            ControlKind::Button => Button::new("general-link-handler-button")
+                .label("Make Quill the default")
+                .disabled(unavailable)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Err(err) = link_handler::make_default() {
+                        this.status_note = err;
+                    }
+                    // The system confirmation is asynchronous: re-read the
+                    // handler a few times so the status catches up.
+                    for secs in [1u64, 3, 8] {
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_secs(secs))
+                                .await;
+                            link_handler::invalidate();
+                            let _ = this.update(cx, |_, cx| cx.notify());
+                        })
+                        .detach();
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+            ControlKind::Switch => Switch::new("general-link-handler-switch")
+                .checked(ours)
+                .disabled(unavailable)
+                .accessibility_label("Open Telegram links with Quill")
+                .on_click(cx.listener(|this, &on, _, cx| {
+                    let result = if on {
+                        link_handler::make_default()
+                    } else {
+                        link_handler::release()
+                    };
+                    if let Err(err) = result {
+                        this.status_note = err;
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+        };
+        self.appearance_section(cx, "Open Telegram links with Quill", &hint, control)
     }
 
     fn appearance_send_key_section(&self, cx: &mut Context<Self>) -> AnyElement {
