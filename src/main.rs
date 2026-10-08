@@ -259,6 +259,14 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    // Single instance (tdesktop `Core::Sandbox`): a second launch hands its
+    // links to the running Quill and exits before touching the account
+    // database or the media caches.
+    if forwarded_to_running_instance(args) {
+        return;
+    }
+    quill::scheme_registration::register_url_scheme();
+
     // Demo windows can run beside the live app without touching its private caches.
     quill::local_path::sweep_media_caches();
 
@@ -270,62 +278,160 @@ fn ui_main(args: &[String]) {
     let credentials = quill::credentials::load();
     let start_in_tray = args.iter().any(|arg| arg == "--start-minimized")
         || ui::QuillApp::load_appearance().start_in_tray;
-    gpui_kit::application()
-        .with_assets(QuillAssets)
-        .run(move |cx| {
-            cx.set_app_identity("org.shinycake.quill", "Quill");
-            #[cfg(windows)]
-            quill::notify::register_toast_icon("org.shinycake.quill");
-            gpui_kit::init(cx);
-            // kit Phase 8: the kit defaults to its light theme on init;
-            // Quill boots dark (kit dialogs match the app from here on).
-            ui::set_theme_mode(startup_theme_mode(), None, cx);
-            // stories-high-contrast: screenshot demos can opt into the
-            // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
-            ui::set_high_contrast(
-                std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
-            );
-            // kit Phase 9: honor the OS reduce-motion preference.
-            cx.set_reduce_motion(os_prefers_reduced_motion());
-            ui::bind_keys(cx);
-            // kit Phase 7: File / Edit / View / Window / Help — native on
-            // macOS, kit `AppMenuBar` data on Linux/Windows.
-            ui::setup_app_menus(cx);
-            let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
-            cx.spawn(async move |cx| {
-                cx.open_window(
-                    WindowOptions {
-                        window_bounds: Some(window_bounds),
-                        app_id: Some("org.shinycake.quill".into()),
-                        show: !start_in_tray,
-                        focus: !start_in_tray,
-                        ..quill_window_options("Quill")
-                    },
-                    move |window, cx| {
-                        let view = cx.new(|cx| {
-                            let mut app = ui::QuillApp::new(window, cx, credentials.clone());
-                            app.pending_deep_link = pending_deep_link.clone();
-                            app
-                        });
-                        install_main_window_tray(window, cx, &view);
-                        if window.focused(cx).is_none() {
-                            window.focus(&view.focus_handle(cx), cx);
+    let application = gpui_kit::application().with_assets(QuillAssets);
+    // macOS delivers `tg:` / `t.me` URLs (Info.plist CFBundleURLTypes) here,
+    // both on cold launch and to the running app; Linux/Windows pass them
+    // as argv instead (handled above and via the single-instance socket).
+    application.on_open_urls(|urls| {
+        for url in urls {
+            quill::deep_link_inbox::push_external_link(&url);
+        }
+    });
+    application.run(move |cx| {
+        cx.set_app_identity("org.shinycake.quill", "Quill");
+        #[cfg(windows)]
+        quill::notify::register_toast_icon("org.shinycake.quill");
+        gpui_kit::init(cx);
+        // kit Phase 8: the kit defaults to its light theme on init;
+        // Quill boots dark (kit dialogs match the app from here on).
+        ui::set_theme_mode(startup_theme_mode(), None, cx);
+        // stories-high-contrast: screenshot demos can opt into the
+        // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
+        ui::set_high_contrast(std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"));
+        // kit Phase 9: honor the OS reduce-motion preference.
+        cx.set_reduce_motion(os_prefers_reduced_motion());
+        ui::bind_keys(cx);
+        // kit Phase 7: File / Edit / View / Window / Help — native on
+        // macOS, kit `AppMenuBar` data on Linux/Windows.
+        ui::setup_app_menus(cx);
+        let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
+        cx.spawn(async move |cx| {
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(window_bounds),
+                    app_id: Some("org.shinycake.quill".into()),
+                    show: !start_in_tray,
+                    focus: !start_in_tray,
+                    ..quill_window_options("Quill")
+                },
+                move |window, cx| {
+                    let view = cx.new(|cx| {
+                        let mut app = ui::QuillApp::new(window, cx, credentials.clone());
+                        app.pending_deep_link = pending_deep_link.clone();
+                        app
+                    });
+                    install_main_window_tray(window, cx, &view);
+                    install_link_inbox(window, cx, &view);
+                    if window.focused(cx).is_none() {
+                        window.focus(&view.focus_handle(cx), cx);
+                    }
+                    if start_in_tray && !quill::tray::tray_available() {
+                        // No tray host must never leave the only window inaccessible.
+                        cx.activate(true);
+                        window.activate_window();
+                    }
+                    // The shell adds Quill's dialog hit-test barrier; Root
+                    // hosts the kit dialog and notification layers.
+                    let shell = cx.new(|_cx| ui::QuillShell::new(view));
+                    cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
+                },
+            )
+            .expect("failed to open window");
+        })
+        .detach();
+    });
+}
+
+/// Returns `true` when this launch was handed to an already-running
+/// instance (or must not start because that instance is stuck). Falls back
+/// to running normally if the socket cannot be set up.
+#[cfg(feature = "ui")]
+fn forwarded_to_running_instance(args: &[String]) -> bool {
+    use quill::single_instance::{Acquired, Endpoint, acquire};
+    let Some(root) = quill::settings::safe_app_root() else {
+        return false;
+    };
+    let forwarded: Vec<String> = args
+        .iter()
+        .skip(1)
+        .filter_map(|arg| quill::deep_link_inbox::sanitize_link(arg))
+        .chain(
+            args.iter()
+                .any(|arg| arg == "--start-minimized")
+                .then(|| "--start-minimized".to_string()),
+        )
+        .collect();
+    match acquire(&Endpoint::for_root(&root), &forwarded, |args| {
+        quill::deep_link_inbox::handle_forwarded_launch(&args)
+    }) {
+        Ok(Acquired::Forwarded) => true,
+        Ok(Acquired::Primary) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+            eprintln!("quill: {error}; not starting a second instance.");
+            true
+        }
+        Err(error) => {
+            eprintln!("quill: single-instance check unavailable ({error}); continuing.");
+            false
+        }
+    }
+}
+
+/// Drains links that arrived from the OS or a second launch: raises the
+/// window and hands the next link to the deep-link pump (one flow at a time).
+#[cfg(feature = "ui")]
+fn install_link_inbox(
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::App,
+    view: &gpui_kit::Entity<ui::QuillApp>,
+) {
+    cx.spawn({
+        let view = view.downgrade();
+        let window_handle = window.window_handle();
+        async move |cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(250))
+                    .await;
+                let alive = view
+                    .update(cx, |this, _| {
+                        if this.pending_deep_link.is_none() {
+                            this.pending_deep_link = quill::deep_link_inbox::pop_link();
                         }
-                        if start_in_tray && !quill::tray::tray_available() {
-                            // No tray host must never leave the only window inaccessible.
-                            cx.activate(true);
-                            window.activate_window();
-                        }
-                        // The shell adds Quill's dialog hit-test barrier; Root
-                        // hosts the kit dialog and notification layers.
-                        let shell = cx.new(|_cx| ui::QuillShell::new(view));
-                        cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
-                    },
-                )
-                .expect("failed to open window");
-            })
-            .detach();
-        });
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+                if quill::deep_link_inbox::take_activation() {
+                    let _ = window_handle.update(cx, |_, window, cx| raise_main_window(window, cx));
+                }
+            }
+        }
+    })
+    .detach();
+}
+
+/// Brings the main window to the front, restoring it from the tray, the
+/// Dock (minimized) or a hidden app.
+#[cfg(feature = "ui")]
+fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSView;
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = HasWindowHandle::window_handle(window)
+            && let RawWindowHandle::AppKit(handle) = handle.as_raw()
+        {
+            // GPUI retains this native view while the window lives.
+            let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+            if let Some(native) = view.window() {
+                native.deminiaturize(None);
+            }
+        }
+    }
+    cx.activate(true);
+    window.activate_window();
 }
 
 #[cfg(feature = "ui")]
@@ -512,6 +618,9 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-shared-media" => ScreenshotDemo::ReadySharedMedia,
                 "ready-typing" => ScreenshotDemo::ReadyTyping,
                 "ready-chat-rows" => ScreenshotDemo::ReadyChatRows,
+                "ready-join-bar" => ScreenshotDemo::ReadyJoinBar,
+                "ready-search-previews" => ScreenshotDemo::ReadySearchPreviews,
+                "ready-multiline-rows" => ScreenshotDemo::ReadyMultilineRows,
                 "ready-stickers" => ScreenshotDemo::ReadyStickers,
                 "ready-sticker-playback" => ScreenshotDemo::ReadyStickerPlayback,
                 "ready-voice" => ScreenshotDemo::ReadyVoice,
@@ -760,6 +869,9 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
         ScreenshotDemo::ReadyChatRows => ".quill-ready-ready-chat-rows",
+        ScreenshotDemo::ReadyJoinBar => ".quill-ready-ready-join-bar",
+        ScreenshotDemo::ReadySearchPreviews => ".quill-ready-ready-search-previews",
+        ScreenshotDemo::ReadyMultilineRows => ".quill-ready-ready-multiline-rows",
         ScreenshotDemo::ReadyStickers => ".quill-ready-ready-stickers",
         ScreenshotDemo::ReadyStickerPlayback => ".quill-ready-ready-sticker-playback",
         ScreenshotDemo::ReadyVoice => ".quill-ready-ready-voice",

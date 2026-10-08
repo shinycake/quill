@@ -177,6 +177,8 @@ impl Session {
             chat.draft = draft;
         }
         self.replace_avatar(old_photo_file_id, photo_file_id);
+        // `updateSupergroup` precedes `updateNewChat`: adopt its status now.
+        self.adopt_supergroup_status_for_chat(chat_id);
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_supergroup(
@@ -204,6 +206,7 @@ impl Session {
         self.set_supergroup_username(supergroup_id, username);
         // Phase A1: own member status drives the slow-mode bypass.
         self.supergroup_member_status.insert(supergroup_id, status);
+        self.adopt_supergroup_status(supergroup_id);
         // Phase A1: `can_restrict_members` gates the slow-mode
         // admin control; absent = unknown → treated as lacking.
         self.supergroup_restrict_right
@@ -270,6 +273,7 @@ impl Session {
             self.set_supergroup_username(supergroup_id, username);
             // Phase A1: own member status drives the slow-mode bypass.
             self.supergroup_member_status.insert(supergroup_id, status);
+            self.adopt_supergroup_status(supergroup_id);
             self.supergroup_restrict_right
                 .insert(supergroup_id, can_restrict_members.unwrap_or(false));
             // Phase D3a: `can_invite_users` gates invite-link /

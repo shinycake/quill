@@ -19,7 +19,10 @@ use super::chat_list::{
     apply_ready_mute_archive, apply_ready_pin,
 };
 use super::chat_row::ChatPreviewState;
-use super::chatlist_demo::apply_ready_archive_row;
+use super::chatlist_demo::{
+    apply_ready_archive_row, apply_ready_join_bar, apply_ready_multiline_rows,
+    apply_ready_search_previews,
+};
 use super::composer::apply_ready_reply;
 use super::composer_ui::apply_ready_stickers;
 use super::contacts::apply_ready_contacts;
@@ -525,6 +528,27 @@ impl QuillApp {
                 apply_ready_chat_rows(session, &self.demo_sink, &self.demo_seq);
             }
             self.status_note = "screenshot demo — chat rows".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyJoinBar)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_join_bar(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — non-member channel".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySearchPreviews)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_search_previews(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — search previews".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyMultilineRows)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_multiline_rows(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — multi-line row previews".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyTyping)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -1656,10 +1680,40 @@ impl QuillApp {
                         "שלום עולם, מה שלומך היום? זו הודעה ארוכה יותר כדי לראות את הטקסט נשבר לשורות בתוך הבועה.",
                     ),
                     (902, true, "היי, ההזמנה 12345 מוכנה ב-Telegram Desktop"),
+                    (904, false, "מחכה לעוד עדכונים ממנה"),
+                    (
+                        903,
+                        false,
+                        "קישור https://example.com/he בתוך הודעה ארוכה עם מילה מודגשת וקוד לשורות נוספות בבועה",
+                    ),
                 ] {
+                    // Entities by needle: a link, a bold word and inline code.
+                    let entity = |needle: &str, kind: &str| -> Option<String> {
+                        let start = body.find(needle)?;
+                        let from = quill::text::utf8_to_utf16_offset(body, start).ok()?;
+                        let to =
+                            quill::text::utf8_to_utf16_offset(body, start + needle.len()).ok()?;
+                        Some(format!(
+                            r#"{{"@type":"textEntity","offset":{from},"length":{},"type":{{"@type":"{kind}"}}}}"#,
+                            to - from
+                        ))
+                    };
+                    let entities = if id == 903 {
+                        [
+                            entity("https://example.com/he", "textEntityTypeUrl"),
+                            entity("מודגשת", "textEntityTypeBold"),
+                            entity("וקוד", "textEntityTypeCode"),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(",")
+                    } else {
+                        String::new()
+                    };
                     let body = serde_json::to_string(body).unwrap_or_default();
                     let json = format!(
-                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[]}}}}}}}}"#,
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[{entities}]}}}}}}}}"#,
                         chat.0
                     );
                     if let Some(owned) =

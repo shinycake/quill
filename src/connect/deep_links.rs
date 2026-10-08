@@ -108,26 +108,121 @@ pub fn parse_tg_url(url: &str) -> Option<DeepLinkAction> {
     }
 }
 
+/// First path segments of `t.me` links that are not usernames (stickers,
+/// proxies, languages, share sheets, ...). They fall through to TDLib's
+/// own `getDeepLinkInfo` text instead of a bogus `searchPublicChat`.
+const WEB_RESERVED_PATHS: [&str; 24] = [
+    "addstickers",
+    "addemoji",
+    "addtheme",
+    "addlist",
+    "proxy",
+    "socks",
+    "setlanguage",
+    "share",
+    "msg",
+    "login",
+    "confirmphone",
+    "bg",
+    "invoice",
+    "boost",
+    "giftcode",
+    "m",
+    "s",
+    "iv",
+    "contact",
+    "joinchat",
+    "c",
+    "+",
+    "web",
+    "k",
+];
+
+fn is_username(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// `https://t.me/...` (also `telegram.me`, `telegram.dog`) → action, the
+/// web spellings of the `tg://` forms: `t.me/<user>[/<post>][?start=]`,
+/// `t.me/<user>/s/<story>`, `t.me/+<hash>`, `t.me/joinchat/<hash>`,
+/// `t.me/c/<channel>/<post>`. Anything else is `None`.
+pub fn parse_web_url(url: &str) -> Option<DeepLinkAction> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let rest = rest.split('#').next().unwrap_or(rest);
+    let (host, tail) = rest.split_once('/')?;
+    if !["t.me", "telegram.me", "telegram.dog"]
+        .iter()
+        .any(|h| host.eq_ignore_ascii_case(h))
+    {
+        return None;
+    }
+    let (path, query) = tail.split_once('?').unwrap_or((tail, ""));
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let first = *segments.first()?;
+    if let Some(hash) = first.strip_prefix('+') {
+        return (!hash.is_empty()).then(|| DeepLinkAction::JoinInvite { hash: hash.into() });
+    }
+    match first {
+        "joinchat" => {
+            return segments.get(1).map(|hash| DeepLinkAction::JoinInvite {
+                hash: (*hash).into(),
+            });
+        }
+        "c" => {
+            let channel_id = segments.get(1)?.parse().ok()?;
+            let post = segments.iter().skip(2).rev().find_map(|s| s.parse().ok())?;
+            return Some(DeepLinkAction::OpenChannelPost { channel_id, post });
+        }
+        _ => {}
+    }
+    if !is_username(first) || WEB_RESERVED_PATHS.contains(&first.to_ascii_lowercase().as_str()) {
+        return None;
+    }
+    let params = tg_query_params(&format!("x?{query}"));
+    let start_param = params
+        .iter()
+        .find(|(n, _)| n == "start")
+        .map(|(_, v)| v.clone())
+        .filter(|v| !v.is_empty());
+    let (post, story_id) = match (segments.get(1), segments.get(2)) {
+        (Some(&"s"), Some(story)) => (None, story.parse().ok()),
+        (Some(_), _) => (
+            segments.iter().skip(1).rev().find_map(|s| s.parse().ok()),
+            None,
+        ),
+        _ => (None, None),
+    };
+    Some(DeepLinkAction::OpenUsername {
+        domain: first.into(),
+        start_param,
+        post,
+        story_id,
+    })
+}
+
+/// Any Telegram link Quill can resolve locally (`tg://` or web form).
+pub fn parse_deep_link_url(url: &str) -> Option<DeepLinkAction> {
+    parse_tg_url(url).or_else(|| parse_web_url(url))
+}
+
 /// Entity list → action, via the first `tg://` TextUrl entity.
 pub fn parse_deep_link_action(entities: &[TextEntity]) -> Option<DeepLinkAction> {
     deep_link_tg_url(entities).and_then(parse_tg_url)
 }
 
-/// First CLI arg that looks like a Telegram deep link. Flags (`--*`)
-/// are skipped; matches `tg://`, `t.me` and `telegram.me` http(s) links.
-/// Used by `main.rs` to stash the launch link on the app.
+/// First CLI arg that is a Telegram deep link. Flags (`--*`) are skipped;
+/// validation is `deep_link_inbox::sanitize_link` (the same gate applied to
+/// links forwarded by a second launch or handed over by the OS).
 pub fn detect_deep_link_arg(args: &[String]) -> Option<String> {
     args.iter()
         .skip(1)
-        .find(|arg| {
-            !arg.starts_with("--")
-                && (arg.starts_with("tg://")
-                    || arg.starts_with("https://t.me/")
-                    || arg.starts_with("http://t.me/")
-                    || arg.starts_with("https://telegram.me/")
-                    || arg.starts_with("http://telegram.me/"))
-        })
-        .cloned()
+        .filter(|arg| !arg.starts_with("--"))
+        .find_map(|arg| crate::deep_link_inbox::sanitize_link(arg))
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -143,6 +238,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self.session.deep_link.is_some() {
             return Ok(None);
+        }
+        // Like tdesktop's `openLocalUrl`, route the link by its shape
+        // locally. `getDeepLinkInfo` only knows server-side deep links
+        // (it answers 404 for `resolve?domain=` and `t.me/<user>`).
+        if let Some(action) = parse_deep_link_url(link) {
+            return self.resolve_deep_link(action);
         }
         self.session.deep_link_seq = self.session.deep_link_seq.wrapping_add(1);
         let generation = self.session.deep_link_seq;
@@ -321,6 +422,56 @@ mod tests {
         // Missing params are not actionable.
         assert_eq!(parse_tg_url("tg://privatepost?channel=123"), None);
         assert_eq!(parse_tg_url("tg://user"), None);
+    }
+
+    #[test]
+    fn parse_web_links() {
+        let user = |domain: &str, start: Option<&str>, post, story| {
+            Some(DeepLinkAction::OpenUsername {
+                domain: domain.into(),
+                start_param: start.map(Into::into),
+                post,
+                story_id: story,
+            })
+        };
+        assert_eq!(
+            parse_deep_link_url("https://t.me/durov"),
+            user("durov", None, None, None)
+        );
+        assert_eq!(
+            parse_deep_link_url("https://telegram.me/durov/42?single"),
+            user("durov", None, Some(42), None)
+        );
+        assert_eq!(
+            parse_deep_link_url("https://t.me/BotFather?start=a%20b#x"),
+            user("BotFather", Some("a b"), None, None)
+        );
+        assert_eq!(
+            parse_deep_link_url("https://t.me/durov/s/7"),
+            user("durov", None, None, Some(7))
+        );
+        assert_eq!(
+            parse_deep_link_url("https://t.me/+AbCdEf"),
+            Some(DeepLinkAction::JoinInvite {
+                hash: "AbCdEf".into()
+            })
+        );
+        assert_eq!(
+            parse_deep_link_url("https://t.me/joinchat/AbCdEf"),
+            Some(DeepLinkAction::JoinInvite {
+                hash: "AbCdEf".into()
+            })
+        );
+        assert_eq!(
+            parse_deep_link_url("https://t.me/c/123/456"),
+            Some(DeepLinkAction::OpenChannelPost {
+                channel_id: 123,
+                post: 456
+            })
+        );
+        assert_eq!(parse_deep_link_url("https://t.me/addstickers/Pack"), None);
+        assert_eq!(parse_deep_link_url("https://t.me/"), None);
+        assert_eq!(parse_deep_link_url("https://evil.com/durov"), None);
     }
 
     #[test]

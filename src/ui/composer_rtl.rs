@@ -589,4 +589,186 @@ mod tests {
             .unwrap();
         });
     }
+
+    // --- message bubbles (`BidiParagraph`, see selectable_text.rs) ---
+
+    use gpui_kit::base::RunGeometry;
+    use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
+
+    /// A paragraph laid out at `wrap` width with the default text style.
+    fn paragraph(text: &str, wrap: f32, window: &mut Window) -> BidiParagraph {
+        let style = window.text_style();
+        let font_size = style.font_size.to_pixels(window.rem_size());
+        let runs = vec![style.to_run(text.len())];
+        BidiParagraph::layout(
+            &text.to_string().into(),
+            &runs,
+            font_size,
+            px(20.),
+            Some(px(wrap)),
+            window,
+        )
+        .expect("the text has right-to-left characters")
+    }
+
+    #[test]
+    fn plain_text_is_left_to_gpui() {
+        with_composer(None, |cx, handle, _| {
+            cx.update_window(handle, |_, window, _| {
+                let style = window.text_style();
+                let size = style.font_size.to_pixels(window.rem_size());
+                let runs = vec![style.to_run(5)];
+                assert!(
+                    BidiParagraph::layout(
+                        &"hello".to_string().into(),
+                        &runs,
+                        size,
+                        px(20.),
+                        Some(px(100.)),
+                        window
+                    )
+                    .is_none()
+                );
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn a_long_hebrew_message_wraps_in_typing_order() {
+        with_composer(None, |cx, handle, _| {
+            cx.update_window(handle, |_, window, _| {
+                // 5-glyph words at 8.4px: a 150px row holds about three of them.
+                let words = [
+                    "שלום",
+                    "עולם",
+                    "מה",
+                    "שלומך",
+                    "היום",
+                    "זו",
+                    "הודעה",
+                    "ארוכה",
+                ];
+                let text = words.join(" ");
+                let p = paragraph(&text, 150., window);
+                let width = px(150.);
+                // The first character is on the first row at the right edge...
+                let first = p.position_for_index(0, width).unwrap();
+                assert_eq!(first.y, px(0.));
+                assert!((first.x - width).abs() < px(0.5), "{first:?}");
+                // ...the last word is on the last row, and rows grow downward in
+                // typing order (the end of the sentence is not on the first row).
+                let mut last_y = px(-1.);
+                for word in words {
+                    let at = text.find(word).unwrap();
+                    let y = p.position_for_index(at, width).unwrap().y;
+                    assert!(y >= last_y, "{word} is on row y={y:?} after y={last_y:?}");
+                    last_y = y;
+                }
+                assert!(last_y > px(0.), "the message wrapped");
+                assert_eq!(p.size().height, px(20.) * ((last_y / px(20.)) + 1.));
+                // Every row starts at the right edge.
+                for word in words {
+                    let at = text.find(word).unwrap();
+                    let pos = p.position_for_index(at, width).unwrap();
+                    assert!(pos.x <= width + px(0.5));
+                }
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn a_short_rtl_message_measures_its_shaped_width_not_the_available_width() {
+        // A bubble hugs its text: the measured width is the widest row, however wide
+        // the wrap width is.
+        with_composer(None, |cx, handle, _| {
+            cx.update_window(handle, |_, window, _| {
+                let text = "מחכה לעוד עדכונים ממנה";
+                let p = paragraph(text, 560., window);
+                let shaped = px(text.chars().count() as f32 * 9.6);
+                assert!(
+                    (p.size().width - shaped).abs() < px(0.5),
+                    "{:?} vs {shaped:?}",
+                    p.size().width
+                );
+                assert_eq!(p.size().height, px(20.));
+                // And it still wraps at the wrap width when it must.
+                let narrow = paragraph(text, 120., window);
+                assert!(narrow.size().width <= px(120.));
+                assert!(narrow.size().height > px(20.));
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn bubble_hit_testing_and_selection_follow_the_rows() {
+        with_composer(None, |cx, handle, _| {
+            cx.update_window(handle, |_, window, _| {
+                let text = "שלום עולם מה שלומך היום זו הודעה ארוכה";
+                let p = Rc::new(paragraph(text, 150., window));
+                let width = px(150.);
+                // A click on a caret position's glyph names that character.
+                let at = text.find("מה").unwrap();
+                let pos = p.position_for_index(at, width).unwrap();
+                let hit = p.index_for_position(point(pos.x - px(2.), pos.y + px(8.)), width);
+                assert_eq!(hit, Ok(at));
+                // Rectangles of a word are where it is drawn: as wide as it is.
+                let rects = p.range_rects(at..at + "מה".len(), width);
+                assert_eq!(rects.len(), 1);
+                assert!(
+                    (rects[0].size.width - px(2. * 9.6)).abs() < px(0.5),
+                    "{rects:?}"
+                );
+                // Dragging from the first row to the last selects the text in
+                // between in typing order, not by x.
+                let geometry = p.geometry(point(px(0.), px(0.)), width);
+                let start = p.position_for_index(0, width).unwrap();
+                let end = p.position_for_index(text.len(), width).unwrap();
+                let all = geometry
+                    .selected_range(
+                        point(start.x - px(1.), start.y + px(8.)),
+                        point(end.x + px(1.), end.y + px(8.)),
+                    )
+                    .unwrap();
+                assert_eq!(all, Some(0..text.len()));
+                // Nothing is selected above or below the paragraph.
+                assert_eq!(
+                    geometry.selected_range(point(px(10.), px(-80.)), point(px(20.), px(-40.))),
+                    Some(None)
+                );
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn bubble_rows_order_mixed_runs_visually_and_agree_across_platform_bases() {
+        let text = "שלום hello 123 עולם";
+        let measure = |base: Option<bool>| {
+            let out: Rc<RefCell<Vec<Pixels>>> = Rc::new(RefCell::new(Vec::new()));
+            let sink = out.clone();
+            with_composer(base, move |cx, handle, _| {
+                cx.update_window(handle, |_, window, _| {
+                    let p = paragraph(text, 400., window);
+                    for (at, _) in text.char_indices() {
+                        sink.borrow_mut()
+                            .push(p.position_for_index(at, px(400.)).unwrap().x);
+                    }
+                })
+                .unwrap();
+            });
+            out.take()
+        };
+        let auto = measure(None);
+        assert_eq!(auto, measure(Some(false)));
+        // First word rightmost, last word leftmost, the Latin word's letters
+        // advance rightwards.
+        let hello = text.find("hello").unwrap();
+        let world = text.find("עולם").unwrap();
+        let x = |at: usize| auto[text.char_indices().position(|(i, _)| i == at).unwrap()];
+        assert!(x(0) > x(hello) && x(hello) > x(world));
+        assert!(x(hello + 3) > x(hello));
+    }
 }

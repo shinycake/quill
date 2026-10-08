@@ -919,8 +919,9 @@ enum InlineAction {
 
 /// One flowing paragraph of inline runs as a single `StyledText`, so
 /// mixed formatting wraps like prose (a bold word mid-sentence stays on
-/// its line). Paragraphs with resolved custom-emoji images keep the
-/// per-run layout: images cannot live inside a text run.
+/// its line). A resolved custom emoji is one invisible em-wide glyph in
+/// that text, with its image painted over the glyph after layout
+/// (`InlineEmoji`), so it wraps and aligns like any other character.
 fn inline_paragraph(
     runs: &[TextRun],
     first_index: usize,
@@ -933,50 +934,17 @@ fn inline_paragraph(
     reserve: Option<Pixels>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let has_emoji_image = runs.iter().any(|run| {
-        run.custom_emoji_id
-            .is_some_and(|id| emoji_paths.contains_key(&id) || layered.contains_key(&id))
-    });
-    if has_emoji_image {
-        let mut row = div()
-            .id(format!(
-                "msg-runs-{}-{}-{first_index}",
-                msg_key.1, is_caption as u8
-            ))
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_0();
-        for (offset, run) in runs.iter().enumerate() {
-            row = row.child(paint_text_run(
-                run,
-                first_index + offset,
-                msg_key,
-                is_caption,
-                revealed,
-                emoji_paths,
-                layered,
-                font,
-                cx,
-            ));
-        }
-        if let Some(reserve) = reserve {
-            row = row.child(div().w(reserve).h(font));
-        }
-        return row.into_any_element();
-    }
     let mut text = String::new();
     let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
     let mut mono: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
     let mut click_ranges = Vec::new();
     let mut actions = Vec::new();
     let mut spoilers: Vec<(std::ops::Range<usize>, f32)> = Vec::new();
+    let mut inline_emoji: Vec<super::selectable_text::InlineEmoji> = Vec::new();
     for (offset, run) in runs.iter().enumerate() {
         if run.text.is_empty() {
             continue;
         }
-        let range = text.len()..text.len() + run.text.len();
-        text.push_str(&run.text);
         let style = &run.style;
         let key = (
             msg_key.0,
@@ -985,6 +953,41 @@ fn inline_paragraph(
             is_caption,
         );
         let hidden = style.spoiler && !revealed.contains(&key);
+        // A resolved custom emoji (animated first) becomes a placeholder
+        // glyph; unresolved ones and hidden spoilers keep their text.
+        let visual = run.custom_emoji_id.filter(|_| !hidden).and_then(|id| {
+            layered
+                .get(&id)
+                .map(|clip| super::selectable_text::InlineEmojiVisual::Clip(clip.clone()))
+                .or_else(|| {
+                    emoji_paths.get(&id).map(|source| {
+                        super::selectable_text::InlineEmojiVisual::Image(source.clone())
+                    })
+                })
+        });
+        let range = if visual.is_some() {
+            let at = text.len();
+            text.push(super::selectable_text::EMOJI_PLACEHOLDER);
+            at..text.len()
+        } else {
+            let at = text.len();
+            text.push_str(&run.text);
+            at..text.len()
+        };
+        if let Some(visual) = visual {
+            // The picture carries no text styling; a link around it keeps
+            // its click target.
+            if let Some(href) = &run.href {
+                click_ranges.push(range.clone());
+                actions.push(InlineAction::Link(href.clone()));
+            }
+            inline_emoji.push(super::selectable_text::InlineEmoji {
+                range,
+                visual,
+                fallback: run.text.clone(),
+            });
+            continue;
+        }
         let mut highlight = HighlightStyle::default();
         if style.bold {
             highlight.font_weight = Some(FontWeight::BOLD);
@@ -1055,6 +1058,7 @@ fn inline_paragraph(
         ));
     }
     let full: SharedString = text.clone().into();
+    let bidi_source = (highlights.clone(), mono.clone());
     let styled = StyledText::new(text)
         .with_highlights(highlights)
         .with_font_family_overrides(mono);
@@ -1064,6 +1068,7 @@ fn inline_paragraph(
         full,
         styled,
     )
+    .bidi(bidi_source.0, bidi_source.1)
     .selection_color(accent().opacity(0.35).into())
     .message(msg_key)
     // Messages read top to bottom by id; paragraphs within one in order.
@@ -1081,7 +1086,8 @@ fn inline_paragraph(
             }
         });
     })
-    .spoilers(spoilers);
+    .spoilers(spoilers)
+    .inline_emoji(inline_emoji);
     div()
         .id(format!(
             "msg-par-wrap-{}-{}-{first_index}",
