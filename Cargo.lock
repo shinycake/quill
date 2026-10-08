@@ -5908,6 +5908,7 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-video",
  "directories",
+ "embed-resource",
  "flate2",
  "gpui-kit",
  "image",

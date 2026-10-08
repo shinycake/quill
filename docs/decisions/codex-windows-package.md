@@ -30,6 +30,10 @@ Not bundled (system-provided): everything in System32 (kernel32, user32, d3d11, 
 
 Release UI builds are `windows_subsystem = "windows"` so starting Quill does not open a console window. A GUI-subsystem process has no standard handles when launched from a terminal, so `main` attaches to the parent console and points stdout/stderr at `CONOUT$` only when those handles are missing (redirected handles are left alone). CI reads `--version`/`--build-info` through a redirected file, so it does not exercise the console-attach path itself; debug builds stay console-subsystem.
 
+## Icon and line endings
+
+`build.rs` (Windows hosts only; a no-op elsewhere) writes a one-line `.rc` and embeds `assets/icons/Quill.ico` as `quill.exe`'s application icon via the `embed-resource` build-dependency (already in the lockfile through GPUI). `.gitattributes` marks `schema/**` and `native/patches/**` as `-text` and forces LF for `*.sh`/`*.py`, because a CRLF checkout on Windows broke the byte-exact vendored schema test and would break the TDLib patch and Git Bash scripts.
+
 ## Checker: `scripts/check-bundle-pe.ps1 <dir>`
 
 For every `.exe`/`.dll` in the package, `dumpbin /dependents` (static and delay-load imports) must resolve to a file in the package, an `api-ms-win-*`/`ext-ms-win-*` API set, or a DLL that exists in `%SystemRoot%\System32` and is not on a short denylist of things that exist on developer machines but not on clean installs (`vcruntime*`, `msvcp*`, `concrt*`, `vcomp*`, `libssl*`, `libcrypto*`, `zlib*`, `vulkan-1`). The job also runs a negative test (removing `libcrypto-3-x64.dll` must make the checker fail). `scripts/check-bundle-load.ps1` loads `tdjson.dll`/`ntgcalls.dll`/`rlottie.dll` from the extracted zip and asserts the OpenSSL/zlib modules mapped into the process came from the package.
