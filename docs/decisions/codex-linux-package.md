@@ -10,7 +10,7 @@ quill-linux-x86_64/
   lib/librlottie.so           RUNPATH $ORIGIN
   lib/libssl.so.3, libcrypto.so.3   RUNPATH $ORIGIN
   share/applications/quill.desktop
-  share/icons/hicolor/scalable/apps/quill.svg
+  share/icons/hicolor/<size>/apps/quill.png   (16–1024 px, from assets/icons/hicolor)
   install.sh  README.txt  LICENSE  THIRD_PARTY.md
 ```
 
@@ -42,7 +42,7 @@ Result (run 37727904807): 6 ELF files checked (quill + 5 libs), tarball 74 MB (a
 
 Verified in CI: the UI release build links on Ubuntu; package layout; RUNPATHs; no unresolved or foreign NEEDED; the bundled libs load and use the bundled OpenSSL; `--version`/`--build-info` run from the extracted tarball; install script relocation.
 
-Not verified (no GPU, display or Telegram account on the runner): window creation under X11 or Wayland, Vulkan rendering, tray icon behavior, call audio (ALSA), a live TDLib login, and other distros/glibc versions. `.desktop` `StartupWMClass` and the icon are placeholders: `assets/quill.svg` is a simple stand-in until a real app icon exists (there is none for macOS either).
+Not verified (no GPU, display or Telegram account on the runner): window creation under X11 or Wayland, Vulkan rendering, tray icon behavior, call audio (ALSA), a live TDLib login, and other distros/glibc versions. `.desktop` `StartupWMClass` is a placeholder. The app icon lives in `assets/icons/` (see docs/decisions/codex-app-icon.md).
 
 ## Follow-ups
 
