@@ -1,0 +1,16 @@
+English spellcheck word list (assets/spellcheck/en.txt, compiled into the quill binary)
+
+Source: FrequencyWords by Hermit Dave, content/2018/en/en_50k.txt
+        https://github.com/hermitdave/FrequencyWords
+        (word frequencies computed from OpenSubtitles subtitle data)
+License of the source content: Creative Commons Attribution-ShareAlike 4.0
+        International (CC BY-SA 4.0), https://creativecommons.org/licenses/by-sa/4.0/
+        (the FrequencyWords code is MIT; the word lists are CC BY-SA 4.0)
+
+Changes made for Quill: the frequency counts were removed, and entries that are
+not plain words (for example "18-year-old", "etc.", "75th") were dropped. The
+remaining 48,439 words keep their original order.
+
+Quill's adapted word list (assets/spellcheck/en.txt) is likewise licensed under
+CC BY-SA 4.0. This license applies to the word list only, not to the rest of
+Quill, which is MIT-licensed.

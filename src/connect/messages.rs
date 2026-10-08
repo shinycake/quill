@@ -72,6 +72,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.chat_export.is_some() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // Protected chats can't be saved or forwarded, so they can't be
+        // exported either (tdesktop `PeerData::canExportChatHistory`
+        // requires `allowsForwarding()`).
+        if self.session.chat_has_protected_content(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         self.session.chat_export = Some(crate::chat_export::ChatExportState::new(
             chat_id, chat_title,
         ));

@@ -384,3 +384,22 @@ jobs:
           fetch-depth: 0
       - name: validate parity fragments
         run: bash scripts/check-parity-fragments.sh ${{ github.event.pull_request.base.sha }}
+
+  # Not a required check (docs/decisions/codex-legal-compliance.md): fails when a
+  # crate brings a license that deny.toml does not allow, or when
+  # THIRD_PARTY_LICENSES.md no longer matches Cargo.lock.
+  licenses:
+    name: licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2,cargo-about@0.9.2
+      - name: crate licenses are on the allow-list
+        run: cargo deny --locked check licenses
+      - name: THIRD_PARTY_LICENSES.md is current
+        run: bash scripts/third-party-licenses.sh --check

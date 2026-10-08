@@ -21,5 +21,11 @@ ALSA (libasound), zlib.
                      libfontconfig1 libasound2 mesa-vulkan-drivers
 
 Telegram API credentials: see docs/credentials.md in the source repository.
-Licenses: LICENSE and THIRD_PARTY.md (libntgcalls and OpenSSL notices);
-FFmpeg (LGPL-2.1+, dynamically linked, replaceable): licenses/ffmpeg/.
+Licenses: Quill is MIT (LICENSE). THIRD_PARTY.md lists every bundled
+component and its license. The license texts are in licenses/, and the Rust
+crate licenses are in THIRD_PARTY_LICENSES.md. FFmpeg (LGPL-2.1+, dynamically
+linked, replaceable): licenses/ffmpeg/.
+
+Quill is an independent, unofficial Telegram client. It is not affiliated with,
+endorsed by, or sponsored by Telegram. It is early, experimental software and
+comes with no warranty (see LICENSE).
