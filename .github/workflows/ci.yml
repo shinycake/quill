@@ -65,6 +65,8 @@ jobs:
           key: tdlib-linux-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
       - name: build TDLib
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        env:
+          TDLIB_BUILD_TARGET: tdjson
         run: bash scripts/build-tdlib.sh
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
