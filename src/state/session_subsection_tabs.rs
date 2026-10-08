@@ -142,6 +142,25 @@ impl Session {
         }
     }
 
+    /// Unread messages across the chat's topics as the badge counts them
+    /// (tdesktop `History::chatListUnreadState` for a forum sums the topics'
+    /// `displayedUnreadCount`): only topics with a trustworthy count, see
+    /// [`Session::topic_badge`]. Zero for a chat without loaded topics.
+    pub fn forum_topics_unread(&self, chat_id: ChatId) -> i32 {
+        if !self.chat_has_topics(chat_id) {
+            return 0;
+        }
+        self.forum_topics.get(&chat_id.0).map_or(0, |topics| {
+            topics
+                .iter()
+                .map(|topic| match self.topic_badge(chat_id, topic) {
+                    TopicBadge::Count(n) => n.max(0),
+                    _ => 0,
+                })
+                .fold(0, i32::saturating_add)
+        })
+    }
+
     /// The chat-list row's topic line for a chat with topics: topic names in
     /// topic order (Telegram Desktop's forum rows list them on the second
     /// line). `None` until topics are loaded or when there are none.

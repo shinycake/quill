@@ -11,13 +11,16 @@
 //!   Desktop's default: `_includeMutedCounter = true`, tdesktop
 //!   `Telegram/SourceFiles/core/core_settings.h`, i.e. excluding muted is
 //!   the opt-out, not the opt-in; muteness is [`Session::effective_muted`]);
-//! - archived chats are excluded unless `include_archived` is on (both
-//!   clients exclude the archive by default);
+//! - archived chats count as muted (tdesktop folds the archive folder into
+//!   the main list, all-muted), so they are included with muted chats unless
+//!   `include_archived` is turned off;
 //! - the badge shows either the unread-message sum or the unread-chat count
 //!   (`count_messages`). The sum saturates instead of overflowing.
 //!
-//! The OS tray itself is managed behind `#[cfg(feature = "ui")]` with the
-//! `tray-icon` crate. [`sync_tray`] is called from a 1s timer in `main.rs`;
+//! The OS tray itself is managed behind `#[cfg(feature = "ui")]`: the
+//! `tray-icon` crate on macOS and Windows, a StatusNotifierItem over D-Bus
+//! (`ksni`, [`crate::tray_sni`]) on Linux, where `tray-icon` would need a
+//! GTK main loop. [`sync_tray`] is called from a 1s timer in `main.rs`;
 //! it re-renders only when the count changes and silently no-ops when the OS
 //! has no system tray (a tray appearing later is picked up on the next sync —
 //! the handle is re-created until it succeeds).
@@ -42,25 +45,113 @@ pub fn menu_action(id: &str) -> Option<TrayAction> {
     }
 }
 
-/// Badge count honoring [`BadgePrefs`]: archived chats are skipped unless
-/// `include_archived`; muted chats are skipped unless `include_muted`;
-/// the count is the unread-message sum when `count_messages` is on, else
-/// the number of unread chats. Negative per-chat counts (shouldn't happen)
-/// are ignored; the sum saturates.
+/// Badge count, mirroring Telegram Desktop's `Session::computeUnreadBadge`
+/// (`data/data_session.cpp`) over TDLib's server-side totals.
+///
+/// - The main list contributes TDLib's `updateUnreadMessageCount` (or
+///   `updateUnreadChatCount` when `count_messages` is off): the unmuted
+///   subset when `include_muted` is off, the full total otherwise.
+/// - tdesktop folds the archive folder into the main list with everything
+///   counted as muted, so the archive contributes its full total, and only
+///   when muted chats are included. `include_archived` is Quill's extra
+///   opt-out for it (default on, like tdesktop).
+/// - A list whose totals haven't arrived yet (TDLib sends them only with a
+///   message database, and after the first chat load) falls back to summing
+///   the loaded chats of that list; a chat marked as unread counts as one.
+///
+/// The sum saturates.
 pub fn badge_count(session: &Session, prefs: &BadgePrefs) -> u32 {
+    let main = list_badge(session, prefs, false);
+    let archive = if prefs.include_archived && prefs.include_muted {
+        list_badge(session, prefs, true)
+    } else {
+        0
+    };
+    main.saturating_add(archive)
+}
+
+/// `QUILL_TRACE_STATUS=1`: note (once per list/mode) that the badge fell
+/// back to summing loaded chats because TDLib's totals haven't arrived.
+fn trace_fallback(archive: bool, messages: bool) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static SEEN: AtomicU8 = AtomicU8::new(0);
+    let bit = 1u8 << (u8::from(archive) * 2 + u8::from(messages));
+    if std::env::var_os("QUILL_TRACE_STATUS").is_some()
+        && SEEN.fetch_or(bit, Ordering::Relaxed) & bit == 0
+    {
+        eprintln!(
+            "status: badge fallback to loaded-chat sum list={} count_messages={messages}",
+            if archive { "archive" } else { "main" }
+        );
+    }
+}
+
+/// Unread of chats split into topics, on top of the list totals. tdesktop
+/// replaces a forum chat's own state with its topics' (`AdjustedForumUnreadState`:
+/// the topics' message sum, or one chat in chats mode), while TDLib's totals
+/// know nothing of topics the user never opened. Whatever TDLib already counts
+/// for the chat itself (`unread_count`, marked unread) is subtracted so
+/// nothing is counted twice.
+fn forum_topics_extra(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
     session
         .chats
         .values()
-        .filter(|chat| prefs.include_archived || !chat.in_archive)
+        .filter(|chat| chat.in_archive == archive)
         .filter(|chat| prefs.include_muted || !session.effective_muted(chat))
         .map(|chat| {
+            let topics = session.forum_topics_unread(chat.id);
+            if topics <= 0 {
+                return 0;
+            }
             if prefs.count_messages {
-                chat.unread_count.max(0) as u32
+                (topics - chat.unread_count.max(0)).max(0) as u32
             } else {
-                u32::from(chat.unread_count > 0)
+                u32::from(chat.unread_count <= 0 && !chat.is_marked_as_unread)
             }
         })
         .fold(0u32, u32::saturating_add)
+}
+
+fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
+    let totals = if archive {
+        &session.unread_totals.archive
+    } else {
+        &session.unread_totals.main
+    };
+    let pair = if prefs.count_messages {
+        totals.messages
+    } else {
+        totals.chats
+    };
+    let topics = forum_topics_extra(session, prefs, archive);
+    if let Some(pair) = pair {
+        // Archived chats always count as muted: take the full total.
+        let value = if prefs.include_muted || archive {
+            pair.all
+        } else {
+            pair.unmuted
+        };
+        return (value.max(0) as u32).saturating_add(topics);
+    }
+    trace_fallback(archive, prefs.count_messages);
+    session
+        .chats
+        .values()
+        .filter(|chat| chat.in_archive == archive)
+        .filter(|chat| prefs.include_muted || !session.effective_muted(chat))
+        .map(|chat| {
+            if prefs.count_messages {
+                if chat.unread_count > 0 {
+                    chat.unread_count as u32
+                } else {
+                    u32::from(chat.is_marked_as_unread)
+                }
+            } else {
+                u32::from(chat.unread_count > 0 || chat.is_marked_as_unread)
+            }
+        })
+        .fold(0u32, u32::saturating_add)
+        .saturating_add(topics)
 }
 
 /// The app icon downscaled to [`ICON_SIZE`] as straight (non-premultiplied)
@@ -74,7 +165,7 @@ const BASE_ICON: &[u8; (ICON_SIZE * ICON_SIZE * 4) as usize] =
 /// from `assets/icons/tray-template.svg` with
 /// `magick -background white -density 300 tray-template.svg -flatten
 /// -resize 64x64 -colorspace Gray -negate -depth 8 gray:tray-template-64.a8`.
-const TEMPLATE_MASK: &[u8; (ICON_SIZE * ICON_SIZE) as usize] =
+pub(crate) const TEMPLATE_MASK: &[u8; (ICON_SIZE * ICON_SIZE) as usize] =
     include_bytes!("../assets/icons/tray-template-64.a8");
 
 const BADGE_RED: [u8; 4] = [0xFF, 0x3B, 0x30, 0xFF];
@@ -173,7 +264,7 @@ fn glyph(ch: char) -> Option<[u8; 7]> {
 }
 
 /// Text shown in the badge: the count, capped at "99+".
-fn badge_text(unread: u32) -> String {
+pub(crate) fn badge_text(unread: u32) -> String {
     if unread > 99 {
         "99+".to_string()
     } else {
@@ -181,10 +272,78 @@ fn badge_text(unread: u32) -> String {
     }
 }
 
+/// Tray tooltip / title: "Quill", or "Quill - N unread".
+pub fn tray_tooltip(unread: u32) -> String {
+    if unread == 0 {
+        "Quill".to_string()
+    } else {
+        format!("Quill \u{2014} {unread} unread")
+    }
+}
+
+/// Convert straight RGBA to the StatusNotifierItem pixmap layout: ARGB32 in
+/// network byte order, i.e. bytes `[A, R, G, B]` per pixel.
+#[cfg(any(target_os = "linux", test))]
+pub fn rgba_to_argb32(rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rgba.len());
+    for px in rgba.as_chunks::<4>().0 {
+        out.extend_from_slice(&[px[3], px[0], px[1], px[2]]);
+    }
+    out
+}
+
+/// Overlay badge for the Windows taskbar button (`SetOverlayIcon`): the red
+/// count pill alone, vertically centered on a transparent canvas, so the
+/// taskbar's ~16 px downscale keeps the digits as large as possible
+/// (tdesktop draws its overlay the same way, `main_window_win.cpp`).
+pub fn render_overlay_icon(unread: u32) -> (Vec<u8>, u32, u32) {
+    let mut px = Pixels::new(ICON_SIZE);
+    if unread > 0 {
+        draw_badge_at(
+            &mut px,
+            unread,
+            &BadgeColors {
+                ring: WHITE,
+                fill: BADGE_RED,
+                digits: WHITE,
+            },
+            (ICON_SIZE - BADGE_HEIGHT) / 2,
+        );
+    }
+    (px.buf, ICON_SIZE, ICON_SIZE)
+}
+
+/// Which tray-dependent switches the General settings may offer. Hidden when
+/// no tray icon exists: a "minimize/start in tray" window with no tray to
+/// reopen it from would strand the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraySettingSwitches {
+    pub start_in_tray: bool,
+    pub minimize_to_tray: bool,
+}
+
+/// `minimize_to_tray` is additionally macOS-only for now: Windows/Linux
+/// GPUI windows cannot be hidden after creation, so only the menu-bar
+/// hide path exists (`cx.hide()`).
+pub fn tray_setting_switches(tray_available: bool, macos: bool) -> TraySettingSwitches {
+    TraySettingSwitches {
+        start_in_tray: tray_available,
+        minimize_to_tray: tray_available && macos,
+    }
+}
+
 /// Red pill in the top-right corner, sized to take up most of the icon so the
 /// count reads at menu-bar size: 4 px glyph cells for one or two characters,
 /// 3 px for "99+", with a ring to separate it from the icon art.
 fn draw_badge(px: &mut Pixels, unread: u32, colors: &BadgeColors) {
+    draw_badge_at(px, unread, colors, 0);
+}
+
+/// Height of the unread pill in pixels.
+const BADGE_HEIGHT: u32 = 38;
+
+/// [`draw_badge`] with the pill's top edge at row `y0`.
+fn draw_badge_at(px: &mut Pixels, unread: u32, colors: &BadgeColors, y0: u32) {
     let text = badge_text(unread);
     let n = text.len() as u32;
     let scale: u32 = if n >= 3 { 3 } else { 4 };
@@ -192,11 +351,10 @@ fn draw_badge(px: &mut Pixels, unread: u32, colors: &BadgeColors) {
     let glyph_w = 5 * scale;
     let text_w = n * glyph_w + (n - 1) * gap;
     let text_h = 7 * scale;
-    let pill_h: u32 = 38;
+    let pill_h: u32 = BADGE_HEIGHT;
     let pill_w = (text_w + 14).max(pill_h).min(ICON_SIZE);
     let ring: u32 = 2;
     let x0 = ICON_SIZE - pill_w;
-    let y0 = 0;
     px.rounded_rect(x0, y0, pill_w, pill_h, pill_h / 2, colors.ring);
     px.rounded_rect(
         x0 + ring,
@@ -264,15 +422,18 @@ impl Pixels {
     }
 }
 
-/// Live tray handle. Created lazily on the UI thread; construction fails
-/// (returning `None`) when the OS has no system tray.
-#[cfg(feature = "ui")]
+/// Live tray handle (macOS / Windows via `tray-icon`). Created lazily on the
+/// UI thread; construction fails (returning `None`) when the OS has no
+/// system tray. Linux uses [`crate::tray_sni`] instead: `tray-icon` there
+/// needs a GTK main loop that a GPUI process does not run.
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub struct Tray {
     icon: tray_icon::TrayIcon,
-    last_shown: Option<u32>,
+    /// Last drawn (unread, all-muted, dark menu bar) — redraw on change.
+    last_shown: Option<(u32, bool, bool)>,
 }
 
-#[cfg(feature = "ui")]
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 impl Tray {
     fn new() -> Option<Self> {
         #[cfg(target_os = "macos")]
@@ -291,7 +452,7 @@ impl Tray {
             &MenuItem::with_id("quill-tray-quit", "Quit Quill", true, None),
         ])
         .ok()?;
-        let (rgba, w, h) = render_platform_icon(0);
+        let (rgba, w, h, _) = render_platform_icon(0, false, true);
         let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
         let tray = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu))
@@ -302,42 +463,68 @@ impl Tray {
             .ok()?;
         Some(Self {
             icon: tray,
-            last_shown: Some(0),
+            last_shown: None,
         })
     }
 
-    fn set_unread(&mut self, unread: u32) {
-        if self.last_shown == Some(unread) {
+    fn set_unread(&mut self, unread: u32, muted: bool) {
+        #[cfg(target_os = "macos")]
+        let dark = self
+            .icon
+            .ns_status_item()
+            .is_none_or(|item| crate::tray_mac::menu_bar_is_dark(&item));
+        #[cfg(not(target_os = "macos"))]
+        let dark = false;
+        let key = (unread, muted, dark);
+        if self.last_shown == Some(key) {
             return;
         }
-        self.last_shown = Some(unread);
-        let (rgba, w, h) = render_platform_icon(unread);
+        self.last_shown = Some(key);
+        let (rgba, w, h, template) = render_platform_icon(unread, muted, dark);
         if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) {
-            let _ = self
-                .icon
-                .set_icon_with_as_template(Some(icon), cfg!(target_os = "macos"));
+            let _ = self.icon.set_icon_with_as_template(Some(icon), template);
         }
-        let tooltip = if unread == 0 {
-            "Quill".to_string()
-        } else {
-            format!("Quill — {unread} unread")
-        };
-        let _ = self.icon.set_tooltip(Some(tooltip));
+        let _ = self.icon.set_tooltip(Some(tray_tooltip(unread)));
     }
 }
 
-/// The macOS menu bar takes a monochrome template; Windows and Linux trays
-/// show the full-color app icon.
-#[cfg(feature = "ui")]
-fn render_platform_icon(unread: u32) -> (Vec<u8>, u32, u32) {
-    if cfg!(target_os = "macos") {
-        render_tray_template(unread)
-    } else {
-        render_tray_icon(unread)
+/// macOS: the monochrome template while nothing is unread, and tdesktop's
+/// tinted glyph + red counter otherwise ([`crate::tray_mac`]). Windows trays
+/// show the full-color app icon. Returns the RGBA, size and whether AppKit
+/// should treat it as a template.
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
+fn render_platform_icon(unread: u32, muted: bool, dark: bool) -> (Vec<u8>, u32, u32, bool) {
+    #[cfg(target_os = "macos")]
+    {
+        if unread == 0 {
+            let (rgba, w, h) = render_tray_template(0);
+            return (rgba, w, h, true);
+        }
+        let (rgba, w, h) = crate::tray_mac::render(TEMPLATE_MASK, unread, muted, dark);
+        (rgba, w, h, false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (muted, dark);
+        let (rgba, w, h) = render_tray_icon(unread);
+        (rgba, w, h, false)
     }
 }
 
+/// tdesktop's `unreadBadgeMuted`: every counted unread chat is muted.
 #[cfg(feature = "ui")]
+fn badge_all_muted(session: &Session, unread: u32) -> bool {
+    if unread == 0 || !session.badge_prefs.include_muted {
+        return false;
+    }
+    let unmuted = BadgePrefs {
+        include_muted: false,
+        ..session.badge_prefs.clone()
+    };
+    badge_count(session, &unmuted) == 0
+}
+
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 thread_local! {
     /// UI-thread tray handle. `tray_icon::TrayIcon` is `!Send` on some
     /// platforms (macOS), so a process-wide static cannot hold it; every
@@ -345,12 +532,20 @@ thread_local! {
     static TRAY: std::cell::RefCell<Option<Tray>> = const { std::cell::RefCell::new(None) };
 }
 
+#[cfg(all(feature = "ui", target_os = "linux"))]
+thread_local! {
+    /// UI-thread StatusNotifierItem lifecycle (registration runs on a worker).
+    static TRAY: std::cell::RefCell<crate::tray_sni::TrayState> =
+        std::cell::RefCell::new(crate::tray_sni::TrayState::new());
+}
+
 /// Sync the system tray icon with the session's unread count. Called from a
 /// 1s timer in `main.rs` on the UI thread; a no-op when the count is
 /// unchanged or no system tray exists.
-#[cfg(feature = "ui")]
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn sync_tray(session: Option<&Session>) {
     let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    let muted = session.is_some_and(|s| badge_all_muted(s, unread));
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
         // AppKit can return a status-item handle before its native window
@@ -366,22 +561,58 @@ pub fn sync_tray(session: Option<&Session>) {
             *slot = Tray::new();
         }
         if let Some(tray) = slot.as_mut() {
-            tray.set_unread(unread);
+            tray.set_unread(unread, muted);
         }
     });
 }
 
-#[cfg(feature = "ui")]
+/// Linux: drive the StatusNotifierItem lifecycle (see [`crate::tray_sni`]).
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn sync_tray(session: Option<&Session>) {
+    let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    TRAY.with(|cell| cell.borrow_mut().poll(unread));
+}
+
+/// First sync at window creation. macOS/Windows create the tray
+/// synchronously; Linux waits briefly for the StatusNotifierItem
+/// registration so start-in-tray knows whether a tray host exists.
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
+pub fn sync_tray_startup(session: Option<&Session>) {
+    sync_tray(session);
+}
+
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn sync_tray_startup(session: Option<&Session>) {
+    let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    TRAY.with(|cell| {
+        cell.borrow_mut()
+            .poll_startup(unread, std::time::Duration::from_millis(1500))
+    });
+}
+
+/// Whether a tray icon is currently shown. The close/minimize/start-in-tray
+/// switches are only offered when this is true ([`tray_setting_switches`]).
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn tray_available() -> bool {
     TRAY.with(|cell| cell.borrow().is_some())
 }
 
-#[cfg(feature = "ui")]
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn tray_available() -> bool {
+    TRAY.with(|cell| cell.borrow().available())
+}
+
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn take_tray_actions() -> Vec<TrayAction> {
     tray_icon::menu::MenuEvent::receiver()
         .try_iter()
         .filter_map(|event| menu_action(event.id.as_ref()))
         .collect()
+}
+
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn take_tray_actions() -> Vec<TrayAction> {
+    crate::tray_sni::take_actions()
 }
 
 #[cfg(test)]
@@ -398,7 +629,7 @@ mod tests {
     use crate::diagnostics::MemorySink;
     use crate::ids::{AccountKey, ChatId, MessageId};
     use crate::settings::BadgePrefs;
-    use crate::state::{ChatSummary, Session};
+    use crate::state::{ChatSummary, ListUnreadTotals, Session, UnreadPair};
     use crate::telegram::envelope::{ChatKind, ChatNotificationSettings};
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -506,31 +737,105 @@ mod tests {
     }
 
     #[test]
-    fn badge_count_excludes_archived_chats_by_default() {
-        // Archived chats never count (both official clients exclude them
-        // from the badge by default).
+    fn badge_count_includes_archived_chats_by_default() {
+        // tdesktop folds the all-muted archive into the main list, so it
+        // counts while muted chats do.
         let mut session = Session::new(
             AccountKey("tray-test-archived".into()),
             Arc::new(MemorySink::new()),
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, archived_chat(1, 9));
-        assert_eq!(badge_count(&session, &BadgePrefs::default()), 5);
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 14);
     }
 
     #[test]
-    fn badge_count_includes_archived_when_opted_in() {
+    fn badge_count_excludes_archived_when_opted_out_or_muted_excluded() {
         let mut session = Session::new(
-            AccountKey("tray-test-archived-in".into()),
+            AccountKey("tray-test-archived-out".into()),
             Arc::new(MemorySink::new()),
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, archived_chat(1, 9));
-        let prefs = BadgePrefs {
-            include_archived: true,
+        let no_archive = BadgePrefs {
+            include_archived: false,
             ..BadgePrefs::default()
         };
-        assert_eq!(badge_count(&session, &prefs), 14);
+        assert_eq!(badge_count(&session, &no_archive), 5);
+        let no_muted = BadgePrefs {
+            include_muted: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &no_muted), 5);
+    }
+
+    #[test]
+    fn badge_count_marked_as_unread_counts_one_in_fallback() {
+        let mut session = session_with(&[0, 2]);
+        session.chats.get_mut(&0).unwrap().is_marked_as_unread = true;
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 3);
+        let prefs = BadgePrefs {
+            count_messages: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &prefs), 2);
+    }
+
+    fn with_totals(session: &mut Session) {
+        // Loaded chats are a small slice; the server totals are what count.
+        session.chats.insert(0, chat(0, 1));
+        session.unread_totals.main = ListUnreadTotals {
+            messages: Some(UnreadPair {
+                all: 44,
+                unmuted: 13,
+            }),
+            chats: Some(UnreadPair {
+                all: 20,
+                unmuted: 6,
+            }),
+        };
+        session.unread_totals.archive = ListUnreadTotals {
+            messages: Some(UnreadPair {
+                all: 30,
+                unmuted: 0,
+            }),
+            chats: Some(UnreadPair { all: 9, unmuted: 0 }),
+        };
+    }
+
+    #[test]
+    fn badge_count_uses_server_totals_over_loaded_chats() {
+        let mut session = Session::new(AccountKey("t-totals".into()), Arc::new(MemorySink::new()));
+        with_totals(&mut session);
+        // Default: messages, muted + archive (all-muted) included.
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 44 + 30);
+        let chats = BadgePrefs {
+            count_messages: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &chats), 20 + 9);
+        let unmuted = BadgePrefs {
+            include_muted: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &unmuted), 13);
+        let no_archive = BadgePrefs {
+            include_archived: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &no_archive), 44);
+    }
+
+    #[test]
+    fn badge_count_totals_fall_back_per_list() {
+        // Only the main totals arrived: the archive sums its loaded chats.
+        let mut session = Session::new(AccountKey("t-partial".into()), Arc::new(MemorySink::new()));
+        session.chats.insert(1, archived_chat(1, 4));
+        session.unread_totals.main.messages = Some(UnreadPair {
+            all: 10,
+            unmuted: 7,
+        });
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 14);
     }
 
     #[test]
@@ -591,5 +896,79 @@ mod tests {
         let (b, _, _) = render_tray_icon(150);
         assert_ne!(a, b);
         assert!(red_pixel_count(&b) > 100);
+    }
+
+    #[test]
+    fn tooltip_names_the_unread_count() {
+        assert_eq!(tray_tooltip(0), "Quill");
+        assert_eq!(tray_tooltip(3), "Quill \u{2014} 3 unread");
+    }
+
+    #[test]
+    fn argb32_pixmap_is_network_byte_order() {
+        assert_eq!(
+            rgba_to_argb32(&[0x11, 0x22, 0x33, 0x44, 0xAA, 0xBB, 0xCC, 0xDD]),
+            vec![0x44, 0x11, 0x22, 0x33, 0xDD, 0xAA, 0xBB, 0xCC]
+        );
+        let (rgba, w, h) = render_tray_icon(0);
+        assert_eq!(rgba_to_argb32(&rgba).len(), (w * h * 4) as usize);
+    }
+
+    #[test]
+    fn overlay_icon_is_empty_without_unread_and_centered_pill_with_unread() {
+        let (empty, w, h) = render_overlay_icon(0);
+        assert_eq!((w, h), (ICON_SIZE, ICON_SIZE));
+        assert!(empty.as_chunks::<4>().0.iter().all(|p| p[3] == 0));
+
+        let (rgba, _, _) = render_overlay_icon(7);
+        let red = |p: &[u8; 4]| *p == BADGE_RED;
+        assert!(rgba.as_chunks::<4>().0.iter().any(red));
+        // The pill is vertically centered: no opaque pixel in the top or
+        // bottom margin rows.
+        let margin = ((ICON_SIZE - BADGE_HEIGHT) / 2) as usize;
+        let row = (ICON_SIZE * 4) as usize;
+        assert!(
+            rgba[..margin * row]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[3] == 0)
+        );
+        assert!(
+            rgba[(ICON_SIZE as usize - margin) * row..]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[3] == 0)
+        );
+        // The top-right badge of the tray icon starts at row 0, so the
+        // overlay differs from it.
+        assert_ne!(rgba, render_tray_icon(7).0);
+    }
+
+    #[test]
+    fn tray_switches_hide_without_a_tray() {
+        assert_eq!(
+            tray_setting_switches(false, true),
+            TraySettingSwitches {
+                start_in_tray: false,
+                minimize_to_tray: false
+            }
+        );
+        assert_eq!(
+            tray_setting_switches(true, true),
+            TraySettingSwitches {
+                start_in_tray: true,
+                minimize_to_tray: true
+            }
+        );
+        // Windows / Linux: start-in-tray only, minimize-to-tray stays off.
+        assert_eq!(
+            tray_setting_switches(true, false),
+            TraySettingSwitches {
+                start_in_tray: true,
+                minimize_to_tray: false
+            }
+        );
     }
 }

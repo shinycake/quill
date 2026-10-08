@@ -529,6 +529,18 @@ impl QuillApp {
             self.attach_dropped_files(&paths, cx);
             return true;
         }
+        // Linux file managers: GPUI exposes no `text/uri-list`, but the same
+        // files arrive as a text list of `file://` URIs or paths.
+        let listed = item.entries.iter().find_map(|entry| match entry {
+            ClipboardEntry::String(text) => {
+                Some(super::clipboard_files::paths_from_text(text.text()))
+            }
+            _ => None,
+        });
+        if let Some(paths) = listed.filter(|paths| !paths.is_empty()) {
+            self.attach_dropped_files(&paths, cx);
+            return true;
+        }
         let image = item.entries.iter().find_map(|entry| match entry {
             ClipboardEntry::Image(image) => Some(image),
             _ => None,

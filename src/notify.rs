@@ -10,7 +10,12 @@
 //!   so a click can focus the chat. Action support varies by notification
 //!   daemon (GNOME/KDE honor it; others may ignore clicks) — the click path
 //!   is best-effort, documented in DECISIONS.md.
-//! - macOS: native GPUI system notifications (dispatched by the UI).
+//! - macOS / Windows: native GPUI system notifications (dispatched by the
+//!   UI): `UNUserNotificationCenter` on macOS, WinRT toasts (AUMID
+//!   registered by GPUI under HKCU) on Windows. A click on the body comes
+//!   back through `App::on_system_notification_response` carrying the tag
+//!   built by [`notification_tag`], which [`parse_notification_tag`] maps
+//!   back to the chat.
 //!
 //! Command arguments are passed to the process without a shell, so message
 //! text can never inject shell syntax. The reducer never spawns processes;
@@ -234,6 +239,8 @@ pub fn decide_notification_sound(input: &SoundInput) -> Option<NotificationSound
 pub enum NotifyBackend {
     /// Linux: `notify-send` (libnotify).
     NotifySend,
+    /// macOS and Windows: GPUI `show_system_notification`, no process spawn.
+    Native,
     /// No supported backend on this platform.
     Unsupported,
 }
@@ -241,9 +248,57 @@ pub enum NotifyBackend {
 pub fn current_backend() -> NotifyBackend {
     if cfg!(target_os = "linux") {
         NotifyBackend::NotifySend
+    } else if cfg!(any(target_os = "macos", target_os = "windows")) {
+        NotifyBackend::Native
     } else {
         NotifyBackend::Unsupported
     }
+}
+
+/// Registry key (under HKCU) GPUI fills with the toast app's `DisplayName`
+/// for the AppUserModelID `app_id`; the toast icon lives next to it.
+#[cfg(any(windows, test))]
+fn aumid_registry_key(app_id: &str) -> String {
+    format!(r"Software\Classes\AppUserModelId\{app_id}")
+}
+
+/// Windows: give the toast identity `app_id` the Quill icon (`IconUri`).
+/// GPUI registers only the display name, so unpackaged toasts would show a
+/// blank icon. The PNG is written under `%LOCALAPPDATA%\Quill` (HKCU only,
+/// no elevation); every failure is ignored, the toast still shows.
+#[cfg(windows)]
+pub fn register_toast_icon(app_id: &str) {
+    const ICON: &[u8] = include_bytes!("../assets/icons/hicolor/128x128/apps/quill.png");
+    let Some(dir) = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let dir = dir.join("Quill");
+    let path = dir.join("toast-icon.png");
+    let current = std::fs::metadata(&path).map(|m| m.len()).ok();
+    if current != Some(ICON.len() as u64)
+        && (std::fs::create_dir_all(&dir).is_err() || std::fs::write(&path, ICON).is_err())
+    {
+        return;
+    }
+    let _ = crate::winreg::set_string(
+        &aumid_registry_key(app_id),
+        "IconUri",
+        &path.to_string_lossy(),
+    );
+}
+
+/// Stable GPUI notification tag for a chat: re-posting for the same chat
+/// replaces the earlier toast, and the click response carries it back.
+pub fn notification_tag(account: &str, chat_id: ChatId) -> String {
+    format!("account:{account}:chat:{}", chat_id.0)
+}
+
+/// Inverse of [`notification_tag`]: `(account key, chat)`. The account key
+/// keeps its `account:` prefix so callers compare it against
+/// `format!("account:{}", ..)`.
+pub fn parse_notification_tag(tag: &str) -> Option<(&str, ChatId)> {
+    let (account, chat) = tag.rsplit_once(":chat:")?;
+    Some((account, ChatId(chat.parse().ok()?)))
 }
 
 /// A shell-free OS command that shows one notification.
@@ -278,7 +333,7 @@ fn linux_notify_send_command(notification: &OsNotification) -> NotificationComma
 pub fn build_notification_command(notification: &OsNotification) -> Option<NotificationCommand> {
     match current_backend() {
         NotifyBackend::NotifySend => Some(linux_notify_send_command(notification)),
-        NotifyBackend::Unsupported => None,
+        NotifyBackend::Native | NotifyBackend::Unsupported => None,
     }
 }
 
@@ -500,6 +555,40 @@ mod tests {
             ]
         );
         assert!(cmd.report_click);
+    }
+
+    #[test]
+    fn notification_tag_roundtrips() {
+        let tag = notification_tag("primary", ChatId(-1001234));
+        assert_eq!(tag, "account:primary:chat:-1001234");
+        assert_eq!(
+            parse_notification_tag(&tag),
+            Some(("account:primary", ChatId(-1001234)))
+        );
+        assert_eq!(parse_notification_tag("account:x:chat:nope"), None);
+        assert_eq!(parse_notification_tag("no-chat-here"), None);
+    }
+
+    #[test]
+    fn aumid_key_is_under_classes_appusermodelid() {
+        assert_eq!(
+            aumid_registry_key("org.shinycake.quill"),
+            r"Software\Classes\AppUserModelId\org.shinycake.quill"
+        );
+    }
+
+    #[test]
+    fn native_backend_spawns_no_command() {
+        let notification = OsNotification {
+            chat_id: ChatId(7),
+            title: "Ada".into(),
+            body: "hello".into(),
+        };
+        let native = cfg!(any(target_os = "macos", target_os = "windows"));
+        assert_eq!(current_backend() == NotifyBackend::Native, native);
+        if native {
+            assert!(build_notification_command(&notification).is_none());
+        }
     }
 
     #[test]

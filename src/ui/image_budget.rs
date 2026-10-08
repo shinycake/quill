@@ -346,10 +346,17 @@ pub(super) struct SizedKey {
 /// Inside the main window's `CacheScope` it goes through the bounded
 /// cache; elsewhere (other windows) through GPUI's asset cache as before.
 pub(super) fn sized_image(source: SizedSource, size: Pixels) -> ImageSource {
+    sized_image_with(source, move |scale_factor| display_edge(size, scale_factor))
+}
+
+fn sized_image_with(
+    source: SizedSource,
+    edge: impl Fn(f32) -> u32 + Send + Sync + 'static,
+) -> ImageSource {
     ImageSource::Custom(Arc::new(move |window: &mut Window, cx: &mut App| {
         let key = SizedKey {
             source: source.clone(),
-            edge: display_edge(size, window.scale_factor()),
+            edge: edge(window.scale_factor()),
         };
         match SCOPED.with(|scoped| scoped.borrow().last().cloned()) {
             Some(cache) => cache.update(cx, |cache, cx| cache.load_sized(&key, window, cx)),
@@ -361,6 +368,99 @@ pub(super) fn sized_image(source: SizedSource, size: Pixels) -> ImageSource {
 /// Device pixels for a logical size.
 fn display_edge(size: Pixels, scale_factor: f32) -> u32 {
     ((size / px(1.)) * scale_factor).ceil().clamp(1., 4096.) as u32
+}
+
+/// How a frame shows its picture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Fit {
+    /// Fills the frame, cropping the overflow (photos, posters, tiles).
+    Cover,
+    /// Fits whole inside the frame (stickers).
+    Contain,
+}
+
+/// A history picture (photo, poster, album tile, link preview, sticker)
+/// drawn in a `frame` of logical size, decoded no larger than that needs
+/// (device pixels), through the bounded cache. `dims` is the picture's
+/// own size when known, which keeps the decode tight for frames whose
+/// aspect differs from the picture's. GIF files stay on GPUI's loader
+/// (it plays their frames); the media viewer never comes here.
+pub(super) fn sized_media(
+    path: &Path,
+    frame: (Pixels, Pixels),
+    dims: Option<(i32, i32)>,
+    fit: Fit,
+) -> ImageSource {
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"))
+    {
+        return ImageSource::Resource(Resource::Path(Arc::from(path)));
+    }
+    let logical = shorter_side_in_frame((frame.0 / px(1.), frame.1 / px(1.)), dims, fit);
+    sized_image_with(SizedSource::Path(Arc::from(path)), move |scale_factor| {
+        bucket_edge(display_edge(px(logical), scale_factor))
+    })
+}
+
+/// Logical size the picture's shorter side is drawn at in the frame.
+/// Without `dims` the bound over every possible aspect.
+fn shorter_side_in_frame((fw, fh): (f32, f32), dims: Option<(i32, i32)>, fit: Fit) -> f32 {
+    match (dims, fit) {
+        (Some((iw, ih)), _) if iw > 0 && ih > 0 => {
+            let (sx, sy) = (fw / iw as f32, fh / ih as f32);
+            let scale = match fit {
+                Fit::Cover => sx.max(sy),
+                Fit::Contain => sx.min(sy),
+            };
+            scale * iw.min(ih) as f32
+        }
+        (_, Fit::Cover) => fw.max(fh),
+        (_, Fit::Contain) => fw.min(fh),
+    }
+}
+
+/// Round a wanted edge up to a step, so a resize within one step (or a
+/// tiny rounding difference between two frames) asks for the same decode:
+/// 32 px up to 256, 64 px up to 1024, then 128 px.
+fn bucket_edge(edge: u32) -> u32 {
+    let step = match edge {
+        0..=256 => 32,
+        257..=1024 => 64,
+        _ => 128,
+    };
+    (edge.div_ceil(step) * step).clamp(step, 4096)
+}
+
+/// What to do for a wanted edge when other sizes of the same picture are
+/// loaded.
+#[derive(Debug, PartialEq, Eq)]
+enum VariantPick {
+    /// One is sharp enough and not much bigger: use it (a small shrink
+    /// doesn't decode again).
+    Reuse(u32),
+    /// Decode the wanted size; show this loaded one meanwhile, if any.
+    Decode(Option<u32>),
+}
+
+/// Loaded variants up to this factor (3/2) above the wanted edge are reused.
+const REUSE_UP_TO: (u32, u32) = (3, 2);
+
+fn pick_variant(wanted: u32, loaded: &[u32]) -> VariantPick {
+    let reuse = loaded
+        .iter()
+        .copied()
+        .filter(|&edge| edge >= wanted && edge * REUSE_UP_TO.1 <= wanted * REUSE_UP_TO.0)
+        .min();
+    if let Some(edge) = reuse {
+        return VariantPick::Reuse(edge);
+    }
+    VariantPick::Decode(
+        loaded
+            .iter()
+            .copied()
+            .min_by_key(|&edge| edge.abs_diff(wanted)),
+    )
 }
 
 /// The decoded size for an image of `size` whose shorter side should be at
@@ -384,14 +484,29 @@ fn decode_sized(key: &SizedKey) -> Result<Arc<RenderImage>, ImageCacheError> {
         }
         SizedSource::Mini(mini) => &mini.data,
     };
-    let image = image::load_from_memory(bytes)
-        .map_err(|err| ImageCacheError::Image(Arc::new(err)))?
-        .into_rgba8();
-    let (width, height) = scaled_size(image.dimensions(), key.edge);
-    let mut image = if (width, height) == image.dimensions() {
-        image
+    let decoded =
+        image::load_from_memory(bytes).map_err(|err| ImageCacheError::Image(Arc::new(err)))?;
+    let filter = image::imageops::FilterType::Triangle;
+    let mut image = if decoded.color().has_alpha() {
+        let image = decoded.into_rgba8();
+        let (width, height) = scaled_size(image.dimensions(), key.edge);
+        if (width, height) == image.dimensions() {
+            image
+        } else {
+            image::imageops::resize(&image, width, height, filter)
+        }
     } else {
-        image::imageops::resize(&image, width, height, image::imageops::FilterType::Triangle)
+        // Photos: shrink the three-channel picture and widen only the
+        // small result (an RGBA copy of a 2560 px photo is 20 MB, held
+        // by every decode in flight).
+        let image = decoded.into_rgb8();
+        let (width, height) = scaled_size(image.dimensions(), key.edge);
+        let image = if (width, height) == image.dimensions() {
+            image
+        } else {
+            image::imageops::resize(&image, width, height, filter)
+        };
+        image::DynamicImage::ImageRgb8(image).into_rgba8()
     };
     // GPUI's sprites are BGRA.
     for pixel in image.as_chunks_mut::<4>().0 {
@@ -415,6 +530,24 @@ impl Asset for SizedAsset {
     ) -> impl std::future::Future<Output = Self::Output> + Send + 'static {
         async move { decode_sized(&source) }
     }
+}
+
+/// Side of the atlas textures GPUI allocates (larger images get a texture
+/// of their own size).
+const ATLAS_TEXTURE: u32 = 1024;
+
+/// What a decoded image costs: its pixels, or, for a small one, the share
+/// of an atlas texture it takes up. A texture holds `cols x rows` tiles of
+/// that size at best, so a 768x576 image uses a whole 4 MB texture for
+/// 1.7 MB of pixels (and the texture only goes once its last tile does).
+fn atlas_cost(width: u32, height: u32) -> usize {
+    let pixels = width as usize * height as usize * 4;
+    if width == 0 || height == 0 || width > ATLAS_TEXTURE || height > ATLAS_TEXTURE {
+        return pixels;
+    }
+    let tiles = (ATLAS_TEXTURE / width) as usize * (ATLAS_TEXTURE / height) as usize;
+    let texture = ATLAS_TEXTURE as usize * ATLAS_TEXTURE as usize * 4;
+    pixels.max(texture / tiles)
 }
 
 type LoadResult = Result<Arc<RenderImage>, ImageCacheError>;
@@ -521,6 +654,9 @@ impl Entry {
 /// be on screen go once the decoded total passes the budget.
 pub(super) struct BoundedImageCache {
     entries: HashMap<u64, Entry>,
+    /// The display-size decodes of each picture: source hash -> (edge,
+    /// entry key). May list evicted entries; checked against `entries`.
+    variants: HashMap<u64, SmallVec<[(u32, u64); 2]>>,
     bytes: usize,
     /// The slice being drawn (shared with `app_slice`).
     scope: Rc<Cell<Option<EntityId>>>,
@@ -531,6 +667,7 @@ impl BoundedImageCache {
         SCOPE.with(|current| *current.borrow_mut() = Some(scope.clone()));
         Self {
             entries: HashMap::new(),
+            variants: HashMap::new(),
             bytes: 0,
             scope,
         }
@@ -626,7 +763,7 @@ impl BoundedImageCache {
                 Ok(image) => (0..image.frame_count())
                     .map(|frame| {
                         let size = image.size(frame);
-                        size.width.0.max(0) as usize * size.height.0.max(0) as usize * 4
+                        atlas_cost(size.width.0.max(0) as u32, size.height.0.max(0) as u32)
                     })
                     .sum(),
                 Err(_) => 0,
@@ -637,17 +774,72 @@ impl BoundedImageCache {
         result
     }
 
+    /// A display-size decode. When the same picture is already decoded at
+    /// a nearby larger size, that one serves (so a small change of the
+    /// frame doesn't decode again); while a new size decodes, the closest
+    /// loaded one stands in, so a resize doesn't blank the picture.
     fn load_sized(
         &mut self,
         key: &SizedKey,
         window: &mut Window,
         cx: &mut App,
     ) -> Option<LoadResult> {
+        let source_hash = gpui_kit::hash(&("sized-source", &key.source));
+        let loaded: SmallVec<[(u32, u64); 2]> = self
+            .variants
+            .get(&source_hash)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|(_, hash)| {
+                self.entries
+                    .get(hash)
+                    .is_some_and(|entry| matches!(entry.load.get(), Some(Ok(_))))
+            })
+            .collect();
+        let edges: SmallVec<[u32; 2]> = loaded.iter().map(|(edge, _)| *edge).collect();
+        let pick = pick_variant(key.edge, &edges);
+        let sized_key = |edge: u32| SizedKey {
+            source: key.source.clone(),
+            edge,
+        };
+        let variant_hash = |edge: u32| loaded.iter().find(|(e, _)| *e == edge).map(|(_, h)| *h);
+        if let VariantPick::Reuse(edge) = pick
+            && let Some(hash) = variant_hash(edge)
+        {
+            let reused = sized_key(edge);
+            return self.load_entry(
+                hash,
+                move |cx| Load::Sized(SizedLoad::new(reused, cx)),
+                window,
+                cx,
+            );
+        }
         let hash = gpui_kit::hash(&("sized", key));
-        let key = key.clone();
+        let wanted = key.clone();
+        let result = self.load_entry(
+            hash,
+            move |cx| Load::Sized(SizedLoad::new(wanted, cx)),
+            window,
+            cx,
+        );
+        let tracked = self.variants.entry(source_hash).or_default();
+        if !tracked.iter().any(|(_, h)| *h == hash) {
+            // Forget the evicted ones as new ones are added.
+            tracked.retain(|(_, h)| loaded.iter().any(|(_, l)| l == h));
+            tracked.push((key.edge, hash));
+        }
+        if result.is_some() {
+            return result;
+        }
+        let VariantPick::Decode(Some(edge)) = pick else {
+            return None;
+        };
+        let hash = variant_hash(edge)?;
+        let standing = sized_key(edge);
         self.load_entry(
             hash,
-            move |cx| Load::Sized(SizedLoad::new(key, cx)),
+            move |cx| Load::Sized(SizedLoad::new(standing, cx)),
             window,
             cx,
         )
@@ -763,6 +955,7 @@ mod tests {
         Budget, IDLE_AFTER, begin_frame, idle_trim_due, may_be_visible, newly_shown, note_activity,
         plan_eviction, scaled_size, slice_rendered, slice_shown,
     };
+    use super::{Fit, VariantPick, atlas_cost, bucket_edge, pick_variant, shorter_side_in_frame};
     use gpui_kit::EntityId;
 
     #[test]
@@ -869,5 +1062,93 @@ mod tests {
         assert_eq!(scaled_size((1280, 960), 36), (48, 36));
         assert_eq!(scaled_size((40, 30), 36), (40, 30));
         assert_eq!(scaled_size((0, 10), 5), (0, 10));
+    }
+
+    #[test]
+    fn edges_round_up_to_steps() {
+        assert_eq!(bucket_edge(1), 32);
+        assert_eq!(bucket_edge(32), 32);
+        assert_eq!(bucket_edge(33), 64);
+        assert_eq!(bucket_edge(256), 256);
+        assert_eq!(bucket_edge(257), 320);
+        assert_eq!(bucket_edge(720), 768);
+        assert_eq!(bucket_edge(800), 832);
+        assert_eq!(bucket_edge(1025), 1152);
+        assert_eq!(bucket_edge(9000), 4096);
+        // Never below what was asked (until the cap), never 1.5x over.
+        for edge in 1..=4096_u32 {
+            let bucket = bucket_edge(edge);
+            assert!(bucket >= edge);
+            if edge >= 64 {
+                assert!(bucket * 100 <= edge * 150, "{edge} -> {bucket}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_resize_within_a_step_keeps_the_decode() {
+        // 360 pt at 2x, and the same frame a pixel off.
+        assert_eq!(bucket_edge(720), bucket_edge(715));
+        assert_eq!(bucket_edge(720), bucket_edge(768));
+        assert_ne!(bucket_edge(720), bucket_edge(769));
+    }
+
+    #[test]
+    fn nearby_larger_decodes_are_reused() {
+        assert_eq!(pick_variant(768, &[]), VariantPick::Decode(None));
+        // Same size, or up to 1.5x bigger: reuse the smallest such.
+        assert_eq!(pick_variant(768, &[768]), VariantPick::Reuse(768));
+        assert_eq!(pick_variant(768, &[1152, 896]), VariantPick::Reuse(896));
+        assert_eq!(pick_variant(768, &[1152]), VariantPick::Reuse(1152));
+        // Too big, or too small: decode, and show the closest meanwhile.
+        assert_eq!(
+            pick_variant(256, &[768, 128]),
+            VariantPick::Decode(Some(128))
+        );
+        assert_eq!(pick_variant(256, &[768]), VariantPick::Decode(Some(768)));
+        assert_eq!(pick_variant(768, &[320]), VariantPick::Decode(Some(320)));
+    }
+
+    #[test]
+    fn frame_edge_follows_the_fit() {
+        // A photo in a frame of its own aspect: the frame's short side.
+        let edge = shorter_side_in_frame((360., 270.), Some((2560, 1920)), Fit::Cover);
+        assert!((edge - 270.).abs() < 0.01, "{edge}");
+        // A tile cropping a landscape picture: the short side grows to
+        // cover the tile.
+        let edge = shorter_side_in_frame((100., 100.), Some((400, 300)), Fit::Cover);
+        assert!((edge - 100.).abs() < 0.01, "{edge}");
+        let edge = shorter_side_in_frame((200., 100.), Some((400, 300)), Fit::Cover);
+        assert!((edge - 150.).abs() < 0.01, "{edge}");
+        // Contain: the whole picture fits, so its short side is smaller.
+        let edge = shorter_side_in_frame((128., 128.), Some((512, 256)), Fit::Contain);
+        assert!((edge - 64.).abs() < 0.01, "{edge}");
+        // Unknown size: the bound over every aspect.
+        assert_eq!(shorter_side_in_frame((200., 100.), None, Fit::Cover), 200.);
+        assert_eq!(
+            shorter_side_in_frame((128., 128.), None, Fit::Contain),
+            128.
+        );
+        assert_eq!(
+            shorter_side_in_frame((200., 100.), Some((0, 0)), Fit::Cover),
+            200.
+        );
+    }
+
+    #[test]
+    fn small_images_cost_their_atlas_share() {
+        let texture = 1024 * 1024 * 4;
+        // Larger than a texture: the pixels.
+        assert_eq!(atlas_cost(2560, 1920), 2560 * 1920 * 4);
+        assert_eq!(atlas_cost(1280, 960), 1280 * 960 * 4);
+        // One per texture: the whole texture.
+        assert_eq!(atlas_cost(768, 576), texture);
+        assert_eq!(atlas_cost(1024, 1024), texture);
+        // Two per row, one row.
+        assert_eq!(atlas_cost(512, 576), texture / 2);
+        // Avatars pack tightly: about their pixels.
+        assert_eq!(atlas_cost(92, 92), texture / (11 * 11));
+        assert!((36 * 36 * 4..36 * 36 * 4 * 11 / 10).contains(&atlas_cost(36, 36)));
+        assert_eq!(atlas_cost(0, 5), 0);
     }
 }

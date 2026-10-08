@@ -20,4 +20,5 @@ mod shared_media;
 mod stickers;
 mod stories;
 mod subsection_tabs;
+mod unread_totals;
 mod users;

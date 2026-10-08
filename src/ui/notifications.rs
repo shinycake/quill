@@ -517,16 +517,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let notification = queued.for_display();
-        if cfg!(target_os = "macos") {
+        if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
+            // macOS (UNUserNotificationCenter) and Windows (WinRT toast): the
+            // click returns through `on_system_notification_response`.
+            let account = self
+                .session()
+                .map(|s| s.account.0.as_str())
+                .unwrap_or("primary");
             cx.show_system_notification(SystemNotification {
-                tag: format!(
-                    "account:{}:chat:{}",
-                    self.session()
-                        .map(|s| s.account.0.as_str())
-                        .unwrap_or("primary"),
-                    notification.chat_id.0
-                )
-                .into(),
+                tag: quill::notify::notification_tag(account, notification.chat_id).into(),
                 title: notification.title.into(),
                 body: notification.body.into(),
                 actions: Vec::new(),

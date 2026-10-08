@@ -469,6 +469,19 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             let result = parse_can_post_story_result(&value).ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::CanPostStoryResult { result })
         }
+        "updateUnreadMessageCount" => Ok(EnvelopePayload::UpdateUnreadMessageCount {
+            list: parse_chat_list(value.get("chat_list")),
+            unread_count: unread_total(&value, "unread_count"),
+            unread_unmuted_count: unread_total(&value, "unread_unmuted_count"),
+        }),
+        "updateUnreadChatCount" => Ok(EnvelopePayload::UpdateUnreadChatCount {
+            list: parse_chat_list(value.get("chat_list")),
+            total_count: unread_total(&value, "total_count"),
+            marked_as_unread_count: unread_total(&value, "marked_as_unread_count"),
+            marked_as_unread_unmuted_count: unread_total(&value, "marked_as_unread_unmuted_count"),
+            unread_count: unread_total(&value, "unread_count"),
+            unread_unmuted_count: unread_total(&value, "unread_unmuted_count"),
+        }),
         "updateChatReadInbox" => Ok(EnvelopePayload::UpdateChatReadInbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             last_read_inbox_message_id: MessageId(int53_or_zero(
@@ -2101,4 +2114,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             }))
         }
     }
+}
+
+/// A non-negative `int32` unread total from an update object.
+fn unread_total(value: &Value, key: &str) -> i32 {
+    value
+        .get(key)
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .clamp(0, i64::from(i32::MAX)) as i32
 }

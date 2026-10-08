@@ -362,24 +362,32 @@ pub(super) fn album_tile(
             if let Some(path) = photo_display_path(photo, files, media_roots) {
                 frame
                     .child(
-                        img(path)
-                            .id(("album-photo", row_id))
-                            .w(px(part.width as f32))
-                            .h(px(part.height as f32))
-                            .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
-                            .map(|this| corners.round(this))
-                            .object_fit(ObjectFit::Cover)
-                            .with_fallback(move || {
-                                div()
-                                    .size_full()
-                                    .map(|this| corners.round(this))
-                                    .bg(fill_muted())
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child("Photo")
-                                    .into_any_element()
-                            }),
+                        img(super::image_budget::sized_media(
+                            &path,
+                            (px(part.width as f32), px(part.height as f32)),
+                            photo
+                                .largest_size()
+                                .or_else(|| photo.thumb_size())
+                                .map(|size| (size.width, size.height)),
+                            super::image_budget::Fit::Cover,
+                        ))
+                        .id(("album-photo", row_id))
+                        .w(px(part.width as f32))
+                        .h(px(part.height as f32))
+                        .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
+                        .map(|this| corners.round(this))
+                        .object_fit(ObjectFit::Cover)
+                        .with_fallback(move || {
+                            div()
+                                .size_full()
+                                .map(|this| corners.round(this))
+                                .bg(fill_muted())
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child("Photo")
+                                .into_any_element()
+                        }),
                     )
                     .into_any_element()
             } else {
@@ -420,21 +428,26 @@ pub(super) fn album_tile(
             });
             let duration = format_voice_duration(video.duration);
             let picture = if let Some(path) = visual {
-                img(path)
-                    .id(("album-video", row_id))
-                    .w(px(part.width as f32))
-                    .h(px(part.height as f32))
-                    .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
-                    .map(|this| corners.round(this))
-                    .object_fit(ObjectFit::Cover)
-                    .with_fallback(move || {
-                        div()
-                            .size_full()
-                            .map(|this| corners.round(this))
-                            .bg(success_bg())
-                            .into_any_element()
-                    })
-                    .into_any_element()
+                img(super::image_budget::sized_media(
+                    &path,
+                    (px(part.width as f32), px(part.height as f32)),
+                    Some((video.width, video.height)),
+                    super::image_budget::Fit::Cover,
+                ))
+                .id(("album-video", row_id))
+                .w(px(part.width as f32))
+                .h(px(part.height as f32))
+                .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
+                .map(|this| corners.round(this))
+                .object_fit(ObjectFit::Cover)
+                .with_fallback(move || {
+                    div()
+                        .size_full()
+                        .map(|this| corners.round(this))
+                        .bg(success_bg())
+                        .into_any_element()
+                })
+                .into_any_element()
             } else {
                 div()
                     .size_full()
