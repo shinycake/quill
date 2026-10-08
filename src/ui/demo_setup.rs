@@ -19,6 +19,7 @@ use super::chat_list::{
     apply_ready_mute_archive, apply_ready_pin,
 };
 use super::chat_row::ChatPreviewState;
+use super::chatlist_demo::apply_ready_archive_row;
 use super::composer::apply_ready_reply;
 use super::composer_ui::apply_ready_stickers;
 use super::contacts::apply_ready_contacts;
@@ -393,6 +394,40 @@ impl QuillApp {
                 session.archive_settings_open = true;
             }
             self.status_note = "screenshot demo — archive settings dialog".into();
+        }
+        // Archive row / bar / menu and the pinned drag, over the same
+        // fixture (archived chats, story rings, three pinned chats).
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyArchiveRow
+                    | ScreenshotDemo::ReadyArchiveBar
+                    | ScreenshotDemo::ReadyArchiveMenu
+                    | ScreenshotDemo::ReadyPinDrag
+            )
+        ) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_archive_row(session, &self.demo_sink, &self.demo_seq);
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyArchiveBar)) {
+                self.appearance.archive_collapsed = true;
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyArchiveMenu)) {
+                self.archive_menu = Some(Point::new(px(120.), px(150.)));
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyPinDrag)) {
+                // Pinned 11 / 12 / 13: drag 12 past 13. 13 has just
+                // started sliding back up into the slot above.
+                let heights = [11, 12, 13].into_iter().map(|id| (id, 64.0)).collect();
+                if let Some(mut drag) =
+                    quill::pin_reorder::PinReorder::begin(vec![11, 12, 13], heights, 12, 300.)
+                {
+                    drag.drag_to(352., std::time::Instant::now());
+                    self.pin_reorder = Some(drag);
+                }
+            }
+            self.status_note = "screenshot demo — archive row · story rings".into();
         }
         // Slice CL2: sidebar search showing the empty-result state.
         if matches!(demo, Some(ScreenshotDemo::ReadyChatListSearch)) {

@@ -253,6 +253,15 @@ pub(super) fn demo_seed_for(
             "screenshot demo — chat list: archive settings dialog".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyArchiveRow
+        | ScreenshotDemo::ReadyArchiveBar
+        | ScreenshotDemo::ReadyArchiveMenu
+        | ScreenshotDemo::ReadyPinDrag => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat list: archive row · story rings · pinned drag".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyChatListSearch => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1570,6 +1579,10 @@ impl QuillApp {
             rich_editor_open: false,
             message_menu: None,
             chat_menu: None,
+            archive_menu: None,
+            pin_reorder: None,
+            pin_reorder_archived: false,
+            pin_drag_anchor: None,
             chat_preview: None,
             preview_press: None,
             selected_chats: HashSet::new(),
@@ -1857,12 +1870,16 @@ impl QuillApp {
             if !capturing {
                 let menu_handled = menu_app
                     .update(cx, |this, cx| {
-                        if this.message_menu.is_none() && this.chat_menu.is_none() {
+                        if this.message_menu.is_none()
+                            && this.chat_menu.is_none()
+                            && this.archive_menu.is_none()
+                        {
                             return false;
                         }
                         if event.keystroke.key == "escape" {
                             this.message_menu = None;
                             this.chat_menu = None;
+                            this.archive_menu = None;
                             cx.notify();
                             return true;
                         }

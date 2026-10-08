@@ -295,6 +295,14 @@ pub struct QuillApp {
     /// Slice CL1: right-click chat-row context menu target + window
     /// position.
     pub(super) chat_menu: Option<ChatMenuState>,
+    /// Right-click menu of the "Archived chats" row (window position).
+    pub(super) archive_menu: Option<Point<Pixels>>,
+    /// Pinned-chat drag in progress (or its release slide), see
+    /// `quill::pin_reorder`; `pin_reorder_archived` says which pinned list.
+    pub(super) pin_reorder: Option<quill::pin_reorder::PinReorder>,
+    pub(super) pin_reorder_archived: bool,
+    /// Where a pinned-row press started moving, until the 30px threshold.
+    pub(super) pin_drag_anchor: Option<(i64, f32)>,
     /// Slice CL: the open peek preview — hovered/press-and-hold chat,
     /// or `None`. Transient; never an open chat.
     pub(super) chat_preview: Option<ChatPreviewState>,

@@ -7,7 +7,6 @@ use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::badge::Badge;
-use gpui_kit::component::button::*;
 use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -18,6 +17,7 @@ use quill::local_path::sandboxed_display_path;
 use quill::peer_badge::TitleBadge;
 use quill::row_fx::RowFx;
 use quill::state::{ChatSummary, RowStatus, Session, SidebarLine};
+use quill::story_ring::StoryRing;
 use quill::telegram::envelope::{
     ChatKind, EphemeralMessageContent, MessageContent, effective_content,
 };
@@ -54,7 +54,7 @@ pub(super) fn chat_preview_line(
 }
 
 /// kit Phase 3: one flat item for the virtualized chat list — a chat row
-/// (main list or archive) or the collapsible archive section header.
+/// (main list or archive) or the pinned-top "Archived chats" row / bar.
 #[derive(Clone)]
 pub(super) enum ChatListItem {
     // Ids only: rows look their chat up when rendered, so building the
@@ -65,12 +65,10 @@ pub(super) enum ChatListItem {
         /// Declared virtual-list height (tags/preview-line aware).
         height: Pixels,
     },
-    ArchiveHeader {
-        count: usize,
-        any_unread: bool,
-        collapsed: bool,
-    },
-    ArchiveEmpty,
+    /// tdesktop's pinned-top "Archived chats" row (full height).
+    ArchiveRow { height: Pixels },
+    /// The same entry collapsed to a slim bar.
+    ArchiveBar,
 }
 
 /// kit Phase 9: a loading placeholder row for the chat list — a kit
@@ -294,20 +292,8 @@ impl QuillApp {
     ) -> AnyElement {
         let item = self.chat_list_items.get(ix).cloned();
         match item {
-            Some(ChatListItem::ArchiveHeader {
-                count,
-                any_unread,
-                collapsed,
-            }) => self.archive_header_element(count, any_unread, collapsed, cx),
-            Some(ChatListItem::ArchiveEmpty) => div()
-                .h(px(24.))
-                .flex()
-                .items_center()
-                .px_2()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child("No archived chats.")
-                .into_any_element(),
+            Some(ChatListItem::ArchiveRow { .. }) => self.archive_row_element(cx),
+            Some(ChatListItem::ArchiveBar) => self.archive_bar_element(cx),
             Some(ChatListItem::Chat { id, archived, .. }) => {
                 let Some(chat) = self.session().and_then(|s| s.chats.get(&id.0)) else {
                     return div().into_any_element();
@@ -342,8 +328,7 @@ impl QuillApp {
                 // at least two pinned chats (TGX `ChatsAdapter`); the
                 // archive has its own pinned set.
                 let draggable = if archived {
-                    (self.chat_filter == ChatListFilter::All
-                        || self.chat_filter == ChatListFilter::Archived)
+                    self.chat_filter == ChatListFilter::Archived
                         && self
                             .session()
                             .is_some_and(|s| s.pinned_chat_ids(true).len() >= 2)
@@ -387,7 +372,23 @@ impl QuillApp {
                     Some(TitleBadge::EmojiStatus(id)) => self.custom_emoji_still(id),
                     _ => None,
                 };
-                session_chat_row(
+                // Peers with active stories get the ring (tdesktop
+                // `storiesPeer`: users and channels). Clicking the row
+                // opens the chat, as in tdesktop's chat list.
+                let story_ring = matches!(
+                    chat.kind,
+                    ChatKind::Private { .. } | ChatKind::Supergroup { .. }
+                )
+                .then(|| self.session().and_then(|s| s.chat_story_ring(chat.id.0)))
+                .flatten();
+                let muted_fg = cx.theme().muted_foreground;
+                let pin_slide = self.pin_reorder.as_ref().map(|r| {
+                    (
+                        r.offset(chat.id.0, std::time::Instant::now()),
+                        r.dragging() == Some(chat.id.0),
+                    )
+                });
+                let row = session_chat_row(
                     chat,
                     selected,
                     &folder_names,
@@ -428,72 +429,28 @@ impl QuillApp {
                         _ => None,
                     },
                     self.session().and_then(|s| s.chat_row_topic_names(chat.id)),
+                    story_ring,
+                    muted_fg,
                     cx,
                 )
-                .into_any_element()
+                .into_any_element();
+                match pin_slide {
+                    // A row shifted by the pinned drag: the dragged row
+                    // follows the pointer above its neighbours, the
+                    // displaced ones slide home.
+                    Some((dy, dragging)) if dragging || dy != 0. => {
+                        let shifted = div().relative().top(px(dy)).w_full().child(row);
+                        if dragging {
+                            deferred(shifted).priority(10).into_any_element()
+                        } else {
+                            shifted.into_any_element()
+                        }
+                    }
+                    _ => row,
+                }
             }
             None => div().into_any_element(),
         }
-    }
-
-    /// kit Phase 3: the archive section header as a fixed-height virtual
-    /// list item — collapses the section, marks the archive read, and
-    /// opens the auto-archive settings (Slice CL2, unchanged behavior).
-    pub(super) fn archive_header_element(
-        &mut self,
-        count: usize,
-        any_unread: bool,
-        collapsed: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .id("archive-section")
-            .h(px(32.))
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                div()
-                    .id("archive-section-toggle")
-                    .role(gpui_kit::Role::Button)
-                    .aria_label("Expand or collapse archived chats")
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "{} Archived ({})",
-                        if collapsed { "▸" } else { "▾" },
-                        count
-                    ))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_archive_collapsed(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .when(any_unread && !collapsed, |this| {
-                        this.child(
-                            Button::new("archive-mark-read")
-                                .label("✓")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.mark_all_chats_as_read(true, cx);
-                                })),
-                        )
-                    })
-                    .child(Button::new("archive-settings").label("⚙").ghost().on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.open_archive_settings(cx);
-                        }),
-                    )),
-            )
-            .into_any_element()
     }
 }
 
@@ -540,6 +497,10 @@ pub(super) fn session_chat_row(
     // Subsection tabs: topic names for bots with topics and forums (the
     // sender line in 3-line rows, the preview line in 2-line rows).
     topic_names: Option<String>,
+    // Active stories: the ring around the avatar (unread: accent gradient,
+    // read: grey).
+    story_ring: Option<StoryRing>,
+    muted_fg: Hsla,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
@@ -549,9 +510,6 @@ pub(super) fn session_chat_row(
     } else {
         chat.title.clone()
     };
-    // Slice CL2: cloned for the pin-drag ghost (the row itself moves
-    // `title` below).
-    let drag_title = title.clone();
     // A draft leads with a red "Draft:" (and a reply mark); anything else
     // is the plain preview line.
     let (preview, draft): (String, Option<bool>) = match chat.sidebar_line() {
@@ -697,10 +655,21 @@ pub(super) fn session_chat_row(
                 // avatar while multi-select is active.
                 .when(selecting, |this| this.child(select_check(id, checked)))
                 .child(with_presence_dot_scaled(
-                    if saved {
-                        saved_messages_avatar(CHAT_ROW_AVATAR)
-                    } else {
-                        chat_avatar(&title, photo_path, CHAT_ROW_AVATAR).into_any_element()
+                    match story_ring {
+                        Some(ring) => super::story_ring::with_story_ring(
+                            |size| {
+                                if saved {
+                                    saved_messages_avatar(size)
+                                } else {
+                                    chat_avatar(&title, photo_path, size).into_any_element()
+                                }
+                            },
+                            ring,
+                            CHAT_ROW_AVATAR,
+                            muted_fg,
+                        ),
+                        None if saved => saved_messages_avatar(CHAT_ROW_AVATAR),
+                        None => chat_avatar(&title, photo_path, CHAT_ROW_AVATAR).into_any_element(),
                     },
                     fx.online,
                     13.,
@@ -952,40 +921,27 @@ pub(super) fn session_chat_row(
             let drag = PinnedChatDrag {
                 chat_id: id,
                 archived,
-                title: drag_title.clone(),
             };
-            let target = id;
             this.cursor_move()
-                .on_drag(drag, |drag: &PinnedChatDrag, _, _, cx| {
-                    cx.new(|_| drag.clone())
-                })
-                .on_drop(cx.listener(move |this, drag: &PinnedChatDrag, _, cx| {
-                    this.drop_pinned_chat(drag.chat_id, drag.archived, target, cx);
+                .on_drag(drag, |drag: &PinnedChatDrag, _, _, cx| cx.new(|_| drag.clone()))
+                .on_drop(cx.listener(move |this, _: &PinnedChatDrag, _, cx| {
+                    this.finish_pin_drag(cx);
                 }))
         })
 }
 
-/// Slice CL2: drag payload for pinned-chat reorder. It renders itself
-/// as the drag ghost (the chat title on a highlighted chip).
+/// Slice CL2: drag payload for pinned-chat reorder. The real row follows
+/// the pointer (tdesktop drags the row itself), so the cursor-attached
+/// ghost draws nothing.
 #[derive(Clone)]
 pub(super) struct PinnedChatDrag {
     pub(super) chat_id: ChatId,
     pub(super) archived: bool,
-    pub(super) title: String,
 }
 
 impl Render for PinnedChatDrag {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .bg(cx.theme().primary.opacity(0.25))
-            .border_1()
-            .border_color(cx.theme().border)
-            .text_sm()
-            .font_medium()
-            .child(self.title.clone())
     }
 }
 
