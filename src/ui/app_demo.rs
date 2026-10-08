@@ -89,7 +89,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -1197,10 +1197,12 @@ impl QuillApp {
                         this.close_command_menu(cx);
                         this.close_inline_results(cx);
                         this.close_mention_menu(cx);
+                        this.close_suggest_menu(false, cx);
                     }
                     _ => {
                         this.sync_command_menu(cx);
                         this.sync_mention_menu(cx);
+                        this.sync_suggest_menu(cx);
                         this.sync_inline_mode(cx);
                         // codex:spellcheck-native: shift underlines with
                         // the edit and debounce a background re-check.
@@ -1219,6 +1221,8 @@ impl QuillApp {
                             // Enter was consumed by the inline results.
                         } else if this.pick_mention_selection(window, cx) {
                             // Enter completed the highlighted mention.
+                        } else if this.pick_suggest_selection(window, cx) {
+                            // Enter inserted the highlighted hashtag/emoji.
                         } else if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
                         } else if !text.trim().is_empty() || !this.pending_attachments.is_empty() {
@@ -1438,6 +1442,7 @@ impl QuillApp {
             command_menu_open: false,
             command_menu_selected: 0,
             mention_selected: 0,
+            suggest: super::composer_suggest::SuggestUi::load(),
             inline_results_open: false,
             inline_results_selected: 0,
             inline_query_token: 0,
@@ -1868,6 +1873,7 @@ impl QuillApp {
                             || this.close_media_panel(cx)
                             || this.close_inline_results(cx)
                             || this.close_mention_menu(cx)
+                            || this.close_suggest_menu(true, cx)
                             || this.close_command_menu(cx)
                     })
                     .unwrap_or(false),
@@ -1879,6 +1885,7 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         this.step_inline_results(-1, cx)
                             || this.step_mention_menu(-1, cx)
+                            || this.step_suggest_menu(-1, false, cx)
                             || this.step_command_menu(-1, cx)
                     })
                     .unwrap_or(false),
@@ -1886,12 +1893,24 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         this.step_inline_results(1, cx)
                             || this.step_mention_menu(1, cx)
+                            || this.step_suggest_menu(1, false, cx)
                             || this.step_command_menu(1, cx)
                     })
                     .unwrap_or(false),
-                // Tab completes the highlighted `@` suggestion.
+                // Tab completes the highlighted `@` / `#` / `:` suggestion.
                 "tab" => menu_app
-                    .update(cx, |this, cx| this.pick_mention_selection(window, cx))
+                    .update(cx, |this, cx| {
+                        this.pick_mention_selection(window, cx)
+                            || this.pick_suggest_selection(window, cx)
+                    })
+                    .unwrap_or(false),
+                // The emoji strip is horizontal (tdesktop steps with
+                // Left/Right too); the key keeps moving the caret otherwise.
+                "left" => menu_app
+                    .update(cx, |this, cx| this.step_suggest_menu(-1, true, cx))
+                    .unwrap_or(false),
+                "right" => menu_app
+                    .update(cx, |this, cx| this.step_suggest_menu(1, true, cx))
                     .unwrap_or(false),
                 _ => false,
             };

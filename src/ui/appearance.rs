@@ -314,6 +314,7 @@ impl QuillApp {
                 );
                 body = body.child(this.appearance_theme_section(cx));
                 body = body.child(this.appearance_spellcheck_section(cx));
+                body = body.child(this.appearance_suggest_emoji_section(cx));
                 body = body.child(this.appearance_auto_night_section(cx));
                 body = body.child(this.appearance_accent_section(cx));
                 body = body.child(this.appearance_wallpaper_section(cx));
@@ -894,6 +895,41 @@ impl QuillApp {
             )
             .into_any_element();
         self.appearance_section(cx, "Spelling", "", control)
+    }
+
+    /// tdesktop "Suggest emoji replacements" (`suggestEmoji`, default on):
+    /// the `:name` emoji popup in the composer.
+    fn appearance_suggest_emoji_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let control = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().text_sm().child("Suggest emoji replacements"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Type : and a name in the composer to pick a matching emoji."),
+                    ),
+            )
+            .child(
+                Switch::new("appearance-suggest-emoji")
+                    .checked(self.chat_prefs.suggest_emoji)
+                    .accessibility_label("Suggest emoji replacements")
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_chat_prefs(cx, |c| c.suggest_emoji = on);
+                        this.sync_suggest_menu(cx);
+                    })),
+            )
+            .into_any_element();
+        self.appearance_section(cx, "Emoji", "", control)
     }
 
     /// Slice parity:settings-language: the app language picker (the IETF

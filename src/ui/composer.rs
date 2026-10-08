@@ -64,6 +64,7 @@ impl QuillApp {
                     self.submit_edit(text, window, cx);
                     return;
                 }
+                self.remember_sent_hashtags(&text);
                 // M2: the rich editor sends blocks, not text.
                 if self.rich_editor_open {
                     self.submit_rich_composer(text, window, cx);

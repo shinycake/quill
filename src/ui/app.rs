@@ -120,6 +120,8 @@ pub struct QuillApp {
     pub(super) command_menu_selected: usize,
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
+    /// Composer `#hashtag` / `:emoji` autocomplete popup.
+    pub(super) suggest: super::composer_suggest::SuggestUi,
     /// Bots slice: `@botname query` inline-mode results dropdown above
     /// the composer. `inline_results_selected` is the highlighted row
     /// (Up/Down/Enter); `inline_query_token` debounces the
