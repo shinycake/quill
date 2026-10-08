@@ -28,6 +28,7 @@
 
 use super::anim_layer::{AnimationLayer, Layer};
 use super::app::QuillApp;
+use super::conversation::ConversationPart;
 use gpui_kit::*;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -37,8 +38,13 @@ use std::rc::Rc;
 pub(super) enum SliceKind {
     /// The chat list column (ready mode).
     Sidebar,
-    /// Header, history and composer of the open chat.
+    /// Header and history of the open chat (with the composer when there
+    /// is no composer slice).
     Conversation,
+    /// The open chat's composer, its popups, or the note / channel footer
+    /// in its place: typing and the caret's blink redraw only this, not
+    /// the history above it.
+    Composer,
 }
 
 pub(super) struct AppSlice {
@@ -58,8 +64,16 @@ struct SliceParts {
 pub(super) struct Slices {
     sidebar: Option<SliceParts>,
     conversation: Option<SliceParts>,
+    /// The composer slice, below the conversation slice.
+    composer: Option<Entity<AppSlice>>,
+    /// The composer's height as laid out last time: a cached slice's
+    /// box is sized before its content renders, so the slot takes the
+    /// measured height (a change redraws the slot next frame).
+    composer_height: Rc<Cell<Pixels>>,
     /// The window's bounded path-image cache (`image_budget`).
     image_cache: Option<Entity<super::image_budget::BoundedImageCache>>,
+    /// Waits for the image cache's idle trim (`image_budget::IDLE_AFTER`).
+    idle_trim: Option<Task<()>>,
     /// The slice whose content is being rendered, laid out or painted
     /// (`None`: `QuillApp` itself).
     scope: Rc<Cell<Option<EntityId>>>,
@@ -112,6 +126,10 @@ impl QuillApp {
         };
         self.slices.sidebar = Some(parts(SliceKind::Sidebar));
         self.slices.conversation = Some(parts(SliceKind::Conversation));
+        self.slices.composer = Some(cx.new(|_| AppSlice {
+            app: app.clone(),
+            kind: SliceKind::Composer,
+        }));
         let scope = self.slices.scope.clone();
         self.slices.image_cache =
             Some(cx.new(|_| super::image_budget::BoundedImageCache::new(scope)));
@@ -127,11 +145,38 @@ impl QuillApp {
             .iter()
             .chain(&self.slices.conversation)
             .map(|parts| parts.slice.entity_id())
+            .chain(self.slices.composer.iter().map(Entity::entity_id))
             .collect();
         let app: &mut App = cx;
         for id in ids {
             app.notify(id);
         }
+    }
+
+    /// Once nothing new has been shown for `image_budget::IDLE_AFTER`,
+    /// trim the image cache to its idle budget. One waiting task at most;
+    /// it sleeps past every newer activity.
+    pub(super) fn schedule_idle_image_trim(&mut self, cx: &mut Context<Self>) {
+        if self.slices.idle_trim.is_some() || super::image_budget::idle_trim_due().is_none() {
+            return;
+        }
+        let Some(cache) = self.slices.image_cache.clone() else {
+            return;
+        };
+        self.slices.idle_trim = Some(cx.spawn(async move |this, cx| {
+            while let Some(due) = super::image_budget::idle_trim_due() {
+                let now = std::time::Instant::now();
+                if due <= now {
+                    cache.update(cx, |cache, cx| {
+                        cache.idle_trim(cx);
+                        super::spoiler_fx::release_media_tile(None, cx);
+                    });
+                    break;
+                }
+                cx.background_executor().timer(due - now).await;
+            }
+            let _ = this.update(cx, |this, _| this.slices.idle_trim = None);
+        }));
     }
 
     /// Redraw only the chat list (pinned drag follows the pointer).
@@ -152,6 +197,20 @@ impl QuillApp {
         match &self.slices.conversation {
             Some(parts) => {
                 let id = parts.slice.entity_id();
+                let app: &mut App = cx;
+                app.notify(id);
+            }
+            None => cx.notify(),
+        }
+    }
+
+    /// Redraw only the composer (state that only it shows changed, such
+    /// as suggestions following the typed text); the whole app before the
+    /// slices exist.
+    pub(super) fn notify_composer(&self, cx: &mut Context<Self>) {
+        match &self.slices.composer {
+            Some(slice) => {
+                let id = slice.entity_id();
                 let app: &mut App = cx;
                 app.notify(id);
             }
@@ -199,25 +258,43 @@ impl QuillApp {
     }
 
     /// The conversation, as a cached slice filling the remaining width,
-    /// with its layer painting the history's animations just above it.
+    /// with its layer painting the history's animations just above it,
+    /// and the composer slice below (painted after the layer, so its
+    /// popups cover the history's animations).
     pub(super) fn conversation_slot(&self) -> AnyElement {
         self.slices.conversation_shown.set(true);
         let slot = div().relative().flex().flex_1().min_w_0().min_h_0();
-        match &self.slices.conversation {
-            Some(parts) => {
-                super::image_budget::slice_shown(parts.slice.entity_id());
-                slot.child(parts.slice.clone().cached(full()))
-                    .child(parts.painter.clone())
-                    .into_any_element()
-            }
-            None => slot.into_any_element(),
-        }
+        let (Some(parts), Some(composer)) = (&self.slices.conversation, &self.slices.composer)
+        else {
+            return slot.into_any_element();
+        };
+        super::image_budget::slice_shown(parts.slice.entity_id());
+        super::image_budget::slice_shown(composer.entity_id());
+        let height = self.slices.composer_height.get();
+        slot.flex_col()
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .child(parts.slice.clone().cached(full()))
+                    .child(parts.painter.clone()),
+            )
+            .child(
+                composer
+                    .clone()
+                    .cached(StyleRefinement::default().w_full().h(height).flex_none()),
+            )
+            .into_any_element()
     }
 
     fn slice_layer(&self, kind: SliceKind) -> Option<Layer> {
         match kind {
             SliceKind::Sidebar => self.slices.sidebar.as_ref(),
             SliceKind::Conversation => self.slices.conversation.as_ref(),
+            SliceKind::Composer => None,
         }
         .map(|parts| parts.layer.clone())
     }
@@ -234,7 +311,33 @@ impl QuillApp {
                 div()
                     .size_full()
                     .flex()
-                    .child(self.conversation(cx))
+                    .child(self.conversation(ConversationPart::Top, cx))
+                    .into_any_element()
+            }
+            SliceKind::Composer => {
+                // Laid out at the bottom of its box: while the box still
+                // has last frame's height, a taller composer grows over
+                // the history (as its popups do) for that one frame.
+                let redraw = self
+                    .slices
+                    .conversation
+                    .as_ref()
+                    .map(|parts| parts.painter.entity_id());
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .child(MeasureHeight {
+                        height: self.slices.composer_height.clone(),
+                        redraw,
+                        child: div()
+                            .flex_none()
+                            .flex()
+                            .flex_col()
+                            .child(self.conversation(ConversationPart::Bottom, cx))
+                            .into_any_element(),
+                    })
                     .into_any_element()
             }
         }
@@ -252,6 +355,7 @@ impl Render for AppSlice {
         super::frame_clock::trace_slice_render(match kind {
             SliceKind::Sidebar => "sidebar",
             SliceKind::Conversation => "conversation",
+            SliceKind::Composer => "composer",
         });
         let Some(app) = self.app.upgrade() else {
             return Empty.into_any_element();
@@ -361,5 +465,76 @@ impl Element for SliceScope {
         if let Some(layer) = &self.layer {
             layer.end_frame();
         }
+    }
+}
+
+/// Records its child's laid-out height; when it changed, the slot that
+/// sizes the composer slice is redrawn (`redraw`: a view whose notify
+/// re-renders `QuillApp` without dirtying the other slices).
+struct MeasureHeight {
+    height: Rc<Cell<Pixels>>,
+    redraw: Option<EntityId>,
+    child: AnyElement,
+}
+
+impl IntoElement for MeasureHeight {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for MeasureHeight {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let height = bounds.size.height.ceil();
+        if self.height.replace(height) != height
+            && let Some(id) = self.redraw
+        {
+            cx.notify(id);
+        }
+        self.child.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
     }
 }

@@ -192,7 +192,8 @@ impl QuillApp {
         };
         if shifted != self.spell_misspellings {
             self.spell_misspellings = shifted;
-            cx.notify();
+            // The underlines are drawn in the composer.
+            self.notify_composer(cx);
         }
         self.spell_checked_text = text.to_string();
         self.schedule_spellcheck(delay, cx);

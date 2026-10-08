@@ -9,6 +9,21 @@ use std::sync::{
 
 pub const STICKER_EDGE: usize = 128;
 pub const MAX_STICKER_FRAMES: usize = 120;
+/// Playback rate cap for stickers and custom emoji drawn in the chat
+/// (Lottie files are usually 60 fps). At sticker and emoji sizes 30 fps
+/// looks the same and halves the frames held and the redraws.
+pub const MAX_PLAYBACK_FPS: f64 = 30.0;
+
+/// How many evenly spaced frames to render of a `total`-frame animation
+/// at `fps`: at most `max_frames`, and no more than `max_fps` needs.
+pub fn sampled_frame_count(total: usize, fps: f64, max_frames: usize, max_fps: f64) -> usize {
+    let by_rate = if fps > max_fps && max_fps > 0.0 {
+        (total as f64 * max_fps / fps).ceil() as usize
+    } else {
+        total
+    };
+    total.min(by_rate).min(max_frames).max(1)
+}
 
 pub struct StickerFrames {
     /// Native BGRA, matching GPUI's RenderImage format.
@@ -146,15 +161,22 @@ impl Rlottie {
 }
 
 pub fn decode_tgs(path: &Path, cancelled: &AtomicBool) -> Result<StickerFrames, String> {
-    decode_tgs_sized(path, STICKER_EDGE, MAX_STICKER_FRAMES, cancelled)
+    decode_tgs_sized(
+        path,
+        STICKER_EDGE,
+        MAX_STICKER_FRAMES,
+        MAX_PLAYBACK_FPS,
+        cancelled,
+    )
 }
 
 /// [`decode_tgs`] at `edge` × `edge` px with at most `max_frames` frames
-/// (custom emoji decode smaller and shorter).
+/// played at most `max_fps` (custom emoji decode smaller and shorter).
 pub fn decode_tgs_sized(
     path: &Path,
     edge: usize,
     max_frames: usize,
+    max_fps: f64,
     cancelled: &AtomicBool,
 ) -> Result<StickerFrames, String> {
     let data = tgs_json(path)?;
@@ -199,7 +221,7 @@ pub fn decode_tgs_sized(
     {
         return Err("Invalid animated sticker duration".into());
     }
-    let count = total.min(max_frames.max(1));
+    let count = sampled_frame_count(total, original_fps, max_frames, max_fps);
     let mut frames = Vec::with_capacity(count);
     for index in 0..count {
         if cancelled.load(Ordering::SeqCst) {
@@ -315,6 +337,22 @@ mod tests {
                 .loop_animated_stickers
         );
     }
+    #[test]
+    fn playback_samples_at_most_the_rate_cap() {
+        // A 3 s, 60 fps sticker: 90 frames at 30 fps.
+        assert_eq!(sampled_frame_count(180, 60.0, 120, 30.0), 90);
+        // A 2 s, 60 fps sticker: 60 frames (was all 120).
+        assert_eq!(sampled_frame_count(120, 60.0, 120, 30.0), 60);
+        // Already at or under the cap: every frame, up to the frame cap.
+        assert_eq!(sampled_frame_count(60, 30.0, 120, 30.0), 60);
+        assert_eq!(sampled_frame_count(200, 24.0, 120, 30.0), 120);
+        // Custom emoji: the frame cap binds first.
+        assert_eq!(sampled_frame_count(180, 60.0, 36, 30.0), 36);
+        // No cap.
+        assert_eq!(sampled_frame_count(120, 60.0, 120, f64::INFINITY), 120);
+        assert_eq!(sampled_frame_count(0, 60.0, 120, 30.0), 1);
+    }
+
     fn fixture(value: &serde_json::Value) -> PathBuf {
         let path = std::env::temp_dir().join(format!("quill-sticker-{}.tgs", std::process::id()));
         let mut gzip = flate2::write::GzEncoder::new(
