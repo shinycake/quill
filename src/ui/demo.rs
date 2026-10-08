@@ -457,10 +457,10 @@ fn history_anim_fixture(wanted: &[HistoryAnim]) -> Vec<String> {
                 }
             }
             HistoryAnim::Stickers60 => {
-                let sticker = file(93, "demo-sticker-60.tgs");
+                let sticker = file(4601, "demo-sticker-60.tgs");
                 out.push(message(
                     format!(
-                        r#"{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"93","set_id":"77","width":128,"height":128,"emoji":"😀","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{sticker}}}}}"#
+                        r#"{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"4601","set_id":"77","width":128,"height":128,"emoji":"😀","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{sticker}}}}}"#
                     ),
                     false,
                 ));

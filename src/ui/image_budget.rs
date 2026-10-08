@@ -394,7 +394,7 @@ fn decode_sized(key: &SizedKey) -> Result<Arc<RenderImage>, ImageCacheError> {
         image::imageops::resize(&image, width, height, image::imageops::FilterType::Triangle)
     };
     // GPUI's sprites are BGRA.
-    for pixel in image.chunks_exact_mut(4) {
+    for pixel in image.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Ok(Arc::new(RenderImage::new(SmallVec::from_buf([
