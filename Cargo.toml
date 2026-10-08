@@ -47,6 +47,7 @@ smallvec = { version = "1", optional = true }
 thiserror = "2"
 tray-icon = { version = "0.21", optional = true, default-features = false }
 unicode-segmentation = "1.13"
+unicode-bidi = "0.3"
 spellbook = "0.4"
 encoding_rs = "0.8"
 zeroize = { version = "1", features = ["zeroize_derive"] }
@@ -72,6 +73,7 @@ core-foundation = { version = "0.10.1", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1"
+unicode-bidi-mirroring = "0.4"
 
 [[bin]]
 name = "quill"
@@ -106,3 +108,9 @@ embed-resource = "3"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com"] }
+
+# Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
+# 0.7.0 with a bidi-aware input engine. The commit that adds third_party/gpui-base is
+# the pristine registry copy, so a diff against it isolates the patch.
+[patch.crates-io]
+gpui-base = { path = "third_party/gpui-base" }

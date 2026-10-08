@@ -1628,6 +1628,59 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — expandable block quotes".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRtlComposer)) {
+            let text = match std::env::var("QUILL_DEMO_RTL").as_deref() {
+                Ok("mixed") => "היי, ההזמנה 12345 מוכנה ב-Telegram Desktop",
+                Ok("lines") => "שלום עולם, מה קורה?\nHello world, how are you?\n123",
+                Ok("empty") => "",
+                _ => "שלום עולם, מה שלומך היום",
+            };
+            // `QUILL_DEMO_RTL_SELECT=<start>..<end>` (byte offsets) focuses the
+            // composer with that range selected, `QUILL_DEMO_RTL_CARET=<at>`
+            // with the caret there.
+            let select = std::env::var("QUILL_DEMO_RTL_SELECT").ok().and_then(|v| {
+                let (a, b) = v.split_once("..")?;
+                Some(a.parse::<usize>().ok()?..b.parse::<usize>().ok()?)
+            });
+            // Right-to-left bubbles beside the composer: an incoming Hebrew
+            // message (wraps) and an outgoing mixed one.
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                    self.demo_sink.clone();
+                let chat = session.open_chat.unwrap_or(ChatId(11));
+                for (id, outgoing, body) in [
+                    (
+                        901_i64,
+                        false,
+                        "שלום עולם, מה שלומך היום? זו הודעה ארוכה יותר כדי לראות את הטקסט נשבר לשורות בתוך הבועה.",
+                    ),
+                    (902, true, "היי, ההזמנה 12345 מוכנה ב-Telegram Desktop"),
+                ] {
+                    let body = serde_json::to_string(body).unwrap_or_default();
+                    let json = format!(
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[]}}}}}}}}"#,
+                        chat.0
+                    );
+                    if let Some(owned) =
+                        quill::telegram::client::copy_and_parse(&json, &self.demo_seq, &dyn_sink)
+                    {
+                        session.apply(owned);
+                    }
+                }
+            }
+            let caret = std::env::var("QUILL_DEMO_RTL_CARET")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok());
+            self.composer.update(cx, |input, cx| {
+                input.set_value(text, window, cx);
+                if let Some(range) = select.clone().or(caret.map(|at| at..at)) {
+                    input.focus(window, cx);
+                    input.set_selected_range(range, cx);
+                }
+            });
+            self.status_note = "screenshot demo — RTL composer".into();
+        }
     }
 
     /// Screenshot-demo fixture setup (payments): applies the `payments` demo
