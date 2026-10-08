@@ -34,6 +34,9 @@ pub const ICON_SIZE: u32 = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
     Open,
+    /// Lock behind the local passcode (opens the passcode settings when
+    /// none is set).
+    Lock,
     /// tdesktop tray "Disable notifications" / "Enable notifications".
     ToggleNotifications,
     /// Quill's "Disable/Enable notification sounds" (tdesktop "Play sound").
@@ -62,6 +65,7 @@ pub fn sounds_label(enabled: bool) -> &'static str {
 pub fn menu_action(id: &str) -> Option<TrayAction> {
     match id {
         "quill-tray-open" => Some(TrayAction::Open),
+        "quill-tray-lock" => Some(TrayAction::Lock),
         "quill-tray-notifications" => Some(TrayAction::ToggleNotifications),
         "quill-tray-sounds" => Some(TrayAction::ToggleSounds),
         "quill-tray-quit" => Some(TrayAction::Quit),
@@ -485,6 +489,7 @@ impl Tray {
         let sounds_item = MenuItem::with_id("quill-tray-sounds", sounds_label(true), true, None);
         menu.append_items(&[
             &MenuItem::with_id("quill-tray-open", "Open Quill", true, None),
+            &MenuItem::with_id("quill-tray-lock", "Lock Quill", true, None),
             &notifications_item,
             &sounds_item,
             &PredefinedMenuItem::separator(),
@@ -685,6 +690,7 @@ mod tests {
     fn tray_menu_routes_only_its_own_actions() {
         assert_eq!(menu_action("quill-tray-open"), Some(TrayAction::Open));
         assert_eq!(menu_action("quill-tray-quit"), Some(TrayAction::Quit));
+        assert_eq!(menu_action("quill-tray-lock"), Some(TrayAction::Lock));
         assert_eq!(
             menu_action("quill-tray-notifications"),
             Some(TrayAction::ToggleNotifications)

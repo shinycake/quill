@@ -575,7 +575,15 @@ pub fn rotate_rgba_quarter_turns(
 /// Pure filesystem work — the UI resolves `src` through the existing
 /// `usable_path` machinery first.
 pub fn save_media_to_downloads(src: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
-    let dir = std::env::var("XDG_DOWNLOAD_DIR")
+    let dir = downloads_dir()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no downloads folder"))?;
+    save_media_to_downloads_in_dir(src, &dir)
+}
+
+/// The user's downloads folder (`XDG_DOWNLOAD_DIR`, else the platform's,
+/// else `~/Downloads`).
+pub fn downloads_dir() -> Option<std::path::PathBuf> {
+    std::env::var("XDG_DOWNLOAD_DIR")
         .map(std::path::PathBuf::from)
         .ok()
         .filter(|p| p.is_absolute())
@@ -587,8 +595,6 @@ pub fn save_media_to_downloads(src: &std::path::Path) -> std::io::Result<std::pa
                 .ok()
                 .map(|h| std::path::PathBuf::from(format!("{h}/Downloads")))
         })
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no downloads folder"))?;
-    save_media_to_downloads_in_dir(src, &dir)
 }
 
 /// Copy `src` into `dir`, de-duplicating the file name with a ` (n)`

@@ -530,11 +530,32 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // Slice CL3: `reportChat` result (schema 1.8.67, lines
         // 9210–9219) — collapsed to Ok vs "more info required".
         "reportChatResultOk" => Ok(EnvelopePayload::ReportChatResult(ReportChatOutcome::Ok)),
-        "reportChatResultOptionRequired"
-        | "reportChatResultTextRequired"
-        | "reportChatResultMessagesRequired" => Ok(EnvelopePayload::ReportChatResult(
-            ReportChatOutcome::MoreInfoRequired,
+        "reportChatResultOptionRequired" => Ok(EnvelopePayload::ReportChatResult(
+            ReportChatOutcome::OptionRequired {
+                title: json_field_str(&value, "title"),
+                options: parse_report_options(value.get("options")),
+            },
         )),
+        "reportChatResultTextRequired" => Ok(EnvelopePayload::ReportChatResult(
+            ReportChatOutcome::TextRequired {
+                option_id: json_field_str(&value, "option_id"),
+                is_optional: value
+                    .get("is_optional")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
+        )),
+        "reportChatResultMessagesRequired" => Ok(EnvelopePayload::ReportChatResult(
+            ReportChatOutcome::MessagesRequired,
+        )),
+        // Message menu "N Seen" / "N Reacted" rows (schema lines 2859-2879,
+        // 7315-7318).
+        "messageViewers" => Ok(EnvelopePayload::MessageViewers(parse_message_viewers(
+            &value,
+        ))),
+        "addedReactions" => Ok(EnvelopePayload::AddedReactions(parse_added_reactions(
+            &value,
+        ))),
         "updateChatReadOutbox" => Ok(EnvelopePayload::UpdateChatReadOutbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             last_read_outbox_message_id: MessageId(int53_or_zero(
@@ -737,6 +758,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         }),
         // M1 fix-up: only `can_get_link` is kept (see the
         // `MessageProperties` payload docs).
+        "messageReadDateRead"
+        | "messageReadDateUnread"
+        | "messageReadDateTooOld"
+        | "messageReadDateUserPrivacyRestricted"
+        | "messageReadDateMyPrivacyRestricted" => parse_message_read_date(&value)
+            .map(EnvelopePayload::MessageReadDate)
+            .ok_or(ParseError::MissingField),
         "messageProperties" => {
             let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
             Ok(EnvelopePayload::MessageProperties(MessageActions {
@@ -749,6 +777,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 can_be_replied: flag("can_be_replied"),
                 can_get_link: flag("can_get_link"),
                 can_get_message_thread: flag("can_get_message_thread"),
+                can_be_saved: flag("can_be_saved"),
+                can_report_chat: flag("can_report_chat"),
+                can_get_viewers: flag("can_get_viewers"),
+                can_get_read_date: flag("can_get_read_date"),
+                can_report_supergroup_spam: flag("can_report_supergroup_spam"),
+                can_delete_reactions: flag("can_delete_reactions"),
+                can_edit_scheduling_state: flag("can_edit_scheduling_state"),
             }))
         }
         // B4: `pollVoters` — the `getPollVoters` answer. Unparseable

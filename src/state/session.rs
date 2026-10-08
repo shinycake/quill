@@ -84,6 +84,16 @@ pub struct Session {
     /// What the open message context menu may offer (`messageProperties`).
     pub message_menu_actions:
         Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)>,
+    /// The message menu's Report flow (`reportChat` with message ids).
+    pub message_report: Option<MessageReportFlow>,
+    /// Viewers, read date and reactors of the message the menu is open on.
+    pub message_audience: Option<MessageAudience>,
+    /// The sticker set the message menu's "View Sticker Set" opened.
+    pub sticker_set_view: Option<StickerSetView>,
+    /// One-shot result of an admin moderation call from the delete box
+    /// (ban, delete all, report spam); the UI drains it into the status
+    /// note.
+    pub message_action_note: Option<String>,
     /// Member counts from `updateSupergroup` / `updateBasicGroup` (the
     /// header's fallback before full info loads), keyed by group id.
     pub supergroup_member_counts: HashMap<i64, i32>,
@@ -93,6 +103,10 @@ pub struct Session {
     /// M1: parsed `messageLink.link` from the last `getMessageLink` response
     /// (one-shot; the UI copies it to the clipboard and clears it).
     pub message_link_result: Option<String>,
+    /// `messageLink.is_public` of that answer: a public link works for
+    /// anyone, a private one only for chat members (Telegram Desktop
+    /// words the copied-toast differently).
+    pub message_link_public: bool,
     /// M1 fix-up: one-shot; set when "Share link" is gated off by
     /// `messageProperties.can_get_link == false` or the `getMessageLink`
     /// request errors. The UI drains it into the status note so the
@@ -1035,10 +1049,15 @@ impl Session {
             media_library: MediaLibrary::default(),
             message_reaction_options: None,
             message_menu_actions: None,
+            message_report: None,
+            message_audience: None,
+            sticker_set_view: None,
+            message_action_note: None,
             supergroup_member_counts: HashMap::new(),
             basic_group_member_counts: HashMap::new(),
             chat_online_counts: HashMap::new(),
             message_link_result: None,
+            message_link_public: false,
             message_caption_length_max: 1024,
             // Slice CL1: TDLib's compiled defaults for the pin limits
             // (schema 1.8.67, line 13674); `updateOption` overrides.

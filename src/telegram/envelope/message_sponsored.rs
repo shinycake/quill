@@ -88,14 +88,23 @@ pub enum ReportSponsoredResult {
     PremiumRequired,
 }
 
-/// Slice CL3: `reportChat` result collapsed to what the chat list can
-/// honestly report — the simple spam flow returns `reportChatResultOk`;
-/// anything else means TDLib wants options/text/messages, which the
-/// chat list does not collect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `ReportChatResult` (TDLib 1.8.67, `schema/td_api.tl:9210-9219`):
+/// the simple spam report from the chat list only handles `Ok`; the
+/// message report flow walks `OptionRequired` / `TextRequired` the way
+/// Telegram Desktop's `ShowReportFlowBox` does.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReportChatOutcome {
     Ok,
-    MoreInfoRequired,
+    OptionRequired {
+        title: String,
+        options: Vec<ReportOption>,
+    },
+    TextRequired {
+        option_id: String,
+        is_optional: bool,
+    },
+    /// The report needs messages and none (or too few) were sent.
+    MessagesRequired,
 }
 
 /// Phase 9.5: `ReportStoryResult` (TDLib 1.8.67,

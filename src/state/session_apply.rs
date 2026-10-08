@@ -952,11 +952,48 @@ impl Session {
             // via the same drain as `chat_action_error`; a refusal or a
             // "more info required" is never shown as success.
             EnvelopePayload::ReportChatResult(outcome) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::ReportChat) {
-                    self.report_chat_outcome = Some(match outcome {
-                        ReportChatOutcome::Ok => "chat reported".to_string(),
-                        ReportChatOutcome::MoreInfoRequired => "report needs a reason or messages — the chat list only sends simple spam reports".to_string(),
-                    });
+                match pending.map(|p| p.purpose) {
+                    Some(RequestPurpose::ReportChat) => {
+                        self.report_chat_outcome = Some(match outcome {
+                            ReportChatOutcome::Ok => "chat reported".to_string(),
+                            _ => "report needs a reason or messages — the chat list only sends simple spam reports".to_string(),
+                        });
+                    }
+                    // The message menu's Report flow walks the answers.
+                    Some(RequestPurpose::ReportMessages) => {
+                        if let Some(pending) = pending {
+                            self.accept_message_report(pending, outcome);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // The message menu's "N Seen" / "Seen at" / "N Reacted" rows.
+            EnvelopePayload::MessageViewers(viewers) => {
+                if let Some(RequestPurpose::GetMessageViewers {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.accept_message_viewers(chat_id, message_id, viewers);
+                }
+            }
+            EnvelopePayload::MessageReadDate(date) => {
+                if let Some(RequestPurpose::GetMessageReadDate {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.accept_message_read_date(chat_id, message_id, date);
+                }
+            }
+            EnvelopePayload::AddedReactions(page) => {
+                if let Some(RequestPurpose::GetMessageAddedReactions {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.accept_added_reactions(chat_id, message_id, page);
                 }
             }
             EnvelopePayload::UpdateChatReadOutbox {
@@ -1876,9 +1913,15 @@ impl Session {
                 stickers,
                 files,
                 title,
+                is_installed,
                 ..
             } => {
-                if let Some(RequestPurpose::LoadLibrarySet { set_id }) = pending.map(|p| p.purpose)
+                if let Some(RequestPurpose::ViewStickerSet { set_id }) = pending.map(|p| p.purpose)
+                {
+                    self.remember_files(&files);
+                    self.accept_sticker_set_view(set_id, title, is_installed, stickers);
+                } else if let Some(RequestPurpose::LoadLibrarySet { set_id }) =
+                    pending.map(|p| p.purpose)
                 {
                     self.remember_files(&files);
                     self.accept_library_set(set_id, stickers);
