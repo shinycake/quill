@@ -641,6 +641,14 @@ pub struct Session {
     /// The oldest unread mention/reaction found for the corner buttons;
     /// the driver takes it and jumps (`ConnectDriver::ingest`).
     pub(crate) unread_jump: Option<MessageId>,
+    /// The calendar box ("Jump to date"), when open.
+    pub history_calendar: Option<HistoryCalendar>,
+    /// A resolved date jump the driver has not started yet.
+    pub(crate) date_jump: Option<(MessageId, DateJumpMode)>,
+    /// A started date jump waiting for its window to load.
+    pub(crate) date_jump_pending: Option<(MessageId, DateJumpMode)>,
+    /// One-shot note for a date jump that found nothing.
+    pub date_jump_note: Option<String>,
     /// Slice media-shared-gallery: per-chat shared-media gallery state
     /// (Media / Files / Music / Links / Voice / GIFs tabs).
     pub shared_media: SharedMediaState,
@@ -1216,6 +1224,10 @@ impl Session {
             chat_search: ChatSearchState::default(),
             pinned_messages: HashMap::new(),
             unread_jump: None,
+            history_calendar: None,
+            date_jump: None,
+            date_jump_pending: None,
+            date_jump_note: None,
             chat_media_counts: HashMap::new(),
             shared_media: SharedMediaState::default(),
             stickers: StickerPanel::default(),

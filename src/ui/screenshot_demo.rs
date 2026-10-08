@@ -670,6 +670,14 @@ pub enum ScreenshotDemo {
     /// reference dialog open over the demo chat list (injected, no live
     /// Telegram).
     ReadyShortcuts,
+    /// Find in history: the "Jump to date" calendar box.
+    ReadyJumpDate,
+    /// Find in history: the in-chat "From:" member picker.
+    ReadySearchFrom,
+    /// Find in history: a chosen member's messages with "N of M".
+    ReadySearchFromHits,
+    /// Find in history: global search narrowed by the filter bar.
+    ReadySearchFilters,
     /// Local passcode: the settings dialog with a passcode set (auto-lock,
     /// Touch ID rows).
     ReadyPasscodeSettings,

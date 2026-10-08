@@ -157,6 +157,8 @@ pub enum DialogKind {
     /// Slice parity:platform-shortcuts-reference: read-only keyboard
     /// shortcuts reference dialog.
     Shortcuts,
+    /// Find in history: the "Jump to date" calendar box.
+    JumpToDate,
     /// Batch 4: terms of service, server service popups and the
     /// "New Login Prevented" follow-up.
     AccountNotice,
@@ -246,6 +248,7 @@ impl QuillShell {
             DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
             DialogKind::CommunityHub => app.community_ui.hub_open,
             DialogKind::Shortcuts => app.shortcuts_open,
+            DialogKind::JumpToDate => app.session().is_some_and(|s| s.history_calendar.is_some()),
             DialogKind::AccountNotice => app.account_notice().is_some(),
             DialogKind::Passcode => app.passcode_ui.open,
         }
@@ -302,6 +305,7 @@ impl QuillShell {
             DialogKind::CommunityCreate => community::build_create_community_dialog,
             DialogKind::CommunityHub => community::build_community_hub_dialog,
             DialogKind::Shortcuts => QuillApp::build_shortcuts_dialog,
+            DialogKind::JumpToDate => QuillApp::build_jump_date_dialog,
             DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
             DialogKind::Passcode => QuillApp::build_passcode_dialog,
         }
@@ -367,6 +371,7 @@ impl QuillShell {
         DialogKind::Accounts,
         // Slice parity:platform-shortcuts-reference: informational, lowest
         // priority.
+        DialogKind::JumpToDate,
         DialogKind::Shortcuts,
         DialogKind::Settings,
     ];

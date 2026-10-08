@@ -1115,6 +1115,37 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .collect(),
             })
         }
+        "messageCalendar" => {
+            let days = value
+                .get("days")
+                .and_then(Value::as_array)
+                .map(|days| {
+                    days.iter()
+                        .filter_map(|day| {
+                            let message = day.get("message")?;
+                            let message_id = int53_or_zero(message.get("id"));
+                            let date = message.get("date").and_then(Value::as_i64)? as i32;
+                            (message_id > 0).then(|| CalendarDay {
+                                total_count: day
+                                    .get("total_count")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(0)
+                                    as i32,
+                                message_id: MessageId(message_id),
+                                date,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(EnvelopePayload::MessageCalendar {
+                total_count: value
+                    .get("total_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                days,
+            })
+        }
         "foundChatMessages" => {
             let messages = value
                 .get("messages")
