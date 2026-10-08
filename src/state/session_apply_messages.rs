@@ -288,6 +288,16 @@ impl Session {
             return;
         }
         if self.chat_search.matches_generation(pending)
+            && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
+        {
+            for message in &messages {
+                self.remember_files(&message.files);
+            }
+            let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
+            self.chat_search
+                .append_hits(hits, total_count, next_from_message_id);
+        }
+        if self.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
             for message in &messages {

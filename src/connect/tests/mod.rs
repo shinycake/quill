@@ -12,6 +12,7 @@ mod deep_links;
 mod drafts_polls;
 mod email_login;
 mod emoji_sets;
+mod find_in_history;
 mod group_calls;
 mod groups;
 mod history_window;

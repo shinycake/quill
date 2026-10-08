@@ -132,5 +132,6 @@ impl Session {
         } else {
             ChatSearchJump::Missing { message_id }
         };
+        self.resolve_date_jump(message_id);
     }
 }

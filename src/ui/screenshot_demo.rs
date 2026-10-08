@@ -311,6 +311,10 @@ pub enum ScreenshotDemo {
     /// channel and an imported message; "via @bot"; and the footer's
     /// "edited" / pin / views / "imported" marks.
     ReadyBubbleHeaders,
+    /// README showcase scene: a populated account (generated avatars and
+    /// photos, a lively group conversation); `QUILL_DEMO_SHOWCASE` picks
+    /// the view.
+    ReadyShowcase,
     /// The message context menu over every kind of message (injected, no
     /// live Telegram). `QUILL_DEMO_MENU` picks the scenario: photo,
     /// document, downloading, video, gif, sticker, audio, audio-save-to,
@@ -671,6 +675,14 @@ pub enum ScreenshotDemo {
     /// reference dialog open over the demo chat list (injected, no live
     /// Telegram).
     ReadyShortcuts,
+    /// Find in history: the "Jump to date" calendar box.
+    ReadyJumpDate,
+    /// Find in history: the in-chat "From:" member picker.
+    ReadySearchFrom,
+    /// Find in history: a chosen member's messages with "N of M".
+    ReadySearchFromHits,
+    /// Find in history: global search narrowed by the filter bar.
+    ReadySearchFilters,
     /// Local passcode: the settings dialog with a passcode set (auto-lock,
     /// Touch ID rows).
     ReadyPasscodeSettings,

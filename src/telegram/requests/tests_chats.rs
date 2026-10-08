@@ -674,3 +674,117 @@ fn batch8_action_bar_request_shapes_match_1_8_67() {
     assert_eq!(v["@type"], "sharePhoneNumber");
     assert_eq!(v["user_id"], 99);
 }
+
+#[test]
+fn search_chat_messages_from_carries_the_sender() {
+    use crate::telegram::envelope::MessageSender;
+    let user = search_chat_messages_from(
+        RequestId(61),
+        ChatId(14),
+        &TopicId::None,
+        "",
+        Some(MessageSender::User { user_id: 5 }),
+        MessageId(0),
+        0,
+        50,
+        None,
+    );
+    let v: Value = serde_json::from_str(&user).unwrap();
+    assert_eq!(v["@type"], "searchChatMessages");
+    assert_eq!(
+        v["sender_id"],
+        json!({"@type":"messageSenderUser","user_id":5})
+    );
+    let chat = search_chat_messages_from(
+        RequestId(62),
+        ChatId(14),
+        &TopicId::None,
+        "x",
+        Some(MessageSender::Chat { chat_id: -100 }),
+        MessageId(9),
+        0,
+        50,
+        None,
+    );
+    let v: Value = serde_json::from_str(&chat).unwrap();
+    assert_eq!(
+        v["sender_id"],
+        json!({"@type":"messageSenderChat","chat_id":-100})
+    );
+    // The sender-less builder still sends a null sender.
+    let any = search_chat_messages(
+        RequestId(63),
+        ChatId(14),
+        &TopicId::None,
+        "x",
+        MessageId(0),
+        0,
+        50,
+        None,
+    );
+    let v: Value = serde_json::from_str(&any).unwrap();
+    assert_eq!(v["sender_id"], Value::Null);
+}
+
+#[test]
+fn jump_to_date_request_shapes_match_1_8_67() {
+    let by_date: Value = serde_json::from_str(&get_chat_message_by_date(
+        RequestId(64),
+        ChatId(14),
+        1_790_000_000,
+    ))
+    .unwrap();
+    assert_eq!(by_date["@type"], "getChatMessageByDate");
+    assert_eq!(by_date["chat_id"], 14);
+    assert_eq!(by_date["date"], 1_790_000_000);
+    let calendar: Value = serde_json::from_str(&get_chat_message_calendar(
+        RequestId(65),
+        ChatId(14),
+        "searchMessagesFilterPhotoAndVideo",
+        MessageId(77),
+    ))
+    .unwrap();
+    assert_eq!(calendar["@type"], "getChatMessageCalendar");
+    assert_eq!(calendar["topic_id"], Value::Null);
+    assert_eq!(
+        calendar["filter"]["@type"],
+        "searchMessagesFilterPhotoAndVideo"
+    );
+    assert_eq!(calendar["from_message_id"], 77);
+}
+
+#[test]
+fn global_search_filters_shape_matches_1_8_67() {
+    use crate::search_filters::{SearchChatType, SearchMediaKind};
+    let v: Value = serde_json::from_str(&search_messages_filtered(
+        RequestId(66),
+        "dune",
+        20,
+        &SearchMessagesFilters {
+            community_id: None,
+            chat_type: SearchChatType::Groups,
+            media: SearchMediaKind::Music,
+            min_date: 1_700_000_000,
+        },
+    ))
+    .unwrap();
+    assert_eq!(
+        v["chat_type_filter"],
+        json!({"@type":"searchMessagesChatTypeFilterGroup"})
+    );
+    assert_eq!(v["filter"], json!({"@type":"searchMessagesFilterAudio"}));
+    assert_eq!(v["min_date"], 1_700_000_000);
+    // A community pick wins over the chat-type pick.
+    let v: Value = serde_json::from_str(&search_messages_filtered(
+        RequestId(67),
+        "dune",
+        20,
+        &SearchMessagesFilters {
+            community_id: Some(3),
+            chat_type: SearchChatType::Groups,
+            ..SearchMessagesFilters::default()
+        },
+    ))
+    .unwrap();
+    assert_eq!(v["chat_type_filter"]["community_id"], 3);
+}

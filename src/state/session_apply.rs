@@ -497,6 +497,10 @@ impl Session {
                     && pending.purpose == RequestPurpose::SearchMentionMembers
                 {
                     self.apply_mention_members(pending.id, &members);
+                } else if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::SearchFromMembers
+                {
+                    self.apply_from_members(pending.id, &members);
                 } else if let Some(RequestPurpose::GetSupergroupMembers { filter }) =
                     pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -1601,6 +1605,9 @@ impl Session {
                         .insert(filter, count);
                 }
             }
+            EnvelopePayload::MessageCalendar { days, .. } => {
+                self.apply_message_calendar(days, pending);
+            }
             EnvelopePayload::FoundChatMessages {
                 messages,
                 total_count,
@@ -1768,6 +1775,10 @@ impl Session {
                 self.apply_message_thread_info(*info, pending);
             }
             EnvelopePayload::Message(message) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMessageByDate) {
+                    self.accept_date_message(message.id);
+                    return;
+                }
                 if let Some(RequestPurpose::GetRepliedMessage {
                     chat_id,
                     message_id,

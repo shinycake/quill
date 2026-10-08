@@ -81,6 +81,18 @@ pub enum RequestPurpose {
     SearchPublicChats,
     AddRecentlyFoundChat,
     SearchChatMessages,
+    /// The next older page of the open in-chat search (appended to the
+    /// hits; carries the search generation).
+    SearchChatMessagesMore,
+    /// `searchChatMembers` behind the in-chat "From:" picker.
+    SearchFromMembers,
+    /// `getChatMessageByDate` of a jump to date.
+    GetChatMessageByDate,
+    /// `getChatMessageCalendar` page of the calendar box (the box's
+    /// generation drops late answers).
+    GetChatMessageCalendar {
+        generation: u64,
+    },
     /// The open chat's pinned messages: `searchChatMessages` with
     /// `searchMessagesFilterPinned` (schema 1.8.67, line 6316), newest
     /// first. Feeds the pinned bar (Telegram Desktop's pinned tracker).

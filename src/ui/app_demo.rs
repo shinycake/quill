@@ -567,6 +567,15 @@ pub(super) fn demo_seed_for(
             "screenshot demo — keyboard shortcuts reference (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyJumpDate
+        | ScreenshotDemo::ReadySearchFrom
+        | ScreenshotDemo::ReadySearchFromHits
+        | ScreenshotDemo::ReadySearchFilters => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — find in history (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBotCommandMenu => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -632,6 +641,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — bubble headers".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyShowcase => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — showcase".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyPoll => (
