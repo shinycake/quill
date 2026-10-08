@@ -105,11 +105,10 @@ fn set_auto_download_settings_error_surfaces_without_applying() {
     );
 }
 
-/// Slice S4: a `removeAllFilesFromDownloads` ok drops the cached stats,
-/// clears the loading flag, flags the confirmation, and clears the
-/// error.
+/// Batch 6: an `optimizeStorage` answer drops the cached stats, clears
+/// the working flags, records the freed bytes, and clears the error.
 #[test]
-fn remove_all_files_from_downloads_ok_drops_stats_and_flags_clear() {
+fn optimize_storage_answer_drops_stats_and_reports_freed_bytes() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let stats_extra = session.request(RequestPurpose::GetStorageStatistics, None);
@@ -125,23 +124,28 @@ fn remove_all_files_from_downloads_ok_drops_stats_and_flags_clear() {
     );
     assert!(session.storage_stats.is_some());
     session.data_storage_error = Some("stale".into());
-    let extra = session.request(RequestPurpose::RemoveAllFilesFromDownloads, None);
+    let extra = session.request(RequestPurpose::OptimizeStorage, None);
+    session.storage_clearing = true;
     apply_json(
         &mut session,
         &seq,
         &sink,
-        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        &format!(
+            r#"{{"@type":"storageStatistics","size":"5242880","count":2,"by_chat":[],"@extra":"{}"}}"#,
+            extra.0
+        ),
     );
     assert!(session.storage_stats.is_none());
     assert!(!session.storage_stats_loading);
-    assert!(session.cache_cleared);
+    assert!(!session.storage_clearing);
+    assert_eq!(session.storage_freed, Some(5_242_880));
     assert!(session.data_storage_error.is_none());
 }
 
-/// Slice S4: a `removeAllFilesFromDownloads` error surfaces without
-/// dropping the cached stats or flagging the confirmation.
+/// Batch 6: an `optimizeStorage` error surfaces without dropping the
+/// cached stats or reporting freed bytes.
 #[test]
-fn remove_all_files_from_downloads_error_keeps_stats() {
+fn optimize_storage_error_keeps_stats() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let stats_extra = session.request(RequestPurpose::GetStorageStatistics, None);
@@ -155,7 +159,8 @@ fn remove_all_files_from_downloads_error_keeps_stats() {
         ),
     );
     assert!(session.storage_stats.is_some());
-    let extra = session.request(RequestPurpose::RemoveAllFilesFromDownloads, None);
+    let extra = session.request(RequestPurpose::OptimizeStorage, None);
+    session.storage_clearing = true;
     apply_json(
         &mut session,
         &seq,
@@ -168,5 +173,6 @@ fn remove_all_files_from_downloads_error_keeps_stats() {
     let err = session.data_storage_error.expect("error surfaced");
     assert!(err.starts_with("Couldn't clear the cache:"), "{err}");
     assert!(session.storage_stats.is_some());
-    assert!(!session.cache_cleared);
+    assert!(!session.storage_clearing);
+    assert!(session.storage_freed.is_none());
 }

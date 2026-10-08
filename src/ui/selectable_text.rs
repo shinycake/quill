@@ -35,6 +35,14 @@ thread_local! {
 /// Called with the index of the clicked range.
 type ClickHandler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
+/// Called with the index of the range under a right press and the press
+/// position.
+type PressHandler = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App)>;
+
+/// Called when the pointer enters a range (its index and the pointer
+/// position) or leaves every range (`None`).
+type HoverHandler = Rc<dyn Fn(Option<(usize, Point<Pixels>)>, &mut Window, &mut App)>;
+
 /// A custom emoji drawn inside the text: the shaped text carries one
 /// [`EMOJI_PLACEHOLDER`] (invisible, em wide) at `range`, and the picture
 /// is painted over the glyph's box after layout. The emoji therefore wraps
@@ -73,6 +81,11 @@ pub(super) struct SelectableRichText {
     styled: StyledText,
     click_ranges: Vec<Range<usize>>,
     on_click: Option<ClickHandler>,
+    on_secondary_press: Option<PressHandler>,
+    on_hover: Option<HoverHandler>,
+    /// Per click range: underline it while the pointer is over it.
+    underline_on_hover: Vec<bool>,
+    underline_color: Hsla,
     selection_color: Hsla,
     document_order: u64,
     message: Option<(i64, u64)>,
@@ -135,6 +148,10 @@ impl SelectableRichText {
             styled,
             click_ranges: Vec::new(),
             on_click: None,
+            on_secondary_press: None,
+            on_hover: None,
+            underline_on_hover: Vec::new(),
+            underline_color: gpui_kit::hsla(0., 0., 0., 0.),
             selection_color: gpui_kit::hsla(0.58, 0.8, 0.6, 0.35),
             document_order: 0,
             message: None,
@@ -208,6 +225,34 @@ impl SelectableRichText {
     ) -> Self {
         self.click_ranges = ranges;
         self.on_click = Some(Rc::new(handler));
+        self
+    }
+
+    /// A right press over one of the click ranges (the link context
+    /// menu); runs in the capture phase, before the row's own handler.
+    pub(super) fn on_secondary_press(
+        mut self,
+        handler: impl Fn(usize, Point<Pixels>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_secondary_press = Some(Rc::new(handler));
+        self
+    }
+
+    /// Underline the click ranges flagged in `flags` (one per range, in
+    /// `color`) while the pointer is over them, as Telegram Desktop does
+    /// for links.
+    pub(super) fn link_underline(mut self, flags: Vec<bool>, color: Hsla) -> Self {
+        self.underline_on_hover = flags;
+        self.underline_color = color;
+        self
+    }
+
+    /// The pointer entering or leaving a click range (the link tooltip).
+    pub(super) fn on_range_hover(
+        mut self,
+        handler: impl Fn(Option<(usize, Point<Pixels>)>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_hover = Some(Rc::new(handler));
         self
     }
 
@@ -614,6 +659,70 @@ impl Element for SelectableRichText {
                     );
                 }
             }
+        }
+
+        if let Some(handler) = self.on_secondary_press.clone() {
+            let ranges = self.click_ranges.clone();
+            let press_hitbox = hitbox.clone();
+            let layout = layout.clone();
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                if phase != DispatchPhase::Capture
+                    || event.button != MouseButton::Right
+                    || !press_hitbox.is_hovered(window)
+                {
+                    return;
+                }
+                if let Some(index) = layout.index_for_position(event.position)
+                    && let Some(ix) = ranges.iter().position(|range| range.contains(&index))
+                {
+                    handler(ix, event.position, window, cx);
+                }
+            });
+        }
+        if let Some(handler) = self.on_hover.clone() {
+            let ranges = self.click_ranges.clone();
+            let move_hitbox = hitbox.clone();
+            let layout = layout.clone();
+            let over: Rc<Cell<Option<usize>>> = window.with_element_state(
+                global_id.expect("SelectableRichText has an element id"),
+                |retained: Option<Rc<Cell<Option<usize>>>>, _| {
+                    let cell = retained.unwrap_or_default();
+                    (cell.clone(), cell)
+                },
+            );
+            if let Some(ix) = over.get()
+                && self.underline_on_hover.get(ix).copied().unwrap_or(false)
+                && let Some(range) = self.click_ranges.get(ix)
+            {
+                for quad in layout.range_rects(range.clone()) {
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            point(quad.origin.x, quad.bottom() - px(2.)),
+                            size(quad.size.width, px(1.)),
+                        ),
+                        self.underline_color,
+                    ));
+                }
+            }
+            let hover_cell = over.clone();
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                let over = &hover_cell;
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                let now = if move_hitbox.is_hovered(window) {
+                    layout
+                        .index_for_position(event.position)
+                        .and_then(|index| ranges.iter().position(|range| range.contains(&index)))
+                } else {
+                    None
+                };
+                if now != over.get() {
+                    over.set(now);
+                    handler(now.map(|ix| (ix, event.position)), window, cx);
+                    window.refresh();
+                }
+            });
         }
 
         // Links and spoilers: a press and release without a drag.

@@ -1,6 +1,6 @@
 //! Slice S4 (Data & Storage screen): `setAutoDownloadSettings` /
-//! `removeAllFilesFromDownloads` / `getAutoDownloadSettingsPresets`
-//! request builders (schema 1.8.67).
+//! `getAutoDownloadSettingsPresets` request builders (schema 1.8.67).
+//! The cache is cleared with `optimizeStorage` (`requests::misc`).
 
 use crate::ids::RequestId;
 use serde_json::{Value, json};
@@ -21,22 +21,6 @@ pub fn set_auto_download_settings(
         "@extra": extra.as_extra(),
         "settings": settings,
         "type": {"@type": network_td_type},
-    })
-    .to_string()
-}
-
-/// Slice S4: `removeAllFilesFromDownloads` (schema 1.8.67, :14056 —
-/// `removeAllFilesFromDownloads only_active:Bool only_completed:Bool
-/// delete_from_cache:Bool = Ok;`). "Clear cache": completed downloads
-/// are dropped from the filesystem cache; in-flight downloads are left
-/// alone (`only_active: false`, `only_completed: true`).
-pub fn remove_all_files_from_downloads(extra: RequestId) -> String {
-    json!({
-        "@type": "removeAllFilesFromDownloads",
-        "@extra": extra.as_extra(),
-        "only_active": false,
-        "only_completed": true,
-        "delete_from_cache": true,
     })
     .to_string()
 }
@@ -97,18 +81,6 @@ mod tests {
         assert_eq!(v["settings"]["@type"], "autoDownloadSettings");
         assert_eq!(v["type"]["@type"], "networkTypeWiFi");
         assert!(v["@extra"].is_number() || v["@extra"].is_string());
-    }
-
-    #[test]
-    fn remove_all_files_from_downloads_clears_cache_not_active() {
-        // `removeAllFilesFromDownloads only_active:Bool
-        // only_completed:Bool delete_from_cache:Bool = Ok;`
-        // (schema:14056): clear the cache, keep active downloads.
-        let v = parsed(&remove_all_files_from_downloads(RequestId(42)));
-        assert_eq!(v["@type"], "removeAllFilesFromDownloads");
-        assert_eq!(v["only_active"], false);
-        assert_eq!(v["only_completed"], true);
-        assert_eq!(v["delete_from_cache"], true);
     }
 
     #[test]

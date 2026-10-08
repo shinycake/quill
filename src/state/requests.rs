@@ -18,6 +18,24 @@ pub enum PasswordOp {
     ResendCode,
     /// `cancelRecoveryEmailAddressVerification`.
     AbortEmailSetup,
+    /// Batch 6: `checkRecoveryEmailAddressCode` (confirm the pending
+    /// recovery email with the emailed code).
+    CheckEmailCode,
+    /// Batch 6: `requestPasswordRecovery` ("Forgot password?"). Answers
+    /// `emailAddressAuthenticationCodeInfo`.
+    RequestRecoveryCode,
+    /// Batch 6: `recoverPassword` with the emailed recovery code.
+    RecoverPassword,
+    /// Batch 6: `resetPassword` (7-day wait). Answers
+    /// `resetPasswordResult*`.
+    ResetPassword,
+    /// Batch 6: `cancelPasswordReset`. Answers `ok`.
+    CancelPasswordReset,
+    /// Batch 6: `setLoginEmailAddress` / `resendLoginEmailAddressCode`.
+    /// Answer `emailAddressAuthenticationCodeInfo`.
+    SetLoginEmail,
+    /// Batch 6: `checkLoginEmailAddressCode`. Answers `ok`.
+    CheckLoginEmailCode,
 }
 
 impl PasswordOp {
@@ -31,6 +49,13 @@ impl PasswordOp {
             PasswordOp::SetRecoveryEmail => "set the recovery email",
             PasswordOp::ResendCode => "resend the confirmation code",
             PasswordOp::AbortEmailSetup => "abort the email setup",
+            PasswordOp::CheckEmailCode => "confirm the recovery email",
+            PasswordOp::RequestRecoveryCode => "send the recovery code",
+            PasswordOp::RecoverPassword => "recover the password",
+            PasswordOp::ResetPassword => "reset the password",
+            PasswordOp::CancelPasswordReset => "cancel the password reset",
+            PasswordOp::SetLoginEmail => "change the login email",
+            PasswordOp::CheckLoginEmailCode => "confirm the login email",
         }
     }
 }
@@ -141,6 +166,14 @@ pub(crate) fn password_op_error_line(op: PasswordOp, err: &TdError) -> String {
             PasswordOp::SetRecoveryEmail => "wrong password, or the email was rejected",
             PasswordOp::ResendCode => "the code can't be resent yet",
             PasswordOp::AbortEmailSetup => "the pending setup can't be aborted",
+            PasswordOp::CheckEmailCode
+            | PasswordOp::RecoverPassword
+            | PasswordOp::CheckLoginEmailCode => "the code is wrong or has expired",
+            PasswordOp::RequestRecoveryCode => "no recovery email is available",
+            PasswordOp::ResetPassword | PasswordOp::CancelPasswordReset => {
+                "no reset is possible right now"
+            }
+            PasswordOp::SetLoginEmail => "the email address was rejected",
             PasswordOp::Fetch => "try again",
         },
         _ => "Telegram rejected the request",

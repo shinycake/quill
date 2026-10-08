@@ -55,6 +55,7 @@ impl Session {
             // media-send captions); every other option parses but is
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
+                self.storage_limits.apply_option(&name, &value);
                 if name == "my_id"
                     && let OptionValue::Integer(id) = &value
                     && *id > 0
@@ -2297,6 +2298,17 @@ impl Session {
                     });
                     self.storage_stats_loading = false;
                 }
+                // Batch 6: `optimizeStorage` answers with the statistics
+                // of the files it deleted. Drop the usage cache so the
+                // driver refetches the post-clear numbers on this same
+                // ingest.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
+                    self.storage_freed = Some(total_size);
+                    self.storage_clearing = false;
+                    self.storage_stats = None;
+                    self.storage_stats_loading = false;
+                    self.data_storage_error = None;
+                }
             }
             EnvelopePayload::AutoDownloadSettingsPresets { low, medium, high } => {
                 // Slice S4: `getAutoDownloadSettingsPresets` answer —
@@ -2314,6 +2326,37 @@ impl Session {
                     self.data_storage_error = None;
                 }
             }
+            EnvelopePayload::UpdateUnconfirmedSession { session, count } => {
+                self.apply_unconfirmed_session(session, count);
+            }
+            EnvelopePayload::UpdateServiceNotification { kind, text } => {
+                self.apply_service_notification(kind, text);
+            }
+            EnvelopePayload::UpdateTermsOfService { terms } => {
+                self.notices.terms = Some(terms);
+                self.notices.terms_error = None;
+            }
+            EnvelopePayload::EmailCodeInfo { pattern, .. } => {
+                // Batch 6: only our own in-flight 2FA step takes the
+                // answer (matched by `@extra`).
+                if let Some(RequestPurpose::PasswordStateOp { op }) = pending.map(|p| p.purpose) {
+                    self.password_state_loading = false;
+                    self.password_op_error = None;
+                    self.apply_email_code_info(op, pattern);
+                }
+            }
+            EnvelopePayload::ResetPasswordResult(outcome) => {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::PasswordStateOp {
+                        op: PasswordOp::ResetPassword
+                    })
+                ) {
+                    self.password_state_loading = false;
+                    self.password_op_error = None;
+                    self.apply_reset_password_result(outcome);
+                }
+            }
             EnvelopePayload::PasswordState { state } => {
                 // Slice A2: `passwordState` answer — only our own
                 // in-flight `PasswordStateOp` writes the cache (matched by
@@ -2327,6 +2370,10 @@ impl Session {
                     self.password_state = Some(state);
                     self.password_state_loading = false;
                     self.password_op_error = None;
+                    if let Some(RequestPurpose::PasswordStateOp { op }) = pending.map(|p| p.purpose)
+                    {
+                        self.apply_password_state_op(op);
+                    }
                 }
             }
             EnvelopePayload::DeviceLoginResult { result } => {
@@ -2349,6 +2396,7 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
+                    self.resolve_unconfirmed_entries(&sessions);
                     self.sessions = Some(sessions);
                     self.sessions_loading = false;
                     self.sessions_error = None;

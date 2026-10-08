@@ -25,6 +25,7 @@ use quill::text::{
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use synthetic::MessageChrome;
@@ -210,7 +211,64 @@ pub(super) fn apply_ready_text_entities(
         r#"{{"@type":"updateNewMessage","message":{{"id":105,"chat_id":14,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{caption_json},"entities":[{caption_entities}]}},"has_spoiler":false,"is_secret":false}}}}}}"#
     );
 
-    for json in [text_message, photo_message] {
+    // Every interactive entity: mention, mention-name, hashtag, cashtag,
+    // command, email, phone, card, media timestamp, a hidden text link, a
+    // look-alike domain, a bare domain, a date, and an RTL line with a
+    // mention.
+    let links = "Ping @durov and Ann #news $TON /start\nwrite hello@example.com or call +1 555 010 0199\ncard 4111 1111 1111 1111, jump to 1:30\nread the docs or visit https://\u{430}pple.com/login or example.com/path\nשלום @durov מה נשמע";
+    let link_entities = [
+        ent(links, "@durov", r#"{"@type":"textEntityTypeMention"}"#),
+        ent(
+            links,
+            "Ann",
+            r#"{"@type":"textEntityTypeMentionName","user_id":14}"#,
+        ),
+        ent(links, "#news", r#"{"@type":"textEntityTypeHashtag"}"#),
+        ent(links, "$TON", r#"{"@type":"textEntityTypeCashtag"}"#),
+        ent(links, "/start", r#"{"@type":"textEntityTypeBotCommand"}"#),
+        ent(
+            links,
+            "hello@example.com",
+            r#"{"@type":"textEntityTypeEmailAddress"}"#,
+        ),
+        ent(
+            links,
+            "+1 555 010 0199",
+            r#"{"@type":"textEntityTypePhoneNumber"}"#,
+        ),
+        ent(
+            links,
+            "4111 1111 1111 1111",
+            r#"{"@type":"textEntityTypeBankCardNumber"}"#,
+        ),
+        ent(
+            links,
+            "1:30",
+            r#"{"@type":"textEntityTypeMediaTimestamp","media_timestamp":90}"#,
+        ),
+        ent(
+            links,
+            "the docs",
+            r#"{"@type":"textEntityTypeTextUrl","url":"https://docs.example.org/guide"}"#,
+        ),
+        ent(
+            links,
+            "https://\u{430}pple.com/login",
+            r#"{"@type":"textEntityTypeUrl"}"#,
+        ),
+        ent(
+            links,
+            "example.com/path",
+            r#"{"@type":"textEntityTypeUrl"}"#,
+        ),
+    ]
+    .join(",");
+    let links_json = serde_json::to_string(links).unwrap();
+    let links_message = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":106,"chat_id":14,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{links_json},"entities":[{link_entities}]}}}}}}}}"#
+    );
+
+    for json in [text_message, photo_message, links_message] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
@@ -733,14 +791,14 @@ fn paint_text_run(
     if let Some(image) = emoji_image {
         // A custom emoji inside a link keeps the link (role + click); the
         // image itself carries no text styling.
-        if let Some(href) = run.href.clone() {
+        if let Some(link) = run.link.clone() {
             return div()
                 .id(run_id)
                 .role(Role::Link)
                 .aria_label(run.text.clone())
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_message_url(&href, cx);
+                    this.queue_link(link.clone(), msg_key, cx);
                 }))
                 .child(image)
                 .into_any_element();
@@ -748,7 +806,7 @@ fn paint_text_run(
         return image.into_any_element();
     }
     let mut el = div().id(run_id).when(!run.text.trim().is_empty(), |el| {
-        el.role(if run.href.is_some() {
+        el.role(if run.link.is_some() {
             Role::Link
         } else {
             Role::Label
@@ -771,20 +829,81 @@ fn paint_text_run(
         el = el.font_family(MONO_FONT);
     }
     if style.pre {
-        el = el.w_full().bg(bg_code()).rounded_md().px_2().py_1().my_1();
+        return pre_block(run, &run_id_for_pre(msg_key, is_caption, index), font, cx);
     } else if style.code {
         el = el.bg(fill_muted()).rounded_sm().px_1();
     }
-    if let Some(href) = run.href.clone() {
+    if let Some(link) = run.link.clone() {
         el = el
             .text_color(accent_info())
             .underline()
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.open_message_url(&href, cx);
+                this.queue_link(link.clone(), msg_key, cx);
             }));
     }
     el.child(run.text.clone()).into_any_element()
+}
+
+fn run_id_for_pre(msg_key: (i64, u64), is_caption: bool, index: usize) -> String {
+    format!(
+        "msg-pre-{}-{}-{}-{index}",
+        msg_key.0, msg_key.1, is_caption as u64
+    )
+}
+
+/// A `pre` / `preCode` block like Telegram Desktop's: the language (when
+/// there is one) above the code, and a copy button in the corner that shows
+/// while the pointer is over the block.
+fn pre_block(run: &TextRun, id: &str, font: Pixels, cx: &mut Context<QuillApp>) -> AnyElement {
+    let group: SharedString = format!("{id}-group").into();
+    let code = run.text.trim_end_matches('\n').to_string();
+    let copy_text = code.clone();
+    let language = run
+        .style
+        .language
+        .clone()
+        .filter(|language| !language.trim().is_empty());
+    div()
+        .id(id.to_string())
+        .group(group.clone())
+        .relative()
+        .w_full()
+        .bg(bg_code())
+        .rounded_md()
+        .px_2()
+        .py_1()
+        .my_1()
+        .font_family(MONO_FONT)
+        .when_some(language, |this, language| {
+            this.child(
+                div()
+                    .text_size(font * 0.8)
+                    .text_color(text_muted())
+                    .child(language),
+            )
+        })
+        .child(div().pr_6().child(code))
+        .child(
+            div()
+                .absolute()
+                .top_1()
+                .right_1()
+                .invisible()
+                .group_hover(group, |style| style.visible())
+                .child(
+                    Button::new(format!("{id}-copy"))
+                        .icon(IconName::Copy)
+                        .xsmall()
+                        .ghost()
+                        .tooltip("Copy")
+                        .accessibility_label("Copy code")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.copy_entity_text(copy_text.clone(), cx);
+                        })),
+                ),
+        )
+        .into_any_element()
 }
 
 /// One blockquote block: quote styling (accent bar, like `reply_quote_strip`)
@@ -998,7 +1117,9 @@ pub(super) fn rich_text_reserving(
 /// Clickable span inside an inline paragraph.
 #[derive(Clone)]
 enum InlineAction {
-    Link(String),
+    Link(quill::text::LinkTarget),
+    /// Inline `code`: a click copies it (Telegram Desktop).
+    CopyCode(String),
     RevealSpoiler((i64, u64, u64, bool)),
 }
 
@@ -1024,6 +1145,8 @@ fn inline_paragraph(
     let mut mono: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
     let mut click_ranges = Vec::new();
     let mut actions = Vec::new();
+    // Per click range: whether it is a link (underlined on hover).
+    let mut link_flags: Vec<bool> = Vec::new();
     let mut spoilers: Vec<(std::ops::Range<usize>, f32)> = Vec::new();
     let mut inline_emoji: Vec<super::selectable_text::InlineEmoji> = Vec::new();
     for (offset, run) in runs.iter().enumerate() {
@@ -1062,9 +1185,10 @@ fn inline_paragraph(
         if let Some(visual) = visual {
             // The picture carries no text styling; a link around it keeps
             // its click target.
-            if let Some(href) = &run.href {
+            if let Some(link) = &run.link {
                 click_ranges.push(range.clone());
-                actions.push(InlineAction::Link(href.clone()));
+                actions.push(InlineAction::Link(link.clone()));
+                link_flags.push(true);
             }
             inline_emoji.push(super::selectable_text::InlineEmoji {
                 range,
@@ -1096,11 +1220,6 @@ fn inline_paragraph(
             highlight.background_color = Some(fill_muted().into());
             mono.push((range.clone(), MONO_FONT.into()));
         }
-        if let Some(href) = &run.href {
-            highlight.color = Some(accent_info().into());
-            click_ranges.push(range.clone());
-            actions.push(InlineAction::Link(href.clone()));
-        }
         // tdesktop hides spoiler text under drifting specks of its color;
         // a revealed run's specks fade out over the text.
         if hidden {
@@ -1116,10 +1235,18 @@ fn inline_paragraph(
             highlight.color = None;
             highlight.fade_out = Some(1.);
             highlight.background_color = None;
-            click_ranges.retain(|existing| existing != &range);
-            actions.truncate(click_ranges.len());
             click_ranges.push(range.clone());
             actions.push(InlineAction::RevealSpoiler(key));
+            link_flags.push(false);
+        } else if let Some(link) = &run.link {
+            highlight.color = Some(accent_info().into());
+            click_ranges.push(range.clone());
+            actions.push(InlineAction::Link(link.clone()));
+            link_flags.push(true);
+        } else if style.code && !style.pre {
+            click_ranges.push(range.clone());
+            actions.push(InlineAction::CopyCode(run.text.clone()));
+            link_flags.push(false);
         }
         if highlight != HighlightStyle::default() {
             highlights.push((range, highlight));
@@ -1148,6 +1275,11 @@ fn inline_paragraph(
         .with_highlights(highlights)
         .with_font_family_overrides(mono);
     let owner = cx.entity().downgrade();
+    let actions = Rc::new(actions);
+    let press_actions = actions.clone();
+    let press_owner = owner.clone();
+    let hover_actions = actions.clone();
+    let hover_owner = owner.clone();
     let paragraph = super::selectable_text::SelectableRichText::new(
         format!("msg-par-{}-{}-{first_index}", msg_key.1, is_caption as u8),
         full,
@@ -1163,7 +1295,8 @@ fn inline_paragraph(
             return;
         };
         let _ = owner.update(cx, |this, cx| match action {
-            InlineAction::Link(href) => this.open_message_url(&href, cx),
+            InlineAction::Link(link) => this.queue_link(link, msg_key, cx),
+            InlineAction::CopyCode(text) => this.copy_entity_text(text, cx),
             InlineAction::RevealSpoiler(key) => {
                 this.spoiler_revealed.insert(key);
                 super::spoiler_fx::mark_revealed(key);
@@ -1172,7 +1305,21 @@ fn inline_paragraph(
         });
     })
     .spoilers(spoilers)
-    .inline_emoji(inline_emoji);
+    .inline_emoji(inline_emoji)
+    .link_underline(link_flags, accent_info().into())
+    .on_secondary_press(move |ix, position, _, cx| {
+        if let Some(InlineAction::Link(link)) = press_actions.get(ix) {
+            let link = link.clone();
+            let _ = press_owner.update(cx, |this, _| this.note_right_clicked_link(position, link));
+        }
+    })
+    .on_range_hover(move |hover, _, cx| {
+        let tooltip = hover.and_then(|(ix, position)| match hover_actions.get(ix) {
+            Some(InlineAction::Link(link)) => link.tooltip().map(|text| (position, text)),
+            _ => None,
+        });
+        let _ = hover_owner.update(cx, |this, cx| this.set_link_tooltip(tooltip, cx));
+    });
     div()
         .id(format!(
             "msg-par-wrap-{}-{}-{first_index}",

@@ -1,3 +1,4 @@
+mod account_notices;
 mod auth;
 mod bots;
 mod calls;
@@ -31,6 +32,7 @@ mod secret_chat;
 mod sessions;
 mod statistics;
 mod storage;
+mod storage_categories;
 mod stories;
 mod users;
 
@@ -67,6 +69,8 @@ mod tests_chats;
 #[cfg(test)]
 mod tests_core;
 #[cfg(test)]
+mod tests_entities;
+#[cfg(test)]
 mod tests_keyboards;
 #[cfg(test)]
 mod tests_media;
@@ -76,6 +80,7 @@ mod tests_messages;
 mod tests_payments;
 
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
+pub use account_notices::*;
 pub use auth::*;
 pub use bots::*;
 pub use calls::*;
@@ -109,5 +114,6 @@ pub use secret_chat::*;
 pub use sessions::*;
 pub use statistics::*;
 pub use storage::*;
+pub use storage_categories::*;
 pub use stories::*;
 pub use users::*;
