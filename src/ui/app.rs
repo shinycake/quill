@@ -494,6 +494,8 @@ pub struct QuillApp {
     /// (list / switch / add / remove). Working state lives in
     /// `accounts.rs`; this is the one field the dialog machinery reads.
     pub(super) accounts_ui: AccountsUiState,
+    /// Local passcode: settings dialog, lock screen, auto-lock.
+    pub(super) passcode_ui: super::passcode::PasscodeUi,
     /// Slice A3: Active Sessions overlay (TGX Settings → Devices /
     /// `SettingsSessionsController`).
     pub(super) sessions_open: bool,

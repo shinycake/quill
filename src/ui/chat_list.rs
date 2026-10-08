@@ -1309,6 +1309,10 @@ impl QuillApp {
                     .when(mode == PaneMode::Ready, |this| {
                         this.child(self.main_navigation_menu(cx))
                     })
+                    .when(
+                        mode == PaneMode::Ready && self.passcode_ui.enabled,
+                        |this| this.child(self.lock_button(cx)),
+                    )
                     .child(self.list_tabs(cx)),
             )
             .when_some(

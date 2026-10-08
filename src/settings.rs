@@ -106,7 +106,7 @@ where
 /// written, synced, and renamed over the target, so a crash mid-write
 /// leaves the previous file intact instead of a truncated one that would
 /// silently reset the settings to defaults.
-fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
+pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     use std::io::Write;
     let parent = path
         .parent()

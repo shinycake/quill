@@ -518,7 +518,13 @@ impl QuillApp {
         queued: QueuedNotification,
         cx: &mut Context<Self>,
     ) {
-        let notification = queued.for_display();
+        // A locked app shows no sender or text (tdesktop hides the message
+        // preview while the passcode lock is up).
+        let notification = if self.passcode_ui.locked {
+            queued.for_locked_display()
+        } else {
+            queued.for_display()
+        };
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
             // macOS (UNUserNotificationCenter) and Windows (WinRT toast): the
             // click returns through `on_system_notification_response`.

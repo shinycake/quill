@@ -34,12 +34,16 @@ pub const ICON_SIZE: u32 = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
     Open,
+    /// Lock behind the local passcode (opens the passcode settings when
+    /// none is set).
+    Lock,
     Quit,
 }
 
 pub fn menu_action(id: &str) -> Option<TrayAction> {
     match id {
         "quill-tray-open" => Some(TrayAction::Open),
+        "quill-tray-lock" => Some(TrayAction::Lock),
         "quill-tray-quit" => Some(TrayAction::Quit),
         _ => None,
     }
@@ -448,6 +452,7 @@ impl Tray {
         }
         menu.append_items(&[
             &MenuItem::with_id("quill-tray-open", "Open Quill", true, None),
+            &MenuItem::with_id("quill-tray-lock", "Lock Quill", true, None),
             &PredefinedMenuItem::separator(),
             &MenuItem::with_id("quill-tray-quit", "Quit Quill", true, None),
         ])
@@ -622,6 +627,7 @@ mod tests {
     fn tray_menu_routes_only_its_own_actions() {
         assert_eq!(menu_action("quill-tray-open"), Some(TrayAction::Open));
         assert_eq!(menu_action("quill-tray-quit"), Some(TrayAction::Quit));
+        assert_eq!(menu_action("quill-tray-lock"), Some(TrayAction::Lock));
         assert_eq!(menu_action("quit"), None);
         assert_eq!(menu_action(""), None);
     }

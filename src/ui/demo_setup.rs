@@ -1238,6 +1238,31 @@ impl QuillApp {
         // over the ReadyChats fixture (injected, no live Telegram). The
         // list reads the real local registry, read-only — nothing is
         // added, switched, or removed by the fixture.
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyPasscodeSettings
+                    | ScreenshotDemo::ReadyPasscodeCreate
+                    | ScreenshotDemo::ReadyLockScreen
+            )
+        ) {
+            self.passcode_ui.fixture(
+                !matches!(demo, Some(ScreenshotDemo::ReadyPasscodeCreate)),
+                matches!(demo, Some(ScreenshotDemo::ReadyLockScreen)),
+                matches!(demo, Some(ScreenshotDemo::ReadyLockScreen)).then_some("Wrong passcode"),
+            );
+            self.passcode_ui.autolock_secs = 300;
+            self.passcode_ui.system_unlock = true;
+            if matches!(demo, Some(ScreenshotDemo::ReadyPasscodeSettings)) {
+                self.passcode_ui.open = true;
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyPasscodeCreate)) {
+                self.passcode_ui.open = true;
+                self.passcode_ui.view = super::passcode::PasscodeView::Create;
+                self.passcode_ui.error = Some("Passcodes are different".into());
+            }
+            self.status_note = "screenshot demo — local passcode".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyAccounts)) {
             self.accounts_ui.open = true;
             self.status_note = "screenshot demo — accounts".into();

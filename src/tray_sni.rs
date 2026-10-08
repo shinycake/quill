@@ -95,6 +95,12 @@ impl ksni::Tray for SniTray {
                 ..Default::default()
             }
             .into(),
+            StandardItem {
+                label: "Lock Quill".into(),
+                activate: Box::new(|_| push_action(TrayAction::Lock)),
+                ..Default::default()
+            }
+            .into(),
             ksni::MenuItem::Separator,
             StandardItem {
                 label: "Quit Quill".into(),
