@@ -749,6 +749,10 @@ impl Render for QuillApp {
             .when_some(self.privacy_exceptions_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
+            // Avatar-click profile layer (tdesktop `Info::LayerWidget`).
+            .when_some(self.profile_modal_overlay(window, cx), |this, overlay| {
+                this.child(overlay)
+            })
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             // Phase C3a: group-call (voice chat) overlay above the call

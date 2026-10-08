@@ -140,6 +140,47 @@ pub(super) fn history_skeleton() -> impl IntoElement {
         )
 }
 
+/// A sender avatar's click target (tdesktop `Element::fromLink`): opens
+/// the sender's profile. Built beside the row, wrapped around the kit
+/// avatar by [`AvatarLink::wrap`].
+struct AvatarLink {
+    id: u64,
+    on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+}
+
+impl AvatarLink {
+    fn wrap(self, avatar: AnyElement) -> AnyElement {
+        div()
+            .id(("sender-avatar", self.id))
+            .size(px(32.))
+            .flex_none()
+            .cursor_pointer()
+            .child(avatar)
+            .on_click(self.on_click)
+            .into_any_element()
+    }
+}
+
+/// Link for a row's avatar; `None` for spacers (rows continuing a sender
+/// run), outgoing rows and senders TDLib did not name.
+fn avatar_link(
+    sender_avatar: &Option<(String, Option<PathBuf>)>,
+    message: &HistoryMessage,
+    cx: &mut Context<QuillApp>,
+) -> Option<AvatarLink> {
+    let (name, _) = sender_avatar.as_ref()?;
+    if name.is_empty() {
+        return None;
+    }
+    let sender = message.sender?;
+    Some(AvatarLink {
+        id: message.id.0 as u64,
+        on_click: Box::new(cx.listener(move |this, _, window, cx| {
+            this.open_avatar_profile(sender, window, cx);
+        })),
+    })
+}
+
 pub(super) fn album_history_row(
     album_id: i64,
     messages: &[&HistoryMessage],
@@ -216,7 +257,11 @@ pub(super) fn album_history_row(
     // Media-led like single photos: the mosaic sits on a thin inset and,
     // without a caption, the time rides on the picture.
     let has_caption = caption.is_some();
+    let avatar_link = avatar_link(&sender_avatar, first, cx);
     let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending);
+    if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link) {
+        chrome.avatar = Some(link.wrap(avatar));
+    }
     chrome.media_led = true;
     chrome.footer_overlay = !has_caption;
     chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx).into_any_element());
@@ -1301,6 +1346,7 @@ pub(super) fn session_history_row(
                 })
         );
     let mut more_btn = Some(more_btn);
+    let mut avatar_link = avatar_link(&sender_avatar, message, cx);
     let mut chrome = |footer_inline: bool| {
         let mut chrome = message_chrome(
             sender.clone(),
@@ -1309,6 +1355,9 @@ pub(super) fn session_history_row(
             message.date,
             message.pending,
         );
+        if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link.take()) {
+            chrome.avatar = Some(link.wrap(avatar));
+        }
         if views.is_some() || signature.is_some() {
             chrome.footer = message_footer_meta(
                 message.date,

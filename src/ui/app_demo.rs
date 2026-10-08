@@ -694,6 +694,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — posting to a forum topic".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyAvatarProfile => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — group member profile from an avatar click".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyContacts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1585,6 +1591,7 @@ impl QuillApp {
             pin_reorder_archived: false,
             pin_drag_anchor: None,
             chat_preview: None,
+            profile_modal: None,
             preview_press: None,
             selected_chats: HashSet::new(),
             swipe_reply_start: None,

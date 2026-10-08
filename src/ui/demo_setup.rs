@@ -1868,6 +1868,27 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Avatar click: group history with a member's profile layer open.
+        if matches!(demo, Some(ScreenshotDemo::ReadyAvatarProfile)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::profile_modal::apply_ready_avatar_profile(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                );
+            }
+            self.open_avatar_profile(
+                quill::telegram::envelope::MessageSender::User { user_id: 602 },
+                window,
+                cx,
+            );
+            // Captures show the settled layer, not the fade.
+            self.profile_modal = Some(super::profile_modal::ProfileModal::shown(
+                InfoPanelTarget::User(602),
+            ));
+            self.status_note = "screenshot demo — profile layer from an avatar click".into();
+        }
         // Phase D2: channel statistics fixture, then open the stats panel
         // directly in the info panel (demo path just sets the target).
         if matches!(demo, Some(ScreenshotDemo::ReadyChannelStats)) {
