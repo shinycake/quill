@@ -374,6 +374,20 @@ impl MediaCorners {
         }
     }
 
+    /// What shows behind each corner of a video mask, `[tl, tr, br, bl]`: a
+    /// corner on the bubble's outer edge (large radius) lies mostly outside
+    /// the bubble's own rounded shape, so it takes the history `backdrop`;
+    /// a corner against a caption, header or tile (small radius) sits on
+    /// the bubble. Bubble-less media uses the backdrop everywhere.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn mask_colors(self, backdrop: Hsla) -> [Hsla; 4] {
+        let small = px(MEDIA_SMALL_RADIUS);
+        [self.tl, self.tr, self.br, self.bl].map(|radius| match self.behind {
+            Some(bubble) if radius <= small => bubble,
+            _ => backdrop,
+        })
+    }
+
     /// The corner radii in whole points, `[tl, tr, br, bl]`.
     fn radii(self) -> [u32; 4] {
         [self.tl, self.tr, self.br, self.bl].map(|r| f32::from(r).round().max(0.) as u32)
@@ -2113,7 +2127,7 @@ fn inline_surface(
             f32::from(frame_w).round() as u32,
             f32::from(frame_h).round() as u32,
             corners.radii(),
-            corners.behind.unwrap_or(inline.backdrop),
+            corners.mask_colors(inline.backdrop),
         );
         div()
             .relative()
