@@ -28,7 +28,7 @@ and the missing macOS dock badge. Telegram Desktop references are read-only
 
 | Area | Before | After |
 |---|---|---|
-| Windows notifications | none (`build_notification_command` returned `None`) | GPUI WinRT toast via `NotifyBackend::Native`; click focuses the window and opens the chat; per-chat tag replaces the previous toast; `IconUri` registered so the toast shows the Quill icon; Quill plays its own sound (GPUI posts toasts silent) through a hidden PowerShell (`SystemSounds.Asterisk`, MP3 via WPF `MediaPlayer`, path passed as a quoted literal) |
+| Windows notifications | none (`build_notification_command` returned `None`) | GPUI WinRT toast via `NotifyBackend::Native`; click focuses the window and opens the chat; per-chat tag replaces the previous toast; `IconUri` registered so the toast shows the Quill icon; Quill plays its own sound through the in-process audio engine (#443), same path as macOS/Linux, because GPUI posts toasts silent |
 | macOS notification click | callback existed, but a hidden/minimized window might never render to consume it | the response handler now activates the app and window itself; tag build/parse extracted to `notify::{notification_tag, parse_notification_tag}` |
 | Linux notifications | `notify-send --wait --action=default=Open` | unchanged (click path kept) |
 | macOS dock badge | none | `NSApplication.dockTile.badgeLabel`, "99+" cap, cleared at 0 |
@@ -60,8 +60,7 @@ is no second definition.
 - **Not done.** Windows toast reply action (tdesktop has inline reply): GPUI's
   toast API carries buttons but no text input; follow-up. Close-to-tray on
   Windows/Linux: GPUI windows cannot be hidden after creation there, so only
-  start-in-tray exists; the macOS minimize-to-tray path is unchanged. Custom MP3
-  notification sounds on Linux/macOS are unchanged.
+  start-in-tray exists; the macOS minimize-to-tray path is unchanged. 
 - No README parity fragment: `platform-app-icon-badge`, `platform-autostart`,
   `platform-os-notifications`, `platform-tray-icon` are already checked; the
   merge pipeline owns the README prose.

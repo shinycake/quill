@@ -1101,22 +1101,24 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     });
                 }
                 // Performance fixture:
-                // `QUILL_DEMO_AUTOSCROLL=<x>,<y>[,<dy>[,<steps>]]` scrolls
-                // whatever sits under that window point with synthetic wheel
-                // events (~60/s, `dy` px each, turning around every `steps`),
-                // to profile scrolling.
-                if let Some((x, y, step_dy, turn)) =
+                // `QUILL_DEMO_AUTOSCROLL=<x>,<y>[,<dy>[,<steps>[,<stop>]]]`
+                // scrolls whatever sits under that window point with
+                // synthetic wheel events (~60/s, `dy` px each, turning
+                // around every `steps`, stopping after `stop` events when
+                // given), to profile scrolling and what stays after it.
+                if let Some((x, y, step_dy, turn, stop)) =
                     std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
                         let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
                         let x = parts.next()??;
                         let y = parts.next()??;
                         let dy = parts.next().flatten().unwrap_or(24.);
                         let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
-                        Some((x, y, dy, turn))
+                        let stop = parts.next().flatten().map_or(u32::MAX, |stop| stop as u32);
+                        Some((x, y, dy, turn, stop))
                     })
                 {
                     cx.spawn(async move |cx| {
-                        for step in 0_u32.. {
+                        for step in 0_u32..stop {
                             cx.background_executor()
                                 .timer(Duration::from_millis(16))
                                 .await;

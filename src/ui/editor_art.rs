@@ -50,7 +50,8 @@ pub(super) fn sticker_pixels(path: &Path, format: StickerFormat) -> Option<RgbaI
     let image = match format {
         StickerFormat::Tgs => {
             let frames =
-                quill::sticker_playback::decode_tgs_sized(path, 512, 1, &cancelled).ok()?;
+                quill::sticker_playback::decode_tgs_sized(path, 512, 1, f64::INFINITY, &cancelled)
+                    .ok()?;
             let mut bytes = frames.frames.into_iter().next()?;
             // rlottie hands out premultiplied BGRA.
             for pixel in bytes.chunks_exact_mut(4) {

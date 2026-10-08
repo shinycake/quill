@@ -1,12 +1,10 @@
 //! Poll loop and OS notification threads.
 
 use super::app::QuillApp;
+use super::audio::{NotificationSound, notification_sound};
 use super::connect_ui::live_status_for;
-use super::notification_settings::{
-    MAX_OS_NOTIFICATION_SOUND_THREADS, MAX_OS_NOTIFICATION_THREADS,
-};
+use super::notification_settings::MAX_OS_NOTIFICATION_THREADS;
 use gpui_kit::*;
-use quill::connect::SoundResolution;
 use quill::ids::ChatId;
 use quill::notify::{NotificationSoundKind, QueuedNotification};
 use quill::telegram::envelope::{AuthorizationState, ChatNotificationSettings};
@@ -488,9 +486,7 @@ impl QuillApp {
             .map(|live| std::mem::take(&mut live.driver.session.pending_sound_plays))
             .unwrap_or_default();
         for path in plays {
-            if let Some(command) = quill::notify::file_sound_command(&path.to_string_lossy()) {
-                self.spawn_sound_command(command);
-            }
+            self.notification_sounds.play(NotificationSound::File(path));
         }
     }
 
@@ -500,42 +496,14 @@ impl QuillApp {
     /// `pending_sound_plays`). Silent when the chat's sound is disabled —
     /// the reducer never queues a sound for those.
     pub(super) fn play_notification_sound(&mut self, kind: NotificationSoundKind) {
-        let command = match self.live.as_mut() {
-            Some(live) => match live.driver.resolve_notification_sound(kind) {
-                SoundResolution::DefaultTone => quill::notify::default_tone_command(),
-                SoundResolution::FilePath(path) => {
-                    quill::notify::file_sound_command(&path.to_string_lossy())
-                }
-                SoundResolution::Pending => None,
-            },
+        let sound = match self.live.as_mut() {
+            Some(live) => notification_sound(live.driver.resolve_notification_sound(kind)),
             // No live driver (screenshot demo): the tone is the honest
             // stand-in — no TDLib file is reachable.
-            None => quill::notify::default_tone_command(),
+            None => Some(NotificationSound::DefaultTone),
         };
-        if let Some(command) = command {
-            self.spawn_sound_command(command);
-        }
-    }
-
-    /// Parity slice: play one notification sound on a worker thread. A
-    /// player failure (missing ffplay, vanished file) is silent by design —
-    /// a notification must never surface an error dialog.
-    pub(super) fn spawn_sound_command(&mut self, command: quill::notify::SoundCommand) {
-        if self.notify_sound_inflight.fetch_add(1, Ordering::SeqCst)
-            >= MAX_OS_NOTIFICATION_SOUND_THREADS
-        {
-            self.notify_sound_inflight.fetch_sub(1, Ordering::SeqCst);
-            return;
-        }
-        let inflight = self.notify_sound_inflight.clone();
-        let spawn = std::thread::Builder::new()
-            .name("quill-sound".to_string())
-            .spawn(move || {
-                quill::notify::play_sound_command(&command);
-                inflight.fetch_sub(1, Ordering::SeqCst);
-            });
-        if spawn.is_err() {
-            self.notify_sound_inflight.fetch_sub(1, Ordering::SeqCst);
+        if let Some(sound) = sound {
+            self.notification_sounds.play(sound);
         }
     }
 

@@ -17,7 +17,7 @@ use std::time::Duration;
 /// How a [`NotificationSoundKind`] resolves to something playable
 /// (parity slice: notification sounds).
 pub enum SoundResolution {
-    /// Play the app default tone (ffplay-synthesized).
+    /// Play the app default tone (synthesized in-process).
     DefaultTone,
     /// Play this downloaded MP3.
     FilePath(std::path::PathBuf),
