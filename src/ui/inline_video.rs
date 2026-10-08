@@ -462,9 +462,101 @@ pub(super) fn circle_mask(edge: u32, color: Hsla) -> std::sync::Arc<RenderImage>
     })
 }
 
+/// An image of `color` the size of a `width` x `height` tile with each
+/// corner's outside cut away in an anti-aliased quarter circle of its radius
+/// (`[top-left, top-right, bottom-right, bottom-left]`, in points): laid
+/// over a native video surface, which GPUI can't clip, it rounds the video
+/// to match the bubble. Rendered at twice the size for Retina edges.
+pub(super) fn corner_mask(
+    width: u32,
+    height: u32,
+    radii: [u32; 4],
+    colors: [Hsla; 4],
+) -> std::sync::Arc<RenderImage> {
+    use std::cell::RefCell;
+    use std::sync::Arc;
+    type Key = (u32, u32, [u32; 4], [[u8; 4]; 4]);
+    thread_local! {
+        static MASKS: RefCell<HashMap<Key, Arc<RenderImage>>> = RefCell::new(HashMap::new());
+    }
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let bgra = colors.map(|color| {
+        let rgba = Rgba::from(color);
+        [
+            channel(rgba.b),
+            channel(rgba.g),
+            channel(rgba.r),
+            channel(rgba.a),
+        ]
+    });
+    MASKS.with(|masks| {
+        masks
+            .borrow_mut()
+            .entry((width, height, radii, bgra))
+            .or_insert_with(|| {
+                let (w, h) = (width * 2, height * 2);
+                let mut image = image::RgbaImage::new(w.max(1), h.max(1));
+                for (x, y, pixel) in image.enumerate_pixels_mut() {
+                    let px = x as f32 + 0.5;
+                    let py = y as f32 + 0.5;
+                    let left = px < w as f32 / 2.0;
+                    let top = py < h as f32 / 2.0;
+                    let corner = match (top, left) {
+                        (true, true) => 0,
+                        (true, false) => 1,
+                        (false, false) => 2,
+                        (false, true) => 3,
+                    };
+                    let radius = radii[corner] as f32 * 2.0;
+                    let color = bgra[corner];
+                    // Distance from this corner's edges.
+                    let dx = if left { px } else { w as f32 - px };
+                    let dy = if top { py } else { h as f32 - py };
+                    let cover = if dx >= radius || dy >= radius {
+                        0.0
+                    } else {
+                        let ox = radius - dx;
+                        let oy = radius - dy;
+                        ((ox * ox + oy * oy).sqrt() - radius + 0.5).clamp(0.0, 1.0)
+                    };
+                    let alpha = (f32::from(color[3]) * cover).round() as u8;
+                    *pixel = image::Rgba([color[0], color[1], color[2], alpha]);
+                }
+                Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+                    image::Frame::new(image),
+                ])))
+            })
+            .clone()
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::circle_mask;
+    use super::{circle_mask, corner_mask};
+
+    #[test]
+    fn corner_mask_cuts_only_the_corner_outsides() {
+        let colors = [
+            gpui_kit::white(),
+            gpui_kit::white(),
+            gpui_kit::black(),
+            gpui_kit::white(),
+        ];
+        let mask = corner_mask(40, 30, [10, 0, 10, 0], colors);
+        let bytes = mask.as_bytes(0).expect("one frame");
+        let alpha = |x: usize, y: usize| bytes[(y * 80 + x) * 4 + 3];
+        // Rounded corners keep the backdrop at the extreme pixel; the square
+        // ones and the middle show the video.
+        assert_eq!(alpha(0, 0), 255);
+        assert_eq!(alpha(79, 59), 255);
+        assert_eq!(alpha(79, 0), 0);
+        assert_eq!(alpha(0, 59), 0);
+        assert_eq!(alpha(40, 30), 0);
+        // Straight BGRA: each corner keeps its own color.
+        assert_eq!(&bytes[0..3], &[255, 255, 255]);
+        let br = (59 * 80 + 79) * 4;
+        assert_eq!(&bytes[br..br + 3], &[0, 0, 0]);
+    }
 
     #[test]
     fn circle_mask_covers_corners_and_clears_the_circle() {
