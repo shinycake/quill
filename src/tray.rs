@@ -76,7 +76,7 @@ const BASE_ICON: &[u8; (ICON_SIZE * ICON_SIZE * 4) as usize] =
 /// from `assets/icons/tray-template.svg` with
 /// `magick -background white -density 300 tray-template.svg -flatten
 /// -resize 64x64 -colorspace Gray -negate -depth 8 gray:tray-template-64.a8`.
-const TEMPLATE_MASK: &[u8; (ICON_SIZE * ICON_SIZE) as usize] =
+pub(crate) const TEMPLATE_MASK: &[u8; (ICON_SIZE * ICON_SIZE) as usize] =
     include_bytes!("../assets/icons/tray-template-64.a8");
 
 const BADGE_RED: [u8; 4] = [0xFF, 0x3B, 0x30, 0xFF];
@@ -340,7 +340,8 @@ impl Pixels {
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub struct Tray {
     icon: tray_icon::TrayIcon,
-    last_shown: Option<u32>,
+    /// Last drawn (unread, all-muted, dark menu bar) — redraw on change.
+    last_shown: Option<(u32, bool, bool)>,
 }
 
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
@@ -362,7 +363,7 @@ impl Tray {
             &MenuItem::with_id("quill-tray-quit", "Quit Quill", true, None),
         ])
         .ok()?;
-        let (rgba, w, h) = render_platform_icon(0);
+        let (rgba, w, h, _) = render_platform_icon(0, false, true);
         let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
         let tray = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu))
@@ -373,34 +374,65 @@ impl Tray {
             .ok()?;
         Some(Self {
             icon: tray,
-            last_shown: Some(0),
+            last_shown: None,
         })
     }
 
-    fn set_unread(&mut self, unread: u32) {
-        if self.last_shown == Some(unread) {
+    fn set_unread(&mut self, unread: u32, muted: bool) {
+        #[cfg(target_os = "macos")]
+        let dark = self
+            .icon
+            .ns_status_item()
+            .is_none_or(|item| crate::tray_mac::menu_bar_is_dark(&item));
+        #[cfg(not(target_os = "macos"))]
+        let dark = false;
+        let key = (unread, muted, dark);
+        if self.last_shown == Some(key) {
             return;
         }
-        self.last_shown = Some(unread);
-        let (rgba, w, h) = render_platform_icon(unread);
+        self.last_shown = Some(key);
+        let (rgba, w, h, template) = render_platform_icon(unread, muted, dark);
         if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) {
-            let _ = self
-                .icon
-                .set_icon_with_as_template(Some(icon), cfg!(target_os = "macos"));
+            let _ = self.icon.set_icon_with_as_template(Some(icon), template);
         }
         let _ = self.icon.set_tooltip(Some(tray_tooltip(unread)));
     }
 }
 
-/// The macOS menu bar takes a monochrome template; Windows trays show the
-/// full-color app icon.
+/// macOS: the monochrome template while nothing is unread, and tdesktop's
+/// tinted glyph + red counter otherwise ([`crate::tray_mac`]). Windows trays
+/// show the full-color app icon. Returns the RGBA, size and whether AppKit
+/// should treat it as a template.
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
-fn render_platform_icon(unread: u32) -> (Vec<u8>, u32, u32) {
-    if cfg!(target_os = "macos") {
-        render_tray_template(unread)
-    } else {
-        render_tray_icon(unread)
+fn render_platform_icon(unread: u32, muted: bool, dark: bool) -> (Vec<u8>, u32, u32, bool) {
+    #[cfg(target_os = "macos")]
+    {
+        if unread == 0 {
+            let (rgba, w, h) = render_tray_template(0);
+            return (rgba, w, h, true);
+        }
+        let (rgba, w, h) = crate::tray_mac::render(TEMPLATE_MASK, unread, muted, dark);
+        (rgba, w, h, false)
     }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (muted, dark);
+        let (rgba, w, h) = render_tray_icon(unread);
+        (rgba, w, h, false)
+    }
+}
+
+/// tdesktop's `unreadBadgeMuted`: every counted unread chat is muted.
+#[cfg(feature = "ui")]
+fn badge_all_muted(session: &Session, unread: u32) -> bool {
+    if unread == 0 || !session.badge_prefs.include_muted {
+        return false;
+    }
+    let unmuted = BadgePrefs {
+        include_muted: false,
+        ..session.badge_prefs.clone()
+    };
+    badge_count(session, &unmuted) == 0
 }
 
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
@@ -424,6 +456,7 @@ thread_local! {
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn sync_tray(session: Option<&Session>) {
     let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    let muted = session.is_some_and(|s| badge_all_muted(s, unread));
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
         // AppKit can return a status-item handle before its native window
@@ -439,7 +472,7 @@ pub fn sync_tray(session: Option<&Session>) {
             *slot = Tray::new();
         }
         if let Some(tray) = slot.as_mut() {
-            tray.set_unread(unread);
+            tray.set_unread(unread, muted);
         }
     });
 }

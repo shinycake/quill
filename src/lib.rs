@@ -65,6 +65,8 @@ pub mod suggest;
 pub mod telegram;
 pub mod text;
 pub mod tray;
+#[cfg(all(target_os = "macos", feature = "ui"))]
+pub mod tray_mac;
 #[cfg(all(target_os = "linux", feature = "ui"))]
 pub mod tray_sni;
 pub mod update_install;
