@@ -16,7 +16,7 @@ pub(super) struct StickerClip {
     /// One single-frame image per animation frame; the frame clock picks
     /// the current one (`frame_clock`), instead of GPUI animating a
     /// multi-frame image at the display's refresh rate.
-    frames: Vec<Arc<RenderImage>>,
+    frames: Arc<[Arc<RenderImage>]>,
     fps: f64,
     started: Instant,
     duration: Duration,
@@ -66,6 +66,14 @@ impl PlaybackSize {
     }
 }
 
+/// A chat-list preview's custom emoji: stills (and emoji still decoding)
+/// as images, decoded animations for the sidebar's animation layer.
+#[derive(Default)]
+pub(super) struct PreviewEmoji {
+    pub(super) still: HashMap<i64, ImageSource>,
+    pub(super) layered: HashMap<i64, super::app_slice::LayeredFrames>,
+}
+
 #[derive(Default)]
 pub(super) struct StickerPlayback {
     clips: HashMap<i32, StickerClip>,
@@ -87,7 +95,9 @@ impl QuillApp {
     pub(super) fn stop_sticker_playback(&mut self) {
         for size in [PlaybackSize::Sticker, PlaybackSize::Emoji] {
             let cache = self.playback_cache_mut(size);
-            cache.clips.clear();
+            for (_, clip) in cache.clips.drain() {
+                super::image_budget::retire_all(clip.frames.iter().cloned());
+            }
             cache.jobs.clear();
             cache.failed.clear();
             cache.epoch = cache.epoch.wrapping_add(1);
@@ -105,6 +115,20 @@ impl QuillApp {
         match size {
             PlaybackSize::Sticker => &mut self.sticker_playback,
             PlaybackSize::Emoji => &mut self.emoji_playback,
+        }
+    }
+
+    /// Drop the least recently shown clip; its frames leave the atlas
+    /// once nothing can show them (`image_budget`).
+    fn evict_oldest_clip(&mut self, size: PlaybackSize) {
+        let oldest = self
+            .playback_cache(size)
+            .clips
+            .iter()
+            .min_by_key(|(_, clip)| clip.used)
+            .map(|(id, _)| *id);
+        if let Some(clip) = oldest.and_then(|id| self.playback_cache_mut(size).clips.remove(&id)) {
+            super::image_budget::retire_all(clip.frames.iter().cloned());
         }
     }
 
@@ -146,15 +170,7 @@ impl QuillApp {
         };
         let epoch = cache.epoch;
         if self.playback_cache(size).clips.len() >= size.capacity() {
-            if let Some(old) = self
-                .playback_cache(size)
-                .clips
-                .iter()
-                .min_by_key(|(_, clip)| clip.used)
-                .map(|(id, _)| *id)
-            {
-                self.playback_cache_mut(size).clips.remove(&old);
-            }
+            self.evict_oldest_clip(size);
         }
         let cancel = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(None));
@@ -250,7 +266,8 @@ impl QuillApp {
                                     rgba,
                                 )])))
                             })
-                            .collect();
+                            .collect::<Vec<_>>()
+                            .into();
                         Ok(StickerClip {
                             frames,
                             fps,
@@ -273,15 +290,7 @@ impl QuillApp {
                         Ok(clip) => {
                             let duration = clip.duration;
                             if this.playback_cache(size).clips.len() >= size.capacity() {
-                                if let Some(old) = this
-                                    .playback_cache(size)
-                                    .clips
-                                    .iter()
-                                    .min_by_key(|(_, clip)| clip.used)
-                                    .map(|(id, _)| *id)
-                                {
-                                    this.playback_cache_mut(size).clips.remove(&old);
-                                }
+                                this.evict_oldest_clip(size);
                             }
                             this.playback_cache_mut(size).clips.insert(id.0, clip);
                             Some(duration)
@@ -362,13 +371,96 @@ impl QuillApp {
     }
 
     /// Images for the custom emoji in a chat-list preview: animated when
-    /// decoded, the still meanwhile.
+    /// decoded, the still meanwhile. Built inside the chat list slice, the
+    /// animated ones are painted by its animation layer (`app_slice`), so
+    /// their ticks don't rebuild the list.
     pub(super) fn preview_emoji_images(
         &self,
         chat: &quill::state::ChatSummary,
         cx: &mut Context<QuillApp>,
-    ) -> HashMap<i64, ImageSource> {
-        self.custom_emoji_images(&chat.last_preview_style.entities, cx)
+    ) -> PreviewEmoji {
+        let entities = &chat.last_preview_style.entities;
+        if !self.slices.in_sidebar() {
+            return PreviewEmoji {
+                still: self.custom_emoji_images(entities, cx),
+                layered: HashMap::new(),
+            };
+        }
+        use quill::text::TextEntityKind;
+        let mut out = PreviewEmoji::default();
+        let Some(session) = self.session() else {
+            return out;
+        };
+        let roots = self.media_display_roots();
+        let looping = session.media_prefs.loop_animated_stickers;
+        let mut fps = 0_u32;
+        for entity in entities {
+            let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
+                continue;
+            };
+            let Some(item) = session
+                .emoji
+                .custom_emoji_stickers
+                .iter()
+                .find(|item| item.custom_emoji_id == Some(custom_emoji_id))
+            else {
+                continue;
+            };
+            if let Some(clip) = self.layered_emoji_clip(item.file_id, item.format, looping, cx) {
+                if clip.frames.len() > 1 {
+                    fps = fps.max(clip.fps.ceil() as u32);
+                }
+                out.layered
+                    .insert(custom_emoji_id, self.slices.layered(clip));
+                continue;
+            }
+            let still = item
+                .display_file_id()
+                .and_then(|file| session.files.get(&file.0))
+                .and_then(|file| file.usable_path())
+                .and_then(|path| sandboxed_display_path(path, &roots))
+                .map(ImageSource::from);
+            if let Some(still) = still {
+                out.still.insert(custom_emoji_id, still);
+            }
+        }
+        if fps > 0 && self.window_active.get() {
+            self.request_animation_tick_for(self.slices.layer_target(), fps.min(30), cx);
+        }
+        out
+    }
+
+    /// The decoded clip of an animated custom emoji, for the chat list's
+    /// animation layer; starts decoding it when missing.
+    fn layered_emoji_clip(
+        &self,
+        id: FileId,
+        format: StickerFormat,
+        looping: bool,
+        cx: &mut Context<QuillApp>,
+    ) -> Option<super::app_slice::LayeredClip> {
+        if !matches!(format, StickerFormat::Tgs | StickerFormat::Webm) || id.0 == 0 {
+            return None;
+        }
+        let size = PlaybackSize::Emoji;
+        let clip =
+            self.playback_cache(size)
+                .clips
+                .get(&id.0)
+                .map(|clip| super::app_slice::LayeredClip {
+                    frames: clip.frames.clone(),
+                    fps: clip.fps,
+                    started: clip.started,
+                    duration: clip.duration,
+                    looping,
+                });
+        let weak = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.ensure_sticker_playback(id, format, size, cx)
+            });
+        });
+        clip
     }
 
     /// Images for the custom emoji among `entities`: animated when

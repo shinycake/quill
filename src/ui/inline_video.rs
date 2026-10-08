@@ -135,8 +135,8 @@ impl InlineVideos {
     /// show a clip, so every player stops. Without this, a clip that was
     /// playing when you left the chat kept decoding and kept the frame
     /// clock at 30 fps forever.
-    pub(super) fn frame_start(&mut self) {
-        if !self.swept {
+    pub(super) fn frame_start(&mut self, history_drawn: bool) {
+        if history_drawn && !self.swept {
             self.clear();
         }
         self.swept = false;

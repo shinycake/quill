@@ -105,7 +105,8 @@ impl QuillApp {
             return;
         }
         self.scroll_date.scrolled(Instant::now(), false);
-        cx.notify();
+        // The pill lives in the conversation: the chat list can replay.
+        self.notify_conversation(cx);
     }
 
     /// Resolve the probed top row to its day; a changed day while the pill

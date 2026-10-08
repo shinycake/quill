@@ -1602,6 +1602,8 @@ impl QuillApp {
             frame_clock_running: Default::default(),
             composer_link_dialog: None,
             send_morph: Default::default(),
+            animation_targets: Default::default(),
+            slices: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),
             group_call_title_dialog: None,
@@ -1944,6 +1946,7 @@ impl QuillApp {
         // notifies when the effective theme actually changed, so the
         // tick is free when idle.
         app.apply_appearance(cx);
+        app.init_slices(cx);
         // Remember the window's geometry when the user moves or resizes it.
         cx.observe_window_bounds(window, |this, window, cx| {
             this.schedule_window_state_save(window, cx);

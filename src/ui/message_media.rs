@@ -2284,7 +2284,7 @@ fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.len() > 256 {
-            cache.clear();
+            super::image_budget::retire_all(cache.drain().map(|(_, image)| image));
         }
         cache.insert(row_id, render.clone());
     });

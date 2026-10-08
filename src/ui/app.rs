@@ -341,6 +341,9 @@ pub struct QuillApp {
     pub(super) animation_demand: std::cell::Cell<u32>,
     /// Chat-row online-dot and unread-badge animation state.
     pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
+    /// What asked for the next tick: cached slices by entity id, `None`
+    /// for `QuillApp` itself (see `frame_clock`).
+    pub(super) animation_targets: std::cell::RefCell<std::collections::HashSet<Option<EntityId>>>,
     /// Whether the main window is active this frame: like tdesktop
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.
@@ -353,6 +356,10 @@ pub struct QuillApp {
     pub(super) composer_link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
     /// Cross-fade timeline of the round Send / Record / Save button.
     pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
+    /// Cached child views (chat list, conversation) the frame clock can
+    /// redraw on their own, and the chat list's animation layer; see
+    /// `app_slice`.
+    pub(super) slices: super::app_slice::Slices,
     /// Smooth reveal of a bot's streaming reply (`bot_stream`).
     pub(super) stream_reveal: std::cell::RefCell<super::bot_stream::StreamReveal>,
     /// Deleted messages still dissolving (`vanish`).

@@ -1,5 +1,6 @@
 mod account_lifecycle;
 mod accounts;
+mod app_slice;
 mod appearance;
 mod auth_recovery;
 mod chat_theme;
@@ -7,6 +8,7 @@ mod clipboard_files;
 mod editor_art;
 mod force_reply;
 mod frame_clock;
+mod image_budget;
 mod inline_video;
 mod native_video;
 mod photo_edit;
