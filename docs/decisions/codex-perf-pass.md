@@ -218,6 +218,19 @@ the picker 0.1–0.2%, animated emoji in a chat row 0.2–0.5%. (Active
 numbers in this round are unreliable: other agents' windows took focus
 during the runs.)
 
+## The 8 Hz notifier
+
+With `QUILL_TRACE_NOTIFY=1` the live app showed `notify: 8.0/s
+spawn_poll_loop` while idle, with no TDLib updates applied. The cause was
+`pump_deep_link`, which `poll_live` calls on every iteration: with no
+deep-link flow (the normal case) it put the empty state back and still
+called `cx.notify()`. At the poll loop's idle cadence (120 ms) that
+redrew the whole app, both slices included, 8 times a second, active or
+not, since the account went Ready. It now redraws only when a step has
+something to show (a terminal state to consume, or an invite preview
+not on screen yet); `deep_link_step_redraws` is unit-tested for the idle
+case.
+
 ## Risks
 
 - A slice that reads state of an entity rendered outside it would replay
