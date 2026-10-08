@@ -30,6 +30,7 @@ mod sender;
 mod settings;
 mod stickers;
 mod stories;
+mod subsection_tabs;
 mod types;
 mod typing;
 

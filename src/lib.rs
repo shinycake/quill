@@ -46,6 +46,7 @@ pub mod story_composer;
 pub mod story_page;
 pub mod story_restriction;
 pub mod story_viewer;
+pub mod subsection_tabs;
 pub mod telegram;
 pub mod text;
 pub mod tray;

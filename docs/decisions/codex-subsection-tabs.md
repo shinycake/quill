@@ -1,0 +1,78 @@
+# codex/subsection-tabs — topic tabs for bots with topics and forums with tabs
+
+## Telegram Desktop behavior (reference, read-only)
+
+- `history/view/history_view_subsection_tabs.cpp`: `SubsectionTabs::UsedFor` is
+  `amMonoforumAdmin() || peer->displaySubsectionTabs()`.
+- `data/data_peer.cpp`: `displaySubsectionTabs()` = `displayAsForum()` for bots, else
+  `useSubsectionTabs()`. For bots `displayAsForum()` needs `isForum()` (TDLib
+  `userTypeBot.has_topics`), and when `Data::IsBotCreatesTopics` holds
+  (`botInfo && !userCreatesTopics`, i.e. TDLib `allows_users_to_create_topics == false`)
+  it also needs a non-empty topic list. `data/data_channel.cpp`: `useSubsectionTabs()` =
+  `isForum() && ForumTabs` (TDLib `supergroup.has_forum_tabs`).
+  Note: the brief described the empty-list rule the other way round; Quill follows the
+  source (`IsBotCreatesTopics` is the `!allows_users_to_create_topics` case).
+- Layout modes `SubsectionTabsMode` Top=0 / Left=1 / Bottom=2, saved per peer
+  (`subsectionTabsMode(peerId)`); `toggleModes()` cycles Top → Bottom → Left → Top.
+- `ui/chat/chat.style` `chatTabs*`: strip height 36px, semibold labels, `windowSubTextFg`
+  inactive / `lightButtonFg` active; vertical column 64px wide, 28px topic icon at top 8px,
+  10px name text 54px wide below, active bar 8px stroke / 4px radius at the edge.
+- Tabs: "All" (the whole chat) first, then topics. Vertical shows the round topic icon
+  (letter on `forumTopicIcon.color`, or custom emoji) with the name; General gets a "#".
+  Right-click = `Window::FillDialogsEntryMenu` for the topic (section `SubsectionTabsMenu`).
+
+## What changed
+
+- Parsing: `ParsedUser.has_topics` / `allows_users_to_create_topics` (bots only);
+  `has_forum_tabs` on `updateSupergroup` / `supergroup` (stored in
+  `Session::forum_tabs_supergroups`); `ForumTopic` gains icon color / custom emoji id,
+  last message id, last read inbox id and notification settings; new envelope payloads
+  `UpdateForumTopicInfo` and `UpdateForumTopic` (previously ignored).
+- State (`state/session_subsection_tabs.rs`): `bot_topics`, `chat_has_topics` (forum
+  supergroup or bot with topics), `subsection_tabs_used_for` (the tdesktop rule above),
+  per-chat mode in `MediaPrefs.subsection_tabs_modes` (`media_prefs.json`; Top is not
+  stored), live topic updates (rename/recolor, new topics first, pin, mute, read position),
+  per-topic unread counting from `updateNewMessage` (TDLib sends no per-topic unread count
+  in `updateForumTopic`; reading up to the last known message clears it), topic header
+  ("name" + "N messages" from `foundChatMessages.total_count`), chat-row topic line.
+- Driver: `getForumTopics`, `select_topic` and topic history now gate on
+  `chat_has_topics`, so bot chats fetch and page topics (sending already used
+  `messageTopicForum` via `send_topic`). A bot with topics loads its topic list as soon as
+  `updateUser` / `updateNewChat` makes it known (for the chat-row line). The topic action
+  gate also admits bot chats (pin/unpin, delete). New `connect/subsection_tabs.rs`:
+  mode toggle (persists), "Mark as read" (`viewMessages` on the last topic message with
+  `messageSourceForumTopicHistory`), mute/unmute (`setForumTopicNotificationSettings`).
+- UI (`ui/subsection_tabs.rs`): the three layouts, toggle button (PanelTop / PanelBottom /
+  PanelLeft glyph of the current layout; `PanelTop` registered in `src/main.rs`), "All"
+  first, unread pills (gray when the topic is muted), accent text + underline (horizontal)
+  or edge bar (vertical) for the active tab, horizontal / vertical scrolling, right-click
+  menu: Mark as read (when unread), Pin/Unpin, Mute/Unmute, Close/Reopen (forums with
+  `can_manage_topics`), Delete (forums with the right; bots when users create topics) —
+  delete is confirmed through the existing group-confirm dialog. No animation.
+- Hooks: `conversation.rs` — Top strip under the header, Bottom strip above the composer,
+  Left column wraps the history; forums with tabs skip the old topic list and the
+  "‹ Topics" strip; the header shows the open tab topic. `chat_row.rs` — one optional
+  parameter: the topic names replace the sender line (3-line rows) or the preview line
+  (2-line rows) for chats with loaded topics. Forum supergroups without `has_forum_tabs`
+  keep the old topic list / pane.
+- Demo fixtures: `ready-bot-topics`, `ready-bot-topics-bottom`, `ready-bot-topics-left`.
+
+## Not done
+
+- Drag-reorder of pinned tabs (`setPinnedForumTopics`), Ctrl-click "open in new window",
+  custom-emoji topic icons (letter fallback), topic list paging beyond the first
+  `getForumTopics` page, the monoforum (channel direct messages) admin case.
+- No README parity item covers these tabs, so no parity fragment is added.
+
+## Verification
+
+- Tests: `state::tests::subsection_tabs` (flag parsing, UsedFor gating for plain bot /
+  users-create / bot-creates with and without topics / forum with and without tabs, mode
+  cycle, topic updates + unread + chat-row line), `connect::tests::subsection_tabs` (bot
+  chat fetches `getForumTopics` once, select topic → `searchChatMessages` with the topic,
+  mark read, mute, pin; mode cycle persists to `media_prefs.json`), `subsection_tabs` unit
+  test for the cycle order, UI unit test for active-tab logic.
+- Screenshots (demo-capture, 1300x900): `docs/screenshots/subsection-tabs-top.png`,
+  `subsection-tabs-bottom.png`, `subsection-tabs-left.png`.
+- Not verified live: real bot topic data, right-click menu actions against the server,
+  `updateForumTopic*` delivery for bot chats.

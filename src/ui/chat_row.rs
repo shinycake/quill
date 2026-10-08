@@ -397,6 +397,7 @@ impl QuillApp {
                         }
                         _ => None,
                     },
+                    self.session().and_then(|s| s.chat_row_topic_names(chat.id)),
                     cx,
                 )
                 .into_any_element()
@@ -501,9 +502,13 @@ pub(super) fn session_chat_row(
     preview_emoji: std::collections::HashMap<i64, ImageSource>,
     // Telegram Desktop marks groups, channels and bots before the title.
     kind_icon: Option<IconName>,
+    // Subsection tabs: topic names for bots with topics and forums (the
+    // sender line in 3-line rows, the preview line in 2-line rows).
+    topic_names: Option<String>,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
+    let topic_line = topic_names.clone().filter(|_| row_style.preview_lines < 3);
     let title: String = if saved {
         "Saved Messages".to_string()
     } else {
@@ -744,7 +749,10 @@ pub(super) fn session_chat_row(
                                     .font_semibold()
                                     .truncate()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(chat.last_preview_sender.clone()),
+                                    .child(
+                                        topic_names
+                                            .unwrap_or_else(|| chat.last_preview_sender.clone()),
+                                    ),
                             )
                         })
                         .child(
@@ -760,7 +768,8 @@ pub(super) fn session_chat_row(
                                         .min_w_0()
                                         .items_center()
                                         .when_some(
-                                            preview_sender.filter(|_| from_last),
+                                            preview_sender
+                                                .filter(|_| from_last && topic_line.is_none()),
                                             |this, sender| {
                                                 this.child(
                                                     div()
@@ -772,7 +781,9 @@ pub(super) fn session_chat_row(
                                             },
                                         )
                                         .when_some(
-                                            chat.last_preview_thumb.clone().filter(|_| from_last),
+                                            chat.last_preview_thumb
+                                                .clone()
+                                                .filter(|_| from_last && topic_line.is_none()),
                                             |this, mini| {
                                                 this.child(
                                                     img(ImageSource::Image(std::sync::Arc::new(
@@ -809,6 +820,13 @@ pub(super) fn session_chat_row(
                                                     ),
                                                 )
                                                 .child(div().min_w_0().truncate().child(line.text))
+                                                .into_any_element(),
+                                            None if topic_line.is_some() => div()
+                                                .min_w_0()
+                                                .flex_1()
+                                                .text_xs()
+                                                .truncate()
+                                                .child(topic_line.unwrap_or_default())
                                                 .into_any_element(),
                                             None => div()
                                                 .min_w_0()

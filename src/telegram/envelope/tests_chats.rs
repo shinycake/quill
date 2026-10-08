@@ -264,6 +264,7 @@ fn update_supergroup_parses_forum_flag() {
             supergroup_id,
             member_count: _,
             is_forum,
+            has_forum_tabs: _,
             username,
             status,
             can_restrict_members,
@@ -309,6 +310,7 @@ fn update_supergroup_parses_username() {
             supergroup_id,
             member_count: _,
             is_forum,
+            has_forum_tabs: _,
             username,
             status,
             can_restrict_members,
@@ -348,6 +350,7 @@ fn supergroup_response_parses_forum_flag() {
         EnvelopePayload::Supergroup {
             supergroup_id,
             is_forum,
+            has_forum_tabs: _,
             username,
             status,
             can_restrict_members,

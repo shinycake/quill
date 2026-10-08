@@ -515,8 +515,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let recent_packs = self.session.media_prefs.recent_emoji_packs.clone();
         let recent_emoji = self.session.media_prefs.recent_custom_emoji_ids.clone();
+        let topic_chat = Self::possible_topic_chat(&owned.envelope.payload);
         let previous_seq = self.session.last_seq;
         self.session.apply(owned);
+        self.maybe_fetch_bot_topics(topic_chat);
         if self.session.last_seq != previous_seq {
             self.session.remember_emoji_pack_usage(&used_emoji);
         }

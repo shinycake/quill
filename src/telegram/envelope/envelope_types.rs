@@ -575,6 +575,10 @@ pub enum EnvelopePayload {
     UpdateSupergroup {
         supergroup_id: i64,
         is_forum: bool,
+        /// Subsection tabs: `supergroup.has_forum_tabs` (schema 1.8.67,
+        /// line 2746) — a forum whose topics show as tabs, the way
+        /// Telegram Desktop shows them (`ChannelData::useSubsectionTabs`).
+        has_forum_tabs: bool,
         username: String,
         /// `supergroup.member_count` — may be 0 until full info is known.
         member_count: i32,
@@ -640,6 +644,9 @@ pub enum EnvelopePayload {
     Supergroup {
         supergroup_id: i64,
         is_forum: bool,
+        /// Subsection tabs: `supergroup.has_forum_tabs` (schema 1.8.67,
+        /// line 2746).
+        has_forum_tabs: bool,
         username: String,
         status: ChannelMemberStatus,
         /// Phase A1: `rights.can_restrict_members` from own
@@ -697,6 +704,10 @@ pub enum EnvelopePayload {
     ForumTopic {
         chat_id: i64,
     },
+    /// Subsection tabs: `updateForumTopicInfo` (schema 1.8.67, line 10652).
+    UpdateForumTopicInfo(ForumTopicInfoUpdate),
+    /// Subsection tabs: `updateForumTopic` (schema 1.8.67, line 10665).
+    UpdateForumTopic(ForumTopicUpdate),
     UpdateFile(ParsedFile),
     File(ParsedFile),
     /// Slice media-downloads-pause: `updateFileDownload` — pause state and

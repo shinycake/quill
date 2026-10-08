@@ -132,6 +132,7 @@ mod stickers_ui;
 mod story_albums;
 mod story_composer;
 mod story_viewer;
+mod subsection_tabs;
 mod video_pip;
 
 pub use app::QuillApp;

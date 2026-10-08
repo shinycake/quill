@@ -72,6 +72,11 @@ pub enum GroupConfirmAction {
     RemoveStickerSet {
         set_id: i64,
     },
+    /// Subsection tabs: the tab menu's "Delete" — `deleteForumTopic`
+    /// (schema 1.8.67, line 12736) for the dialog's chat.
+    DeleteForumTopic {
+        forum_topic_id: i32,
+    },
 }
 
 pub struct GroupConfirmDialog {

@@ -946,3 +946,21 @@ pub fn get_chat_message_count(extra: RequestId, chat_id: ChatId, filter: &str) -
     })
     .to_string()
 }
+
+/// Subsection tabs: `setForumTopicNotificationSettings` (TDLib 1.8.67,
+/// `schema/td_api.tl:12707`) — the same `chatNotificationSettings` body as
+/// `setChatNotificationSettings`, addressed to one topic.
+pub fn set_forum_topic_notification_settings(
+    extra: RequestId,
+    chat_id: ChatId,
+    forum_topic_id: i32,
+    settings: &crate::telegram::envelope::ChatNotificationSettings,
+) -> String {
+    let mut value: Value = serde_json::from_str(&super::chats::set_chat_notification_settings(
+        extra, chat_id, settings,
+    ))
+    .expect("request builders emit valid JSON");
+    value["@type"] = json!("setForumTopicNotificationSettings");
+    value["forum_topic_id"] = json!(forum_topic_id);
+    value.to_string()
+}

@@ -1191,6 +1191,7 @@ impl Session {
                 self.finish_pending_bot_stop(chat_id, forum_topic_id, draft_id);
             }
             EnvelopePayload::UpdateNewMessage(message) => {
+                self.note_forum_topic_message(&message);
                 self.apply_update_new_message(message);
             }
             EnvelopePayload::UpdateMessageSendSucceeded {
@@ -1511,6 +1512,7 @@ impl Session {
                 supergroup_id,
                 member_count,
                 is_forum,
+                has_forum_tabs,
                 username,
                 status,
                 can_restrict_members,
@@ -1529,6 +1531,7 @@ impl Session {
                     self.supergroup_member_counts
                         .insert(supergroup_id, member_count);
                 }
+                self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
                 self.apply_update_supergroup(
                     supergroup_id,
                     is_forum,
@@ -1553,6 +1556,7 @@ impl Session {
             EnvelopePayload::Supergroup {
                 supergroup_id,
                 is_forum,
+                has_forum_tabs,
                 username,
                 status,
                 can_restrict_members,
@@ -1566,26 +1570,29 @@ impl Session {
                 is_broadcast_group,
                 sign_messages,
                 show_message_sender,
-            } => self.apply_supergroup(
-                supergroup_id,
-                is_forum,
-                username,
-                status,
-                can_restrict_members,
-                can_invite_users,
-                can_promote_members,
-                can_manage_tags,
-                can_manage_topics,
-                can_change_info,
-                can_send_welcome_messages,
-                join_by_request,
-                is_broadcast_group,
-                sign_messages,
-                show_message_sender,
-                pending,
-                extra,
-                seq,
-            ),
+            } => {
+                self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
+                self.apply_supergroup(
+                    supergroup_id,
+                    is_forum,
+                    username,
+                    status,
+                    can_restrict_members,
+                    can_invite_users,
+                    can_promote_members,
+                    can_manage_tags,
+                    can_manage_topics,
+                    can_change_info,
+                    can_send_welcome_messages,
+                    join_by_request,
+                    is_broadcast_group,
+                    sign_messages,
+                    show_message_sender,
+                    pending,
+                    extra,
+                    seq,
+                );
+            }
             // Phase 5.1: `getForumTopics` response — cache the first page
             // against the requesting chat.
             EnvelopePayload::ForumTopics {
@@ -1604,6 +1611,12 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::CreateForumTopic) {
                     self.forum_topics.remove(&chat_id);
                 }
+            }
+            EnvelopePayload::UpdateForumTopicInfo(info) => {
+                self.apply_update_forum_topic_info(info);
+            }
+            EnvelopePayload::UpdateForumTopic(update) => {
+                self.apply_update_forum_topic(update);
             }
             EnvelopePayload::Messages(messages) => {
                 self.apply_messages(messages, pending, extra, seq)
