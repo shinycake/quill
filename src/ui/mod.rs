@@ -55,6 +55,7 @@ mod bot_stream;
 mod bots;
 mod call_panel;
 mod call_sounds;
+mod call_tones;
 mod call_ui;
 mod calls;
 mod capture_access;
