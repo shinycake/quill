@@ -18,6 +18,8 @@ actions!(
         CancelSearch,
         QuitApp,
         OpenSettings,
+        /// Lock the app behind the local passcode.
+        LockApp,
         /// kit Phase 7: close the window (Cmd/Ctrl+W, File menu). Quits on
         /// Linux/Windows; on macOS the app stays alive for its menu bar.
         CloseWindow,

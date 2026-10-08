@@ -89,7 +89,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -607,6 +607,13 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — RTL polish".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyMessageMenu => (
+            Some(super::message_menu_demo::seed_ready_message_menu_session
+                as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — message menu".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyServiceMessages => (
@@ -1621,6 +1628,7 @@ impl QuillApp {
             twofa_confirm: None,
             account_lifecycle: AccountLifecycleState::new(window, cx),
             accounts_ui: AccountsUiState::new(window, cx),
+            passcode_ui: super::passcode::PasscodeUi::new(window, cx),
             credentials,
             // Slice S3: privacy screen state.
             privacy_open: false,
@@ -1879,6 +1887,7 @@ impl QuillApp {
             restrict_dialog: None,
             group_confirm_dialog: None,
             message_menu_selection: None,
+            message_menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             media_viewer: MediaViewer::closed(),
             photo_editor: None,
             viewer_zoom: ViewerZoom::new(),
@@ -1998,6 +2007,9 @@ impl QuillApp {
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
+        if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
+            app.demo_setup_message_menu(window, cx);
+        }
 
         let menu_app = cx.weak_entity();
         cx.intercept_keystrokes(move |event, window, cx| {
@@ -2163,8 +2175,13 @@ impl QuillApp {
                 let _ = window.update(cx, |_, window, _| window.activate_window());
             }
         });
-        if demo.is_none() {
+        if demo.is_none() && !app.passcode_ui.deferred_connect {
+            // With a local passcode the database key is wrapped: the
+            // connection starts after the first unlock (tdesktop starts locked).
             app.start_connection(cx);
+        }
+        if demo.is_none() {
+            app.spawn_passcode_tick(cx);
         }
         // Settings → Appearance: apply the persisted prefs (theme +
         // accent) before the first frame, then re-evaluate auto-night

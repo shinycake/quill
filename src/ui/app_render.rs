@@ -4,11 +4,11 @@ use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
     ComposerPastePlain, FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear,
     FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, LoadOlder,
-    MinimizeWindow, NextChat, OpenChatSearch, OpenHelp, OpenSearch, OpenSettings, OpenShortcuts,
-    PrevChat, QuitApp, SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn, SubmitCode,
-    SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
-    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
-    ViewerZoomReset, ZoomWindow,
+    LockApp, MinimizeWindow, NextChat, OpenChatSearch, OpenHelp, OpenSearch, OpenSettings,
+    OpenShortcuts, PrevChat, QuitApp, SpellingIgnore, SpellingLearn, SpellingReplace,
+    SpellingUnlearn, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme,
+    ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave,
+    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -36,7 +36,8 @@ impl Render for QuillApp {
         self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
         // Rows the history list painted last frame are what the user saw.
-        self.report_visible_history(window.is_window_active(), cx);
+        self.passcode_frame(window, cx);
+        self.report_visible_history(window.is_window_active() && !self.passcode_ui.locked, cx);
         // A conversation replayed from its cache (`app_slice`) still shows
         // its clips: only a conversation that rendered (or a frame without
         // one) and swept no player orphans them.
@@ -294,6 +295,7 @@ impl Render for QuillApp {
                     cx.stop_propagation();
                 }
             }))
+            .on_action(cx.listener(|this, _: &LockApp, _, cx| this.lock_by_passcode(cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
             }))
@@ -826,6 +828,10 @@ impl Render for QuillApp {
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
                 this.child(overlay)
             });
+        // The lock screen covers the whole window, above every overlay.
+        let root = root.when(self.passcode_ui.locked, |this| {
+            this.child(self.lock_overlay(cx))
+        });
         match image_cache {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),

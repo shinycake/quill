@@ -530,6 +530,12 @@ pub enum EnvelopePayload {
     /// driver gates the link request on it instead of letting "Share
     /// link" silently 400.
     MessageProperties(MessageActions),
+    /// `messageViewers` (`getMessageViewers` answer).
+    MessageViewers(Vec<MessageViewer>),
+    /// `MessageReadDate` (`getMessageReadDate` answer).
+    MessageReadDate(MessageReadDate),
+    /// `addedReactions` (`getMessageAddedReactions` answer).
+    AddedReactions(AddedReactionsPage),
     /// B4: `pollVoters` (TDLib 1.8.67, `schema/td_api.tl:2854`) — the
     /// `getPollVoters` answer (schema line 12941). `total_count` is the
     /// approximate total; `voters` is one page of senders, in server
@@ -765,6 +771,8 @@ pub enum EnvelopePayload {
         id: i64,
         title: String,
         name: String,
+        /// `stickerSet.is_installed`: the set is in the user's collection.
+        is_installed: bool,
         stickers: Vec<StickerItem>,
         files: Vec<ParsedFile>,
     },
@@ -1513,6 +1521,20 @@ pub struct MessageActions {
     pub can_be_replied: bool,
     pub can_get_link: bool,
     pub can_get_message_thread: bool,
+    /// Content may be saved locally (Save As…, Copy Image, Show in Folder).
+    pub can_be_saved: bool,
+    /// The message can be reported with `reportChat`.
+    pub can_report_chat: bool,
+    /// `getMessageViewers` works ("N Seen").
+    pub can_get_viewers: bool,
+    /// `getMessageReadDate` works ("Seen 12:34" in private chats).
+    pub can_get_read_date: bool,
+    /// An admin may report it with `reportSupergroupSpam`.
+    pub can_report_supergroup_spam: bool,
+    /// An admin may delete other members' reactions on it.
+    pub can_delete_reactions: bool,
+    /// A scheduled message may be rescheduled or sent now.
+    pub can_edit_scheduling_state: bool,
 }
 
 impl MessageActions {
