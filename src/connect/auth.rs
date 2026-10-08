@@ -4,12 +4,15 @@ use crate::ids::RequestId;
 use crate::state::{PasswordOp, RequestPurpose};
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::requests::{
-    cancel_recovery_email_address_verification, check_authentication_code,
-    check_authentication_email_code, check_authentication_password, check_phone_number_code,
-    get_password_state, recover_authentication_password, request_authentication_password_recovery,
-    request_qr_code_authentication, resend_authentication_code, resend_phone_number_code,
-    resend_recovery_email_address_code, send_phone_number_code, set_authentication_email_address,
-    set_authentication_phone_number, set_password, set_recovery_email_address,
+    cancel_password_reset, cancel_recovery_email_address_verification, check_authentication_code,
+    check_authentication_email_code, check_authentication_password, check_login_email_address_code,
+    check_phone_number_code, check_recovery_email_address_code, get_password_state,
+    recover_authentication_password, recover_password, request_authentication_password_recovery,
+    request_password_recovery, request_qr_code_authentication, resend_authentication_code,
+    resend_login_email_address_code, resend_phone_number_code, resend_recovery_email_address_code,
+    reset_password, send_phone_number_code, set_authentication_email_address,
+    set_authentication_phone_number, set_login_email_address, set_password,
+    set_recovery_email_address,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -239,7 +242,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// so double-clicks can't double-send a password change. Passwords
     /// are never stored on the session or diagnostics — they ride the
     /// request JSON only.
-    fn password_op_send(
+    pub(super) fn password_op_send(
         &mut self,
         op: PasswordOp,
         build: impl FnOnce(RequestId) -> String,
@@ -352,6 +355,121 @@ impl<S: JsonSender> ConnectDriver<S> {
             PasswordOp::AbortEmailSetup,
             cancel_recovery_email_address_verification,
         )
+    }
+
+    /// Batch 6: re-fetch `getPasswordState` even though a cached state
+    /// exists — after a reset, a cancelled reset or a login-email change.
+    pub fn refresh_password_state(&mut self) -> Result<RequestId, ConnectSendError> {
+        self.password_op_send(PasswordOp::Fetch, get_password_state)
+    }
+
+    /// Batch 6: send `checkRecoveryEmailAddressCode` (schema 1.8.67, line
+    /// 11461) — confirm the pending recovery email with the emailed code.
+    /// The code rides the request JSON only.
+    pub fn check_recovery_email_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
+        if code.is_empty()
+            || !self
+                .session
+                .password_state
+                .as_ref()
+                .is_some_and(|s| s.pending_email_pattern.is_some())
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(PasswordOp::CheckEmailCode, |extra| {
+            check_recovery_email_address_code(extra, code)
+        })
+    }
+
+    /// Batch 6: "Forgot password?" while signed in — `requestPasswordRecovery`
+    /// (schema 1.8.67, line 11470). Needs a recovery email on the account.
+    pub fn request_twofa_recovery_code(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self
+            .session
+            .password_state
+            .as_ref()
+            .is_some_and(|s| s.has_password && s.has_recovery_email_address)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.twofa_flow.recovery_code_sent_to = None;
+        self.password_op_send(PasswordOp::RequestRecoveryCode, request_password_recovery)
+    }
+
+    /// Batch 6: `recoverPassword` (schema 1.8.67, line 11479) with the
+    /// emailed code. An empty `new_password` removes the password
+    /// (tdesktop's "Disable cloud password" on the recovery screen).
+    pub fn recover_twofa_password(
+        &mut self,
+        code: &str,
+        new_password: &str,
+        new_hint: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if code.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(PasswordOp::RecoverPassword, |extra| {
+            recover_password(extra, code, new_password, new_hint)
+        })
+    }
+
+    /// Batch 6: `resetPassword` (schema 1.8.67, line 11482) — remove the
+    /// password without the old one; TDLib enforces the 7-day wait.
+    pub fn reset_twofa_password(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self
+            .session
+            .password_state
+            .as_ref()
+            .is_some_and(|s| s.has_password)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(PasswordOp::ResetPassword, reset_password)
+    }
+
+    /// Batch 6: `cancelPasswordReset` (schema 1.8.67, line 11485); valid
+    /// while `pending_reset_date` is set.
+    pub fn cancel_twofa_password_reset(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !self
+            .session
+            .password_state
+            .as_ref()
+            .is_some_and(|s| s.pending_reset_date > 0)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(PasswordOp::CancelPasswordReset, cancel_password_reset)
+    }
+
+    /// Batch 6: `setLoginEmailAddress` (schema 1.8.67, line 11443) — the
+    /// new address gets a code, confirmed with
+    /// [`Self::check_login_email_code`].
+    pub fn set_login_email(&mut self, email: &str) -> Result<RequestId, ConnectSendError> {
+        if email.trim().is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.twofa_flow.login_email_code_sent_to = None;
+        self.password_op_send(PasswordOp::SetLoginEmail, |extra| {
+            set_login_email_address(extra, email.trim())
+        })
+    }
+
+    /// Batch 6: `resendLoginEmailAddressCode` (schema 1.8.67, line 11446).
+    pub fn resend_login_email_code(&mut self) -> Result<RequestId, ConnectSendError> {
+        if self.session.twofa_flow.login_email_code_sent_to.is_none() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(PasswordOp::SetLoginEmail, resend_login_email_address_code)
+    }
+
+    /// Batch 6: `checkLoginEmailAddressCode` (schema 1.8.67, line 11449).
+    pub fn check_login_email_code(&mut self, code: &str) -> Result<RequestId, ConnectSendError> {
+        if code.is_empty() || self.session.twofa_flow.login_email_code_sent_to.is_none() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.password_op_send(PasswordOp::CheckLoginEmailCode, |extra| {
+            check_login_email_address_code(extra, code)
+        })
     }
 
     /// Send `checkAuthenticationPassword` when auth is WaitPassword.

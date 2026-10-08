@@ -50,6 +50,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_menu = Some(menu);
+        self.message_menu_link = self.take_right_clicked_link(menu.position);
+        self.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
         self.message_menu_selection = super::selectable_text::selected_message_text(window, cx)

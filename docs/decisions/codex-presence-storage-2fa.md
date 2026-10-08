@@ -1,0 +1,26 @@
+## Gap audit batches 4 and 6 — presence, account notices, storage, two-step recovery (2026-10-08)
+
+No README parity item is completed (the affected items were already checked but incomplete, the audit's "R!"), so there is no parity fragment.
+
+### Batch 4 — presence and account hygiene
+
+- **`online` option.** tdesktop (`Api::Updates::updateOnline`): online while the window is active and the user was not idle for `offlineIdleTimeout` (30 s default); background, hidden or minimised is offline. `quill::presence` holds the rule and `PresenceSync` (send only on change; reset when auth is not Ready). TDLib re-announces a true value itself, so no periodic resend. The 40 ms poll loop calls `sync_presence`. On quit `wait_closed` sends `online=false` first (best effort, same ordered queue as `close`).
+- **Idle clock.** In-window input (invisible canvas, mouse move/down/scroll/key, capture phase) instead of an OS idle API: while the window is active it receives all the user's input, so it is the same signal as `LastUserInputTime` and needs no macOS/Windows/Linux backends.
+- **New-login alert.** `updateUnconfirmedSession` carries no session id (schema 1.8.67), so the update marks the sessions list stale; the refetch resolves `session.is_unconfirmed` ids (`ParsedSession.is_unconfirmed`). tdesktop text and layout: a strip above the chat list ("Someone just got access to your messages!", "Yes, it's me" / "No, it's not me!"). Yes → `confirmSession` for each, toast "New Login Allowed"; No → `terminateSession` for each, then the "New Login(s) Prevented" box with the attempts and the never-send-your-code warning. Errors keep the alert and show a line.
+- **Service notifications.** Queue of popups (`updateServiceNotification`); `API_WITHDRAWAL_FEATURE_DISABLED_*` and empty ones are skipped like tdesktop. `AUTH_KEY_DROP_*` is the forced-logout popup: no close, one "Log out" button (`logOut`; tdesktop's `forceLogOut`). Text is plain (message text or caption); entities are not rendered here.
+- **Terms of service.** `updateTermsOfService` → locked dialog (no Esc/backdrop/close button) with the age checkbox when `min_user_age > 0`, "Agree & Continue" → `acceptTermsOfService`, "Decline" → tdesktop's "sorry" text → "Decline & Delete" → irreversible-delete warning → "Delete now" → `deleteAccount("Decline ToS update", "")` (TDLib's documented requirement). Never exercised live. Text is plain.
+
+### Batch 6 — storage and two-step fixes
+
+- **Clear cache is real.** `removeAllFilesFromDownloads` (which only dropped completed Downloads entries) is gone. `optimizeStorage` with size/ttl/count/immunity 0 deletes everything eligible (TDLib default types: not thumbnails, profile photos, stickers, wallpapers); `return_deleted_file_statistics` gives "{size} freed on your device!" (tdesktop string), then usage is refetched. Per-type ("Clear selected", ticked rows) and per-chat ("Clear" in the chat rows, `chat_ids`, `0` = no chat) clears, each behind an inline confirmation; one clear at a time.
+- **Limits.** tdesktop's "Total size limit" / "Clear files older than" map to TDLib's storage optimizer options `storage_max_files_size` (KiB), `storage_max_time_from_last_access` (s), `storage_max_file_count` and `use_storage_optimizer`, which only runs while on (verified in `FileGcParameters.cpp` / `StorageManager.cpp`). Choosing any limit sets all four (unset limits get a "never" sentinel so TDLib's silent defaults — 100 MB, 23 h, 40000 files — do not apply); no limits switches the optimizer off. Current values come back as `updateOption`. Chips replace tdesktop's slider (6 sizes, 5 ages instead of 18 / 16) because the kit `Select` needs per-field entities; a deliberate simplification.
+- **Recovery email code.** Pending confirmation shows the pattern ("Confirmation code sent to …"), a code field and "Confirm and Finish" (`checkRecoveryEmailAddressCode`), next to the existing resend and abort.
+- **Forgot password / reset.** "Forgot password?" under every form that asks for the current password. With a recovery email: `requestPasswordRecovery` → code + new password (empty = turn off) → `recoverPassword`; "Unable to access your email?" → reset confirmation. Without: reset confirmation (tdesktop wording). `resetPassword` answers ok/pending/declined; pending shows "You can reset your password in N days." with "Cancel reset" (`cancelPasswordReset`, confirmed), once the date passes "Reset password"; declined shows the retry wait. After reset/cancel the password state is refetched for the date.
+- **Login email.** Shown only when the account has one (tdesktop): "Change email" → `setLoginEmailAddress` → code → `checkLoginEmailAddressCode`, with resend.
+- All new 2FA steps reuse `PasswordStateOp` (one op in flight, honest classified error lines, codes/passwords never stored or logged).
+
+### Verified gaps
+All of gaps.md items 9, 10, 14 and 15 were accurate (no `setOption("online")`, no handlers for the three updates, `Clear cache` only touched Downloads, `checkRecoveryEmailAddressCode` unused).
+
+### Not done
+Live verification of any of this (destructive or account-changing); OS-level idle time; rich-text (entities) rendering of terms and service notices; the first-time login-email setup (`suggestedActionSetLoginEmailAddress`).

@@ -13,7 +13,6 @@ use gpui_kit::component::table::{Table, TableBody, TableRow};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::ids::ChatId;
 use quill::key_fingerprint;
 use quill::telegram::envelope::{ParsedSecretChat, ParsedSession, ParsedWebsite, PasswordState};
 use std::cell::RefCell;
@@ -37,7 +36,26 @@ impl QuillApp {
             let state = session.as_ref().and_then(|s| s.password_state.clone());
             let loading = session.is_some_and(|s| s.password_state_loading);
             let error = session.as_ref().and_then(|s| s.password_op_error.clone());
+            // A finished recovery / reset / login-email step reports on the
+            // status screen.
+            if this.twofa_step_finished()
+                && matches!(this.twofa_view, TwofaView::Recover | TwofaView::LoginEmail)
+            {
+                this.twofa_view = TwofaView::Status;
+                this.twofa_confirm = None;
+            }
+            let notice = this.twofa_notice_line();
             let mut body = div().flex().flex_col().gap_2();
+            if let Some(line) = notice.filter(|_| this.twofa_view == TwofaView::Status) {
+                body = body.child(
+                    div()
+                        .id("twofa-notice")
+                        .role(Role::Status)
+                        .aria_label(line.clone())
+                        .text_sm()
+                        .child(line),
+                );
+            }
             if let Some(line) = error {
                 body = body.child(
                     div()
@@ -64,6 +82,8 @@ impl QuillApp {
                 (TwofaView::Change, _) => this.twofa_change_body(cx, body),
                 (TwofaView::Disable, _) => this.twofa_disable_body(cx, body),
                 (TwofaView::Email, _) => this.twofa_email_body(cx, body),
+                (TwofaView::Recover, _) => this.twofa_recover_body(cx, body),
+                (TwofaView::LoginEmail, _) => this.twofa_login_email_body(cx, body),
             };
             let footer = div().flex().justify_end().child(
                 Button::new("close-twofa")
@@ -562,6 +582,8 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.twofa_email
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa_code
+            .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
     /// Slice A3: close the overlay and drop any pending terminate
@@ -593,6 +615,14 @@ impl QuillApp {
     pub(super) fn goto_twofa_view(&mut self, view: TwofaView) {
         self.twofa_view = view;
         self.twofa_notice = None;
+        self.twofa_confirm = None;
+        if view == TwofaView::Status {
+            self.clear_twofa_flow();
+        } else if let Some(session) = self.live.as_mut().map(|l| &mut l.driver.session) {
+            session.twofa_flow.notice = None;
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.twofa_flow.notice = None;
+        }
     }
 
     /// Slice A2: one `setPassword` round-trip — enable (empty current),
@@ -793,40 +823,10 @@ impl QuillApp {
                 })),
         );
         if let Some(pattern) = &state.pending_email_pattern {
-            body = body
-                .child(div().text_xs().child(format!(
-                    "Your recovery email {pattern} is not yet active and pending confirmation."
-                )))
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(
-                            Button::new("twofa-resend-code")
-                                .label("Resend code")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.resend_twofa_code(cx);
-                                })),
-                        )
-                        .child(
-                            // TGX `AbortRecoveryEmail`, verbatim. The abort
-                            // is confirmed like TGX's
-                            // `AbortRecoveryEmailConfirm` — one tap opens
-                            // the shared confirm dialog. No chat is
-                            // involved, so the dialog's chat id is a dummy.
-                            Button::new("twofa-abort-email")
-                                .label("Abort recovery email setup")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.open_group_confirm(
-                                        ChatId(0),
-                                        GroupConfirmAction::AbortRecoveryEmailSetup,
-                                        cx,
-                                    );
-                                })),
-                        ),
-                );
+            body = body.child(self.twofa_pending_email_block(cx, pattern, loading));
+        }
+        if let Some(row) = self.twofa_login_email_row(cx, state) {
+            body = body.child(row);
         }
         let mut actions = div().flex().gap_2().flex_wrap();
         if state.has_password {
@@ -977,6 +977,7 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child("Sent securely to Telegram."),
             )
+            .child(self.twofa_forgot_link(cx))
             .child(self.twofa_form_buttons(cx, TwofaView::Change, "Change password"))
     }
 
@@ -1014,6 +1015,7 @@ impl QuillApp {
                 .text_color(cx.theme().muted_foreground)
                 .child("Sent securely to Telegram."),
         )
+        .child(self.twofa_forgot_link(cx))
         .child(self.twofa_form_buttons(cx, TwofaView::Disable, "Turn off"))
     }
 
@@ -1052,6 +1054,7 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child("The change stays pending until the new address is confirmed."),
             )
+            .child(self.twofa_forgot_link(cx))
             .child(self.twofa_form_buttons(cx, TwofaView::Email, "Save"))
     }
 
@@ -1070,7 +1073,9 @@ impl QuillApp {
             TwofaView::Change => "twofa-submit-change",
             TwofaView::Disable => "twofa-submit-disable",
             TwofaView::Email => "twofa-submit-email",
-            TwofaView::Status => unreachable!("status view has no submit buttons"),
+            TwofaView::Status | TwofaView::Recover | TwofaView::LoginEmail => {
+                unreachable!("this view has its own buttons")
+            }
         };
         div()
             .flex()

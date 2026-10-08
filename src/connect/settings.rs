@@ -13,16 +13,17 @@ use crate::telegram::envelope::{
     ReactionNotificationSettings, ScopeNotificationSettings,
 };
 use crate::telegram::requests::{
-    delete_account, disconnect_all_websites, disconnect_website, get_account_ttl,
+    OptimizeStorage, delete_account, disconnect_all_websites, disconnect_website, get_account_ttl,
     get_active_sessions, get_chat_notification_settings_exceptions, get_connected_websites,
     get_saved_notification_sounds, get_scope_notification_settings, get_storage_statistics,
-    reset_all_notification_settings, set_account_ttl, set_chat_notification_settings,
-    set_message_sender_block_list, set_reaction_notification_settings,
-    set_scope_notification_settings, terminate_all_other_sessions, terminate_session,
-    toggle_session_can_accept_calls, toggle_session_can_accept_secret_chats,
+    optimize_storage, reset_all_notification_settings, set_account_ttl,
+    set_chat_notification_settings, set_message_sender_block_list, set_option_boolean,
+    set_option_integer, set_reaction_notification_settings, set_scope_notification_settings,
+    terminate_all_other_sessions, terminate_session, toggle_session_can_accept_calls,
+    toggle_session_can_accept_secret_chats,
 };
 use crate::telegram::requests_data_settings::{
-    get_auto_download_settings_presets, remove_all_files_from_downloads, set_auto_download_settings,
+    get_auto_download_settings_presets, set_auto_download_settings,
 };
 use crate::telegram::requests_privacy::{
     PrivacySettingKey, get_blocked_message_senders, get_privacy_rules,
@@ -609,26 +610,69 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// Slice S4: "Clear cache" (`removeAllFilesFromDownloads`, schema
-    /// 1.8.67, :14056 — completed downloads dropped from the filesystem
-    /// cache, in-flight downloads left alone). The confirmed `ok` drops
-    /// the cached stats and refetches the post-clear numbers.
-    pub fn clear_download_cache(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
+    /// Batch 6: "Clear cache" and its per-type / per-chat variants
+    /// (`optimizeStorage`, schema 1.8.67, :15799). `file_types` are
+    /// `FileType` constructor names (empty = every type except thumbnails,
+    /// profile photos, stickers and wallpapers), `chat_ids` the chats to
+    /// clear (empty = all). The answer carries the statistics of the
+    /// deleted files, shown as "{size} freed on your device!"; the usage
+    /// numbers are refetched. One clear at a time.
+    pub fn clear_storage(
+        &mut self,
+        file_types: &[&str],
+        chat_ids: &[i64],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.storage_clearing {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::RemoveAllFilesFromDownloads, None);
-        if let Err(err) = self
-            .sender
-            .send_json(&remove_all_files_from_downloads(extra))
-        {
+        let extra = self.session.request(RequestPurpose::OptimizeStorage, None);
+        let params = OptimizeStorage {
+            file_types,
+            chat_ids,
+            ..OptimizeStorage::everything(50)
+        };
+        self.session.storage_freed = None;
+        self.session.storage_clearing = true;
+        self.session.data_storage_error = None;
+        if let Err(err) = self.sender.send_json(&optimize_storage(extra, &params)) {
             self.session.requests.take(extra);
+            self.session.storage_clearing = false;
             self.session.data_storage_error = Some("Couldn't clear the cache.".to_string());
             return Err(err);
         }
         Ok(extra)
+    }
+
+    /// Batch 6: apply the local storage limits (tdesktop "Total size
+    /// limit" / "Clear files older than"): the four TDLib options
+    /// `crate::storage_limits::options_for` lists. `None` = no limit of
+    /// that kind; neither switches TDLib's storage optimizer off.
+    pub fn set_storage_limits(
+        &mut self,
+        size: Option<i64>,
+        keep: Option<i64>,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        for (name, value) in crate::storage_limits::options_for(size, keep) {
+            let extra = self.session.request(RequestPurpose::SetStorageOption, None);
+            let json = match value {
+                crate::storage_limits::StorageOptionValue::Boolean(on) => {
+                    set_option_boolean(extra, name, on)
+                }
+                crate::storage_limits::StorageOptionValue::Integer(n) => {
+                    set_option_integer(extra, name, Some(n))
+                }
+            };
+            if let Err(err) = self.sender.send_json(&json) {
+                self.session.requests.take(extra);
+                self.session.data_storage_error =
+                    Some("Couldn't save the storage limits.".to_string());
+                return Err(err);
+            }
+        }
+        Ok(())
     }
 
     /// Slice S4: persist the per-network auto-download settings

@@ -815,6 +815,54 @@ pub(super) fn demo_seed_for(
             "screenshot demo — active sessions (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyNewLogin => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ready-new-login (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyLoginPrevented => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ready-login-prevented (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyServiceNotice => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ready-service-notice (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyTerms => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ready-terms (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyLocalStorage => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ready-local-storage (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::Ready2faForgot => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ready-2fa-forgot (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::Ready2faReset => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ready-2fa-reset (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyLoginEmail => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — ready-login-email (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyRecoveryEmail => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1148,6 +1196,11 @@ impl QuillApp {
             TextareaState::new(window, cx)
                 .placeholder("Hint (optional)")
                 .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        let twofa_code = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Code")
                 .submit_on_enter(false)
         });
         let twofa_email = cx.new(|cx| {
@@ -1545,6 +1598,8 @@ impl QuillApp {
             twofa_hint,
             twofa_email,
             twofa_notice: None,
+            twofa_code,
+            twofa_confirm: None,
             account_lifecycle: AccountLifecycleState::new(window, cx),
             accounts_ui: AccountsUiState::new(window, cx),
             credentials,
@@ -1672,7 +1727,8 @@ impl QuillApp {
             shortcuts_open: false,
             sticker_settings_open: false,
             data_storage_editor: None,
-            data_storage_confirm_clear: false,
+            storage_confirm: None,
+            storage_selected: Default::default(),
             sessions_open: false,
             device_qr_scanner: None,
             device_login_qr: None,
@@ -1698,6 +1754,11 @@ impl QuillApp {
             animation_sound: Default::default(),
             polled_notify: (std::time::Instant::now(), false),
             window_active: std::cell::Cell::new(true),
+            presence: Default::default(),
+            login_prevented: None,
+            terms_step: Default::default(),
+            terms_age_ok: false,
+            terms_age_error: false,
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
             motion: Default::default(),
@@ -1783,6 +1844,13 @@ impl QuillApp {
             deep_link_dialog: None,
             deep_link_invite: None,
             pending_deep_link_open: None,
+            pending_link: None,
+            right_clicked_link: None,
+            message_menu_link: None,
+            link_tooltip: None,
+            open_link_confirm: None,
+            link_popup: None,
+            pending_viewer_seek: None,
             dismissed_keyboards: std::collections::HashSet::new(),
             permissions_dialog: None,
             username_dialog: None,

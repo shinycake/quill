@@ -163,6 +163,8 @@ impl Render for QuillApp {
         if let Some((chat_id, action)) = self.pending_deep_link_open.take() {
             self.open_deep_link_chat(chat_id, &action, window, cx);
         }
+        // A clicked mention, hashtag, command or link (`entity_links`).
+        self.run_pending_link(window, cx);
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
         // chats whose active stories should be refreshed (an own story
         // posted from another client appears in the tray this way).
@@ -272,6 +274,8 @@ impl Render for QuillApp {
             // Window-wide text selection: message text can be selected and
             // copied within a message (Telegram Desktop).
             .child(gpui_kit::base::TextSelectionLayer)
+            // Batch 4: input clock for the online/idle presence.
+            .child(super::presence::input_probe())
             // Capture phase: with message text selected, ⌘C copies it even
             // while the composer has focus.
             .capture_action(cx.listener(|_this, _: &CopyAction, window, cx| {
@@ -536,6 +540,7 @@ impl Render for QuillApp {
                 self.search_is_open(),
                 cx,
             ))
+            .children(self.unconfirmed_login_banner(cx))
             .when(
                 matches!(
                     self.update_state,
@@ -768,6 +773,14 @@ impl Render for QuillApp {
             // M1: right-click message context menu.
             .when_some(self.message_menu, |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
+            })
+            // The copy menu of a phone number, card number or date, and
+            // the tooltip of a text link.
+            .when_some(self.link_popup_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            .when_some(self.link_tooltip_overlay(), |this, overlay| {
+                this.child(overlay)
             })
             // The expanded reaction selector, where the menu was.
             .when_some(self.media_panel.reaction, |this, target| {
