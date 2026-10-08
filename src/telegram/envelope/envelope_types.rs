@@ -178,6 +178,12 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         blocked: bool,
     },
+    /// Batch 8: `updateChatActionBar` (schema 1.8.67, line 10549) — `None`
+    /// when the bar was removed.
+    UpdateChatActionBar {
+        chat_id: ChatId,
+        action_bar: Option<ChatActionBar>,
+    },
     /// Slice CL3: `reportChat` result (schema 1.8.67, lines 9210–9219).
     /// The chat list only sends the simple spam report (empty
     /// option_id/message_ids/text, schema:3667), so every non-Ok
@@ -250,6 +256,9 @@ pub enum EnvelopePayload {
         /// 3627). Gates the row-menu Report item (`reportChat`, schema
         /// line 15693).
         can_be_reported: bool,
+        /// Batch 8: `chat.action_bar` (schema 1.8.67, line 3627). Refreshed
+        /// by `updateChatActionBar`.
+        action_bar: Option<ChatActionBar>,
         /// Slice CL3: `chat.block_list` is `blockListMain` (schema 1.8.67,
         /// lines 3627 / 9692). Refreshed by `updateChatBlockList`
         /// (schema line 10594); drives the row-menu Block/Unblock label.

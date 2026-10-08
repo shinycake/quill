@@ -129,11 +129,13 @@ impl Session {
                 unread_mention_count,
                 unread_reaction_count,
                 can_be_reported,
+                action_bar,
                 blocked,
                 positions,
                 last_message,
             } => {
                 self.set_chat_protected(chat_id.0, has_protected_content);
+                self.set_chat_action_bar(chat_id.0, action_bar);
                 self.apply_update_new_chat(
                     chat_id,
                     title,
@@ -632,11 +634,23 @@ impl Session {
             EnvelopePayload::UpdateChatPendingJoinRequests {
                 chat_id,
                 total_count,
-                ..
+                user_ids,
             } => {
                 self.pending_join_request_counts
                     .insert(chat_id, total_count);
+                // Batch 8: the (up to three) newest requesters back the
+                // requests bar's avatars.
+                if user_ids.is_empty() {
+                    self.pending_join_request_users.remove(&chat_id);
+                } else {
+                    self.pending_join_request_users.insert(chat_id, user_ids);
+                }
             }
+            // Batch 8: `updateChatActionBar` (schema 1.8.67, line 10526).
+            EnvelopePayload::UpdateChatActionBar {
+                chat_id,
+                action_bar,
+            } => self.set_chat_action_bar(chat_id.0, action_bar),
             EnvelopePayload::UpdateChatNotificationSettings {
                 chat_id,
                 notification_settings,
@@ -2666,13 +2680,20 @@ impl Session {
         chat_id: ChatId,
         message: Option<&ParsedMessage>,
     ) {
+        // Service messages preview as their wording ("Dana pinned \"hi\""),
+        // computed before the chat is borrowed mutably.
+        let service_preview = message.and_then(|message| {
+            let content = effective_content(&message.content, message.ephemeral.as_ref());
+            self.service_text_for(chat_id, content, message.sender, message.is_outgoing)
+                .map(|text| text.plain())
+        });
         let chat = self
             .chats
             .entry(chat_id.0)
             .or_insert_with(|| placeholder_chat(chat_id));
         if let Some(message) = message {
             let content = effective_content(&message.content, message.ephemeral.as_ref());
-            chat.last_preview = content.preview();
+            chat.last_preview = service_preview.unwrap_or_else(|| content.preview());
             chat.last_preview_style = preview_style(content, &chat.last_preview);
             chat.last_preview_thumb = match content {
                 MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => photo
@@ -2682,11 +2703,15 @@ impl Session {
                     .map(std::sync::Arc::new),
                 _ => None,
             };
-            chat.last_preview_sender = preview_sender_name(
-                message.is_outgoing,
-                message.author_signature.as_deref(),
-                &chat.title,
-            );
+            chat.last_preview_sender = if chat.last_preview_style.service {
+                String::new()
+            } else {
+                preview_sender_name(
+                    message.is_outgoing,
+                    message.author_signature.as_deref(),
+                    &chat.title,
+                )
+            };
             chat.last_message = Some(ChatLastMessage {
                 id: message.id,
                 date: message.date,

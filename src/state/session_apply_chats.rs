@@ -2,6 +2,23 @@
 use super::*;
 
 impl Session {
+    /// Batch 8: store (or drop) a chat's action bar.
+    pub fn set_chat_action_bar(&mut self, chat_id: i64, bar: Option<ChatActionBar>) {
+        match bar {
+            Some(bar) => {
+                self.chat_action_bars.insert(chat_id, bar);
+            }
+            None => {
+                self.chat_action_bars.remove(&chat_id);
+            }
+        }
+    }
+
+    /// Batch 8: the chat's current action bar, if any.
+    pub fn chat_action_bar(&self, chat_id: ChatId) -> Option<&ChatActionBar> {
+        self.chat_action_bars.get(&chat_id.0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_new_chat(
         &mut self,

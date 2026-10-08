@@ -13,7 +13,7 @@
 
 use crate::ids::{ChatId, FileId, MessageId};
 use crate::state::HistoryMessage;
-use crate::telegram::envelope::{MessageActions, MessageContent};
+use crate::telegram::envelope::{MessageActions, MessageContent, PhotoContent, ServiceAction};
 use crate::text::TextEntity;
 use crate::voice::format_voice_duration;
 
@@ -629,42 +629,53 @@ pub fn collect_media_items(messages: &[HistoryMessage]) -> Vec<MediaViewerItem> 
     messages.iter().filter_map(media_viewer_item).collect()
 }
 
+fn photo_viewer_item(message: &HistoryMessage, photo: &PhotoContent) -> Option<MediaViewerItem> {
+    let largest = photo.open_file_id()?;
+    let mut display = vec![largest];
+    if let Some(thumb) = photo.thumb_size()
+        && thumb.file_id != largest
+    {
+        display.push(thumb.file_id);
+    }
+    for size in &photo.sizes {
+        if !display.contains(&size.file_id) {
+            display.push(size.file_id);
+        }
+    }
+    Some(MediaViewerItem {
+        chat_id: message.chat_id,
+        message_id: message.id,
+        kind: MediaViewerKind::Photo,
+        display_file_ids: display,
+        download_file_id: largest,
+        play_file_id: None,
+        duration_secs: None,
+        mime_type: None,
+        start_timestamp: None,
+        caption: photo.caption.clone(),
+        caption_entities: photo.caption_entities.clone(),
+        duration_label: None,
+        natural_size: photo
+            .largest_size()
+            .map(|size| (size.width, size.height))
+            .filter(|(w, h)| *w > 0 && *h > 0),
+    })
+}
+
 fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
     match &message.content {
         // Spoilers are viewable once revealed (the cover takes the click
         // before that), as in Telegram Desktop; secret media never.
-        MessageContent::Photo(photo) if !photo.is_secret => {
-            let largest = photo.open_file_id()?;
-            let mut display = vec![largest];
-            if let Some(thumb) = photo.thumb_size()
-                && thumb.file_id != largest
-            {
-                display.push(thumb.file_id);
+        MessageContent::Photo(photo) if !photo.is_secret => photo_viewer_item(message, photo),
+        // A chat-photo change or a suggested profile photo opens in the
+        // viewer like any photo.
+        MessageContent::Action(action) => match action.as_ref() {
+            ServiceAction::ChatPhoto { photo: Some(photo) }
+            | ServiceAction::SuggestProfilePhoto { photo: Some(photo) } => {
+                photo_viewer_item(message, photo)
             }
-            for size in &photo.sizes {
-                if !display.contains(&size.file_id) {
-                    display.push(size.file_id);
-                }
-            }
-            Some(MediaViewerItem {
-                chat_id: message.chat_id,
-                message_id: message.id,
-                kind: MediaViewerKind::Photo,
-                display_file_ids: display,
-                download_file_id: largest,
-                play_file_id: None,
-                duration_secs: None,
-                mime_type: None,
-                start_timestamp: None,
-                caption: photo.caption.clone(),
-                caption_entities: photo.caption_entities.clone(),
-                duration_label: None,
-                natural_size: photo
-                    .largest_size()
-                    .map(|size| (size.width, size.height))
-                    .filter(|(w, h)| *w > 0 && *h > 0),
-            })
-        }
+            _ => None,
+        },
         MessageContent::Video(video) if !video.is_secret => {
             let thumb = video.thumb_file_id.filter(|id| id.0 != 0);
             let download = thumb.unwrap_or(video.file_id);

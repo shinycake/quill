@@ -34,9 +34,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{HistoryMessage, OutboxReceipt, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{
-    MessageContent, ParsedFile, chat_ttl_service_label, effective_content,
-};
+use quill::telegram::envelope::{MessageContent, ParsedFile, effective_content};
 use quill::text::TextEntity;
 use quill::voice::format_voice_duration;
 use std::collections::HashMap;
@@ -546,7 +544,7 @@ pub(super) fn session_history_row(
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Phase B4: whether the row's chat is a secret chat — selects the
     // "Self-destruct" vs "Auto-delete" service-row wording.
-    is_secret: bool,
+    _is_secret: bool,
     // Phase C2i: session for `messageCall` peer resolution ("Call
     // again" only for 1:1 chats).
     session: Option<&Session>,
@@ -580,38 +578,11 @@ pub(super) fn session_history_row(
     } else {
         look
     };
-    // Phase B4: timer-change service rows (`messageChatSetMessageAutoDeleteTime`,
-    // schema 1.8.67 line 5387) render as a centered neutral notice — no
+    // Service actions (members, pins, gifts, topics…), timer changes and
+    // screenshots: Telegram Desktop's wording as a centered pill — no
     // bubble, no reply/react/edit/delete controls.
-    if let MessageContent::Service(text) = &message.content {
-        return service_pill(("service-message", message.id.0 as u64), text.clone(), cx)
-            .into_any_element();
-    }
-    if let MessageContent::ChatTtlChanged { secs } = &message.content {
-        return service_pill(
-            ("ttl-service-row", message.id.0 as u64),
-            chat_ttl_service_label(*secs, is_secret),
-            cx,
-        )
-        .into_any_element();
-    }
-    // Phase S1: `messageScreenshotTaken` service row (schema 1.8.67,
-    // line 5375) — centered neutral notice, attributed via
-    // `message.is_outgoing` (TGX `YouTookAScreenshot` /
-    // `XTookAScreenshot`).
-    if matches!(message.content, MessageContent::ScreenshotTaken) {
-        let text = if message.is_outgoing {
-            "You took a screenshot".to_string()
-        } else {
-            format!(
-                "{} took a screenshot",
-                sender
-                    .as_ref()
-                    .map_or("Someone", |label| label.name.as_str())
-            )
-        };
-        return service_pill(("screenshot-service-row", message.id.0 as u64), text, cx)
-            .into_any_element();
+    if super::service_row::is_service_row(&message.content) {
+        return super::service_row::service_message_row(message, session, files, media_roots, cx);
     }
     // Slice G9: community service rows (`messageChatAddedToCommunity`,
     // `messageChatRemovedFromCommunity`, `messageChatJoinFromCommunity`,
@@ -1054,7 +1025,7 @@ pub(super) fn session_history_row(
         MessageContent::Venue(venue) => Some(venue_row(message.id.0 as u64, venue, cx)),
         MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
-        MessageContent::Service(_)
+        MessageContent::Action(_)
         | MessageContent::Text(_)
         | MessageContent::RichMessage(_)
         | MessageContent::Game(_)

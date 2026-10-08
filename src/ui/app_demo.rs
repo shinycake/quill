@@ -311,6 +311,7 @@ pub(super) fn demo_seed_for(
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyJoinBar
+        | ScreenshotDemo::ReadyTopBars
         | ScreenshotDemo::ReadySearchPreviews
         | ScreenshotDemo::ReadyMultilineRows => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
@@ -607,6 +608,12 @@ pub(super) fn demo_seed_for(
                 as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — message menu".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyServiceMessages => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — service messages".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyBubbleHeaders => (
@@ -1926,6 +1933,8 @@ impl QuillApp {
             folder_delete_confirm: None,
             folder_menu_open: false,
             add_contact_dialog: None,
+            block_bar_dialog: None,
+            join_requests_dialog: None,
             edit_profile_dialog: None,
             import_contacts_dialog: None,
         };

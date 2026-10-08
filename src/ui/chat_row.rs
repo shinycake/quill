@@ -605,7 +605,8 @@ pub(super) fn session_chat_row(
         .flex_col()
         .justify_center()
         .rounded_md()
-        .cursor_pointer()
+        // Plain arrow while hovering: on macOS 26 the pointing hand reads
+        // as a drag affordance, which a row you only click isn't.
         .when(!selected, |this| this.pressable(cx.theme()))
         .aria_selected(selected)
         .when(selected, |this| {
