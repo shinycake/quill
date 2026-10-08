@@ -66,6 +66,7 @@ pub mod tray;
 pub mod update_install;
 pub mod updater;
 pub mod video;
+pub mod video_decode;
 pub mod voice;
 #[cfg(feature = "ui")]
 pub mod voice_input;
