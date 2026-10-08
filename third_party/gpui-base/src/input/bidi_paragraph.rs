@@ -14,6 +14,8 @@
 use std::ops::Range;
 use std::rc::Rc;
 
+use unicode_segmentation::UnicodeSegmentation as _;
+
 use gpui::{
     App, Bounds, Pixels, Point, SharedString, TextAlign, TextRun, Window, point, px, size,
 };
@@ -178,7 +180,7 @@ impl BidiParagraph {
         }
         const ELLIPSIS: &str = "\u{2026}";
         let boundaries: Vec<usize> = text
-            .char_indices()
+            .grapheme_indices(true)
             .map(|(i, _)| i)
             .chain(std::iter::once(text.len()))
             .collect();
@@ -288,9 +290,10 @@ impl BidiParagraph {
                 // A word wider than the row: break it at characters.
                 let mut piece_width = px(0.);
                 let word_text = &text[word.start..core_end];
-                for (i, c) in word_text.char_indices() {
+                // Grapheme clusters are never cut: an emoji sequence is one unit.
+                for (i, g) in word_text.grapheme_indices(true) {
                     let at = word.start + i;
-                    let cw = measure(at..at + c.len_utf8(), window);
+                    let cw = measure(at..at + g.len(), window);
                     if piece_width > px(0.) && piece_width + cw > wrap_width {
                         breaks.push(at);
                         piece_width = px(0.);

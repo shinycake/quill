@@ -35,6 +35,12 @@ mod tests {
         base_rtl: Option<bool>,
     }
 
+    thread_local! {
+        /// Every string handed to the text system, to see which pieces the bidi
+        /// layout shapes (a platform picks the colour emoji font per shaped string).
+        static SHAPED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
     impl gpui_kit::PlatformTextSystem for BidiTextSystem {
         fn add_fonts(&self, fonts: Vec<std::borrow::Cow<'static, [u8]>>) -> gpui_kit::Result<()> {
             gpui_kit::NoopTextSystem.add_fonts(fonts)
@@ -91,6 +97,7 @@ mod tests {
             font_size: Pixels,
             runs: &[gpui_kit::FontRun],
         ) -> gpui_kit::LineLayout {
+            SHAPED.with(|shaped| shaped.borrow_mut().push(text.to_string()));
             let mut layout = gpui_kit::NoopTextSystem.layout_line(text, font_size, runs);
             if text.is_empty() {
                 return layout;
@@ -1091,5 +1098,154 @@ mod tests {
             })
             .unwrap();
         });
+    }
+
+    // --- emoji in right-to-left text (codex:rtl-emoji) ---
+
+    /// The emoji of the report and its relatives: variation selector, skin tone, ZWJ family,
+    /// flag, keycap.
+    const EMOJI: [&str; 5] = [
+        "\u{261D}\u{FE0F}",
+        "\u{1F44D}\u{1F3FD}",
+        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+        "\u{1F1EE}\u{1F1F1}",
+        "1\u{FE0F}\u{20E3}",
+    ];
+    const CAPTION: &str =
+        "תיעוד התקיפה, אחרי התרעת פינוי, על בית משפחת א-סואפירי בשכונת צברה בעיר עזה";
+
+    /// Asserts that, of the strings shaped since `SHAPED` was cleared, none starts with a
+    /// character that belongs to the cluster before it or ends in a joiner, and that `emoji`
+    /// was shaped whole inside one string.
+    fn assert_emoji_shaped_whole(emoji: &str, composer: bool) {
+        use unicode_segmentation::UnicodeSegmentation as _;
+        SHAPED.with(|shaped| {
+            let shaped = shaped.borrow();
+            assert!(
+                shaped.iter().any(|s| s.contains(emoji)),
+                "{emoji:?} is never shaped whole: {shaped:?}"
+            );
+            // The composer's soft wrapping (GPUI's own line wrapper) measures single
+            // characters; those are never drawn.
+            for s in shaped.iter().filter(|s| !composer || s.chars().count() > 1) {
+                let first = s.chars().next();
+                assert!(
+                    !matches!(
+                        first,
+                        Some('\u{FE0F}' | '\u{200D}' | '\u{20E3}' | '\u{1F3FB}'..='\u{1F3FF}')
+                    ),
+                    "{s:?} starts inside a cluster"
+                );
+                assert!(!s.ends_with('\u{200D}'), "{s:?} ends on a joiner");
+                // No string ends half way through a flag (regional indicator pair).
+                let tail = s.graphemes(true).last().unwrap_or("");
+                let regional = |c: char| ('\u{1F1E6}'..='\u{1F1FF}').contains(&c);
+                if tail.chars().all(regional) && !tail.is_empty() {
+                    assert_eq!(tail.chars().count() % 2, 0, "{s:?} splits a flag");
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn emoji_in_a_hebrew_bubble_are_shaped_whole_and_sit_at_the_left_end() {
+        for emoji in EMOJI {
+            for wrap in [2000., 150.] {
+                with_composer(None, |cx, handle, _| {
+                    cx.update_window(handle, |_, window, _| {
+                        let text = format!("{CAPTION} {emoji}");
+                        SHAPED.with(|s| s.borrow_mut().clear());
+                        let p = paragraph(&text, wrap, window);
+                        assert_emoji_shaped_whole(emoji, false);
+                        if wrap > 1000. {
+                            // One row: the emoji ends the sentence, so it is drawn at the
+                            // left end, left of the last Hebrew word.
+                            let width = px(wrap);
+                            let emoji_at = text.rfind(emoji).unwrap();
+                            let last_word = text.rfind("עזה").unwrap();
+                            let e = p.position_for_index(emoji_at, width).unwrap().x;
+                            let w = p.position_for_index(last_word, width).unwrap().x;
+                            assert!(e < w, "{emoji:?} at {e:?} is not left of the word at {w:?}");
+                        }
+                    })
+                    .unwrap();
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn emoji_between_hebrew_and_latin_text_are_shaped_whole() {
+        for emoji in EMOJI {
+            for text in [
+                format!("שלום {emoji} עולם"),
+                format!("hello {emoji} שלום"),
+                format!("{emoji}{emoji} שלום"),
+            ] {
+                with_composer(None, |cx, handle, _| {
+                    cx.update_window(handle, |_, window, _| {
+                        SHAPED.with(|s| s.borrow_mut().clear());
+                        let _ = paragraph(&text, 2000., window);
+                        assert_emoji_shaped_whole(emoji, false);
+                    })
+                    .unwrap();
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn a_hebrew_preview_never_elides_inside_an_emoji() {
+        // A line of emoji clusters, narrower than the whole: whatever the cut, no piece of
+        // the shaped output starts or ends inside a cluster.
+        for emoji in EMOJI {
+            with_composer(None, |cx, handle, _| {
+                cx.update_window(handle, |_, window, _| {
+                    let text = format!("שלום עולם {emoji}{emoji}{emoji}{emoji}");
+                    let style = window.text_style();
+                    let size = style.font_size.to_pixels(window.rem_size());
+                    let runs = vec![style.to_run(text.len())];
+                    let shared: gpui_kit::SharedString = text.into();
+                    for width in (40..260).step_by(7) {
+                        SHAPED.with(|s| s.borrow_mut().clear());
+                        let line = BidiParagraph::layout_one_line(
+                            &shared,
+                            &runs,
+                            size,
+                            px(20.),
+                            px(width as f32),
+                            window,
+                        )
+                        .expect("right-to-left text");
+                        assert!(line.width() <= px(width as f32));
+                        SHAPED.with(|shaped| {
+                            for s in shaped.borrow().iter() {
+                                assert!(
+                                    !s.starts_with(['\u{FE0F}', '\u{200D}', '\u{20E3}']),
+                                    "{s:?} (width {width}) starts inside a cluster"
+                                );
+                                assert!(!s.ends_with('\u{200D}'), "{s:?} (width {width})");
+                            }
+                        });
+                    }
+                })
+                .unwrap();
+            });
+        }
+    }
+
+    #[test]
+    fn emoji_typed_into_a_hebrew_composer_are_shaped_whole() {
+        for emoji in EMOJI {
+            with_composer(None, |cx, handle, input| {
+                cx.update_window(handle, |_, window, cx| {
+                    window.render_frame(cx);
+                    SHAPED.with(|s| s.borrow_mut().clear());
+                    set_text(&input, &format!("{CAPTION} {emoji}"), window, cx);
+                    assert_emoji_shaped_whole(emoji, true);
+                })
+                .unwrap();
+            });
+        }
     }
 }
