@@ -32,7 +32,7 @@ unconditionally on Linux (no feature flag drops it):
 sudo apt-get install libgtk-3-dev libasound2-dev
 ```
 
-`libasound2-dev` (ALSA) is for call sounds: `rodio`/`cpal` link `alsa-sys`.
+`libasound2-dev` (ALSA) is for call sounds and voice-note recording: `rodio`/`cpal` link `alsa-sys`.
 
 Without it the build fails in the `gdk-pixbuf-sys` build script
 (`gdk-3.0.pc` missing). Not needed on macOS (tray-icon uses Cocoa there).

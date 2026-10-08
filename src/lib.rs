@@ -69,6 +69,10 @@ pub mod update_install;
 pub mod updater;
 pub mod video;
 pub mod voice;
+#[cfg(feature = "ui")]
+pub mod voice_input;
+#[cfg(feature = "ui")]
+pub mod voice_opus;
 #[cfg(windows)]
 pub mod winreg;
 

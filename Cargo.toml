@@ -14,7 +14,7 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder"]
+ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus"]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
@@ -41,6 +41,10 @@ rodio = { version = "0.22", optional = true, default-features = false, features 
 # and RFC 8251-conformant Opus decoder, no C dependency.
 ogg = { version = "0.9", optional = true }
 opus-decoder = { version = "0.1", optional = true }
+# Voice-note recording: microphone via cpal (same backend rodio plays
+# through) and a pure-Rust Opus encoder, muxed with `ogg`. No external binary.
+cpal = { version = "0.17", optional = true, default-features = false }
+rusty-opus = { version = "1", optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 sha2 = "0.10"
 smallvec = { version = "1", optional = true }
