@@ -221,6 +221,59 @@ impl QuillApp {
             });
             self.status_note = "screenshot demo — select → pick dest → forwarded".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadySelectMode)) {
+            let mut draft =
+                ForwardDraft::from_message(ChatId(11), MessageId(101), false).expect("select 101");
+            draft.toggle(ChatId(11), MessageId(102), false);
+            self.pending_forward = Some(draft);
+            self.status_note = "screenshot demo — selection mode".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyReplyMedia)) {
+            self.composer.update(cx, |input, cx| {
+                input.set_value("nice shot", window, cx);
+                input.focus(window, cx);
+            });
+            self.pending_reply = Some(ComposerReplyTo::new(
+                ChatId(11),
+                MessageId(201),
+                "Loaded photo",
+            ));
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyEditMedia)) {
+            let content = self
+                .demo_session
+                .as_ref()
+                .and_then(|session| session.histories.get(&11))
+                .and_then(|history| history.messages.get(&302))
+                .map(|message| message.content.clone());
+            self.pending_edit = content.and_then(|content| {
+                ComposerEdit::from_own_content(ChatId(11), MessageId(302), true, false, &content)
+            });
+            self.composer.update(cx, |input, cx| {
+                input.set_value("Outgoing photo", window, cx);
+                input.focus(window, cx);
+            });
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyReveal)) {
+            // The last message "just arrived": reveal it (freeze the frame
+            // with `QUILL_MOTION_HOLD_MS`).
+            // Read, so the list opens at the bottom (no unread anchor).
+            if let Some(session) = self.demo_session.as_mut() {
+                if let Some(chat) = session.chats.get_mut(&11) {
+                    chat.unread_count = 0;
+                }
+                if let Some(history) = session.histories.get_mut(&11) {
+                    history.unread_anchor = None;
+                }
+            }
+            let rows = self
+                .demo_session
+                .as_ref()
+                .and_then(|session| session.histories.get(&11))
+                .map_or(0, |history| history.messages.len());
+            self.motion
+                .start_reveal(rows.saturating_sub(1), std::time::Instant::now());
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyReactions)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

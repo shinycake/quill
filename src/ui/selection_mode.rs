@@ -3,11 +3,24 @@
 //! each row shows a check circle, and ⌘C copies the selected messages.
 
 use super::app::QuillApp;
+use super::motion;
+use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::telegram::envelope::effective_content;
+
+/// A history row's selection-mode decoration (see
+/// [`QuillApp::selection_row`]).
+#[derive(Default)]
+pub(super) struct SelectionRow {
+    pub(super) overlay: Option<AnyElement>,
+    /// Opacity of the selected-row tint, `0..=1`.
+    pub(super) tint: f32,
+    /// How far an outgoing bubble slides left, px.
+    pub(super) slide: f32,
+}
 
 impl QuillApp {
     /// Whether selection mode is on in `chat_id`.
@@ -17,61 +30,178 @@ impl QuillApp {
             .is_some_and(|draft| draft.from_chat_id == chat_id && !draft.message_ids.is_empty())
     }
 
-    /// The row overlay while selecting: it takes the row's clicks (links
-    /// and media don't fire) and shows the check circle.
-    pub(super) fn selection_overlay(
+    /// Follow selection mode for the motion state; returns the check fade
+    /// (`0..=1`) and the top bar slide (`0..=1`). Asks the frame clock for
+    /// frames while either moves. An inactive window snaps.
+    pub(super) fn selection_motion(&self, chat_id: ChatId, cx: &mut Context<Self>) -> (f32, f32) {
+        let now = std::time::Instant::now();
+        let on = self.selecting_in(chat_id);
+        let mut fx = self.motion.selection.borrow_mut();
+        if on && let Some(draft) = self.pending_forward.as_ref() {
+            fx.last_count = draft.count();
+        }
+        fx.sync_mode(on, self.window_active.get(), now);
+        if fx.moving(now) {
+            self.request_animation_tick(60, cx);
+        }
+        (fx.mode(now), fx.bar(now))
+    }
+
+    /// What a history row shows for selection mode: the fading check
+    /// circle (an overlay that also takes the row's clicks while the mode
+    /// is on), the selection tint, and how far an outgoing bubble slides
+    /// aside (`Message::draw`, `history_view_message.cpp:2313`).
+    pub(super) fn selection_row(
         &self,
         chat_id: ChatId,
         message_id: MessageId,
         pending: bool,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if !self.selecting_in(chat_id) {
-            return None;
-        }
+    ) -> SelectionRow {
+        let (mode, _) = self.selection_motion(chat_id, cx);
         let selected = self
             .pending_forward
             .as_ref()
             .is_some_and(|draft| draft.contains(message_id));
-        let accent = cx.theme().primary;
-        Some(
+        if mode <= 0. && !selected {
+            return SelectionRow::default();
+        }
+        let now = std::time::Instant::now();
+        let checked = self.motion.selection.borrow_mut().check(
+            message_id.0,
+            selected,
+            self.window_active.get(),
+            now,
+        );
+        let interactive = self.selecting_in(chat_id);
+        let overlay = (mode > 0.).then(|| {
+            let ring = cx.theme().background;
+            let (fill, tick) = motion::check_frame(checked);
+            let size = motion::CHECK_SIZE;
+            // The circle slides in from the right edge while it fades.
+            let edge = 11.5 - 15. * (1. - mode);
             div()
                 .id(("selection-overlay", message_id.0 as u64))
                 .absolute()
                 .inset_0()
-                .occlude()
-                .cursor_pointer()
-                .flex()
-                .items_end()
-                .pl_1()
-                .pb_1()
+                .when(interactive, |this| {
+                    this.occlude()
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_forward_select(chat_id, message_id, pending, cx);
+                        }))
+                })
                 .child(
                     div()
-                        .size(px(20.))
+                        .absolute()
+                        .right(px(edge))
+                        .bottom(px(motion::CHECK_BOTTOM_SKIP + 1.))
+                        .size(px(size))
+                        .opacity(mode)
                         .rounded_full()
                         .border_2()
-                        .border_color(if selected {
-                            accent
-                        } else {
-                            gpui_kit::white().opacity(0.6)
-                        })
-                        .when(selected, |this| this.bg(accent))
+                        .border_color(ring)
+                        .bg(gpui_kit::black().opacity(0.3))
                         .flex()
                         .items_center()
                         .justify_center()
-                        .when(selected, |this| {
+                        .when(fill > 0., |this| {
                             this.child(
-                                Icon::new(gpui_kit::assets::IconName::Check)
-                                    .size(px(12.))
-                                    .text_color(gpui_kit::white()),
+                                div()
+                                    .size(px((size - 4.) * fill))
+                                    .rounded_full()
+                                    .bg(cx.theme().success),
+                            )
+                        })
+                        .when(tick > 0., |this| {
+                            // The tick wipes in from the left.
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .left(px(2.))
+                                    .top(px(2.))
+                                    .w(px(12. * tick))
+                                    .h(px(12.))
+                                    .overflow_hidden()
+                                    .child(
+                                        div().flex_none().size(px(12.)).child(
+                                            Icon::new(gpui_kit::assets::IconName::Check)
+                                                .size(px(12.))
+                                                .text_color(gpui_kit::white()),
+                                        ),
+                                    ),
                             )
                         }),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_forward_select(chat_id, message_id, pending, cx);
-                }))
-                .into_any_element(),
-        )
+                .into_any_element()
+        });
+        SelectionRow {
+            overlay,
+            tint: checked,
+            slide: motion::bubble_slide(mode),
+        }
+    }
+
+    /// The conversation header while selecting: Telegram Desktop swaps the
+    /// top bar for "Forward N", "Delete N" and "Cancel", sliding the
+    /// buttons down over 150 ms (`toggleSelectedControls`).
+    pub(super) fn with_selection_bar(
+        &self,
+        chat_id: ChatId,
+        header: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (_, slide) = self.selection_motion(chat_id, cx);
+        if slide <= 0. {
+            return header.into_any_element();
+        }
+        let count = self.motion.selection.borrow().last_count;
+        let bar = div()
+            .id("selection-bar")
+            .absolute()
+            .left_0()
+            .right_0()
+            .h_full()
+            .top(relative(-(1. - slide)))
+            .occlude()
+            .px_4()
+            .flex()
+            .items_center()
+            .gap_2()
+            .bg(cx.theme().background)
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("selection-forward")
+                    .label(format!("Forward {count}"))
+                    .primary()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_forward_picker(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("selection-delete")
+                    .label(format!("Delete {count}"))
+                    .primary()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.confirm_delete_selection(window, cx);
+                    })),
+            )
+            .child(div().flex_1())
+            .child(
+                Button::new("selection-cancel")
+                    .label("Cancel")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.clear_forward(window, cx);
+                    })),
+            );
+        div()
+            .relative()
+            .overflow_hidden()
+            .child(header)
+            .child(bar)
+            .into_any_element()
     }
 
     /// The selected messages as text, as Telegram Desktop copies them: a

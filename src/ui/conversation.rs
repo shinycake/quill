@@ -54,6 +54,8 @@ pub(super) struct HistoryRowsKey {
 /// Rows before the end of a window that stops short of the latest
 /// message at which the next newer page is requested.
 const NEWER_PREFETCH_ROWS: usize = 8;
+/// More rows than this arriving at once (a page, not a message) just appear.
+const NEW_ROW_REVEAL_MAX: usize = 3;
 pub(super) fn apply_ready_typing(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let json = r#"{"@type":"updateChatAction","chat_id":11,"topic_id":null,"sender_id":{"@type":"messageSenderUser","user_id":11},"action":{"@type":"chatActionTyping"}}"#;
@@ -266,7 +268,7 @@ impl QuillApp {
             session.is_some_and(|s| Self::can_start_secret_chat_with(s, user_id))
         });
         let chat_search_open = self.chat_search_is_open();
-        div()
+        let header = div()
             .id("conversation-header")
             .px_4()
             .py_2()
@@ -376,7 +378,9 @@ impl QuillApp {
                         })
                         .child(self.chat_navigation_menu(cx)),
                 )
-            })
+            });
+        // Selecting messages swaps the bar for Forward N / Delete N / Cancel.
+        self.with_selection_bar(chat_id, header, cx)
     }
 
     /// `parity:platform-chat-export` — start exporting a chat's history.
@@ -596,7 +600,13 @@ impl QuillApp {
                             this.child(self.forward_success_banner(&result, cx))
                         })
                         .when(
-                            self.pending_forward.is_some() && !self.forward_picker_open,
+                            self.pending_forward.is_some()
+                                && !self.forward_picker_open
+                                // Selecting here: the header carries the buttons.
+                                && !self
+                                    .session()
+                                    .and_then(|s| s.open_chat)
+                                    .is_some_and(|chat| self.selecting_in(chat)),
                             |this| {
                                 this.when_some(self.pending_forward.clone(), |this, draft| {
                                     this.child(self.forward_selection_banner(&draft, cx))
@@ -1283,10 +1293,6 @@ impl QuillApp {
                             run_start: run_start && index > 0,
                             day_label: day_label(message.date),
                             unread_divider: first_unread(&message),
-                            selected_forward: self
-                                .pending_forward
-                                .as_ref()
-                                .is_some_and(|draft| draft.contains(message.id)),
                             quote_preview: session.and_then(|s| s.reply_quote_preview(&message)),
                             forward_from: message
                                 .forward_info
@@ -1316,7 +1322,6 @@ impl QuillApp {
                     run_start,
                     day_label: None,
                     unread_divider: false,
-                    selected_forward: false,
                     quote_preview: None,
                     forward_from: None,
                     seek_bar: None,
@@ -1406,13 +1411,27 @@ impl QuillApp {
                         // last row in view and read on from there.
                         let added = count.saturating_sub(prev_count);
                         let newer_page = self.history_had_newer;
+                        let mut following = false;
                         self.history_scroller.update(cx, |state, cx| {
-                            let following = state.is_following_tail();
+                            following = state.is_following_tail();
                             state.append(added, cx);
                             if newer_page && following {
                                 state.scroll_to_item(prev_count.saturating_sub(1), cx);
                             }
                         });
+                        // tdesktop reveals a few new rows at the bottom of a
+                        // history that is pinned there (`itemRevealDuration`);
+                        // an inactive window just snaps.
+                        if following
+                            && !newer_page
+                            && prev_count > 0
+                            && added <= NEW_ROW_REVEAL_MAX
+                            && self.window_active.get()
+                            && self.motion.list_fills.get()
+                        {
+                            self.motion
+                                .start_reveal(prev_count, std::time::Instant::now());
+                        }
                     }
                     (_, Some(_), Some((_, prev_last)))
                         if last == Some(prev_last) && count > prev_count =>
@@ -1523,6 +1542,8 @@ impl QuillApp {
         let date_pill = self.scroll_date_pill(cx);
         let probe = self.scroll_probe.clone();
         let top_probe = self.scroll_top_probe.clone();
+        let reveal = self.history_reveal(cx);
+        let reveal_probe = self.motion.reveal_probe();
         super::selectable_text::selection_viewport(
             div()
                 .id(id)
@@ -1540,7 +1561,8 @@ impl QuillApp {
                 .when_some(self.appearance.wallpaper_rgb, |this, color| {
                     this.bg(rgb(color))
                 })
-                .child(
+                .child(super::history_fx::reveal_viewport(
+                    reveal,
                     MessageScroller::new(
                         id,
                         self.history_scroller.clone(),
@@ -1593,7 +1615,7 @@ impl QuillApp {
                     })
                     .size_full()
                     .min_h_0(),
-                )
+                ))
                 // Paints after the rows: the first row reaching below the
                 // top edge is what the floating date describes.
                 .child(
@@ -1601,6 +1623,7 @@ impl QuillApp {
                         |_, _, _| {},
                         move |bounds, _, _, _| {
                             let mut rows = probe.borrow_mut();
+                            reveal_probe.note(&rows, count, bounds.top());
                             let top = rows
                                 .iter()
                                 .filter(|(_, row, _)| row.bottom() > bounds.top())
@@ -1772,11 +1795,12 @@ impl QuillApp {
                 // M1: `cx.listener` closures must be `'static`, so the
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);
-                let selection_overlay =
-                    self.selection_overlay(row_chat, row_msg, message.pending, cx);
+                let selection = self.selection_row(row_chat, row_msg, message.pending, cx);
+                let (selection_overlay, selection_tint, selection_slide) =
+                    (selection.overlay, selection.tint, selection.slide);
+                let outgoing = message.is_outgoing;
                 let vanishing = inputs.vanishing;
                 let highlighted = inputs.highlighted;
-                let selected_forward = inputs.selected_forward;
                 let failed = message.failed;
                 let run_start = inputs.run_start;
                 let element = div()
@@ -1791,7 +1815,9 @@ impl QuillApp {
                         highlighted.then(|| self.jump_highlight_alpha(cx)).flatten(),
                         |this, alpha| this.bg(cx.theme().primary.opacity(alpha)),
                     )
-                    .when(selected_forward, |this| this.bg(cx.theme().selection))
+                    .when(selection_tint > 0., |this| {
+                        this.bg(cx.theme().selection.opacity(selection_tint))
+                    })
                     // M1: failed sends stay visibly marked so the retry
                     // affordance is noticed (`updateMessageSendFailed`).
                     .when(failed, |this| this.bg(cx.theme().danger.opacity(0.08)))
@@ -1834,7 +1860,16 @@ impl QuillApp {
                             cx.notify();
                         }),
                     )
-                    .child(row)
+                    // Selecting slides an outgoing bubble aside for the check.
+                    .child(if outgoing && selection_slide > 0. {
+                        div()
+                            .relative()
+                            .right(px(selection_slide))
+                            .child(row)
+                            .into_any_element()
+                    } else {
+                        row.into_any_element()
+                    })
                     // M1: explicit failed-send notice with a retry hint.
                     .when(failed, |this| {
                         this.child(
