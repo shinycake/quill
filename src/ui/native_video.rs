@@ -2,7 +2,7 @@
 //! audio and A/V sync), an `AVPlayerItemVideoOutput` hands back the
 //! current frame as a `CVPixelBuffer`, and GPUI's `surface` element draws
 //! it straight from the GPU. This replaces the old ffmpeg PNG-frame
-//! extraction plus a separate `ffplay` audio process.
+//! extraction plus its separate audio process.
 //!
 //! The UI pulls a frame each animation frame while playing
 //! ([`NativeVideo::frame`]); nothing is decoded ahead of time.

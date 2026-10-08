@@ -14,7 +14,7 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio"]
+ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder"]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
@@ -34,8 +34,13 @@ raw-window-handle = { version = "0.6.2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
-# Call sounds: in-process playback (CoreAudio / WASAPI / ALSA via cpal).
-rodio = { version = "0.22", optional = true, default-features = false, features = ["playback"] }
+# In-process audio: call tones, notification sounds, voice/audio playback
+# (CoreAudio / WASAPI / ALSA via cpal; MP3/AAC/FLAC/Vorbis/WAV via symphonia).
+rodio = { version = "0.22", optional = true, default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav"] }
+# Ogg/Opus voice notes (symphonia has no Opus decoder): pure-Rust Ogg demux
+# and RFC 8251-conformant Opus decoder, no C dependency.
+ogg = { version = "0.9", optional = true }
+opus-decoder = { version = "0.1", optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 sha2 = "0.10"
 smallvec = { version = "1", optional = true }

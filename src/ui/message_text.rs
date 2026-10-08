@@ -420,7 +420,11 @@ pub(super) fn kit_avatar_element(
         return Avatar::new()
             .name(name)
             .with_size(size)
-            .src(path.to_path_buf())
+            // Decoded at the drawn size, not the file's (`image_budget`).
+            .src(super::image_budget::sized_image(
+                super::image_budget::SizedSource::Path(std::sync::Arc::from(path)),
+                size,
+            ))
             .into_any_element();
     }
     initials_circle(name, size)
@@ -937,11 +941,6 @@ fn inline_paragraph(
     let mut actions = Vec::new();
     let mut spoilers: Vec<(std::ops::Range<usize>, f32)> = Vec::new();
     let mut inline_emoji: Vec<super::selectable_text::InlineEmoji> = Vec::new();
-    // Right-to-left paragraphs keep the emoji's own glyph: the platform
-    // shapes them in visual order, so a byte index no longer maps to an x
-    // position and an overlay could not be placed reliably.
-    let plain_rtl =
-        quill::text::is_rtl_text(&runs.iter().map(|r| r.text.as_str()).collect::<String>());
     for (offset, run) in runs.iter().enumerate() {
         if run.text.is_empty() {
             continue;
@@ -956,19 +955,16 @@ fn inline_paragraph(
         let hidden = style.spoiler && !revealed.contains(&key);
         // A resolved custom emoji (animated first) becomes a placeholder
         // glyph; unresolved ones and hidden spoilers keep their text.
-        let visual = run
-            .custom_emoji_id
-            .filter(|_| !hidden && !plain_rtl)
-            .and_then(|id| {
-                layered
-                    .get(&id)
-                    .map(|clip| super::selectable_text::InlineEmojiVisual::Clip(clip.clone()))
-                    .or_else(|| {
-                        emoji_paths.get(&id).map(|source| {
-                            super::selectable_text::InlineEmojiVisual::Image(source.clone())
-                        })
+        let visual = run.custom_emoji_id.filter(|_| !hidden).and_then(|id| {
+            layered
+                .get(&id)
+                .map(|clip| super::selectable_text::InlineEmojiVisual::Clip(clip.clone()))
+                .or_else(|| {
+                    emoji_paths.get(&id).map(|source| {
+                        super::selectable_text::InlineEmojiVisual::Image(source.clone())
                     })
-            });
+                })
+        });
         let range = if visual.is_some() {
             let at = text.len();
             text.push(super::selectable_text::EMOJI_PLACEHOLDER);
@@ -1062,6 +1058,7 @@ fn inline_paragraph(
         ));
     }
     let full: SharedString = text.clone().into();
+    let bidi_source = (highlights.clone(), mono.clone());
     let styled = StyledText::new(text)
         .with_highlights(highlights)
         .with_font_family_overrides(mono);
@@ -1071,6 +1068,7 @@ fn inline_paragraph(
         full,
         styled,
     )
+    .bidi(bidi_source.0, bidi_source.1)
     .selection_color(accent().opacity(0.35).into())
     .message(msg_key)
     // Messages read top to bottom by id; paragraphs within one in order.

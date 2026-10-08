@@ -462,9 +462,12 @@ pub(super) enum HistoryAnim {
     Stickers,
     /// A round video message that autoplays inline (macOS).
     Note,
+    /// An animated sticker authored at 60 fps, like most Telegram stickers
+    /// (not part of `all`).
+    Stickers60,
 }
 
-/// `QUILL_DEMO_HISTORY_ANIM=stickers,emoji,video,note,spoiler` (any
+/// `QUILL_DEMO_HISTORY_ANIM=stickers,emoji,video,note,spoiler,stickers60` (any
 /// subset; `all` for the first four): the ready-chats fixture's open chat
 /// ends with that content, to measure what history animations cost.
 pub(super) fn demo_history_anim() -> Vec<HistoryAnim> {
@@ -487,6 +490,7 @@ pub(super) fn demo_history_anim() -> Vec<HistoryAnim> {
             "note" => &all[3..4],
             "all" => &all[..],
             "spoiler" => &[HistoryAnim::Spoiler],
+            "stickers60" => &[HistoryAnim::Stickers60],
             _ => &[],
         })
         .copied()
@@ -536,6 +540,15 @@ fn history_anim_fixture(wanted: &[HistoryAnim]) -> Vec<String> {
                         outgoing,
                     ));
                 }
+            }
+            HistoryAnim::Stickers60 => {
+                let sticker = file(4601, "demo-sticker-60.tgs");
+                out.push(message(
+                    format!(
+                        r#"{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"4601","set_id":"77","width":128,"height":128,"emoji":"😀","format":{{"@type":"stickerFormatTgs"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{sticker}}}}}"#
+                    ),
+                    false,
+                ));
             }
             HistoryAnim::Emoji => {
                 // Three custom emoji (UTF-16 offsets 0, 3 and 6).

@@ -5,8 +5,9 @@
 //! (highlights for bold, links, spoilers…) and keeps the inline click
 //! targets (links, spoilers) a plain `InteractiveText` had.
 
+use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
 use gpui_kit::base::{
-    TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
+    RunGeometry, TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
 };
 use gpui_kit::*;
 use std::cell::Cell;
@@ -79,8 +80,51 @@ pub(super) struct SelectableRichText {
     spoilers: Vec<(Range<usize>, f32)>,
     /// The animation layer that draws the specks (`anim_layer`), if any.
     layer: Option<super::anim_layer::Layer>,
+    /// What the text is made of, for the bidirectional path (see [`Self::bidi`]).
+    bidi_source: Option<BidiSource>,
+    /// The paragraph laid out by the bidirectional path, once prepainted.
+    paragraph: Option<Rc<BidiParagraph>>,
+    /// The paragraph measured during layout, to reuse when its wrap width stands.
+    measured: Rc<std::cell::RefCell<Option<(Option<Pixels>, Rc<BidiParagraph>)>>>,
     /// Custom emoji painted over placeholder glyphs.
     emoji: Vec<InlineEmoji>,
+}
+
+/// Highlights and font overrides of a paragraph, as `StyledText` takes them.
+#[derive(Clone)]
+struct BidiSource {
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
+    font_families: Vec<(Range<usize>, SharedString)>,
+}
+
+/// Text runs for `text` under `style`: the highlights over the base style, then the
+/// font-family overrides, the way `StyledText` resolves them at layout time.
+fn text_runs(text: &str, style: &TextStyle, source: &BidiSource) -> Vec<TextRun> {
+    let mut runs = Vec::new();
+    let mut ix = 0;
+    for (range, highlight) in &source.highlights {
+        if ix < range.start {
+            runs.push(style.clone().to_run(range.start - ix));
+        }
+        runs.push(style.clone().highlight(*highlight).to_run(range.len()));
+        ix = range.end;
+    }
+    if ix < text.len() {
+        runs.push(style.to_run(text.len() - ix));
+    }
+    let mut offset = 0;
+    for run in &mut runs {
+        let end = offset + run.len;
+        if let Some((_, family)) = source
+            .font_families
+            .iter()
+            .find(|(range, _)| offset >= range.start && end <= range.end)
+        {
+            run.font.family = family.clone();
+        }
+        offset = end;
+    }
+    runs
 }
 
 impl SelectableRichText {
@@ -96,6 +140,9 @@ impl SelectableRichText {
             message: None,
             spoilers: Vec::new(),
             layer: None,
+            bidi_source: None,
+            paragraph: None,
+            measured: Rc::default(),
             emoji: Vec::new(),
         }
     }
@@ -107,6 +154,24 @@ impl SelectableRichText {
             self.layer = super::anim_layer::current();
         }
         self.emoji = emoji;
+        self
+    }
+
+    /// Text with right-to-left characters is wrapped in typing order and each row ordered
+    /// visually (GPUI wraps by glyph order, which puts the end of a Hebrew sentence on the
+    /// first row). The highlights and font overrides given to the `StyledText` are needed
+    /// again for that layout.
+    pub(super) fn bidi(
+        mut self,
+        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        font_families: Vec<(Range<usize>, SharedString)>,
+    ) -> Self {
+        if quill::text::has_rtl_text(&self.text) {
+            self.bidi_source = Some(BidiSource {
+                highlights,
+                font_families,
+            });
+        }
         self
     }
 
@@ -151,12 +216,78 @@ impl SelectableRichText {
         self
     }
 
-    fn clicked_range(&self, layout: &TextLayout, position: Point<Pixels>) -> Option<usize> {
-        let index = layout.index_for_position(position).ok()?;
-        self.click_ranges
-            .iter()
-            .position(|range| range.contains(&index))
+    /// The laid-out text, from whichever path made it (after prepaint).
+    fn laid(&self, bounds: Bounds<Pixels>) -> Laid {
+        match &self.paragraph {
+            Some(paragraph) => Laid::Bidi {
+                paragraph: paragraph.clone(),
+                bounds,
+            },
+            None => Laid::Styled(self.styled.layout().clone()),
+        }
     }
+}
+
+/// The laid-out text a paragraph reads positions from, whichever path made it.
+#[derive(Clone)]
+enum Laid {
+    Styled(TextLayout),
+    Bidi {
+        paragraph: Rc<BidiParagraph>,
+        bounds: Bounds<Pixels>,
+    },
+}
+
+impl Laid {
+    fn index_for_position(&self, position: Point<Pixels>) -> Option<usize> {
+        match self {
+            Laid::Styled(layout) => layout.index_for_position(position).ok(),
+            Laid::Bidi { paragraph, bounds } => paragraph
+                .index_for_position(position - bounds.origin, bounds.size.width)
+                .ok(),
+        }
+    }
+
+    /// Rectangles covering the byte `range`, one per row (and per visual piece).
+    fn range_rects(&self, range: Range<usize>) -> Vec<Bounds<Pixels>> {
+        match self {
+            Laid::Styled(layout) => {
+                let (Some(start), Some(end)) = (
+                    layout.position_for_index(range.start),
+                    layout.position_for_index(range.end),
+                ) else {
+                    return Vec::new();
+                };
+                selection_quads(start, end, layout.bounds(), layout.line_height())
+            }
+            Laid::Bidi { paragraph, bounds } => paragraph
+                .range_rects(range, bounds.size.width)
+                .into_iter()
+                .map(|rect| Bounds::new(rect.origin + bounds.origin, rect.size))
+                .collect(),
+        }
+    }
+
+    fn geometry(&self) -> Rc<dyn RunGeometry> {
+        match self {
+            Laid::Styled(layout) => Rc::new(layout.clone()),
+            Laid::Bidi { paragraph, bounds } => {
+                paragraph.geometry(bounds.origin, bounds.size.width)
+            }
+        }
+    }
+}
+
+/// The box for an emoji whose placeholder glyph occupies `rect` (one text
+/// row): the glyph's box, enlarged a little and centred on the row.
+fn emoji_box(rect: Bounds<Pixels>, font: Pixels) -> Bounds<Pixels> {
+    let advance = rect.size.width;
+    let edge = advance.max(font * 0.5) * EMOJI_SCALE;
+    let origin = point(
+        rect.origin.x - (edge - advance) / 2.,
+        rect.origin.y + (rect.size.height - edge) / 2.,
+    );
+    Bounds::new(origin, size(edge, edge))
 }
 
 /// The box a custom emoji with the placeholder at `range` is painted in:
@@ -253,6 +384,35 @@ impl Element for SelectableRichText {
                 (handle.clone(), (handle, refresh))
             },
         );
+        if let Some(source) = self.bidi_source.clone() {
+            let style = window.text_style();
+            let font_size = style.font_size.to_pixels(window.rem_size());
+            let line_height = window.pixel_snap(
+                style
+                    .line_height
+                    .to_pixels(font_size.into(), window.rem_size()),
+            );
+            let runs = text_runs(&self.text, &style, &source);
+            let text = self.text.clone();
+            let measured = self.measured.clone();
+            let layout_id = window.request_measured_layout(Default::default(), {
+                move |known, available, window, _| {
+                    let wrap = known.width.or(match available.width {
+                        AvailableSpace::Definite(width) => Some(width),
+                        _ => None,
+                    });
+                    let paragraph =
+                        BidiParagraph::layout(&text, &runs, font_size, line_height, wrap, window)
+                            .map(Rc::new);
+                    let size = paragraph.as_ref().map_or_else(Size::default, |p| p.size());
+                    if let Some(paragraph) = paragraph {
+                        *measured.borrow_mut() = Some((wrap, paragraph));
+                    }
+                    size
+                }
+            });
+            return (layout_id, handle);
+        }
         let (layout_id, ()) = self
             .styled
             .request_layout(global_id, inspector_id, window, cx);
@@ -268,15 +428,54 @@ impl Element for SelectableRichText {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        self.styled
-            .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
+        if let Some(source) = self.bidi_source.clone() {
+            // The measured paragraph stands when it was wrapped at this width; else lay it out
+            // again at the width it was given.
+            let measured = self
+                .measured
+                .borrow()
+                .as_ref()
+                .filter(|(wrap, _)| *wrap == Some(bounds.size.width))
+                .map(|(_, paragraph)| paragraph.clone());
+            self.paragraph = measured.or_else(|| {
+                let style = window.text_style();
+                let font_size = style.font_size.to_pixels(window.rem_size());
+                let line_height = window.pixel_snap(
+                    style
+                        .line_height
+                        .to_pixels(font_size.into(), window.rem_size()),
+                );
+                let runs = text_runs(&self.text, &style, &source);
+                BidiParagraph::layout(
+                    &self.text,
+                    &runs,
+                    font_size,
+                    line_height,
+                    Some(bounds.size.width),
+                    window,
+                )
+                .map(Rc::new)
+            });
+        } else {
+            self.styled
+                .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
+        }
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let mut emoji = Vec::new();
         if !self.emoji.is_empty() {
-            let layout = self.styled.layout().clone();
             let font = window.text_style().font_size.to_pixels(window.rem_size());
+            let laid = self.laid(bounds);
             for item in &self.emoji {
-                let Some(rect) = emoji_bounds(&layout, &item.range, font) else {
+                let rect = match &laid {
+                    // Visual positions of the placeholder, wherever the
+                    // bidirectional layout put it.
+                    Laid::Bidi { .. } => laid
+                        .range_rects(item.range.clone())
+                        .first()
+                        .map(|rect| emoji_box(*rect, font)),
+                    Laid::Styled(layout) => emoji_bounds(layout, &item.range, font),
+                };
+                let Some(rect) = rect else {
                     continue;
                 };
                 let mut element = match &item.visual {
@@ -329,7 +528,7 @@ impl Element for SelectableRichText {
             .with_text_bounds(vec![bounds])
             .with_rendered_element(handle, window, cx);
         handle.register(registration, window, cx);
-        let layout = self.styled.layout().clone();
+        let layout = self.laid(bounds);
         let selected_before = TextSelection::selected_text(window, cx);
         if let Some(message) = self.message {
             OWNERS.with(|owners| {
@@ -353,7 +552,7 @@ impl Element for SelectableRichText {
             Vec::new()
         } else {
             vec![
-                TextSelectionRun::new(self.text.clone(), layout.clone(), bounds)
+                TextSelectionRun::with_geometry(self.text.clone(), layout.geometry(), bounds)
                     .with_document_order(self.document_order),
             ]
         };
@@ -383,38 +582,29 @@ impl Element for SelectableRichText {
             });
         }
         for range in projection.ranges().iter().flatten() {
-            if let (Some(start), Some(end)) = (
-                layout.position_for_index(range.start),
-                layout.position_for_index(range.end),
-            ) {
-                for quad in selection_quads(start, end, layout.bounds(), layout.line_height()) {
-                    window.paint_quad(fill(quad, self.selection_color));
-                }
+            for quad in layout.range_rects(range.clone()) {
+                window.paint_quad(fill(quad, self.selection_color));
             }
         }
-        self.styled.paint(
-            global_id,
-            inspector_id,
-            bounds,
-            &mut (),
-            &mut (),
-            window,
-            cx,
-        );
+        match &self.paragraph {
+            Some(paragraph) => paragraph.paint(bounds.origin, bounds.size.width, window, cx),
+            None => self.styled.paint(
+                global_id,
+                inspector_id,
+                bounds,
+                &mut (),
+                &mut (),
+                window,
+                cx,
+            ),
+        }
         for element in emoji.iter_mut() {
             element.paint(window, cx);
         }
         if !self.spoilers.is_empty() {
             let color = window.text_style().color;
-            let line_height = layout.line_height();
             for (range, opacity) in &self.spoilers {
-                let (Some(start), Some(end)) = (
-                    layout.position_for_index(range.start),
-                    layout.position_for_index(range.end),
-                ) else {
-                    continue;
-                };
-                for rect in selection_quads(start, end, layout.bounds(), line_height) {
+                for rect in layout.range_rects(range.clone()) {
                     super::spoiler_fx::layer_text_specks(
                         self.layer.as_ref(),
                         rect,
@@ -429,9 +619,9 @@ impl Element for SelectableRichText {
         // Links and spoilers: a press and release without a drag.
         if let Some(handler) = self.on_click.clone() {
             if hitbox.is_hovered(window)
-                && self
-                    .clicked_range(&layout, window.mouse_position())
-                    .is_some()
+                && layout
+                    .index_for_position(window.mouse_position())
+                    .is_some_and(|index| self.click_ranges.iter().any(|r| r.contains(&index)))
             {
                 window.set_cursor_style(CursorStyle::PointingHand, hitbox);
             }
@@ -466,7 +656,7 @@ impl Element for SelectableRichText {
                 if moved || !up_hitbox.is_hovered(window) {
                     return;
                 }
-                let Some(index) = layout.index_for_position(event.position).ok() else {
+                let Some(index) = layout.index_for_position(event.position) else {
                     return;
                 };
                 if let Some(ix) = ranges.iter().position(|range| range.contains(&index)) {

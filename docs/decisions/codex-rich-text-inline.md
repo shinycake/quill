@@ -29,12 +29,13 @@ in `prepaint` (after layout), measures the placeholder with
 - Animation layer: the `Layered` element is prepainted at the inline
   box, so its recorded bounds come from the new positions (the layer is
   captured with `with_layer`, as the element is built outside render).
-- RTL: the platform shapes right-to-left paragraphs in visual order, so a
-  byte index no longer maps to an x position (the wrapped lines of an RTL
-  bubble come out in visual order too, a pre-existing limitation; the
-  bubble has no bidi layout yet). An overlay cannot be placed reliably
-  there, so RTL paragraphs keep the emoji's own glyph. Verified in the
-  `ready-custom-emoji` capture (Hebrew post with an emoji mid-text).
+- RTL: paragraphs with right-to-left text take PR #442's `BidiParagraph`
+  path (logical wrapping, visual row order). The placeholder is just an
+  em space in that text, so `Laid::range_rects(placeholder)` returns its
+  exact visual box and the image is painted there (`emoji_box`); LTR uses
+  `position_for_index`. Both feed the same prepaint, so animation-layer
+  bounds come from these boxes. Copy uses logical byte ranges from the
+  selection projection, which the bidi geometry already supplies.
 - A wrap right before the emoji makes `position_for_index` report the
   previous line's end; `emoji_bounds` detects it (y differs) and uses the
   box just before the placeholder's end.
