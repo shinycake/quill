@@ -95,7 +95,7 @@ pub(super) fn search_result_row(
                                 .min_w_0()
                                 .truncate()
                                 .font_medium()
-                                .child(title),
+                                .child(super::bidi_line::one_line_plain(title)),
                         )
                         .when_some(stamp, |this, stamp| {
                             this.child(
@@ -112,7 +112,7 @@ pub(super) fn search_result_row(
                         .text_xs()
                         .truncate()
                         .text_color(cx.theme().muted_foreground)
-                        .child(StyledText::new(preview).with_highlights(highlights)),
+                        .child(super::bidi_line::one_line(preview, highlights, Vec::new())),
                 ),
         )
 }
@@ -169,7 +169,7 @@ fn chat_search_hit_row(
                 .min_w_0()
                 .text_sm()
                 .truncate()
-                .child(StyledText::new(preview).with_highlights(highlights)),
+                .child(super::bidi_line::one_line(preview, highlights, Vec::new())),
         )
         .when_some(stamp, |this, stamp| {
             this.child(

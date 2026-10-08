@@ -86,6 +86,26 @@ impl BidiParagraph {
         if !super::display_map::needs_bidi(text) {
             return None;
         }
+        Some(Self::layout_unchecked(
+            text,
+            runs,
+            font_size,
+            line_height,
+            wrap_width,
+            window,
+        ))
+    }
+
+    /// [`Self::layout`] without the right-to-left test: the text is laid out run by run
+    /// whatever it holds.
+    fn layout_unchecked(
+        text: &SharedString,
+        runs: &[TextRun],
+        font_size: Pixels,
+        line_height: Pixels,
+        wrap_width: Option<Pixels>,
+        window: &mut Window,
+    ) -> Self {
         let mut rows = Vec::new();
         let mut start = 0;
         for hard in text.split('\n') {
@@ -124,13 +144,87 @@ impl BidiParagraph {
             .map(|row| row.line.width)
             .max()
             .unwrap_or_default();
-        Some(Self {
+        Self {
             rows,
             line_height,
             wrap_width,
             width,
             len: text.len(),
-        })
+        }
+    }
+
+    /// Lays `text` out as one line at most `width` wide, or `None` when it holds no
+    /// right-to-left character (the caller keeps GPUI's single-line layout for it).
+    ///
+    /// What does not fit is cut at the *logical* end of the text, where reading ends, and an
+    /// ellipsis follows the kept text: for a Hebrew line that is the left edge of the row, as in
+    /// Telegram Desktop's one-line `Ui::Text::String`, not wherever the glyphs happen to run
+    /// out. Line breaks must already be spaces. The paragraph keeps its own direction, so an
+    /// elided Hebrew line is still right-aligned by [`Self::paint`].
+    pub fn layout_one_line(
+        text: &SharedString,
+        runs: &[TextRun],
+        font_size: Pixels,
+        line_height: Pixels,
+        width: Pixels,
+        window: &mut Window,
+    ) -> Option<Self> {
+        if !super::display_map::needs_bidi(text) {
+            return None;
+        }
+        let whole = Self::layout_unchecked(text, runs, font_size, line_height, None, window);
+        if whole.width <= width {
+            return Some(whole);
+        }
+        const ELLIPSIS: &str = "\u{2026}";
+        let boundaries: Vec<usize> = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain(std::iter::once(text.len()))
+            .collect();
+        let elided = |keep: usize, window: &mut Window| {
+            let kept = text[..boundaries[keep]].trim_end();
+            let mut cut_runs = runs_in(runs, &(0..kept.len()));
+            // The ellipsis takes the style of the last kept character.
+            let mut ellipsis_run = cut_runs
+                .last()
+                .or_else(|| runs.first())
+                .cloned()
+                .unwrap_or_else(|| TextRun {
+                    len: 0,
+                    font: gpui::Font::default(),
+                    color: gpui::Hsla::default(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                });
+            ellipsis_run.len = ELLIPSIS.len();
+            cut_runs.push(ellipsis_run);
+            let shown: SharedString = format!("{kept}{ELLIPSIS}").into();
+            Self::layout_unchecked(&shown, &cut_runs, font_size, line_height, None, window)
+        };
+        // The most characters that still fit with the ellipsis (width is monotone enough in
+        // the kept length for a bisection).
+        let (mut low, mut high) = (0usize, boundaries.len() - 1);
+        while low < high {
+            let mid = (low + high).div_ceil(2);
+            if elided(mid, window).width <= width {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        Some(elided(low, window))
+    }
+
+    /// Whether the (first) paragraph reads right to left.
+    pub fn is_rtl(&self) -> bool {
+        self.rows.first().is_some_and(|row| row.rtl)
+    }
+
+    /// The paragraph's widest row.
+    pub fn width(&self) -> Pixels {
+        self.width
     }
 
     /// `row_end` moved back over trailing spaces: a row's break whitespace takes no room.

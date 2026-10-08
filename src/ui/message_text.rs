@@ -1797,6 +1797,8 @@ pub(super) fn reply_quote_strip(
                 .text_color(accent())
                 .child("Reply"),
         )
-        .child(div().text_xs().text_color(text_primary()).child(preview))
+        .child(div().text_xs().truncate().text_color(text_primary()).child(
+            super::bidi_line::one_line_plain(super::search_ui::one_line_preview(&preview)),
+        ))
         .into_any_element()
 }
