@@ -77,13 +77,14 @@ sounds are GPL.
   gpui-kit-assets 0.7.0 crate; cargo-about only records the crate's own
   Apache-2.0), winpthreads (statically linked into the Windows FFmpeg DLLs),
   the spellcheck word-list attribution, and a Visual C++ runtime notice.
-- `THIRD_PARTY_LICENSES.md` (new, generated): the license text of all 743
+- `THIRD_PARTY_LICENSES.md` (new, generated): the license text of all 749
   crates compiled into the binary, grouped by license, made by
   `scripts/third-party-licenses.sh` (cargo-about 0.9.2, `licenses/about.toml`,
   `licenses/about.hbs`). Default features, targets aarch64-apple-darwin,
   x86_64/aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc; build and dev
   dependencies excluded. It runs `--offline` after `cargo fetch` so the output
-  depends only on `Cargo.lock`. Trade-off: for a crate whose package lacks its
+  depends only on `Cargo.lock`, so any PR that changes `Cargo.lock` must rerun
+  the script (the `licenses` CI job reports it when it doesn't). Trade-off: for a crate whose package lacks its
   license file, cargo-about falls back to the canonical license text without
   the crate's copyright line.
 - `THIRD_PARTY.md` rewritten as the index of everything above.
@@ -113,7 +114,7 @@ sounds are GPL.
 ### Inventory
 
 Rust crates (cargo-about overview, crates per license; a crate with an AND
-expression counts under each): MIT 665, Apache-2.0 41, ISC 22, Unicode-3.0 19,
+expression counts under each): MIT 673, Apache-2.0 41, ISC 22, Unicode-3.0 19,
 MPL-2.0 16, BSD-3-Clause 11, 0BSD 4, CC0-1.0 3, Zlib 3, BSD-2-Clause 1,
 CDLA-Permissive-2.0 1, Unlicense 1, bzip2-1.0.6 1. No crate is GPL, AGPL or
 LGPL only, and none has an unknown license. `self_cell` (Apache-2.0 OR
