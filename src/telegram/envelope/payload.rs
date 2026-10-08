@@ -1217,6 +1217,9 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             .and_then(parse_forum_topic_info)
             .map(EnvelopePayload::UpdateForumTopicInfo)
             .ok_or(ParseError::MissingField),
+        "forumTopic" => parse_forum_topic(&value)
+            .map(EnvelopePayload::ForumTopicAnswer)
+            .ok_or(ParseError::MissingField),
         "updateForumTopic" => parse_forum_topic_update(&value)
             .map(EnvelopePayload::UpdateForumTopic)
             .ok_or(ParseError::MissingField),

@@ -867,6 +867,97 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                         },
                     ))
                     .await;
+                // `QUILL_DEMO_CLICK=x,y[;x,y…]` (demo-capture only): left-click
+                // at window points before the capture, to verify click paths.
+                #[cfg(feature = "demo-capture")]
+                if let Ok(clicks) = std::env::var("QUILL_DEMO_CLICK") {
+                    for point in clicks.split(';') {
+                        // `s:x,y,dy` scrolls by `dy` px at the point instead.
+                        if let Some(scroll) = point.strip_prefix("s:") {
+                            let parts: Vec<f32> = scroll
+                                .split(',')
+                                .filter_map(|v| v.trim().parse().ok())
+                                .collect();
+                            if let [x, y, dy] = parts[..] {
+                                let _ = demo_window.update(cx, |_, window, cx| {
+                                    use gpui_kit::gpui::{
+                                        Modifiers, PlatformInput, ScrollDelta, ScrollWheelEvent,
+                                        TouchPhase, point, px,
+                                    };
+                                    window.dispatch_event(
+                                        PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                            position: point(px(x), px(y)),
+                                            delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                                            modifiers: Modifiers::default(),
+                                            touch_phase: TouchPhase::Moved,
+                                        }),
+                                        cx,
+                                    );
+                                });
+                            }
+                            cx.background_executor()
+                                .timer(Duration::from_millis(400))
+                                .await;
+                            continue;
+                        }
+                        let Some((x, y)) = point.split_once(',') else {
+                            continue;
+                        };
+                        let (Ok(x), Ok(y)) = (x.trim().parse::<f32>(), y.trim().parse::<f32>())
+                        else {
+                            continue;
+                        };
+                        let position =
+                            gpui_kit::gpui::point(gpui_kit::gpui::px(x), gpui_kit::gpui::px(y));
+                        let _ = demo_window.update(cx, |_, window, cx| {
+                            use gpui_kit::gpui::{
+                                Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+                                PlatformInput,
+                            };
+                            window.dispatch_event(
+                                PlatformInput::MouseMove(MouseMoveEvent {
+                                    position,
+                                    pressed_button: None,
+                                    modifiers: Modifiers::default(),
+                                }),
+                                cx,
+                            );
+                            window.dispatch_event(
+                                PlatformInput::MouseDown(MouseDownEvent {
+                                    button: MouseButton::Left,
+                                    position,
+                                    modifiers: Modifiers::default(),
+                                    click_count: 1,
+                                    first_mouse: false,
+                                }),
+                                cx,
+                            );
+                            window.refresh();
+                        });
+                        // A real click spans frames: let one render between
+                        // press and release.
+                        cx.background_executor()
+                            .timer(Duration::from_millis(120))
+                            .await;
+                        let _ = demo_window.update(cx, |_, window, cx| {
+                            use gpui_kit::gpui::{
+                                Modifiers, MouseButton, MouseUpEvent, PlatformInput,
+                            };
+                            window.dispatch_event(
+                                PlatformInput::MouseUp(MouseUpEvent {
+                                    button: MouseButton::Left,
+                                    position,
+                                    modifiers: Modifiers::default(),
+                                    click_count: 1,
+                                }),
+                                cx,
+                            );
+                        });
+                        cx.background_executor()
+                            .timer(Duration::from_millis(400))
+                            .await;
+                    }
+                }
                 #[cfg(feature = "demo-capture")]
                 if let Some(path) = std::env::var_os("QUILL_DEMO_CAPTURE") {
                     let captured = demo_window

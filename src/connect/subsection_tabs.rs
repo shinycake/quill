@@ -5,7 +5,9 @@ use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::subsection_tabs::SubsectionTabsMode;
 use crate::telegram::envelope::{EnvelopePayload, MUTE_FOREVER};
-use crate::telegram::requests::{set_forum_topic_notification_settings, view_messages};
+use crate::telegram::requests::{
+    get_forum_topic, set_forum_topic_notification_settings, view_messages,
+};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// The tabs' toggle button: Top → Bottom → Left → Top, saved per chat
@@ -39,6 +41,47 @@ impl<S: JsonSender> ConnectDriver<S> {
             && self.session.bot_topics(chat_id).is_some()
         {
             let _ = self.maybe_fetch_forum_topics(chat_id);
+        }
+    }
+
+    /// A topic whose TDLib state may have changed: its read position or
+    /// settings (`updateForumTopic`), its info (`updateForumTopicInfo`, e.g.
+    /// a new topic) or a new message in it. Checked before `apply`.
+    pub(crate) fn possible_topic_refresh(payload: &EnvelopePayload) -> Option<(ChatId, i32)> {
+        match payload {
+            EnvelopePayload::UpdateForumTopic(update) => {
+                Some((ChatId(update.chat_id), update.forum_topic_id))
+            }
+            EnvelopePayload::UpdateForumTopicInfo(info) => {
+                Some((ChatId(info.chat_id), info.forum_topic_id))
+            }
+            EnvelopePayload::UpdateNewMessage(message) => {
+                message.topic_id.map(|topic| (message.chat_id, topic))
+            }
+            _ => None,
+        }
+    }
+
+    /// `getForumTopic` for one topic of a loaded topic list, so its unread
+    /// count and read position come from TDLib (deduped while in flight).
+    pub(crate) fn maybe_refresh_forum_topic(&mut self, target: Option<(ChatId, i32)>) {
+        let Some((chat_id, forum_topic_id)) = target else {
+            return;
+        };
+        if !self.chats_path_active() || !self.session.forum_topics.contains_key(&chat_id.0) {
+            return;
+        }
+        let purpose = RequestPurpose::GetForumTopic { forum_topic_id };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return;
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if self
+            .sender
+            .send_json(&get_forum_topic(extra, chat_id, forum_topic_id))
+            .is_err()
+        {
+            self.session.requests.take(extra);
         }
     }
 

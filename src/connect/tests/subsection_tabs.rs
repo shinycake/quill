@@ -161,3 +161,92 @@ fn tabs_mode_cycles_and_persists() {
     assert!(load_media_prefs(&paths).subsection_tabs_modes.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Selecting a topic in a bot's private chat opens it and pages its history
+/// with `searchChatMessages` + `messageTopicForum` (schema 1.8.67 line 3003:
+/// "A topic in a forum supergroup chat or a chat with a bot"); TDLib's
+/// `updateForumTopic` triggers a `getForumTopic` refetch for the count.
+#[test]
+fn bot_private_chat_topic_select_sends_exact_request() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(&mut driver, &bot_user_json(41, true, true));
+    ingest(&mut driver, &bot_chat_json(41));
+    driver.select_chat(ChatId(41)).unwrap();
+    let extra = sent(&recorder, "getForumTopics")[0]["@extra"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"forumTopics","@extra":"{extra}","total_count":1,"topics":[{{"info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":12,"name":"Make it default","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":null,"order":"5","is_pinned":false,"unread_count":16,"last_read_inbox_message_id":0}}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#
+        ),
+    );
+
+    driver.select_topic(12).unwrap();
+    assert_eq!(driver.session.open_topic, Some(12));
+    let search = sent(&recorder, "searchChatMessages");
+    let search = search.last().unwrap();
+    assert_eq!(search["chat_id"], 41);
+    assert_eq!(search["query"], "");
+    assert_eq!(search["from_message_id"], 0);
+    assert_eq!(
+        search["topic_id"],
+        serde_json::json!({"@type": "messageTopicForum", "forum_topic_id": 12})
+    );
+    // The answer lands in the topic's history.
+    let extra = search["@extra"].as_str().unwrap().to_string();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":1,"next_from_message_id":0,"messages":[{{"id":700,"chat_id":41,"is_outgoing":false,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":12}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}]}}"#
+        ),
+    );
+    assert_eq!(driver.session.open_topic, Some(12));
+    assert!(
+        driver.session.topic_histories[&(41, 12)]
+            .messages
+            .contains_key(&700)
+    );
+
+    // Read elsewhere: `updateForumTopic` -> `getForumTopic` -> TDLib's count.
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateForumTopic","chat_id":41,"forum_topic_id":12,"is_pinned":false,"last_read_inbox_message_id":700,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{"@type":"chatNotificationSettings"},"draft_message":null}"#,
+    );
+    let refetch = sent(&recorder, "getForumTopic");
+    assert_eq!(refetch.len(), 1);
+    assert_eq!(refetch[0]["forum_topic_id"], 12);
+    let extra = refetch[0]["@extra"].as_str().unwrap().to_string();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"forumTopic","@extra":"{extra}","info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":12,"name":"Make it default","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":null,"order":"5","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":700}}"#
+        ),
+    );
+    assert_eq!(
+        driver.session.ordered_forum_topics(ChatId(41))[0].unread_count,
+        0
+    );
+    // An own message in the topic doesn't bump the count locally.
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewMessage","message":{"id":701,"chat_id":41,"is_outgoing":true,"topic_id":{"@type":"messageTopicForum","forum_topic_id":12},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"thanks","entities":[]}}}}"#,
+    );
+    assert_eq!(
+        driver.session.ordered_forum_topics(ChatId(41))[0].unread_count,
+        0
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

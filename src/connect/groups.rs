@@ -228,7 +228,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if !self.session.chat_has_topics(chat_id) {
+        // A topic already in the loaded list is selectable whatever the
+        // chat kind (bots with topics, forums).
+        let known_topic = self
+            .session
+            .forum_topics
+            .get(&chat_id.0)
+            .is_some_and(|topics| topics.iter().any(|t| t.forum_topic_id == forum_topic_id));
+        if !known_topic && !self.session.chat_has_topics(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.select_topic(chat_id, forum_topic_id);

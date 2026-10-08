@@ -177,7 +177,8 @@ fn topic_updates_keep_tabs_current() {
     assert_eq!(trips.name, "Trips");
     assert_eq!(trips.icon_color, 7322096);
 
-    // An incoming topic message counts as unread and becomes the last one.
+    // A new topic message refreshes the preview; the unread count stays
+    // TDLib's (the driver refetches the topic) - no local guessing.
     apply_json(
         &mut session,
         &seq,
@@ -191,8 +192,8 @@ fn topic_updates_keep_tabs_current() {
             .find(|t| t.forum_topic_id == 3)
             .unwrap()
     };
-    assert_eq!(t3(&session).unread_count, 2);
-    assert_eq!(t3(&session).last_message_id, 500);
+    assert_eq!(t3(&session).unread_count, 1);
+    assert_eq!(t3(&session).last_message_id, 103);
     assert_eq!(t3(&session).last_message_preview, "ping");
 
     // Pin + mute + read up to the last message.
@@ -212,4 +213,54 @@ fn topic_updates_keep_tabs_current() {
         session.chat_row_topic_names(ChatId(41)).as_deref(),
         Some("T3  New  Trips")
     );
+}
+
+/// `getForumTopic` answers replace the cached topic with TDLib's state,
+/// including an unread count that was wrong locally.
+#[test]
+fn forum_topic_answer_replaces_unread_count() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &bot_user(41, true, true));
+    apply_json(&mut session, &seq, &sink, &private_chat(41));
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topics_answer(extra.0, 41, &[2, 3]),
+    );
+    let extra = session.request(
+        RequestPurpose::GetForumTopic { forum_topic_id: 3 },
+        Some(ChatId(41)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"forumTopic","@extra":"{}","info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":3,"name":"T3","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":null,"order":"3","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":103}}"#,
+            extra.0
+        ),
+    );
+    let topic = session
+        .ordered_forum_topics(ChatId(41))
+        .into_iter()
+        .find(|t| t.forum_topic_id == 3)
+        .unwrap();
+    assert_eq!(topic.unread_count, 0);
+    assert_eq!(topic.last_read_inbox_message_id, 103);
+    // An unsolicited `forumTopic` (no pending request) is ignored.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"forumTopic","info":{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":2,"name":"X","icon":{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"order":"2","unread_count":9}"#,
+    );
+    let t2 = session
+        .ordered_forum_topics(ChatId(41))
+        .into_iter()
+        .find(|t| t.forum_topic_id == 2)
+        .unwrap();
+    assert_eq!(t2.unread_count, 1);
 }

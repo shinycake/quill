@@ -1618,6 +1618,14 @@ impl Session {
             EnvelopePayload::UpdateForumTopic(update) => {
                 self.apply_update_forum_topic(update);
             }
+            EnvelopePayload::ForumTopicAnswer(topic) => {
+                if let Some(pending) = pending
+                    && matches!(pending.purpose, RequestPurpose::GetForumTopic { .. })
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.replace_forum_topic(chat_id, topic);
+                }
+            }
             EnvelopePayload::Messages(messages) => {
                 self.apply_messages(messages, pending, extra, seq)
             }

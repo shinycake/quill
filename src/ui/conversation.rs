@@ -201,8 +201,8 @@ impl QuillApp {
                 Some(activity_line.map_or_else(|| "typing".to_string(), |l| l.text)),
                 true,
             )
-        } else if let Some((_, line)) = topic_header {
-            ((!line.is_empty()).then_some(line), false)
+        } else if let Some((_, line)) = topic_header.filter(|(_, line)| !line.is_empty()) {
+            (Some(line), false)
         } else if let Some(line) = secret_line {
             (Some(line), true)
         } else if let Some((line, online)) = presence {

@@ -708,6 +708,8 @@ pub enum EnvelopePayload {
     UpdateForumTopicInfo(ForumTopicInfoUpdate),
     /// Subsection tabs: `updateForumTopic` (schema 1.8.67, line 10665).
     UpdateForumTopic(ForumTopicUpdate),
+    /// Subsection tabs: `forumTopic` — the `getForumTopic` answer.
+    ForumTopicAnswer(ForumTopic),
     UpdateFile(ParsedFile),
     File(ParsedFile),
     /// Slice media-downloads-pause: `updateFileDownload` — pause state and

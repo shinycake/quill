@@ -234,6 +234,15 @@ impl QuillApp {
             .text_sm()
             .font_semibold()
             .text_color(text)
+            // Activate on press (a click that spans re-renders of the busy
+            // live history still lands); `on_click` keeps keyboard activation.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.select_subsection_tab(tab, cx);
+                }),
+            )
             .on_click(cx.listener(move |this, _, _, cx| this.select_subsection_tab(tab, cx)))
             .child(div().whitespace_nowrap().child(label))
             .when(unread > 0, |this| this.child(count_pill(unread, muted, cx)))
@@ -295,6 +304,15 @@ impl QuillApp {
             .aria_selected(active)
             .aria_label(label.clone())
             .tab_index(0)
+            // Activate on press (a click that spans re-renders of the busy
+            // live history still lands); `on_click` keeps keyboard activation.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.select_subsection_tab(tab, cx);
+                }),
+            )
             .on_click(cx.listener(move |this, _, _, cx| this.select_subsection_tab(tab, cx)))
             .child(div().relative().child(icon).when(unread > 0, |this| {
                 this.child(
@@ -588,6 +606,19 @@ pub(super) fn apply_ready_bot_topics(
         ),
         message(506, 5, false, base + 300, "Your weekly summary is ready."),
     ];
+    // Older back-and-forth so "All" scrolls, as a real bot chat does.
+    for i in 0..30_i64 {
+        let text = if i % 2 == 0 {
+            "Another draft, please."
+        } else {
+            "Here is a tighter version."
+        };
+        let row = message(400 + i, 3, i % 2 == 0, base - 3_600 + i * 60, text);
+        apply(
+            session,
+            &format!(r#"{{"@type":"updateNewMessage","message":{row}}}"#),
+        );
+    }
     for row in &messages {
         apply(
             session,

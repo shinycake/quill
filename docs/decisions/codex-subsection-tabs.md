@@ -76,3 +76,20 @@
   `subsection-tabs-bottom.png`, `subsection-tabs-left.png`.
 - Not verified live: real bot topic data, right-click menu actions against the server,
   `updateForumTopic*` delivery for bot chats.
+
+## Live-test follow-up
+
+- Unread counts now come from TDLib only. `updateForumTopic`, `updateForumTopicInfo` and a
+  new topic message trigger `getForumTopic` (schema 1.8.67 line 12679) for that topic, and
+  its `forumTopic` answer replaces the cached entry. The local "+1 per incoming message"
+  guess is gone: own messages, pending sends (temporary ids) and messages read in another
+  client skewed it (a topic showed 16 while Telegram Desktop showed none).
+- Tabs activate on press (`on_mouse_down`) as well as on click (keyboard). `select_topic`
+  also accepts any topic in the loaded list. The click path was verified with synthesized
+  input in the demo build (scrolled history, a frame between press and release) and by
+  `bot_private_chat_topic_select_sends_exact_request`, which asserts
+  `searchChatMessages{chat_id, query:"", from_message_id:0,
+  topic_id:messageTopicForum{forum_topic_id}}` for a bot private chat (schema line 3003:
+  "A topic in a forum supergroup chat or a chat with a bot").
+- Demo capture gained `QUILL_DEMO_CLICK="x,y;s:x,y,dy"` (demo-capture builds only):
+  left clicks / scroll-wheel steps at window points before the capture.

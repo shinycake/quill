@@ -964,3 +964,16 @@ pub fn set_forum_topic_notification_settings(
     value["forum_topic_id"] = json!(forum_topic_id);
     value.to_string()
 }
+
+/// Subsection tabs: `getForumTopic` (TDLib 1.8.67, `schema/td_api.tl:12679`)
+/// — one topic with TDLib's own `unread_count`, refetched when the topic's
+/// read position or messages change.
+pub fn get_forum_topic(extra: RequestId, chat_id: ChatId, forum_topic_id: i32) -> String {
+    json!({
+        "@type": "getForumTopic",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "forum_topic_id": forum_topic_id,
+    })
+    .to_string()
+}

@@ -173,8 +173,9 @@ impl Session {
     }
 
     /// `updateForumTopic`: pin state, notification settings and the read
-    /// position. TDLib sends no per-topic unread count, so reading up to
-    /// the last known message clears it.
+    /// position. TDLib sends no per-topic unread count here; the driver
+    /// refetches the topic (`getForumTopic`) for TDLib's own count. Reading
+    /// up to TDLib's last message clears the badge right away.
     pub(crate) fn apply_update_forum_topic(&mut self, update: ForumTopicUpdate) {
         let Some(topic) = self
             .forum_topics
@@ -191,14 +192,18 @@ impl Session {
         topic.notification_settings = update.notification_settings;
         if update.last_read_inbox_message_id > topic.last_read_inbox_message_id {
             topic.last_read_inbox_message_id = update.last_read_inbox_message_id;
-            if topic.last_read_inbox_message_id >= topic.last_message_id {
+            if topic.last_message_id != 0
+                && topic.last_read_inbox_message_id >= topic.last_message_id
+            {
                 topic.unread_count = 0;
             }
         }
     }
 
-    /// A new message in a loaded topic list: it becomes the topic's last
-    /// message, and an incoming one counts as unread.
+    /// A new message in a loaded topic list moves the topic up and refreshes
+    /// its preview. Unread counts are not guessed locally (own messages,
+    /// pending sends and messages read elsewhere would skew them): the
+    /// driver refetches the topic from TDLib.
     pub(crate) fn note_forum_topic_message(&mut self, message: &ParsedMessage) {
         let Some(topic_id) = message.topic_id else {
             return;
@@ -210,17 +215,25 @@ impl Session {
         let Some(topic) = topics.iter_mut().find(|t| t.forum_topic_id == topic_id) else {
             return;
         };
-        if message.id.0 <= topic.last_message_id {
-            return;
-        }
-        topic.last_message_id = message.id.0;
         topic.last_message_preview =
             effective_content(&message.content, message.ephemeral.as_ref()).preview();
         if !topic.is_pinned && topic.order != top {
             topic.order = top + 1;
         }
-        if !message.is_outgoing && message.id.0 > topic.last_read_inbox_message_id {
-            topic.unread_count += 1;
+    }
+
+    /// A `getForumTopic` answer: TDLib's state for one topic replaces the
+    /// cached entry (or adds it).
+    pub(crate) fn replace_forum_topic(&mut self, chat_id: ChatId, topic: ForumTopic) {
+        let Some(topics) = self.forum_topics.get_mut(&chat_id.0) else {
+            return;
+        };
+        match topics
+            .iter_mut()
+            .find(|t| t.forum_topic_id == topic.forum_topic_id)
+        {
+            Some(slot) => *slot = topic,
+            None => topics.push(topic),
         }
     }
 
