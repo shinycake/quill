@@ -10,7 +10,7 @@
 mod display_map;
 mod bidi;
 mod inline_line;
-pub(crate) use bidi::{BidiLine, Paragraph, mirror_neutral_run};
+pub(crate) use bidi::{BidiLine, Paragraph, mirror_neutral_run, needs_bidi};
 pub(crate) use inline_line::{InlineFragment, InputLine, fragment_from_shaped};
 mod fold_map;
 mod folding;
