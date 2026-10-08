@@ -43,6 +43,7 @@ mod history_row;
 mod keybindings;
 mod menu_states;
 mod playback;
+mod player_bar;
 
 pub(crate) use format_helpers::*;
 pub(crate) use history_row::*;

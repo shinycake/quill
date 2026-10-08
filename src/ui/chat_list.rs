@@ -456,8 +456,8 @@ impl QuillApp {
         if self.recording_active() {
             self.cancel_recording(cx);
         }
-        self.stop_voice_playback();
-        self.stop_audio_playback();
+        // Voice notes and music keep playing across chats (the player bar
+        // follows, as in Telegram Desktop).
         self.stop_animation_playback();
         self.autoplayed_gifs.clear();
         self.stop_sticker_playback();

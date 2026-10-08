@@ -604,11 +604,12 @@ pub struct QuillApp {
     pub(super) call_sounds: super::call_sounds::CallSounds,
     pub(super) call_sound_marks: super::call_sounds::SoundMarks,
     /// History row whose voice note is playing.
+    pub(super) player: super::player_bar::PlayerBarState,
     pub(super) playing_voice: Option<MessageId>,
     /// History row whose music file (`messageAudio`) is playing. Shares `voice_player`.
     pub(super) playing_audio: Option<MessageId>,
     /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
-    pub(super) pending_audio_play: Option<(MessageId, FileId, f64)>,
+    pub(super) pending_audio_play: Option<(ChatId, MessageId, FileId, f64)>,
     pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
     /// In-process player for the active voice note / audio file.
     pub(super) audio: super::audio::AudioEngine,

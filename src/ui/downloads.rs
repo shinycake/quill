@@ -41,7 +41,8 @@ impl QuillApp {
         self.pending_gif_play.take_if(|(_, id, _)| *id == file_id);
         self.pending_video_play
             .take_if(|(_, id, ..)| *id == file_id);
-        self.pending_audio_play.take_if(|(_, id, _)| *id == file_id);
+        self.pending_audio_play
+            .take_if(|(_, _, id, _)| *id == file_id);
         self.pending_voice_play
             .take_if(|(_, _, id, ..)| *id == file_id);
         self.viewer_pending_play.take_if(|(_, id)| *id == file_id);
@@ -51,7 +52,7 @@ impl QuillApp {
         let failed: Vec<_> = [
             self.pending_gif_play.as_ref().map(|(_, id, _)| *id),
             self.pending_video_play.as_ref().map(|(_, id, ..)| *id),
-            self.pending_audio_play.as_ref().map(|(_, id, _)| *id),
+            self.pending_audio_play.as_ref().map(|(_, _, id, _)| *id),
             self.viewer_pending_play.map(|(_, id)| id),
             self.pending_voice_play.map(|(_, _, id, ..)| id),
         ]
