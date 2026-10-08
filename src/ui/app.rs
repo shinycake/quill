@@ -275,6 +275,8 @@ pub struct QuillApp {
     /// NSSpellChecker; elsewhere the embedded English wordlist), shared
     /// with background check tasks.
     pub(super) spellchecker: std::sync::Arc<quill::spellcheck::SpellChecker>,
+    /// Which engine that is and its dictionaries (Appearance → Spelling).
+    pub(super) spell_info: super::spellcheck_ui::SpellInfo,
     /// Misspellings underlined in the composer; byte ranges into
     /// `spell_checked_text`.
     pub(super) spell_misspellings: Vec<quill::spellcheck::Misspelling>,

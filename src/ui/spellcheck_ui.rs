@@ -24,6 +24,7 @@ use super::chat_theme::danger;
 use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll, TextareaState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::*;
+use quill::spell_dict::EngineKind;
 use quill::spellcheck::{
     LearnedIn, MAX_SUGGESTIONS, Misspelling, SpellChecker, is_typing_word, shift_misspellings,
     word_at,
@@ -36,31 +37,134 @@ const COLD_DELAY: Duration = Duration::from_millis(700);
 /// coalesce a burst of edits.
 const WARM_DELAY: Duration = Duration::from_millis(40);
 
-/// The Appearance → Spelling row's hint, per platform engine.
-#[cfg(target_os = "macos")]
-pub(super) const SPELLCHECK_SETTING_HINT: &str = "Underline misspelled words in the composer, using the macOS spelling languages and dictionary.";
-#[cfg(not(target_os = "macos"))]
-pub(super) const SPELLCHECK_SETTING_HINT: &str =
-    "Underline misspelled words in the composer (English).";
+/// What the engine behind the composer's underlines is, for the
+/// Appearance → Spelling row.
+pub(super) struct SpellInfo {
+    pub kind: EngineKind,
+    /// Dictionaries the user can pick (empty where the OS owns the list).
+    pub available: Vec<String>,
+    /// Dictionaries in use.
+    pub active: Vec<String>,
+    /// The user's explicit picks (empty: automatic).
+    pub chosen: Vec<String>,
+}
+
+impl SpellInfo {
+    /// The hint under the "Check spelling" switch.
+    pub(super) fn hint(&self) -> String {
+        let engine = match self.kind {
+            EngineKind::System if cfg!(target_os = "macos") => {
+                "using the macOS spelling languages and dictionary"
+            }
+            EngineKind::System => "using the Windows spelling languages",
+            EngineKind::Hunspell => "using Hunspell dictionaries",
+            EngineKind::None if cfg!(windows) => {
+                return "Windows spell checking isn't available for your languages. Add a language with spelling support in Settings > Time & language.".to_string();
+            }
+            EngineKind::None => {
+                return "No spelling dictionaries found. Install Hunspell dictionaries (for example hunspell-en-us) or put .dic and .aff files in ~/.local/share/hunspell.".to_string();
+            }
+        };
+        format!("Underline misspelled words in the composer, {engine}.")
+    }
+}
 
 impl QuillApp {
-    /// The platform engine: macOS NSSpellChecker when it has a spelling
-    /// language, else the embedded English wordlist. `app_words` loads the
-    /// words added on platforms without a system dictionary.
-    pub(super) fn new_spellchecker(app_words: bool) -> Arc<SpellChecker> {
+    /// The platform engine and what it reports: macOS NSSpellChecker,
+    /// Windows ISpellChecker, else Hunspell dictionaries from disk
+    /// (`quill::spell_dict`); with none of those, checking is off.
+    /// `chosen` is the user's explicit language list.
+    fn build_spell_engine(chosen: &[String]) -> (Arc<SpellChecker>, SpellInfo) {
         #[cfg(target_os = "macos")]
-        let checker = match super::spellcheck_mac::SystemSpellBackend::new() {
-            Some(backend) => SpellChecker::new(Arc::new(backend)),
-            None => SpellChecker::wordlist(),
-        };
-        #[cfg(not(target_os = "macos"))]
-        let checker = SpellChecker::wordlist();
-        if app_words {
-            checker.set_app_words(
-                quill::settings::load_spellcheck_words(&Self::appearance_paths()).words,
-            );
+        {
+            let checker = match super::spellcheck_mac::SystemSpellBackend::new() {
+                Some(backend) => SpellChecker::new(Arc::new(backend)),
+                None => SpellChecker::wordlist(),
+            };
+            let info = SpellInfo {
+                kind: EngineKind::System,
+                available: Vec::new(),
+                active: Vec::new(),
+                chosen: Vec::new(),
+            };
+            let _ = chosen;
+            (Arc::new(checker), info)
         }
-        Arc::new(checker)
+        #[cfg(windows)]
+        {
+            let locales = quill::spell_win::user_locale_tags();
+            let system = quill::spell_win::WindowsSpellBackend::new(&locales, chosen);
+            let mut engine = quill::spell_dict::hunspell_engine(
+                &quill::spell_dict::standard_dictionary_dirs_from_env(),
+                &locales,
+                chosen,
+            );
+            if let Some(system) = system {
+                engine.available = system.available_languages();
+                engine.active = system.active_languages();
+                engine.kind = EngineKind::System;
+                engine.checker = Arc::new(SpellChecker::new(Arc::new(system)));
+            }
+            let info = SpellInfo {
+                kind: engine.kind,
+                available: engine.available,
+                active: engine.active,
+                chosen: chosen.to_vec(),
+            };
+            (engine.checker, info)
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let engine = quill::spell_dict::hunspell_engine(
+                &quill::spell_dict::standard_dictionary_dirs_from_env(),
+                &quill::spell_dict::system_locales(),
+                chosen,
+            );
+            let info = SpellInfo {
+                kind: engine.kind,
+                available: engine.available,
+                active: engine.active,
+                chosen: chosen.to_vec(),
+            };
+            (engine.checker, info)
+        }
+    }
+
+    /// The engine at startup. `app_words` loads the words added on
+    /// platforms without a system dictionary, and the language picks.
+    pub(super) fn new_spellchecker(app_words: bool) -> (Arc<SpellChecker>, SpellInfo) {
+        let paths = Self::appearance_paths();
+        let chosen = if app_words {
+            quill::settings::load_spellcheck_languages(&paths).languages
+        } else {
+            Vec::new()
+        };
+        let (checker, info) = Self::build_spell_engine(&chosen);
+        if app_words {
+            checker.set_app_words(quill::settings::load_spellcheck_words(&paths).words);
+        }
+        (checker, info)
+    }
+
+    /// The user picked other spelling languages (empty: automatic):
+    /// persist, rebuild the engine and re-check the draft.
+    pub(super) fn set_spell_languages(&mut self, chosen: Vec<String>, cx: &mut Context<Self>) {
+        let prefs = quill::settings::SpellcheckLanguages {
+            languages: chosen.clone(),
+        };
+        if let Err(err) =
+            quill::settings::save_spellcheck_languages(&Self::appearance_paths(), &prefs)
+        {
+            self.status_note = format!("Couldn't save spelling languages: {err}");
+        }
+        let (checker, info) = Self::build_spell_engine(&chosen);
+        checker.set_app_words(self.spellchecker.app_words());
+        self.spellchecker = checker;
+        self.spell_info = info;
+        self.spell_misspellings.clear();
+        self.spell_checked_text = self.composer.read(cx).value().to_string();
+        self.schedule_spellcheck(WARM_DELAY, cx);
+        cx.notify();
     }
 
     /// Per input event: carry the underlines across the edit and schedule

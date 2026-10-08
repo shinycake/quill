@@ -106,7 +106,13 @@ impl QuillApp {
         ) {
             self.chat_prefs.spellcheck_enabled = true;
             // Ignore persisted app words so this fixture always shows typos.
-            self.spellchecker = Self::new_spellchecker(false);
+            self.spellchecker = Self::new_spellchecker(false).0;
+            // Off macOS the fixture must not depend on the host's dictionaries.
+            #[cfg(not(target_os = "macos"))]
+            {
+                self.spellchecker =
+                    std::sync::Arc::new(quill::spellcheck::SpellChecker::wordlist());
+            }
             // `-panel`: a multi-line draft proving the skip rules — the
             // link, mention, hashtag, command and code stay unmarked.
             let draft = if matches!(demo, Some(ScreenshotDemo::ReadySpellcheckPanel)) {

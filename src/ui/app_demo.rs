@@ -1415,6 +1415,7 @@ impl QuillApp {
 
         let pending_attachments = demo_pending_attachments(demo);
 
+        let (spellchecker, spell_info) = Self::new_spellchecker(true);
         let mut app = Self {
             update_state: if demo.is_none() {
                 quill::update_install::startup_state()
@@ -1616,7 +1617,8 @@ impl QuillApp {
             keybindings_screenshot: false,
             appearance_applied: None,
             // codex:spellcheck-native: platform engine + persisted app words.
-            spellchecker: Self::new_spellchecker(true),
+            spellchecker,
+            spell_info,
             spell_misspellings: Vec::new(),
             spell_checked_text: String::new(),
             spell_task: None,
