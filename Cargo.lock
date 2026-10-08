@@ -5971,6 +5971,7 @@ dependencies = [
  "objc2-core-media",
  "objc2-core-video",
  "objc2-foundation 0.3.2",
+ "objc2-user-notifications",
  "ogg",
  "opus-decoder",
  "pretty_assertions",

@@ -94,6 +94,7 @@ fn push_badge(unread: u32) -> bool {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;
     use objc2_foundation::NSString;
+    request_badge_authorization();
     let Some(mtm) = MainThreadMarker::new() else {
         trace("icon-badge: not on the main thread, dock label skipped");
         return false;
@@ -108,6 +109,60 @@ fn push_badge(unread: u32) -> bool {
         label = dock_badge_label(unread)
     ));
     true
+}
+
+/// macOS draws a Dock badge only for apps the user allowed to badge
+/// (System Settings > Notifications > Quill > "Badge application icon").
+/// GPUI's own authorization request asks for alert + sound only, so ask for
+/// badge as well, once, before the first label is pushed; macOS shows the
+/// prompt only while the decision is still open, and an app that was already
+/// decided keeps its choice (then the user must enable badges in Settings).
+/// `QUILL_TRACE_STATUS=1` logs the resulting `badgeSetting`
+/// (0 not supported, 1 disabled, 2 enabled).
+#[cfg(all(target_os = "macos", feature = "ui"))]
+fn request_badge_authorization() {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_foundation::{NSBundle, NSError};
+    use objc2_user_notifications::{
+        UNAuthorizationOptions, UNNotificationSettings, UNUserNotificationCenter,
+    };
+    use std::ptr::NonNull;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static REQUESTED: AtomicBool = AtomicBool::new(false);
+    if REQUESTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    // UNUserNotificationCenter aborts the process outside an app bundle.
+    if NSBundle::mainBundle().bundleIdentifier().is_none() {
+        trace("icon-badge: not an app bundle, badge authorization skipped");
+        return;
+    }
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let reader = center.clone();
+    let completion = RcBlock::new(move |granted: Bool, _error: *mut NSError| {
+        trace(&format!(
+            "icon-badge: authorization request finished, granted={}",
+            granted.as_bool()
+        ));
+        let report = RcBlock::new(|settings: NonNull<UNNotificationSettings>| {
+            // SAFETY: the system passes a valid settings object for the call.
+            let settings = unsafe { settings.as_ref() };
+            trace(&format!(
+                "icon-badge: authorizationStatus={} badgeSetting={} (0 n/a, 1 disabled, 2 enabled)",
+                settings.authorizationStatus().0,
+                settings.badgeSetting().0
+            ));
+        });
+        reader.getNotificationSettingsWithCompletionHandler(&report);
+    });
+    center.requestAuthorizationWithOptions_completionHandler(
+        UNAuthorizationOptions::Badge
+            | UNAuthorizationOptions::Alert
+            | UNAuthorizationOptions::Sound,
+        &completion,
+    );
 }
 
 #[cfg(windows)]

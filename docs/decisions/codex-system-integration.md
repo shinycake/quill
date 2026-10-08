@@ -57,6 +57,7 @@ is no second definition.
   sandboxes use `disable_dbus_name`. Startup waits up to 1.5 s for the first
   registration so `--start-minimized` can distinguish "no tray host" (reveal the
   window, existing behavior) from "tray still registering".
+- **Dock badge needs notification authorization.** The Dock draws a badge only for apps the user allowed to badge (Settings > Notifications > Quill > Badge application icon). GPUI requests alert+sound only, so `icon_badge` requests badge+alert+sound itself before the first push (bundle-only; `QUILL_TRACE_STATUS=1` logs `badgeSetting`). macOS prompts only while the decision is open: if Quill was already decided without badge, or badges are off, the user must enable them in System Settings; there is nothing more the app can do.
 - **Not done.** Windows toast reply action (tdesktop has inline reply): GPUI's
   toast API carries buttons but no text input; follow-up. Close-to-tray on
   Windows/Linux: GPUI windows cannot be hidden after creation there, so only
