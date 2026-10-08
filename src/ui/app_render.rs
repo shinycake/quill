@@ -24,16 +24,33 @@ use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, StoryPostOutcome, connection_indicator};
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Bounded image memory: retired images and path images nothing can
+        // show any more leave the atlas (`image_budget`).
+        super::image_budget::begin_frame();
+        super::image_budget::sweep(window, cx);
+        let image_cache = self.slices.image_cache();
+        if let Some(cache) = &image_cache {
+            cache.update(cx, |cache, cx| cache.trim(window, cx));
+        }
         self.sync_capture_block(window);
         // Rows the history list painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
-        self.inline_videos.borrow_mut().frame_start();
-        self.window_active.set(window.is_window_active());
+        // A conversation replayed from its cache (`app_slice`) still shows
+        // its clips: only a conversation that rendered (or a frame without
+        // one) and swept no player orphans them.
+        let history_drawn = self.slices.conversation_rendered.replace(false)
+            || !self.slices.conversation_shown.replace(false);
+        self.inline_videos.borrow_mut().frame_start(history_drawn);
+        let active = window.is_window_active() || super::frame_clock::assume_active();
+        if self.window_active.replace(active) != active {
+            self.inline_videos.borrow_mut().set_window_active(active);
+        }
         // The viewer left video full screen: give the window back.
         if std::mem::take(&mut self.viewer_extra.restore_fullscreen) && window.is_fullscreen() {
             window.toggle_fullscreen();
         }
         self.media_roots_frame.borrow_mut().take();
+        self.tick_animation_layer(cx);
         // Spoiler specks painted last frame keep drifting.
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
@@ -244,7 +261,7 @@ impl Render for QuillApp {
             .session()
             .map(|session| session.connection)
             .and_then(connection_indicator);
-        div()
+        let root = div()
             .flex()
             .flex_col()
             .size_full()
@@ -595,16 +612,24 @@ impl Render for QuillApp {
                                     );
                                 },
                             ))
-                            .child(self.sidebar(
-                                &auth,
-                                show_phone,
-                                show_code,
-                                show_password,
-                                show_qr,
-                                cx,
-                            ))
+                            // Ready: the chat list and the conversation are
+                            // cached slices, redrawn on their own (`app_slice`).
+                            .map(|this| {
+                                if self.pane_mode() == super::app::PaneMode::Ready {
+                                    this.child(self.sidebar_slot())
+                                } else {
+                                    this.child(self.sidebar(
+                                        &auth,
+                                        show_phone,
+                                        show_code,
+                                        show_password,
+                                        show_qr,
+                                        cx,
+                                    ))
+                                }
+                            })
                             .child(self.sidebar_resize_handle(cx))
-                            .child(self.conversation(cx))
+                            .child(self.conversation_slot())
                             // Phase 6: user / group info panel beside the conversation.
                             .when_some(self.info_panel(cx), |this, panel| this.child(panel))
                             // MED3: downloads manager panel beside the conversation.
@@ -778,7 +803,13 @@ impl Render for QuillApp {
             // MED4: Instant View reader overlay (above the menu).
             .when_some(self.instant_view_overlay(cx), |this, overlay| {
                 this.child(overlay)
-            })
+            });
+        match image_cache {
+            Some(cache) => {
+                super::image_budget::CacheScope::new(cache.into(), root).into_any_element()
+            }
+            None => root.into_any_element(),
+        }
     }
 }
 

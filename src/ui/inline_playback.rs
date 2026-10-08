@@ -241,7 +241,7 @@ impl QuillApp {
             quill::animation::discard_frame_cache(file_id);
         }
         self.playing_animation = None;
-        self.animation_frames.clear();
+        super::image_budget::retire_all(self.animation_frames.drain(..));
         self.animation_frame = 0;
         self.animation_started_at = None;
         self.animation_tick = false;
@@ -270,14 +270,17 @@ impl QuillApp {
                         }
                         let playing =
                             this.playing_animation.is_some() && this.animation_frames.len() > 1;
-                        if playing {
+                        // Muted GIFs hold still behind another app, like
+                        // tdesktop; activation redraws.
+                        if playing && this.window_active.get() {
                             let elapsed = this
                                 .animation_started_at
                                 .map(|t| t.elapsed().as_secs_f64())
                                 .unwrap_or(0.0);
                             this.animation_frame = (elapsed * this.animation_fps) as usize
                                 % this.animation_frames.len();
-                            cx.notify();
+                            // Only the history shows the GIF.
+                            this.notify_conversation(cx);
                         }
                         this.playing_animation.is_some()
                     })
@@ -400,9 +403,10 @@ impl QuillApp {
                 let cont = this
                     .update(cx, |this, cx| {
                         let playing = this.playing_video.is_some() && this.video_frames.len() > 1;
-                        if playing {
+                        if playing && this.window_active.get() {
                             this.video_frame = (this.video_frame + 1) % this.video_frames.len();
-                            cx.notify();
+                            // Only the history shows the clip.
+                            this.notify_conversation(cx);
                         }
                         this.playing_video.is_some()
                     })
