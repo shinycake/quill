@@ -8,6 +8,7 @@ pub mod auth;
 pub mod autostart;
 pub mod calls;
 pub mod chat_export;
+pub mod chat_swipe;
 pub mod chatlist_archive;
 pub mod chatlist_style;
 pub mod community_mode;
@@ -53,6 +54,7 @@ pub mod spellcheck;
 pub mod state;
 pub mod sticker_playback;
 pub mod sticker_suggest;
+pub mod stories_strip;
 pub mod story_composer;
 pub mod story_page;
 pub mod story_restriction;
@@ -63,6 +65,8 @@ pub mod suggest;
 pub mod telegram;
 pub mod text;
 pub mod tray;
+#[cfg(all(target_os = "linux", feature = "ui"))]
+pub mod tray_sni;
 pub mod update_install;
 pub mod updater;
 pub mod video;
@@ -71,6 +75,8 @@ pub mod voice;
 pub mod voice_input;
 #[cfg(feature = "ui")]
 pub mod voice_opus;
+#[cfg(windows)]
+pub mod winreg;
 
 use sha2::{Digest, Sha256};
 use std::fs;

@@ -2,14 +2,13 @@
 
 use super::app::QuillApp;
 use super::app::{ChatListFilter, PaneMode};
+use super::chat_row::PinnedChatDrag;
 use super::chat_row::{
     ChatListItem, chat_list_caption, chat_list_empty_state, chat_list_skeleton_row,
     chat_row_height, chat_row_tags, static_chat_row,
 };
-use super::chat_row::{PinnedChatDrag, chat_avatar};
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::notifications::notification_settings_json;
-use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
@@ -811,136 +810,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// Phase 9.1: tdesktop-style active-stories tray above the chat list.
-    /// Each entry shows the poster's avatar with an unread (accent) or read
-    /// (muted) ring; tapping opens the story viewer on that chat's latest
-    /// story (`getStory` prefetches any missing story details first).
-    /// Phase 9.3: the row always renders — the leading "+" tile is the
-    /// story composer entry point (kept visible even with no active
-    /// stories).
-    pub(super) fn story_tray(&self, cx: &mut Context<Self>) -> AnyElement {
-        let entries: Vec<quill::telegram::envelope::ChatActiveStoriesView> = self
-            .session()
-            .map(|s| s.ordered_story_tray().into_iter().cloned().collect())
-            .unwrap_or_default();
-        if entries.is_empty() {
-            // Nobody has active stories: the tray collapses. "New story"
-            // stays reachable from the main menu.
-            return div().into_any_element();
-        }
-        let mut row = div()
-            .id("story-tray")
-            // tdesktop's strip: one row that scrolls sideways
-            // (`dialogs_stories_list.cpp`), items never wrap.
-            .flex()
-            .flex_row()
-            .flex_none()
-            .overflow_x_scroll()
-            .items_start()
-            .gap_1()
-            .px_2()
-            .py_2()
-            .child(
-                div()
-                    .id("story-tray-add")
-                    .role(gpui_kit::Role::Button)
-                    .aria_label("Create story")
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .flex_none()
-                    .w(px(64.))
-                    .gap_1()
-                    .child(
-                        div()
-                            .rounded_full()
-                            .p(px(2.))
-                            .border_2()
-                            .border_color(cx.theme().primary)
-                            .child(
-                                div()
-                                    .w(px(40.))
-                                    .h(px(40.))
-                                    .rounded_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_xl()
-                                    .text_color(cx.theme().primary)
-                                    .child("+"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .max_w(px(60.))
-                            .truncate()
-                            .child("New story"),
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_story_composer(window, cx);
-                    })),
-            );
-        for entry in entries {
-            let chat_id = entry.chat_id;
-            let title = self
-                .session()
-                .and_then(|s| s.chats.get(&chat_id))
-                .map(|chat| chat.title.clone())
-                .unwrap_or_else(|| format!("Chat {chat_id}"));
-            let photo = self
-                .session()
-                .and_then(|s| s.chat_photo_path(ChatId(chat_id)))
-                .and_then(|path| {
-                    quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
-                });
-            let latest_story = entry
-                .stories
-                .iter()
-                .map(|info| info.story_id)
-                .max()
-                .unwrap_or(0);
-            row = row.child(
-                div()
-                    .id(("story-tray-item", chat_id as u64))
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Open stories for {title}"))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .flex_none()
-                    .w(px(64.))
-                    .gap_1()
-                    .child(match quill::story_ring::StoryRing::from_active(&entry) {
-                        Some(ring) => super::story_ring::with_story_ring(
-                            |size| chat_avatar(&title, photo.as_deref(), size).into_any_element(),
-                            ring,
-                            46.,
-                            cx.theme().muted_foreground,
-                        ),
-                        None => chat_avatar(&title, photo.as_deref(), 46.).into_any_element(),
-                    })
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .max_w(px(60.))
-                            .truncate()
-                            .child(title.clone()),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_story_viewer(ChatId(chat_id), latest_story, cx);
-                    })),
-            );
-        }
-        row.into_any_element()
-    }
-
     pub(super) fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
         self.contacts_tab_open = false;
         self.calls_tab_open = false;
@@ -1500,15 +1369,18 @@ impl QuillApp {
                     if !self.search_is_open() {
                         list = list.child(self.folder_tabs_with_community_banner(cx));
                     }
-                    list = list.child(self.sidebar_search_field(cx));
+                    // Stories strip: its tiles, and the collapsed stack
+                    // that takes its place beside the search field once
+                    // the list scrolls the strip away.
+                    self.refresh_story_tiles();
+                    let story_stack = if self.search_is_open() {
+                        None
+                    } else {
+                        self.story_compact_stack(cx)
+                    };
+                    list = list.child(self.sidebar_search_field(story_stack, cx));
                     if self.new_secret_picker_open {
                         list = list.child(self.new_secret_picker_panel(cx));
-                    }
-                    // Phase 9.1/9.3: tdesktop-style active-stories tray above
-                    // the chat rows (leading "+" tile opens the story
-                    // composer); omitted for the contacts tab.
-                    if !self.search_is_open() {
-                        list = list.child(self.story_tray(cx));
                     }
                     if self.search_is_open() {
                         list = list.child(self.search_results(cx));
@@ -1735,6 +1607,11 @@ impl QuillApp {
                         let has_archived = self
                             .session()
                             .is_some_and(|s| !s.ordered_archived_chats().is_empty());
+                        // tdesktop's stories strip is the first row: it
+                        // scrolls away with the list (and collapses).
+                        if !self.story_strip.tiles.is_empty() {
+                            items.push(ChatListItem::StoryStrip);
+                        }
                         match quill::chatlist_archive::row_mode(
                             has_archived,
                             self.appearance.archive_collapsed,
@@ -1836,6 +1713,9 @@ impl QuillApp {
                                         ChatListItem::ArchiveRow { height } => *height,
                                         ChatListItem::ArchiveBar => {
                                             px(quill::chatlist_archive::COLLAPSED_BAR_HEIGHT)
+                                        }
+                                        ChatListItem::StoryStrip => {
+                                            px(quill::stories_strip::FULL_HEIGHT)
                                         }
                                     };
                                     ItemSize::new(px(0.), height)

@@ -2,16 +2,23 @@
 //!
 //! OS-level, no TDLib involved (the schema's `autostart` constructor is
 //! for bots, not this). Linux writes an XDG Autostart `.desktop` file;
-//! macOS writes a LaunchAgents plist. Windows is not supported yet — the
-//! Run-key registry write needs a Windows setup to verify, and there is
-//! no Windows CI; it is an explicit follow-up, not a silent gap.
+//! macOS writes a LaunchAgents plist; Windows sets a value under
+//! `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (the same key
+//! Telegram Desktop's `platform/win/specific_win.cpp` uses, no elevation).
+//!
+//! Launch-minimized: tdesktop appends `-autostart` and hides the window only
+//! when its "start minimized" setting is on. Quill's equivalent is the
+//! persisted General "Start in tray" setting (read on every launch), so the
+//! Run value is just the quoted exe path on all platforms — no flag needed.
+// Windows uses the registry; the file-based helpers below are for XDG/macOS.
+#![cfg_attr(windows, allow(dead_code))]
 use std::io;
 use std::path::{Path, PathBuf};
 
 /// User-facing failure for the autostart toggle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutostartError {
-    /// This OS has no verified autostart implementation yet (Windows).
+    /// This OS has no autostart implementation.
     Unsupported,
     Io(String),
 }
@@ -31,6 +38,19 @@ impl std::fmt::Display for AutostartError {
 enum Platform {
     Linux,
     MacOs,
+}
+
+/// Registry key (under HKCU) whose values Windows launches at sign-in.
+#[cfg(any(windows, test))]
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+/// Value name inside [`RUN_KEY`].
+#[cfg(any(windows, test))]
+const RUN_VALUE_NAME: &str = "Quill";
+
+/// `Run` value data for `exe`: the path quoted so spaces survive.
+#[cfg(any(windows, test))]
+fn run_value(exe: &Path) -> String {
+    format!("\"{}\"", exe.display())
 }
 
 fn platform() -> Option<Platform> {
@@ -91,11 +111,17 @@ fn write_file(path: &Path, platform: Platform, exe: &Path) -> io::Result<()> {
 
 /// Whether this OS has a verified autostart implementation.
 pub fn supported() -> bool {
-    platform().is_some()
+    cfg!(windows) || platform().is_some()
 }
 
 /// Whether autostart is currently enabled for this user.
 pub fn is_enabled() -> bool {
+    #[cfg(windows)]
+    return crate::winreg::get_string(RUN_KEY, RUN_VALUE_NAME)
+        .ok()
+        .flatten()
+        .is_some_and(|value| !value.is_empty());
+    #[cfg(not(windows))]
     std::env::var("HOME")
         .ok()
         .is_some_and(|home| is_enabled_in(Path::new(&home)))
@@ -107,6 +133,25 @@ fn is_enabled_in(home: &Path) -> bool {
 
 /// Enable or disable autostart on login.
 pub fn set_enabled(enabled: bool) -> Result<(), AutostartError> {
+    #[cfg(windows)]
+    return set_enabled_windows(enabled);
+    #[cfg(not(windows))]
+    set_enabled_home(enabled)
+}
+
+#[cfg(windows)]
+fn set_enabled_windows(enabled: bool) -> Result<(), AutostartError> {
+    let io_err = |e: io::Error| AutostartError::Io(e.to_string());
+    if enabled {
+        let exe = std::env::current_exe().map_err(io_err)?;
+        crate::winreg::set_string(RUN_KEY, RUN_VALUE_NAME, &run_value(&exe)).map_err(io_err)
+    } else {
+        crate::winreg::delete_value(RUN_KEY, RUN_VALUE_NAME).map_err(io_err)
+    }
+}
+
+#[cfg(not(windows))]
+fn set_enabled_home(enabled: bool) -> Result<(), AutostartError> {
     let home = std::env::var("HOME").map_err(|_| AutostartError::Unsupported)?;
     set_enabled_in(Path::new(&home), enabled)
 }
@@ -165,6 +210,36 @@ mod tests {
         assert!(content.contains("<true/>"));
         assert!(content.contains("<string>/Applications/Quill.app/Contents/MacOS/Quill</string>"));
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn windows_run_value_quotes_the_exe_path() {
+        assert_eq!(RUN_KEY, r"Software\Microsoft\Windows\CurrentVersion\Run");
+        assert_eq!(RUN_VALUE_NAME, "Quill");
+        assert_eq!(
+            run_value(Path::new(r"C:\Program Files\Quill\quill.exe")),
+            r#""C:\Program Files\Quill\quill.exe""#
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_registry_roundtrip_against_real_run_key() {
+        // Real HKCU Run key, restored afterwards: the Windows CI job is the
+        // only place this executes.
+        let before = crate::winreg::get_string(RUN_KEY, RUN_VALUE_NAME).unwrap();
+        set_enabled(true).unwrap();
+        assert!(is_enabled());
+        let value = crate::winreg::get_string(RUN_KEY, RUN_VALUE_NAME)
+            .unwrap()
+            .unwrap();
+        assert!(value.starts_with('"') && value.ends_with('"'), "{value}");
+        set_enabled(false).unwrap();
+        assert!(!is_enabled());
+        set_enabled(false).unwrap();
+        if let Some(previous) = before {
+            crate::winreg::set_string(RUN_KEY, RUN_VALUE_NAME, &previous).unwrap();
+        }
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]

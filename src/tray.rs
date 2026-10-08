@@ -17,8 +17,10 @@
 //! - the badge shows either the unread-message sum or the unread-chat count
 //!   (`count_messages`). The sum saturates instead of overflowing.
 //!
-//! The OS tray itself is managed behind `#[cfg(feature = "ui")]` with the
-//! `tray-icon` crate. [`sync_tray`] is called from a 1s timer in `main.rs`;
+//! The OS tray itself is managed behind `#[cfg(feature = "ui")]`: the
+//! `tray-icon` crate on macOS and Windows, a StatusNotifierItem over D-Bus
+//! (`ksni`, [`crate::tray_sni`]) on Linux, where `tray-icon` would need a
+//! GTK main loop. [`sync_tray`] is called from a 1s timer in `main.rs`;
 //! it re-renders only when the count changes and silently no-ops when the OS
 //! has no system tray (a tray appearing later is picked up on the next sync —
 //! the handle is re-created until it succeeds).
@@ -234,7 +236,7 @@ fn glyph(ch: char) -> Option<[u8; 7]> {
 }
 
 /// Text shown in the badge: the count, capped at "99+".
-fn badge_text(unread: u32) -> String {
+pub(crate) fn badge_text(unread: u32) -> String {
     if unread > 99 {
         "99+".to_string()
     } else {
@@ -242,10 +244,78 @@ fn badge_text(unread: u32) -> String {
     }
 }
 
+/// Tray tooltip / title: "Quill", or "Quill - N unread".
+pub fn tray_tooltip(unread: u32) -> String {
+    if unread == 0 {
+        "Quill".to_string()
+    } else {
+        format!("Quill \u{2014} {unread} unread")
+    }
+}
+
+/// Convert straight RGBA to the StatusNotifierItem pixmap layout: ARGB32 in
+/// network byte order, i.e. bytes `[A, R, G, B]` per pixel.
+#[cfg(any(target_os = "linux", test))]
+pub fn rgba_to_argb32(rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rgba.len());
+    for px in rgba.as_chunks::<4>().0 {
+        out.extend_from_slice(&[px[3], px[0], px[1], px[2]]);
+    }
+    out
+}
+
+/// Overlay badge for the Windows taskbar button (`SetOverlayIcon`): the red
+/// count pill alone, vertically centered on a transparent canvas, so the
+/// taskbar's ~16 px downscale keeps the digits as large as possible
+/// (tdesktop draws its overlay the same way, `main_window_win.cpp`).
+pub fn render_overlay_icon(unread: u32) -> (Vec<u8>, u32, u32) {
+    let mut px = Pixels::new(ICON_SIZE);
+    if unread > 0 {
+        draw_badge_at(
+            &mut px,
+            unread,
+            &BadgeColors {
+                ring: WHITE,
+                fill: BADGE_RED,
+                digits: WHITE,
+            },
+            (ICON_SIZE - BADGE_HEIGHT) / 2,
+        );
+    }
+    (px.buf, ICON_SIZE, ICON_SIZE)
+}
+
+/// Which tray-dependent switches the General settings may offer. Hidden when
+/// no tray icon exists: a "minimize/start in tray" window with no tray to
+/// reopen it from would strand the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraySettingSwitches {
+    pub start_in_tray: bool,
+    pub minimize_to_tray: bool,
+}
+
+/// `minimize_to_tray` is additionally macOS-only for now: Windows/Linux
+/// GPUI windows cannot be hidden after creation, so only the menu-bar
+/// hide path exists (`cx.hide()`).
+pub fn tray_setting_switches(tray_available: bool, macos: bool) -> TraySettingSwitches {
+    TraySettingSwitches {
+        start_in_tray: tray_available,
+        minimize_to_tray: tray_available && macos,
+    }
+}
+
 /// Red pill in the top-right corner, sized to take up most of the icon so the
 /// count reads at menu-bar size: 4 px glyph cells for one or two characters,
 /// 3 px for "99+", with a ring to separate it from the icon art.
 fn draw_badge(px: &mut Pixels, unread: u32, colors: &BadgeColors) {
+    draw_badge_at(px, unread, colors, 0);
+}
+
+/// Height of the unread pill in pixels.
+const BADGE_HEIGHT: u32 = 38;
+
+/// [`draw_badge`] with the pill's top edge at row `y0`.
+fn draw_badge_at(px: &mut Pixels, unread: u32, colors: &BadgeColors, y0: u32) {
     let text = badge_text(unread);
     let n = text.len() as u32;
     let scale: u32 = if n >= 3 { 3 } else { 4 };
@@ -253,11 +323,10 @@ fn draw_badge(px: &mut Pixels, unread: u32, colors: &BadgeColors) {
     let glyph_w = 5 * scale;
     let text_w = n * glyph_w + (n - 1) * gap;
     let text_h = 7 * scale;
-    let pill_h: u32 = 38;
+    let pill_h: u32 = BADGE_HEIGHT;
     let pill_w = (text_w + 14).max(pill_h).min(ICON_SIZE);
     let ring: u32 = 2;
     let x0 = ICON_SIZE - pill_w;
-    let y0 = 0;
     px.rounded_rect(x0, y0, pill_w, pill_h, pill_h / 2, colors.ring);
     px.rounded_rect(
         x0 + ring,
@@ -325,15 +394,17 @@ impl Pixels {
     }
 }
 
-/// Live tray handle. Created lazily on the UI thread; construction fails
-/// (returning `None`) when the OS has no system tray.
-#[cfg(feature = "ui")]
+/// Live tray handle (macOS / Windows via `tray-icon`). Created lazily on the
+/// UI thread; construction fails (returning `None`) when the OS has no
+/// system tray. Linux uses [`crate::tray_sni`] instead: `tray-icon` there
+/// needs a GTK main loop that a GPUI process does not run.
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub struct Tray {
     icon: tray_icon::TrayIcon,
     last_shown: Option<u32>,
 }
 
-#[cfg(feature = "ui")]
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 impl Tray {
     fn new() -> Option<Self> {
         #[cfg(target_os = "macos")]
@@ -378,18 +449,13 @@ impl Tray {
                 .icon
                 .set_icon_with_as_template(Some(icon), cfg!(target_os = "macos"));
         }
-        let tooltip = if unread == 0 {
-            "Quill".to_string()
-        } else {
-            format!("Quill — {unread} unread")
-        };
-        let _ = self.icon.set_tooltip(Some(tooltip));
+        let _ = self.icon.set_tooltip(Some(tray_tooltip(unread)));
     }
 }
 
-/// The macOS menu bar takes a monochrome template; Windows and Linux trays
-/// show the full-color app icon.
-#[cfg(feature = "ui")]
+/// The macOS menu bar takes a monochrome template; Windows trays show the
+/// full-color app icon.
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 fn render_platform_icon(unread: u32) -> (Vec<u8>, u32, u32) {
     if cfg!(target_os = "macos") {
         render_tray_template(unread)
@@ -398,7 +464,7 @@ fn render_platform_icon(unread: u32) -> (Vec<u8>, u32, u32) {
     }
 }
 
-#[cfg(feature = "ui")]
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 thread_local! {
     /// UI-thread tray handle. `tray_icon::TrayIcon` is `!Send` on some
     /// platforms (macOS), so a process-wide static cannot hold it; every
@@ -406,10 +472,17 @@ thread_local! {
     static TRAY: std::cell::RefCell<Option<Tray>> = const { std::cell::RefCell::new(None) };
 }
 
+#[cfg(all(feature = "ui", target_os = "linux"))]
+thread_local! {
+    /// UI-thread StatusNotifierItem lifecycle (registration runs on a worker).
+    static TRAY: std::cell::RefCell<crate::tray_sni::TrayState> =
+        std::cell::RefCell::new(crate::tray_sni::TrayState::new());
+}
+
 /// Sync the system tray icon with the session's unread count. Called from a
 /// 1s timer in `main.rs` on the UI thread; a no-op when the count is
 /// unchanged or no system tray exists.
-#[cfg(feature = "ui")]
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn sync_tray(session: Option<&Session>) {
     let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
     TRAY.with(|cell| {
@@ -432,17 +505,53 @@ pub fn sync_tray(session: Option<&Session>) {
     });
 }
 
-#[cfg(feature = "ui")]
+/// Linux: drive the StatusNotifierItem lifecycle (see [`crate::tray_sni`]).
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn sync_tray(session: Option<&Session>) {
+    let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    TRAY.with(|cell| cell.borrow_mut().poll(unread));
+}
+
+/// First sync at window creation. macOS/Windows create the tray
+/// synchronously; Linux waits briefly for the StatusNotifierItem
+/// registration so start-in-tray knows whether a tray host exists.
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
+pub fn sync_tray_startup(session: Option<&Session>) {
+    sync_tray(session);
+}
+
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn sync_tray_startup(session: Option<&Session>) {
+    let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    TRAY.with(|cell| {
+        cell.borrow_mut()
+            .poll_startup(unread, std::time::Duration::from_millis(1500))
+    });
+}
+
+/// Whether a tray icon is currently shown. The close/minimize/start-in-tray
+/// switches are only offered when this is true ([`tray_setting_switches`]).
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn tray_available() -> bool {
     TRAY.with(|cell| cell.borrow().is_some())
 }
 
-#[cfg(feature = "ui")]
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn tray_available() -> bool {
+    TRAY.with(|cell| cell.borrow().available())
+}
+
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn take_tray_actions() -> Vec<TrayAction> {
     tray_icon::menu::MenuEvent::receiver()
         .try_iter()
         .filter_map(|event| menu_action(event.id.as_ref()))
         .collect()
+}
+
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub fn take_tray_actions() -> Vec<TrayAction> {
+    crate::tray_sni::take_actions()
 }
 
 #[cfg(test)]
@@ -726,5 +835,79 @@ mod tests {
         let (b, _, _) = render_tray_icon(150);
         assert_ne!(a, b);
         assert!(red_pixel_count(&b) > 100);
+    }
+
+    #[test]
+    fn tooltip_names_the_unread_count() {
+        assert_eq!(tray_tooltip(0), "Quill");
+        assert_eq!(tray_tooltip(3), "Quill \u{2014} 3 unread");
+    }
+
+    #[test]
+    fn argb32_pixmap_is_network_byte_order() {
+        assert_eq!(
+            rgba_to_argb32(&[0x11, 0x22, 0x33, 0x44, 0xAA, 0xBB, 0xCC, 0xDD]),
+            vec![0x44, 0x11, 0x22, 0x33, 0xDD, 0xAA, 0xBB, 0xCC]
+        );
+        let (rgba, w, h) = render_tray_icon(0);
+        assert_eq!(rgba_to_argb32(&rgba).len(), (w * h * 4) as usize);
+    }
+
+    #[test]
+    fn overlay_icon_is_empty_without_unread_and_centered_pill_with_unread() {
+        let (empty, w, h) = render_overlay_icon(0);
+        assert_eq!((w, h), (ICON_SIZE, ICON_SIZE));
+        assert!(empty.as_chunks::<4>().0.iter().all(|p| p[3] == 0));
+
+        let (rgba, _, _) = render_overlay_icon(7);
+        let red = |p: &[u8; 4]| *p == BADGE_RED;
+        assert!(rgba.as_chunks::<4>().0.iter().any(red));
+        // The pill is vertically centered: no opaque pixel in the top or
+        // bottom margin rows.
+        let margin = ((ICON_SIZE - BADGE_HEIGHT) / 2) as usize;
+        let row = (ICON_SIZE * 4) as usize;
+        assert!(
+            rgba[..margin * row]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[3] == 0)
+        );
+        assert!(
+            rgba[(ICON_SIZE as usize - margin) * row..]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[3] == 0)
+        );
+        // The top-right badge of the tray icon starts at row 0, so the
+        // overlay differs from it.
+        assert_ne!(rgba, render_tray_icon(7).0);
+    }
+
+    #[test]
+    fn tray_switches_hide_without_a_tray() {
+        assert_eq!(
+            tray_setting_switches(false, true),
+            TraySettingSwitches {
+                start_in_tray: false,
+                minimize_to_tray: false
+            }
+        );
+        assert_eq!(
+            tray_setting_switches(true, true),
+            TraySettingSwitches {
+                start_in_tray: true,
+                minimize_to_tray: true
+            }
+        );
+        // Windows / Linux: start-in-tray only, minimize-to-tray stays off.
+        assert_eq!(
+            tray_setting_switches(true, false),
+            TraySettingSwitches {
+                start_in_tray: true,
+                minimize_to_tray: false
+            }
+        );
     }
 }

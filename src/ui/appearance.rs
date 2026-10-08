@@ -327,15 +327,24 @@ impl QuillApp {
                 body = body.child(this.appearance_language_section(cx));
                 body = body.child(this.general_autostart_section(cx));
                 body = body.child(this.update_settings_section(cx));
-                body = body.child(this.appearance_section(
-                    cx, "Start in tray", "Open Quill from its tray menu when needed.",
-                    Switch::new("general-start-in-tray").checked(this.appearance.start_in_tray)
-                        .accessibility_label("Start Quill in the system tray")
-                        .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.start_in_tray = on)))
-                        .into_any_element(),
-                ));
+                // Tray-dependent switches only exist while a tray icon does:
+                // a hidden window with no tray to reopen it from would
+                // strand the user (Linux without a StatusNotifier host).
+                let tray = quill::tray::tray_setting_switches(
+                    quill::tray::tray_available(),
+                    cfg!(target_os = "macos"),
+                );
+                if tray.start_in_tray {
+                    body = body.child(this.appearance_section(
+                        cx, "Start in tray", "Open Quill from its tray menu when needed.",
+                        Switch::new("general-start-in-tray").checked(this.appearance.start_in_tray)
+                            .accessibility_label("Start Quill in the system tray")
+                            .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.start_in_tray = on)))
+                            .into_any_element(),
+                    ));
+                }
                 // Parity slice (platform-custom-keybindings).
-                if cfg!(target_os = "macos") {
+                if tray.minimize_to_tray {
                     body = body.child(this.appearance_section(
                         cx, "Minimize to tray", "Use the tray menu to reopen Quill.",
                         Switch::new("general-minimize-to-tray").checked(this.appearance.minimize_to_tray)
@@ -793,7 +802,34 @@ impl QuillApp {
             self.appearance.chat_list_rich_preview,
             |a, on| a.chat_list_rich_preview = on,
         ));
+        body = body.child(self.appearance_swipe_action_section(cx));
         body.into_any_element()
+    }
+
+    /// tdesktop's "Chat list quick action" (Settings > Chats): what a
+    /// horizontal trackpad swipe on a chat row does. Disabled by default.
+    fn appearance_swipe_action_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        use quill::chat_swipe::SwipeAction;
+        let current = self.appearance.swipe_action;
+        let selected = SwipeAction::ALL.iter().position(|a| *a == current);
+        let control = RadioGroup::vertical("appearance-swipe-action")
+            .selected_index(selected)
+            .children(SwipeAction::ALL.iter().map(|action| {
+                Radio::new(("appearance-swipe-action", *action as usize))
+                    .label(action.settings_label())
+            }))
+            .on_click(cx.listener(|this, &ix: &usize, _, cx| {
+                if let Some(action) = SwipeAction::ALL.get(ix).copied() {
+                    this.set_appearance(cx, |a| a.swipe_action = action);
+                }
+            }));
+        self.appearance_section(
+            cx,
+            "Chat list quick action",
+            "Swipe a chat left with two fingers on a trackpad to run this action; \
+             past the threshold it runs when you lift your fingers.",
+            control.into_any_element(),
+        )
     }
 
     /// Send-key mode section (parity:settings-enter-send,
@@ -808,7 +844,7 @@ impl QuillApp {
             return self.appearance_section(
                 cx,
                 "Launch at login",
-                "Autostart is not supported on this platform yet.",
+                "Autostart is not available on this platform.",
                 div().into_any_element(),
             );
         }

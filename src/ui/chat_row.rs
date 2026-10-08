@@ -69,6 +69,9 @@ pub(super) enum ChatListItem {
     ArchiveRow { height: Pixels },
     /// The same entry collapsed to a slim bar.
     ArchiveBar,
+    /// The stories strip, first row of the list: it scrolls away with the
+    /// rows, which is what collapses it (`quill::stories_strip`).
+    StoryStrip,
 }
 
 /// kit Phase 9: a loading placeholder row for the chat list — a kit
@@ -294,7 +297,12 @@ impl QuillApp {
         match item {
             Some(ChatListItem::ArchiveRow { .. }) => self.archive_row_element(cx),
             Some(ChatListItem::ArchiveBar) => self.archive_bar_element(cx),
-            Some(ChatListItem::Chat { id, archived, .. }) => {
+            Some(ChatListItem::StoryStrip) => self.story_strip_element(cx),
+            Some(ChatListItem::Chat {
+                id,
+                archived,
+                height,
+            }) => {
                 let Some(chat) = self.session().and_then(|s| s.chats.get(&id.0)) else {
                     return div().into_any_element();
                 };
@@ -385,6 +393,12 @@ impl QuillApp {
                 .then(|| self.session().and_then(|s| s.chat_story_ring(chat.id.0)))
                 .flatten();
                 let muted_fg = cx.theme().muted_foreground;
+                // Swipe action for this row (none while selecting).
+                let swipe_label = if selecting {
+                    quill::chat_swipe::SwipeLabel::Disabled
+                } else {
+                    self.chat_swipe_label(chat)
+                };
                 let pin_slide = self.pin_reorder.as_ref().map(|r| {
                     (
                         r.offset(chat.id.0, std::time::Instant::now()),
@@ -437,6 +451,7 @@ impl QuillApp {
                     cx,
                 )
                 .into_any_element();
+                let row = self.chat_swipe_wrap(row, id, swipe_label, height, cx);
                 match pin_slide {
                     // A row shifted by the pinned drag: the dragged row
                     // follows the pointer above its neighbours, the
