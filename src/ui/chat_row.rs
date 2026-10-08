@@ -509,6 +509,7 @@ pub(super) fn session_chat_row(
     // `title` below).
     let drag_title = title.clone();
     let preview = chat.sidebar_preview();
+    let activity = chat.peer_activity();
     // Slice chatlist-list-style: the icon/entities describe
     // `last_preview` only — draft/typing/activity lines render unstyled.
     // (When the shown text equals `last_preview` the entities describe
@@ -785,15 +786,39 @@ pub(super) fn session_chat_row(
                                                 )
                                             },
                                         )
-                                        .child(div().min_w_0().flex_1().child(
-                                            super::chatlist_style::chat_list_preview_line(
-                                                icon,
-                                                &preview,
-                                                entities,
-                                                &preview_emoji,
-                                                cx,
-                                            ),
-                                        )),
+                                        .child(match activity {
+                                            // Typing / recording / uploading replaces
+                                            // the preview, in the accent color.
+                                            Some(line) => div()
+                                                .min_w_0()
+                                                .flex_1()
+                                                .flex()
+                                                .items_center()
+                                                .text_xs()
+                                                .text_color(cx.theme().primary)
+                                                .child(
+                                                    super::activity_indicator::activity_indicator(
+                                                        line.indicator,
+                                                        cx.theme().primary,
+                                                        format!("row-activity-{}", id.0).into(),
+                                                    ),
+                                                )
+                                                .child(div().min_w_0().truncate().child(line.text))
+                                                .into_any_element(),
+                                            None => div()
+                                                .min_w_0()
+                                                .flex_1()
+                                                .child(
+                                                    super::chatlist_style::chat_list_preview_line(
+                                                        icon,
+                                                        &preview,
+                                                        entities,
+                                                        &preview_emoji,
+                                                        cx,
+                                                    ),
+                                                )
+                                                .into_any_element(),
+                                        }),
                                 )
                                 // Slice CL3: TGX order — ♥ reactions, @ mentions,
                                 // then the unread counter at the trailing edge.

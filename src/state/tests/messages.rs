@@ -310,7 +310,7 @@ fn chat_action_typing_then_cancel() {
     );
     let chat = session.chats.get(&7).unwrap();
     assert!(chat.is_peer_typing());
-    assert_eq!(chat.sidebar_preview(), "typing…");
+    assert_eq!(chat.sidebar_preview(), "typing");
     apply_json(
         &mut session,
         &seq,

@@ -40,6 +40,29 @@ impl Session {
         }
     }
 
+    /// First name of a user (or title of a sender chat), for the
+    /// "Dana is typing" line; empty when unknown.
+    pub fn sender_first_name(&self, sender: MessageSender) -> String {
+        match sender {
+            MessageSender::User { user_id } => self
+                .users
+                .get(&user_id)
+                .map(|user| {
+                    if user.first_name.trim().is_empty() {
+                        user.display_name()
+                    } else {
+                        user.first_name.clone()
+                    }
+                })
+                .unwrap_or_default(),
+            MessageSender::Chat { chat_id } => self
+                .chats
+                .get(&chat_id)
+                .map(|c| c.title.clone())
+                .unwrap_or_default(),
+        }
+    }
+
     /// The display name of a message's author: you, the sending user or
     /// chat, else the chat's title (channel posts).
     pub fn message_author_name(&self, message: &HistoryMessage) -> String {

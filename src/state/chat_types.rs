@@ -112,10 +112,8 @@ pub struct ChatSummary {
     /// Identity, date and direction of `chat.last_message` for the row's
     /// timestamp and outgoing receipt; `None` for an empty chat.
     pub last_message: Option<ChatLastMessage>,
-    /// Senders with an active `chatActionTyping` (`updateChatAction`).
-    pub typing_senders: Vec<MessageSender>,
-    /// Senders with an active `chatActionChoosingSticker` (`updateChatAction`).
-    pub choosing_sticker_senders: Vec<MessageSender>,
+    /// Senders with an active chat action (`updateChatAction`).
+    pub sender_actions: Vec<super::chat_activity::SenderAction>,
     /// `chat.draft_message` text draft. Voice/rich drafts are not stored.
     pub draft: Option<ChatDraft>,
     /// Own `chatMemberStatus*` in a broadcast channel (`getChatMember` /
@@ -498,31 +496,41 @@ impl ChatSummary {
     }
 
     pub fn is_peer_typing(&self) -> bool {
-        !self.typing_senders.is_empty()
+        self.sender_actions
+            .iter()
+            .any(|a| a.action == ChatAction::Typing)
     }
 
-    pub fn set_sender_action(&mut self, sender: MessageSender, action: ChatAction) {
-        self.typing_senders.retain(|existing| *existing != sender);
-        self.choosing_sticker_senders
-            .retain(|existing| *existing != sender);
-        match action {
-            ChatAction::Typing => self.typing_senders.push(sender),
-            ChatAction::ChoosingSticker => self.choosing_sticker_senders.push(sender),
-            ChatAction::Cancel | ChatAction::Other => {}
+    /// Records (or, for `Cancel`/`Other`, clears) one sender's action.
+    /// `name` is the first name shown in groups. TDLib sends the
+    /// `Cancel` when an action expires, so no local timer is needed.
+    pub fn set_sender_action(&mut self, sender: MessageSender, action: ChatAction, name: String) {
+        self.sender_actions
+            .retain(|existing| existing.sender != sender);
+        if !matches!(action, ChatAction::Cancel | ChatAction::Other) {
+            self.sender_actions
+                .push(super::chat_activity::SenderAction {
+                    sender,
+                    action,
+                    name,
+                });
         }
     }
 
-    /// Slice S17: the peer-activity label for the header and sidebar —
-    /// "choosing a sticker…" wins over "typing…" while a peer is picking a
-    /// sticker (`chatActionChoosingSticker`, schema 1.8.67 line 6380).
-    pub fn peer_activity_label(&self) -> Option<&'static str> {
-        if !self.choosing_sticker_senders.is_empty() {
-            Some("choosing a sticker…")
-        } else if self.is_peer_typing() {
-            Some("typing…")
-        } else {
-            None
-        }
+    /// The peer-activity line for the chat row and header, in
+    /// Telegram Desktop's wording ("typing", "Dana is recording a voice
+    /// message"); private chats omit the name.
+    pub fn peer_activity(&self) -> Option<super::chat_activity::ActivityLine> {
+        let named = !matches!(
+            self.kind,
+            ChatKind::Private { .. } | ChatKind::Secret { .. }
+        );
+        super::chat_activity::activity_line(&self.sender_actions, named)
+    }
+
+    /// Text of [`Self::peer_activity`].
+    pub fn peer_activity_label(&self) -> Option<String> {
+        self.peer_activity().map(|line| line.text)
     }
 
     pub fn sidebar_preview(&self) -> String {
@@ -530,7 +538,7 @@ impl ChatSummary {
             return reason.to_string();
         }
         if let Some(label) = self.peer_activity_label() {
-            return label.into();
+            return label;
         }
         if let Some(draft) = &self.draft {
             let text = draft.text.replace('\n', " ");
