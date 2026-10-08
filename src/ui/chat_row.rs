@@ -354,6 +354,11 @@ impl QuillApp {
                             .is_some_and(|s| s.pinned_chat_ids(false).len() >= 2)
                         && chat.is_pinned
                 };
+                // The activity indicator is clock-driven: keep ticking while
+                // a visible row shows one.
+                if chat.peer_activity().is_some() {
+                    self.request_animation_tick(12, cx);
+                }
                 session_chat_row(
                     chat,
                     selected,

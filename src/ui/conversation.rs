@@ -175,6 +175,9 @@ impl QuillApp {
             (!meta.is_empty()).then(|| meta.join(" · "))
         });
         let secret_line = self.secret_pending_subtitle(chat_id);
+        if typing {
+            self.request_animation_tick(12, cx);
+        }
         let status_indicator = if typing {
             Some(
                 activity_line

@@ -6,7 +6,10 @@
 
 use gpui_kit::*;
 use quill::state::ActivityIndicator;
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::Instant;
+
+const CYCLE_MS: u128 = 1100;
 
 const DOT: f32 = 3.;
 
@@ -16,6 +19,14 @@ fn pulse(delta: f32, phase: f32) -> f32 {
     0.3 + 0.7 * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos())
 }
 
+/// Position in the pulse cycle (0..1) for `elapsed_ms` on the shared clock.
+fn cycle_delta(elapsed_ms: u128) -> f32 {
+    (elapsed_ms % CYCLE_MS) as f32 / CYCLE_MS as f32
+}
+
+/// Callers must also `request_animation_tick` so the frame clock redraws;
+/// GPUI's `with_animation` would redraw the window at display rate.
+///
 /// `key` must be unique per visible indicator (animation state is keyed by
 /// element id).
 pub(super) fn activity_indicator(
@@ -27,6 +38,8 @@ pub(super) fn activity_indicator(
         ActivityIndicator::Dots => 3,
         ActivityIndicator::Pulse => 1,
     };
+    static START: OnceLock<Instant> = OnceLock::new();
+    let delta = cycle_delta(START.get_or_init(Instant::now).elapsed().as_millis());
     div()
         .flex()
         .flex_none()
@@ -41,16 +54,19 @@ pub(super) fn activity_indicator(
                 .size(px(DOT))
                 .rounded_full()
                 .bg(color)
-                .with_animation(
-                    SharedString::from(format!("{key}-pulse-{index}")),
-                    Animation::new(Duration::from_millis(1100)).repeat(),
-                    move |dot, delta| dot.opacity(pulse(delta, phase)),
-                )
+                .opacity(pulse(delta, phase))
         }))
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn clock_maps_to_cycle_position() {
+        assert_eq!(super::cycle_delta(0), 0.0);
+        assert_eq!(super::cycle_delta(1100), 0.0);
+        assert!((super::cycle_delta(550) - 0.5).abs() < 1e-6);
+    }
+
     #[test]
     fn pulse_stays_visible_and_staggers() {
         for step in 0..=20 {
