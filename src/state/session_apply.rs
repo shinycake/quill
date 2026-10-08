@@ -2565,13 +2565,20 @@ impl Session {
         chat_id: ChatId,
         message: Option<&ParsedMessage>,
     ) {
+        // Service messages preview as their wording ("Dana pinned \"hi\""),
+        // computed before the chat is borrowed mutably.
+        let service_preview = message.and_then(|message| {
+            let content = effective_content(&message.content, message.ephemeral.as_ref());
+            self.service_text_for(chat_id, content, message.sender, message.is_outgoing)
+                .map(|text| text.plain())
+        });
         let chat = self
             .chats
             .entry(chat_id.0)
             .or_insert_with(|| placeholder_chat(chat_id));
         if let Some(message) = message {
             let content = effective_content(&message.content, message.ephemeral.as_ref());
-            chat.last_preview = content.preview();
+            chat.last_preview = service_preview.unwrap_or_else(|| content.preview());
             chat.last_preview_style = preview_style(content, &chat.last_preview);
             chat.last_preview_thumb = match content {
                 MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => photo
@@ -2581,11 +2588,15 @@ impl Session {
                     .map(std::sync::Arc::new),
                 _ => None,
             };
-            chat.last_preview_sender = preview_sender_name(
-                message.is_outgoing,
-                message.author_signature.as_deref(),
-                &chat.title,
-            );
+            chat.last_preview_sender = if chat.last_preview_style.service {
+                String::new()
+            } else {
+                preview_sender_name(
+                    message.is_outgoing,
+                    message.author_signature.as_deref(),
+                    &chat.title,
+                )
+            };
             chat.last_message = Some(ChatLastMessage {
                 id: message.id,
                 date: message.date,

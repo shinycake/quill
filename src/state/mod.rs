@@ -84,6 +84,7 @@ mod session_members;
 mod session_notifications;
 mod session_requests;
 mod session_search;
+mod session_service;
 mod session_sponsored;
 mod session_stickers;
 mod session_stories;

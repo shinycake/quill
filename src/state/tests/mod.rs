@@ -15,6 +15,7 @@ mod payments;
 mod requests;
 mod search;
 mod send_permissions;
+mod service_preview;
 mod sessions;
 mod shared_media;
 mod stickers;

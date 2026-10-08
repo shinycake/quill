@@ -1400,7 +1400,7 @@ impl QuillApp {
                         // Slice G9: the join-from-community service row
                         // carries no editable caption either.
                         | MessageContent::ChatJoinFromCommunity { .. }
-                        | MessageContent::Service(_) => {}
+                        | MessageContent::Action(_) => {}
                     }
                 }
             }

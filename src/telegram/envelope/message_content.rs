@@ -6,7 +6,9 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageContent {
     Text(TextContent),
-    Service(String),
+    /// A chat event (member added, pinned message, gift, forum topic…):
+    /// structured facts only; the wording is `crate::service_text`.
+    Action(Box<ServiceAction>),
     Photo(PhotoContent),
     Document(DocumentContent),
     Sticker(StickerContent),
@@ -375,7 +377,7 @@ impl MessageContent {
                     call_entry_label(*is_video, discard_reason, *duration, false)
                 )
             }
-            MessageContent::Service(text) => text.chars().take(80).collect(),
+            MessageContent::Action(action) => crate::service_text::action_preview(action),
             MessageContent::Unsupported { .. } => "Unsupported message".into(),
             // Slice bots-games: chat-list preview for a game card.
             MessageContent::Game(game) => {
@@ -456,53 +458,6 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
             // Keep the text when animation metadata isn't available locally.
             let text = serde_json::json!({"text": {"text": value.get("emoji").and_then(Value::as_str).unwrap_or(""), "entities": []}});
             parse_message_text(&text)
-        }
-        Some(
-            kind @ ("messageBasicGroupChatCreate"
-            | "messageSupergroupChatCreate"
-            | "messageChatChangeTitle"
-            | "messageChatChangePhoto"
-            | "messageChatDeletePhoto"
-            | "messageChatAddMembers"
-            | "messageChatDeleteMember"
-            | "messageChatJoinByLink"
-            | "messageChatJoinByRequest"
-            | "messagePinMessage"
-            | "messageContactRegistered"
-            | "messageCustomServiceAction"
-            | "messageChatUpgradeTo"
-            | "messageChatUpgradeFrom"
-            | "messageVideoChatStarted"
-            | "messageVideoChatEnded"),
-        ) => {
-            let text = match kind {
-                "messageBasicGroupChatCreate" | "messageSupergroupChatCreate" => {
-                    "Group created".to_string()
-                }
-                "messageChatChangeTitle" => format!(
-                    "Chat renamed to {}",
-                    value.get("title").and_then(Value::as_str).unwrap_or("")
-                ),
-                "messageChatChangePhoto" => "Chat photo changed".to_string(),
-                "messageChatDeletePhoto" => "Chat photo removed".to_string(),
-                "messageChatAddMembers" => "Members added".to_string(),
-                "messageChatDeleteMember" => "A member left or was removed".to_string(),
-                "messageChatJoinByLink" | "messageChatJoinByRequest" => {
-                    "A member joined the chat".to_string()
-                }
-                "messagePinMessage" => "A message was pinned".to_string(),
-                "messageContactRegistered" => "Joined Telegram".to_string(),
-                "messageCustomServiceAction" => value
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-                "messageChatUpgradeTo" | "messageChatUpgradeFrom" => "Group upgraded".to_string(),
-                "messageVideoChatStarted" => "Voice chat started".to_string(),
-                "messageVideoChatEnded" => "Voice chat ended".to_string(),
-                _ => unreachable!(),
-            };
-            (MessageContent::Service(text), Vec::new())
         }
         Some("messagePhoto") => parse_message_photo(value),
         Some("messageDocument") => parse_message_document(value),
@@ -608,12 +563,18 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
             },
             Vec::new(),
         ),
-        Some(other) => (
-            MessageContent::Unsupported {
-                type_name: other.to_string(),
-            },
-            Vec::new(),
-        ),
+        Some(other) => {
+            let mut files = Vec::new();
+            match ServiceAction::from_td(other, value, &mut files) {
+                Some(action) => (MessageContent::Action(Box::new(action)), files),
+                None => (
+                    MessageContent::Unsupported {
+                        type_name: other.to_string(),
+                    },
+                    Vec::new(),
+                ),
+            }
+        }
         None => (
             MessageContent::Unsupported {
                 type_name: "unknown".into(),
