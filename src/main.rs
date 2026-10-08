@@ -492,6 +492,8 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-dice" => ScreenshotDemo::ReadyDice,
                 "ready-media-viewer" => ScreenshotDemo::ReadyMediaViewer,
                 "ready-video-playback" => ScreenshotDemo::ReadyVideoPlayback,
+                "ready-viewer-gif" => ScreenshotDemo::ReadyViewerGif,
+                "ready-viewer-shared" => ScreenshotDemo::ReadyViewerShared,
                 "ready-video-pip" => ScreenshotDemo::ReadyVideoPip,
                 "ready-stories" => ScreenshotDemo::ReadyStories,
                 "ready-story-post" => ScreenshotDemo::ReadyStoryPost,
@@ -556,7 +558,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-shortcuts" => ScreenshotDemo::ReadyShortcuts,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-premium|wait-qr|ready-chats|ready-chats-composer|ready-suggest-hashtag|ready-suggest-emoji|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-paste-image|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-select-mode|ready-reply-media|ready-edit-media|ready-reveal|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-game-card|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-custom-emoji|ready-animated-emoji|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-inline-results|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-stories|ready-story-post|ready-story-viewers|ready-story-areas|ready-story-composer|ready-story-albums|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-bot-topics|ready-bot-topics-bottom|ready-bot-topics-left|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-rich-ai-tools|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-appearance|ready-spellcheck|ready-spellcheck-panel|ready-spellcheck-toggle|ready-accounts|ready-group-manage|ready-group-info-edit|ready-groups2|ready-community-create|ready-community-hub|ready-community-info|ready-2fa-manage|ready-recovery-email|ready-account|ready-group-call-scheduled|ready-rich-premium-gate|ready-keybindings|ready-blockquote-expandable)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-premium|wait-qr|ready-chats|ready-chats-composer|ready-suggest-hashtag|ready-suggest-emoji|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-paste-image|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-select-mode|ready-reply-media|ready-edit-media|ready-reveal|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-game-card|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-sponsored|ready-custom-emoji|ready-animated-emoji|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-inline-results|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-viewer-gif|ready-viewer-shared|ready-stories|ready-story-post|ready-story-viewers|ready-story-areas|ready-story-composer|ready-story-albums|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-bot-topics|ready-bot-topics-bottom|ready-bot-topics-left|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-rich-ai-tools|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-appearance|ready-spellcheck|ready-spellcheck-panel|ready-spellcheck-toggle|ready-accounts|ready-group-manage|ready-group-info-edit|ready-groups2|ready-community-create|ready-community-hub|ready-community-info|ready-2fa-manage|ready-recovery-email|ready-account|ready-group-call-scheduled|ready-rich-premium-gate|ready-keybindings|ready-blockquote-expandable)"
                     );
                     std::process::exit(2);
                 }
@@ -729,6 +731,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyDice => ".quill-ready-ready-dice",
         ScreenshotDemo::ReadyMediaViewer => ".quill-ready-ready-media-viewer",
         ScreenshotDemo::ReadyVideoPlayback => ".quill-ready-ready-video-playback",
+        ScreenshotDemo::ReadyViewerGif => ".quill-ready-ready-viewer-gif",
+        ScreenshotDemo::ReadyViewerShared => ".quill-ready-ready-viewer-shared",
         ScreenshotDemo::ReadyVideoPip => ".quill-ready-ready-video-pip",
         ScreenshotDemo::ReadyStories => ".quill-ready-ready-stories",
         ScreenshotDemo::ReadyStoryPost => ".quill-ready-ready-story-post",
@@ -867,10 +871,14 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     )
                     .expect("failed to open screenshot demo window");
 
-                let _ = demo_window.update(cx, |_, window, cx| {
-                    cx.activate(true);
-                    window.activate_window();
-                });
+                // `QUILL_DEMO_BACKGROUND=1`: leave the window behind the
+                // frontmost app (inactive), to measure the inactive path.
+                if std::env::var_os("QUILL_DEMO_BACKGROUND").is_none() {
+                    let _ = demo_window.update(cx, |_, window, cx| {
+                        cx.activate(true);
+                        window.activate_window();
+                    });
+                }
 
                 // Allow a couple of frames to paint, then signal the capture script.
                 cx.background_executor()
@@ -985,6 +993,68 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     }
                 }
                 let _ = std::fs::write(&marker_for_spawn, b"ready\n");
+                // `QUILL_DEMO_DEACTIVATE=1`: once ready, a second (blank)
+                // window takes key status, so the demo window goes from
+                // active to inactive, as when another app comes forward.
+                if std::env::var_os("QUILL_DEMO_DEACTIVATE").is_some() {
+                    cx.update(|cx| {
+                        if let Ok(other) = cx.open_window(
+                            WindowOptions {
+                                window_bounds: Some(WindowBounds::Windowed(Bounds {
+                                    origin: point(px(40.), px(40.)),
+                                    size: size(px(200.), px(120.)),
+                                })),
+                                ..Default::default()
+                            },
+                            |_, cx| cx.new(|_| EmptyView),
+                        ) {
+                            let _ = other.update(cx, |_, window, _| window.activate_window());
+                        }
+                    });
+                }
+                // Performance fixture:
+                // `QUILL_DEMO_AUTOSCROLL=<x>,<y>[,<dy>[,<steps>]]` scrolls
+                // whatever sits under that window point with synthetic wheel
+                // events (~60/s, `dy` px each, turning around every `steps`),
+                // to profile scrolling.
+                if let Some((x, y, step_dy, turn)) =
+                    std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
+                        let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
+                        let x = parts.next()??;
+                        let y = parts.next()??;
+                        let dy = parts.next().flatten().unwrap_or(24.);
+                        let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
+                        Some((x, y, dy, turn))
+                    })
+                {
+                    cx.spawn(async move |cx| {
+                        for step in 0_u32.. {
+                            cx.background_executor()
+                                .timer(Duration::from_millis(16))
+                                .await;
+                            let dy = if (step / turn) % 2 == 0 {
+                                -step_dy
+                            } else {
+                                step_dy
+                            };
+                            let scrolled = demo_window.update(cx, |_, window, cx| {
+                                window.dispatch_event(
+                                    PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                        position: point(px(x), px(y)),
+                                        delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                                        modifiers: Modifiers::default(),
+                                        touch_phase: TouchPhase::Moved,
+                                    }),
+                                    cx,
+                                );
+                            });
+                            if scrolled.is_err() {
+                                break;
+                            }
+                        }
+                    })
+                    .detach();
+                }
                 cx.background_executor()
                     .timer(Duration::from_millis(
                         std::env::var("QUILL_DEMO_LINGER_MS")

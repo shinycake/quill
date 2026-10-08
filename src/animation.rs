@@ -58,6 +58,44 @@ pub fn full_playback_frames_cancelable(
     slot: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<crate::video::ViewerFrames, String> {
+    loop_frames_cancelable(src, mime, cache_dir, slot, cancelled, 240, 600)
+}
+
+/// Frame width and cap for the fullscreen viewer's looping animation: larger
+/// pictures than the chat row's 240 px, fewer frames to bound the decoded
+/// cache (~200 MB worst case).
+pub const VIEWER_LOOP_WIDTH: i32 = 480;
+pub const VIEWER_LOOP_MAX_FRAMES: i32 = 200;
+
+/// Frames of an animation for the viewer's loop (see
+/// [`full_playback_frames_cancelable`]).
+pub fn viewer_loop_frames_cancelable(
+    src: &Path,
+    mime: &str,
+    cache_dir: &Path,
+    slot: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<crate::video::ViewerFrames, String> {
+    loop_frames_cancelable(
+        src,
+        mime,
+        cache_dir,
+        slot,
+        cancelled,
+        VIEWER_LOOP_WIDTH,
+        VIEWER_LOOP_MAX_FRAMES,
+    )
+}
+
+fn loop_frames_cancelable(
+    src: &Path,
+    mime: &str,
+    cache_dir: &Path,
+    slot: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    cancelled: &std::sync::atomic::AtomicBool,
+    width: i32,
+    max_frames: i32,
+) -> Result<crate::video::ViewerFrames, String> {
     if cancelled.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("GIF extraction cancelled".into());
     }
@@ -72,7 +110,8 @@ pub fn full_playback_frames_cancelable(
     }
     // ponytail: 600 sampled frames; a streaming decoder is needed for high frame rates on long clips.
     // Round down to ffmpeg's two-decimal rate; never truncate a loop by rounding up.
-    let fps = ((600.0 / (f64::from(duration) + 1.0)).min(24.0) * 100.0).floor() / 100.0;
+    let fps =
+        ((f64::from(max_frames) / (f64::from(duration) + 1.0)).min(24.0) * 100.0).floor() / 100.0;
     if fps < 0.01 {
         return Err("GIF duration is outside the supported range".into());
     }
@@ -81,8 +120,8 @@ pub fn full_playback_frames_cancelable(
         cache_dir,
         0,
         fps,
-        240,
-        600,
+        width,
+        max_frames,
         Some((slot, cancelled)),
         None,
     )?;

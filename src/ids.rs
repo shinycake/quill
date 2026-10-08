@@ -40,7 +40,9 @@ impl fmt::Display for AccountKey {
 pub struct ChatId(pub i64);
 
 /// TDLib `int53` message identifier. Unique only within a chat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord, Default,
+)]
 pub struct MessageId(pub i64);
 
 impl MessageId {

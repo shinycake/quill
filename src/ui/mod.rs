@@ -1,5 +1,6 @@
 mod account_lifecycle;
 mod accounts;
+mod app_slice;
 mod appearance;
 mod auth_recovery;
 mod chat_theme;
@@ -8,6 +9,7 @@ mod composer_thumb;
 mod editor_art;
 mod force_reply;
 mod frame_clock;
+mod image_budget;
 mod inline_video;
 mod motion;
 mod native_video;
@@ -144,6 +146,7 @@ mod story_composer;
 mod story_viewer;
 mod subsection_tabs;
 mod video_pip;
+mod viewer_demo;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

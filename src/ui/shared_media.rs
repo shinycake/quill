@@ -267,7 +267,12 @@ impl QuillApp {
                                     .child(item.label.clone()),
                             )
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.jump_to_shared_media_item_ui(message_id, cx);
+                                // Photos, videos and GIFs open the viewer
+                                // over this list; everything else jumps to
+                                // the message.
+                                if !this.open_shared_media_viewer(message_id, cx) {
+                                    this.jump_to_shared_media_item_ui(message_id, cx);
+                                }
                             })),
                     );
                 }

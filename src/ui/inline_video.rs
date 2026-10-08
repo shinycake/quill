@@ -102,6 +102,9 @@ pub(super) struct InlineVideos {
     render: u64,
     /// The history rendered (and swept the players) this frame.
     swept: bool,
+    /// The window is in the background: muted loops hold still.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    inactive: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -135,8 +138,8 @@ impl InlineVideos {
     /// show a clip, so every player stops. Without this, a clip that was
     /// playing when you left the chat kept decoding and kept the frame
     /// clock at 30 fps forever.
-    pub(super) fn frame_start(&mut self) {
-        if !self.swept {
+    pub(super) fn frame_start(&mut self, history_drawn: bool) {
+        if history_drawn && !self.swept {
             self.clear();
         }
         self.swept = false;
@@ -146,6 +149,36 @@ impl InlineVideos {
     /// for a player that hasn't produced its first frame yet.
     pub(super) fn active(&self) -> bool {
         !self.players.is_empty()
+    }
+
+    /// The window became active or inactive: muted loops pause behind
+    /// another app (tdesktop pauses GIFs and round loops there) and resume
+    /// on return; a clip playing with sound keeps playing.
+    pub(super) fn set_window_active(&mut self, active: bool) {
+        self.inactive = !active;
+        #[cfg(target_os = "macos")]
+        for slot in self.players.values_mut() {
+            if slot.sound || slot.paused {
+                continue;
+            }
+            if active {
+                slot.video.play();
+            } else {
+                slot.video.pause();
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = active;
+    }
+
+    /// Whether a clip plays with sound (it keeps drawing in the background).
+    pub(super) fn sounding(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.players.values().any(|slot| slot.sound && !slot.paused)
+        }
+        #[cfg(not(target_os = "macos"))]
+        false
     }
 
     /// Stop everything (viewer opened, autoplay turned off).
@@ -273,12 +306,16 @@ impl InlineVideos {
         path: impl FnOnce() -> Option<PathBuf>,
     ) -> Option<InlineFrame> {
         let render = self.render;
+        let inactive = self.inactive;
         let slot = match self.players.entry((chat_id, message_id)) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
                 let mut video = super::native_video::NativeVideo::open(&path()?).ok()?;
                 video.set_volume(0.0);
-                video.play();
+                // Behind another app a new muted loop waits for activation.
+                if !inactive {
+                    video.play();
+                }
                 entry.insert(Slot {
                     video,
                     seen: render,
@@ -297,7 +334,9 @@ impl InlineVideos {
         // Loop: `play` rewinds a clip that reached its end. A clip played
         // with sound goes back to its muted loop; a paused or dragged one
         // holds still.
-        let held = slot.paused || slot.seeking.is_some();
+        // Behind another app muted loops hold still (`set_window_active`);
+        // a render there must not restart them.
+        let held = slot.paused || slot.seeking.is_some() || (inactive && !slot.sound);
         if !held && !slot.video.is_playing() {
             if slot.sound {
                 slot.sound = false;
@@ -410,7 +449,12 @@ impl QuillApp {
             let videos = self.inline_videos.borrow();
             if videos.active() {
                 // Seek rings spring in and out more smoothly at 60.
-                self.request_animation_tick(if videos.seek_animating() { 60 } else { 30 }, cx);
+                let fps = if videos.seek_animating() { 60 } else { 30 };
+                if videos.sounding() {
+                    self.request_media_tick(fps, cx);
+                } else {
+                    self.request_animation_tick(fps, cx);
+                }
             }
         }
         // Masks over the video blend into the history behind it.

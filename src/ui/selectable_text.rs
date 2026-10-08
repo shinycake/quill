@@ -166,13 +166,18 @@ impl Element for SelectableRichText {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         // The selection handle lives in element state, so a selection
-        // survives re-renders of the row.
+        // survives re-renders of the row. A selection change redraws the
+        // whole window: the text may sit in a cached view (`app_slice`)
+        // that would otherwise replay its old highlight.
         let handle = window.with_element_state(
             global_id.expect("SelectableRichText has an element id"),
-            |retained: Option<TextSelectionHandle>, _| {
-                let handle =
-                    retained.unwrap_or_else(|| TextSelectionHandle::new(self.text.clone(), cx));
-                (handle.clone(), handle)
+            |retained: Option<(TextSelectionHandle, Subscription)>, window| {
+                let (handle, refresh) = retained.unwrap_or_else(|| {
+                    let handle = TextSelectionHandle::new(self.text.clone(), cx);
+                    let refresh = handle.refresh_window_on_change(window, cx);
+                    (handle, refresh)
+                });
+                (handle.clone(), (handle, refresh))
             },
         );
         let (layout_id, ()) = self

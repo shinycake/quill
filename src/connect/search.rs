@@ -492,6 +492,47 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// The media viewer paged toward the end of a gallery tab: fetch the
+    /// next older `searchChatMessages` page (tdesktop loads more of
+    /// `SharedMediaWithLastSlice` as the viewer nears an edge). A no-op
+    /// when the list is complete or a page is already in flight.
+    pub fn fetch_more_shared_media(&mut self, tab: SharedMediaTab) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(chat_id) = self.session.shared_media.chat_id else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let Some((generation, from_message_id)) = self.session.shared_media.begin_fetch_more(tab)
+        else {
+            return Ok(());
+        };
+        let extra = self.session.request(
+            RequestPurpose::GetSharedMediaMore { tab, generation },
+            Some(chat_id),
+        );
+        let filter = search_messages_filter_json(tab.filter_constructor());
+        match self.sender.send_json(&search_chat_messages(
+            extra,
+            chat_id,
+            &TopicId::None,
+            "",
+            from_message_id,
+            0,
+            SHARED_MEDIA_PAGE_SIZE,
+            Some(filter),
+        )) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session
+                    .shared_media
+                    .fail_more(chat_id, tab, generation);
+                Err(err)
+            }
+        }
+    }
+
     /// Slice media-shared-gallery: gallery row click — close the gallery and
     /// jump to the message with the same history-around pipeline in-chat
     /// search jumps use (`jump_to_replied_message` does the same).

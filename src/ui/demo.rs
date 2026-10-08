@@ -363,20 +363,45 @@ pub(super) fn demo_stress_size() -> Option<(usize, usize)> {
     ))
 }
 
+/// `QUILL_DEMO_STRESS_AVATARS=<dir>`: a directory of stress-chat photos.
+pub(super) fn demo_stress_avatar_dir() -> Option<PathBuf> {
+    std::env::var_os("QUILL_DEMO_STRESS_AVATARS").map(PathBuf::from)
+}
+
+fn demo_stress_avatar(i: usize) -> Option<String> {
+    let path = demo_stress_avatar_dir()?.join(format!("avatar-{i}.jpg"));
+    path.exists().then(|| path.to_string_lossy().into_owned())
+}
+
 fn stress_fixture(chats: usize, messages: usize) -> Vec<String> {
     let mut out = Vec::with_capacity(chats * 3 + messages);
     for i in 0..chats {
         let id = 10_000 + i as i64;
         let file_id = 50_000 + i as i64;
+        // `QUILL_DEMO_STRESS_AVATARS=<dir>`: chat `i`'s photo is
+        // `<dir>/avatar-<i>.jpg` (distinct files, as real avatars are).
+        let avatar = demo_stress_avatar(i);
+        let (avatar_path, avatar_done) = match &avatar {
+            Some(path) => (path.as_str(), true),
+            None => ("", false),
+        };
+        let avatar_path = serde_json::to_string(avatar_path).unwrap_or_default();
         out.push(format!(
-            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Stress chat {i}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":{unread},"photo":{{"@type":"chatPhotoInfo","small":{{"@type":"file","id":{file_id},"size":1000,"expected_size":1000,"local":{{"@type":"localFile","path":"","can_be_downloaded":false,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r{file_id}","unique_id":"u{file_id}","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":1000}}}},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}}}}}"#,
+            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"Stress chat {i}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":{unread},"photo":{{"@type":"chatPhotoInfo","small":{{"@type":"file","id":{file_id},"size":1000,"expected_size":1000,"local":{{"@type":"localFile","path":{avatar_path},"can_be_downloaded":false,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":{avatar_done},"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r{file_id}","unique_id":"u{file_id}","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":1000}}}},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}}}}}"#,
             unread = i % 7
         ));
         out.push(format!(
-            r#"{{"@type":"updateChatLastMessage","chat_id":{id},"last_message":{{"id":1,"chat_id":{id},"is_outgoing":{out},"date":{date},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Message number {i} with some preview text","entities":[]}}}}}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}]}}"#,
+            r#"{{"@type":"updateChatLastMessage","chat_id":{id},"last_message":{{"id":1,"chat_id":{id},"is_outgoing":{out},"date":{date},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"😀 Message number {i} with some preview text","entities":[{entities}]}}}}}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}]}}"#,
             out = i % 3 == 0,
             date = 1_790_000_000 + i as i64 * 60,
-            order = 1_000_000 + i
+            order = 1_000_000 + i,
+            // The newest stress chat previews one animated custom emoji
+            // (see `seed_demo_session`): the idle-animation case.
+            entities = if i + 1 == chats {
+                r#"{"@type":"textEntity","offset":0,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4343"}}"#
+            } else {
+                ""
+            }
         ));
     }
     for i in 0..messages {
@@ -454,6 +479,31 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
         if let Some(owned) = copy_and_parse(&json, &seq, &dyn_sink) {
             session.apply(owned);
         }
+    }
+    if matches!(kind, DemoSeed::ReadyChats) && demo_stress_size().is_some() {
+        // The animated custom emoji the newest stress chat previews.
+        let path = demo_media_allowlist().join("demo-sticker.tgs");
+        if let Some(owned) = copy_and_parse(
+            &demo_file_json(4343, &path.to_string_lossy(), true),
+            &seq,
+            &dyn_sink,
+        ) {
+            session.apply(owned);
+        }
+        session.emoji.custom_emoji_stickers.push(StickerItem {
+            custom_emoji_id: Some(4343),
+            id: 4343,
+            set_id: 0,
+            emoji: "😀".to_string(),
+            width: 512,
+            height: 512,
+            format: StickerFormat::Tgs,
+            file_id: FileId(4343),
+            thumb_file_id: None,
+            thumb_width: 0,
+            thumb_height: 0,
+            requires_premium: false,
+        });
     }
     match kind {
         DemoSeed::ReadyChats => {

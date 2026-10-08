@@ -281,6 +281,10 @@ pub enum ScreenshotDemo {
     /// (Parity slice 5.)
     ReadyVideoPlayback,
     ReadyVideoPip,
+    /// A GIF looping in the viewer, with a custom emoji in its caption.
+    ReadyViewerGif,
+    /// The viewer paging over the Shared Media panel's photos.
+    ReadyViewerShared,
     /// Story viewer demo (injected, no live Telegram): the story tray above
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).
