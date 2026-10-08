@@ -28,6 +28,17 @@ cat > "$DIST/Contents/Info.plist" <<'PLIST'
   <key>NSMicrophoneUsageDescription</key><string>Quill uses your microphone for voice and video calls.</string>
   <key>NSCameraUsageDescription</key><string>Quill uses your camera for video calls, video messages, and scanning login QR codes to link devices.</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>CFBundleURLName</key><string>org.shinycake.quill</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>tg</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST

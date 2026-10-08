@@ -51,6 +51,7 @@ unicode-bidi = "0.3"
 spellbook = "0.4"
 encoding_rs = "0.8"
 zeroize = { version = "1", features = ["zeroize_derive"] }
+interprocess = { version = "2", default-features = false }
 
 [dependencies.gpui-kit]
 version = "=0.7.0"
@@ -105,7 +106,7 @@ embed-resource = "3"
 
 [target.'cfg(windows)'.dependencies]
 # Local time zone offsets; secret chats kept out of screen capture.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com"] }
 
