@@ -71,6 +71,7 @@ mod chat_row;
 mod chatlist_style;
 mod composer;
 mod composer_shortcuts;
+mod composer_suggest;
 mod composer_ui;
 mod connect_ui;
 mod contacts;

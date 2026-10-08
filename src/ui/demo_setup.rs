@@ -120,6 +120,34 @@ impl QuillApp {
             });
             self.spellcheck_now(cx);
         }
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji)
+        ) {
+            // In-memory fixtures; nothing is persisted.
+            self.chat_prefs.suggest_emoji = true;
+            self.suggest.hashtags = quill::suggest::RecentHashtags::default();
+            for tag in [
+                "#rustlang",
+                "#rust",
+                "#rustacean",
+                "#ruby",
+                "#gpui",
+                "#rustlang",
+            ] {
+                self.suggest.hashtags.record_message(tag);
+            }
+            let draft = if matches!(demo, Some(ScreenshotDemo::ReadySuggestHashtag)) {
+                "shipping the new composer today #ru"
+            } else {
+                "that release was :fire"
+            };
+            self.composer.update(cx, |input, cx| {
+                input.set_value(draft, window, cx);
+                input.set_selected_range(draft.len()..draft.len(), cx);
+            });
+            self.sync_suggest_menu(cx);
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             self.composer.update(cx, |input, cx| {
                 input.set_value("hello from composer", window, cx);

@@ -31,6 +31,10 @@ pub enum ScreenshotDemo {
     /// renders with its per-state label ("Updating…").
     ReadyReconnecting,
     ReadyChatsComposer,
+    /// Composer `#ru` with the recent-hashtag popup open.
+    ReadySuggestHashtag,
+    /// Composer `:fire` with the emoji suggestion strip open.
+    ReadySuggestEmoji,
     ReadyUnread,
     ReadyUnreadRead,
     ReadyMedia,

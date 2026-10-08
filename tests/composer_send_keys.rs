@@ -114,6 +114,7 @@ fn chat_prefs_roundtrip_and_missing_file() {
     let prefs = ChatPrefs {
         send_key_mode: SendKeyMode::CtrlEnter,
         spellcheck_enabled: false,
+        suggest_emoji: false,
     };
     save_chat_prefs(&paths, &prefs).unwrap();
     assert_eq!(load_chat_prefs(&paths), prefs);

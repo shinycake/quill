@@ -592,6 +592,10 @@ pub struct ChatPrefs {
     pub send_key_mode: crate::composer::SendKeyMode,
     #[serde(default = "default_true")]
     pub spellcheck_enabled: bool,
+    /// Telegram Desktop's "Suggest emoji replacements" (`suggestEmoji`,
+    /// default on): `:name` in the composer offers matching emoji.
+    #[serde(default = "default_true")]
+    pub suggest_emoji: bool,
 }
 
 impl Default for ChatPrefs {
@@ -600,6 +604,7 @@ impl Default for ChatPrefs {
             send_key_mode: crate::composer::SendKeyMode::default(),
             // Telegram Desktop ships spellcheck on; match that.
             spellcheck_enabled: true,
+            suggest_emoji: true,
         }
     }
 }
@@ -614,6 +619,20 @@ pub fn load_chat_prefs(paths: &AccountPaths) -> ChatPrefs {
 /// in the status note.
 pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) -> std::io::Result<()> {
     save_json_prefs(paths, "chat_prefs.json", prefs)
+}
+
+/// Load the hashtags the user has sent (`recent_hashtags.json`); missing
+/// or corrupt files read as empty.
+pub fn load_recent_hashtags(paths: &AccountPaths) -> crate::suggest::RecentHashtags {
+    load_json_prefs(paths, "recent_hashtags.json")
+}
+
+/// Persist the recent hashtags; failures are returned to the caller.
+pub fn save_recent_hashtags(
+    paths: &AccountPaths,
+    recent: &crate::suggest::RecentHashtags,
+) -> std::io::Result<()> {
+    save_json_prefs(paths, "recent_hashtags.json", recent)
 }
 
 /// Slice parity:platform-spellcheck: the user's own words ("Add to

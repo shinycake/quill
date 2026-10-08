@@ -657,6 +657,9 @@ impl QuillApp {
                         .when_some(self.mention_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
                         })
+                        .when_some(self.suggest_menu_dropdown(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         .when_some(self.command_menu_dropdown(cx), |this, panel| {
                             this.child(panel)
                         })
