@@ -1,5 +1,20 @@
 //! global + in-chat search UI and shared-media browser UI.
 
+/// A search-row preview is one elided line, like tdesktop's dialog rows:
+/// every line break (and other control whitespace) becomes a space. GPUI
+/// lays a literal `\n` out as a second line even under `truncate()`.
+pub(super) fn one_line_preview(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 use super::app::{PaneMode, QuillApp};
 use super::pressable::PressableDiv;
 use gpui_kit::component::button::*;
@@ -29,6 +44,7 @@ pub(super) fn search_result_row(
     cx: &mut Context<QuillApp>,
     on_pick: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
 ) -> impl IntoElement {
+    let preview = one_line_preview(&preview);
     let stamp = date.filter(|date| *date > 0).map(|date| {
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
         quill::local_time::chat_list_stamp(&quill::local_time::civil_local(i64::from(date)), &now)
@@ -112,6 +128,7 @@ fn chat_search_hit_row(
     selected: bool,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
+    let preview = one_line_preview(&preview);
     let stamp = (date > 0).then(|| {
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
         quill::local_time::chat_list_stamp(&quill::local_time::civil_local(i64::from(date)), &now)
@@ -1217,5 +1234,16 @@ mod match_tests {
         assert!(match_ranges("Hello", "").is_empty());
         // Lowercasing İ changes the byte length: no highlight at all.
         assert!(match_ranges("İstanbul hello", "hello").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod one_line_tests {
+    use super::one_line_preview;
+
+    #[test]
+    fn line_breaks_become_spaces() {
+        assert_eq!(one_line_preview("a\nb\r\nc\u{2028}d"), "a b  c d");
+        assert_eq!(one_line_preview("🫠 Galaxy\nSamsung"), "🫠 Galaxy Samsung");
     }
 }

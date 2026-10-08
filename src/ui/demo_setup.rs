@@ -19,7 +19,10 @@ use super::chat_list::{
     apply_ready_mute_archive, apply_ready_pin,
 };
 use super::chat_row::ChatPreviewState;
-use super::chatlist_demo::apply_ready_archive_row;
+use super::chatlist_demo::{
+    apply_ready_archive_row, apply_ready_join_bar, apply_ready_multiline_rows,
+    apply_ready_search_previews,
+};
 use super::composer::apply_ready_reply;
 use super::composer_ui::apply_ready_stickers;
 use super::contacts::apply_ready_contacts;
@@ -525,6 +528,27 @@ impl QuillApp {
                 apply_ready_chat_rows(session, &self.demo_sink, &self.demo_seq);
             }
             self.status_note = "screenshot demo — chat rows".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyJoinBar)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_join_bar(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — non-member channel".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySearchPreviews)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_search_previews(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — search previews".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyMultilineRows)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_multiline_rows(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — multi-line row previews".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyTyping)) {
             if let Some(session) = self.demo_session.as_mut() {
