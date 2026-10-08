@@ -425,7 +425,9 @@ impl QuillApp {
         });
         let revoke = std::rc::Rc::new(std::cell::Cell::new(confirm.revoke));
         // Report Spam / Delete all / Ban: unchecked until the admin ticks them.
-        let choice = std::rc::Rc::new(std::cell::Cell::new(quill::connect::ModerationChoice::default()));
+        let choice = std::rc::Rc::new(std::cell::Cell::new(
+            quill::connect::ModerationChoice::default(),
+        ));
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, revoke, confirm) = (app.clone(), revoke.clone(), confirm.clone());
@@ -442,13 +444,17 @@ impl QuillApp {
                         let mut content = content;
                         if let Some(label) = label.clone() {
                             content = content.child(
-                                gpui_kit::component::checkbox::Checkbox::new("delete-message-revoke")
-                                    .label(label)
-                                    .checked(state.get())
-                                    .on_click(move |checked, window, _| {
+                                gpui_kit::component::checkbox::Checkbox::new(
+                                    "delete-message-revoke",
+                                )
+                                .label(label)
+                                .checked(state.get())
+                                .on_click(
+                                    move |checked, window, _| {
                                         state.set(*checked);
                                         window.refresh();
-                                    }),
+                                    },
+                                ),
                             );
                         }
                         if let Some(offer) = moderation_offer.clone() {

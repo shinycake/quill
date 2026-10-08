@@ -5,8 +5,9 @@ use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{ChatKind, MessageActions};
 use crate::telegram::requests::{
-    add_profile_audio, get_installed_sticker_sets, get_sticker_set, delete_chat_messages_by_sender, delete_messages, get_message_added_reactions, get_message_read_date,
-    get_message_viewers, report_chat_messages, report_supergroup_spam,
+    add_profile_audio, delete_chat_messages_by_sender, delete_messages, get_installed_sticker_sets,
+    get_message_added_reactions, get_message_read_date, get_message_viewers, get_sticker_set,
+    report_chat_messages, report_supergroup_spam,
 };
 
 /// One page of reactors the menu list asks for (Telegram Desktop loads 50
@@ -217,9 +218,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|h| h.messages.get(&message_id.0))
-            .is_some_and(|m| {
-                m.pending && crate::message_menu::media_target(&m.content).is_some()
-            });
+            .is_some_and(|m| m.pending && crate::message_menu::media_target(&m.content).is_some());
         if !uploading {
             return Err(ConnectSendError::InvalidRequest);
         }

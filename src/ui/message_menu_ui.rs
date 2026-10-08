@@ -17,8 +17,8 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::message_menu::{
-    MediaAction, MediaFacts, MediaKind, MediaTarget, SeenKind, media_actions, media_target,
-    order, reacted_label, read_date_label, read_status_label, seen_kind, seen_label,
+    MediaAction, MediaFacts, MediaKind, MediaTarget, SeenKind, media_actions, media_target, order,
+    reacted_label, read_date_label, read_status_label, seen_kind, seen_label,
 };
 use quill::state::{Audience, MessageReportStage, Session, StickerSetViewStage};
 use quill::telegram::envelope::{
@@ -134,9 +134,7 @@ pub(super) fn info_row(
             .py_1p5()
             .text_xs()
             .text_color(text_muted())
-            .when_some(icon, |this, icon| {
-                this.child(Icon::new(icon).size(px(16.)))
-            })
+            .when_some(icon, |this, icon| this.child(Icon::new(icon).size(px(16.))))
             .child(text.into())
             .into_any_element(),
     )
@@ -169,7 +167,11 @@ fn png_bytes_from_file(path: &Path) -> Result<Vec<u8>, &'static str> {
 
 /// The local file behind a media message, if it is on disk. A photo
 /// resolves to its largest size that has been downloaded.
-fn local_media_path(session: &Session, message: &MessageContent, target: &MediaTarget) -> Option<PathBuf> {
+fn local_media_path(
+    session: &Session,
+    message: &MessageContent,
+    target: &MediaTarget,
+) -> Option<PathBuf> {
     if let MessageContent::Photo(photo) = message {
         let mut sizes: Vec<_> = photo.sizes.iter().collect();
         sizes.sort_by_key(|size| std::cmp::Reverse(i64::from(size.width) * i64::from(size.height)));
@@ -198,7 +200,10 @@ impl QuillApp {
         let downloading = session.downloading.contains(&target.file_id.0)
             || session.requests.has_download(target.file_id)
             || file.is_some_and(|f| f.local.is_downloading_active);
-        let content = quill::telegram::envelope::effective_content(&message.content, message.ephemeral.as_ref());
+        let content = quill::telegram::envelope::effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        );
         MediaFacts {
             downloading,
             local: local_media_path(session, content, target).is_some(),
@@ -240,7 +245,10 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return Vec::new();
         };
-        let content = quill::telegram::envelope::effective_content(&message.content, message.ephemeral.as_ref());
+        let content = quill::telegram::envelope::effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        );
         let Some(target) = media_target(content) else {
             return Vec::new();
         };
@@ -263,7 +271,9 @@ impl QuillApp {
                 move |this, window, cx| {
                     let _ = window;
                     match action {
-                        MediaAction::CancelDownload => this.cancel_media_download(target.file_id, cx),
+                        MediaAction::CancelDownload => {
+                            this.cancel_media_download(target.file_id, cx)
+                        }
                         MediaAction::OpenGif => this.open_media_viewer(chat_id, message_id, cx),
                         MediaAction::SaveGif => this.save_message_gif(target.file_id, cx),
                         MediaAction::ViewStickerSet { .. } => {
@@ -302,10 +312,21 @@ impl QuillApp {
     }
 
     /// The on-disk file of the media message: its file id and path.
-    fn menu_media_local(&self, chat_id: ChatId, message_id: MessageId) -> Option<(FileId, PathBuf)> {
+    fn menu_media_local(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Option<(FileId, PathBuf)> {
         let session = self.session()?;
-        let message = session.histories.get(&chat_id.0)?.messages.get(&message_id.0)?;
-        let content = quill::telegram::envelope::effective_content(&message.content, message.ephemeral.as_ref());
+        let message = session
+            .histories
+            .get(&chat_id.0)?
+            .messages
+            .get(&message_id.0)?;
+        let content = quill::telegram::envelope::effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        );
         let target = media_target(content)?;
         if let MessageContent::Photo(photo) = content {
             let mut sizes: Vec<_> = photo.sizes.iter().collect();
@@ -332,7 +353,12 @@ impl QuillApp {
         let target = self
             .session()
             .and_then(|s| s.histories.get(&chat_id.0)?.messages.get(&message_id.0))
-            .and_then(|m| media_target(quill::telegram::envelope::effective_content(&m.content, m.ephemeral.as_ref())));
+            .and_then(|m| {
+                media_target(quill::telegram::envelope::effective_content(
+                    &m.content,
+                    m.ephemeral.as_ref(),
+                ))
+            });
         let Some(target) = target else { return };
         let Some((_, path)) = self.menu_media_local(chat_id, message_id) else {
             // Start the download so a second try finds the file.
@@ -415,7 +441,12 @@ impl QuillApp {
     }
 
     /// "Add to Favorites" / "Remove from Favorites".
-    fn favorite_message_sticker(&mut self, file_id: FileId, favorite: bool, cx: &mut Context<Self>) {
+    fn favorite_message_sticker(
+        &mut self,
+        file_id: FileId,
+        favorite: bool,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.set_favorite_sticker(file_id, favorite) {
                 Ok(_) if favorite => "added to favorites".into(),
@@ -553,7 +584,11 @@ impl QuillApp {
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_sticker_set_dialog(cx);
-                                    this.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::StickerSet,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         )
                         .child(
@@ -567,25 +602,30 @@ impl QuillApp {
                                 .when(!installed, |button| button.primary())
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.toggle_viewed_sticker_set(set_id, !installed, cx);
-                                    this.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::StickerSet,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         )
                         .into_any_element();
                     (title, grid.into_any_element(), Some(footer))
                 }
             };
-            let dialog = dialog
-                .title(shell::dialog_title(title))
-                .content(shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }));
+            let dialog =
+                dialog
+                    .title(shell::dialog_title(title))
+                    .content(shell::scrollable_dialog_content({
+                        let body = Rc::new(RefCell::new(Some(body)));
+                        move |content, _, _| {
+                            let body = body
+                                .borrow_mut()
+                                .take()
+                                .unwrap_or_else(|| div().into_any_element());
+                            content.child(body)
+                        }
+                    }));
             match footer {
                 Some(footer) => dialog.footer(footer),
                 None => dialog,
@@ -634,9 +674,12 @@ impl QuillApp {
             .histories
             .get(&chat_id.0)
             .and_then(|h| h.messages.get(&message_id.0));
-        let Some(target) =
-            message.and_then(|m| media_target(quill::telegram::envelope::effective_content(&m.content, m.ephemeral.as_ref())))
-        else {
+        let Some(target) = message.and_then(|m| {
+            media_target(quill::telegram::envelope::effective_content(
+                &m.content,
+                m.ephemeral.as_ref(),
+            ))
+        }) else {
             return Vec::new();
         };
         let saved = session.is_saved_messages(chat_id);
@@ -678,7 +721,8 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     let me = this.session().and_then(|s| s.my_user_id);
-                    let draft = quill::composer::ForwardDraft::from_message(chat_id, message_id, false);
+                    let draft =
+                        quill::composer::ForwardDraft::from_message(chat_id, message_id, false);
                     if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
                         this.status_note = match live.driver.forward_messages(ChatId(me), &draft) {
                             Ok(_) => "saved to Saved Messages".into(),
@@ -757,7 +801,10 @@ impl QuillApp {
             return rows;
         };
         let message_id = message.id;
-        let kind = seen_kind(quill::telegram::envelope::effective_content(&message.content, message.ephemeral.as_ref()));
+        let kind = seen_kind(quill::telegram::envelope::effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        ));
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
         let audience = session
             .message_audience
@@ -767,7 +814,12 @@ impl QuillApp {
             // A private chat: the other side's read time.
             if let Audience::Ready(read) = &audience.read_date {
                 let label = read_status_label(*read, &now);
-                rows.push(info_row(order::AUDIENCE, "menu-read-date", Some(IconName::Eye), label));
+                rows.push(info_row(
+                    order::AUDIENCE,
+                    "menu-read-date",
+                    Some(IconName::Eye),
+                    label,
+                ));
             } else if audience.viewers.is_loading() || audience.reactions.is_loading() {
                 rows.push(info_row(
                     order::AUDIENCE,
@@ -777,7 +829,10 @@ impl QuillApp {
                 ));
             }
             let seen = audience.viewers.ready().map(|v| v.len());
-            let reacted = audience.reactions.ready().map(|p| p.total_count.max(0) as usize);
+            let reacted = audience
+                .reactions
+                .ready()
+                .map(|p| p.total_count.max(0) as usize);
             let label = match (seen, reacted) {
                 (Some(seen), Some(reacted)) if reacted > 0 && seen > 0 && reacted <= seen => {
                     Some(format!("{reacted}/{seen} Reacted"))
@@ -867,7 +922,10 @@ impl QuillApp {
             return Vec::new();
         };
         let message_id = message.id;
-        let kind = seen_kind(quill::telegram::envelope::effective_content(&message.content, message.ephemeral.as_ref()));
+        let kind = seen_kind(quill::telegram::envelope::effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        ));
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
         let roots = self.media_display_roots();
         let Some(audience) = session
@@ -889,9 +947,8 @@ impl QuillApp {
             } else {
                 name
             };
-            let when_label = (when > 0).then(|| {
-                read_date_label(&quill::local_time::civil_local(i64::from(when)), &now)
-            });
+            let when_label = (when > 0)
+                .then(|| read_date_label(&quill::local_time::civil_local(i64::from(when)), &now));
             let row_hover = cx.theme().accent;
             (
                 10,
@@ -1041,7 +1098,11 @@ impl QuillApp {
     }
 
     /// The user chose a reason.
-    pub(super) fn pick_message_report_option(&mut self, option: ReportOption, cx: &mut Context<Self>) {
+    pub(super) fn pick_message_report_option(
+        &mut self,
+        option: ReportOption,
+        cx: &mut Context<Self>,
+    ) {
         let Some(flow) = self.message_report_flow() else {
             return;
         };
@@ -1066,7 +1127,12 @@ impl QuillApp {
     }
 
     /// Send the details text (or skip an optional one).
-    pub(super) fn send_message_report_text(&mut self, skip: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn send_message_report_text(
+        &mut self,
+        skip: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(flow) = self.message_report_flow() else {
             return;
         };
@@ -1351,4 +1417,23 @@ fn media_action_icon(action: MediaAction) -> IconName {
 pub(super) fn stack_rows(mut rows: Vec<MenuRow>) -> Vec<AnyElement> {
     rows.sort_by_key(|(order, _)| *order);
     rows.into_iter().map(|(_, row)| row).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn copy_image_encodes_a_png_and_refuses_garbage() {
+        let dir = std::env::temp_dir().join(format!("quill-copy-image-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = dir.join("pixel.png");
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255]))
+            .save(&good)
+            .unwrap();
+        let bytes = super::png_bytes_from_file(&good).expect("png");
+        assert_eq!(&bytes[..4], b"\x89PNG");
+        let bad = dir.join("broken.png");
+        std::fs::write(&bad, b"not an image").unwrap();
+        assert!(super::png_bytes_from_file(&bad).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

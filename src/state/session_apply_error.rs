@@ -135,10 +135,8 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::ReportSupergroupSpam) => {
-                self.message_action_note = Some(format!(
-                    "could not report the spam: {}",
-                    error_reason(&err)
-                ));
+                self.message_action_note =
+                    Some(format!("could not report the spam: {}", error_reason(&err)));
             }
             Some(RequestPurpose::ReportStory) => {
                 if let Some(pending) = pending {

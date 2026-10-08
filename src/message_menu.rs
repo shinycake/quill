@@ -167,8 +167,12 @@ pub enum MediaAction {
     CancelDownload,
     OpenGif,
     SaveGif,
-    ViewStickerSet { installed: bool },
-    ToggleFavorite { remove: bool },
+    ViewStickerSet {
+        installed: bool,
+    },
+    ToggleFavorite {
+        remove: bool,
+    },
     ShowInFolder,
     /// A song: "Save to..." with Profile, Saved Messages and Downloads.
     SaveTo,
@@ -397,7 +401,7 @@ mod tests {
     use crate::local_time::civil_at;
     use crate::message_menu::{
         MediaAction, MediaFacts, MediaKind, MediaTarget, copy_link_label, media_actions,
-        media_target, read_date_label, read_status_label, reacted_label, seen_kind, seen_label,
+        media_target, reacted_label, read_date_label, read_status_label, seen_kind, seen_label,
         sent_label, song_name,
     };
     use crate::telegram::envelope::{MessageContent, MessageReadDate};
@@ -550,10 +554,11 @@ mod tests {
         );
         // A sticker without a set offers neither.
         sticker.set_id = 0;
-        assert!(!media_actions(&sticker, &facts).iter().any(|a| matches!(
-            a,
-            MediaAction::ViewStickerSet { .. }
-        )));
+        assert!(
+            !media_actions(&sticker, &facts)
+                .iter()
+                .any(|a| matches!(a, MediaAction::ViewStickerSet { .. }))
+        );
     }
 
     #[test]
@@ -592,10 +597,22 @@ mod tests {
 
     #[test]
     fn audience_labels_follow_telegram_desktop() {
-        assert_eq!(seen_label(seen_kind(&MessageContent::Service("".into())), 3), "3 Seen");
-        assert_eq!(seen_label(crate::message_menu::SeenKind::Seen, 0), "Nobody Viewed");
-        assert_eq!(seen_label(crate::message_menu::SeenKind::Listened, 2), "2 Listened");
-        assert_eq!(seen_label(crate::message_menu::SeenKind::Watched, 0), "Nobody Listened");
+        assert_eq!(
+            seen_label(seen_kind(&MessageContent::Service("".into())), 3),
+            "3 Seen"
+        );
+        assert_eq!(
+            seen_label(crate::message_menu::SeenKind::Seen, 0),
+            "Nobody Viewed"
+        );
+        assert_eq!(
+            seen_label(crate::message_menu::SeenKind::Listened, 2),
+            "2 Listened"
+        );
+        assert_eq!(
+            seen_label(crate::message_menu::SeenKind::Watched, 0),
+            "Nobody Listened"
+        );
         assert_eq!(reacted_label(0), "Nobody Reacted");
         assert_eq!(reacted_label(4), "4 Reacted");
     }
@@ -617,7 +634,10 @@ mod tests {
     #[test]
     fn read_status_covers_every_privacy_state() {
         let now = civil_at(NOW, 0);
-        assert_eq!(read_status_label(MessageReadDate::Unread, &now), "Not seen yet");
+        assert_eq!(
+            read_status_label(MessageReadDate::Unread, &now),
+            "Not seen yet"
+        );
         assert_eq!(
             read_status_label(MessageReadDate::UserPrivacyRestricted, &now),
             "Seen time hidden"

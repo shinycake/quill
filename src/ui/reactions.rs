@@ -74,7 +74,10 @@ impl QuillApp {
                 .histories
                 .get(&menu.chat_id.0)
                 .and_then(|h| h.messages.get(&menu.message_id.0))
-                .map(|m| quill::telegram::envelope::effective_content(&m.content, m.ephemeral.as_ref()).clone());
+                .map(|m| {
+                    quill::telegram::envelope::effective_content(&m.content, m.ephemeral.as_ref())
+                        .clone()
+                });
             match content {
                 Some(quill::telegram::envelope::MessageContent::Sticker(_)) => {
                     let _ = live.driver.fetch_sticker_menu_facts();

@@ -52,10 +52,7 @@ pub(crate) fn parse_message_viewers(value: &Value) -> Vec<MessageViewer> {
         .filter_map(|viewer| {
             Some(MessageViewer {
                 user_id: int53(viewer.get("user_id")).ok()?,
-                view_date: viewer
-                    .get("view_date")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                view_date: viewer.get("view_date").and_then(Value::as_i64).unwrap_or(0) as i32,
             })
         })
         .collect()
@@ -63,9 +60,9 @@ pub(crate) fn parse_message_viewers(value: &Value) -> Vec<MessageViewer> {
 
 pub(crate) fn parse_message_read_date(value: &Value) -> Option<MessageReadDate> {
     Some(match value.get("@type").and_then(Value::as_str)? {
-        "messageReadDateRead" => MessageReadDate::Read(
-            value.get("read_date").and_then(Value::as_i64).unwrap_or(0) as i32,
-        ),
+        "messageReadDateRead" => {
+            MessageReadDate::Read(value.get("read_date").and_then(Value::as_i64).unwrap_or(0) as i32)
+        }
         "messageReadDateUnread" => MessageReadDate::Unread,
         "messageReadDateTooOld" => MessageReadDate::TooOld,
         "messageReadDateUserPrivacyRestricted" => MessageReadDate::UserPrivacyRestricted,

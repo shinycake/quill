@@ -234,11 +234,7 @@ fn report_flow_walks_reason_details_and_done() {
             &[MessageId(50)],
             &options[1].id,
             "",
-            Some((
-                options[1].text.clone(),
-                "Why?".into(),
-                options.clone(),
-            )),
+            Some((options[1].text.clone(), "Why?".into(), options.clone())),
         )
         .unwrap();
     let second = sent_request(&recorder, "reportChat");

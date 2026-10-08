@@ -16,8 +16,8 @@ use gpui_kit::*;
 use quill::composer::DeleteConfirm;
 use quill::connect::PREVIEW_HISTORY_LIMIT;
 use quill::diagnostics::DiagnosticSink;
-use quill::message_menu::order;
 use quill::ids::{ChatId, MessageId};
+use quill::message_menu::order;
 use quill::poll::can_stop_poll;
 use quill::state::{RequestPurpose, effective_preview};
 use quill::telegram::client::copy_and_parse;
@@ -439,12 +439,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.open_delete_dialog_with(
-                        confirm.clone(),
-                        moderation.clone(),
-                        window,
-                        cx,
-                    );
+                    this.open_delete_dialog_with(confirm.clone(), moderation.clone(), window, cx);
                     this.message_menu = None;
                     cx.notify();
                 }
@@ -502,7 +497,10 @@ impl QuillApp {
         }
         // Nothing to copy or forward: say why (`AddSelectRestrictionAction`).
         if protected && !message.pending {
-            let is_group = matches!(chat_kind, Some(ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. }));
+            let is_group = matches!(
+                chat_kind,
+                Some(ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. })
+            );
             rows.push(info_row(
                 order::SELECT,
                 "menu-noforwards",

@@ -1,8 +1,8 @@
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{
-    add_profile_audio, delete_chat_messages_by_sender, get_message_added_reactions, get_message_read_date,
-    get_message_viewers, report_chat_messages, report_supergroup_spam,
+    add_profile_audio, delete_chat_messages_by_sender, get_message_added_reactions,
+    get_message_read_date, get_message_viewers, report_chat_messages, report_supergroup_spam,
 };
 use serde_json::Value;
 
@@ -40,7 +40,11 @@ fn audience_requests_match_the_schema() {
     let viewers = parse(&get_message_viewers(RequestId(1), ChatId(2), MessageId(3)));
     assert_eq!(viewers["@type"], "getMessageViewers");
     assert_eq!(viewers["message_id"], 3);
-    let read = parse(&get_message_read_date(RequestId(1), ChatId(2), MessageId(3)));
+    let read = parse(&get_message_read_date(
+        RequestId(1),
+        ChatId(2),
+        MessageId(3),
+    ));
     assert_eq!(read["@type"], "getMessageReadDate");
     let all = parse(&get_message_added_reactions(
         RequestId(1),
