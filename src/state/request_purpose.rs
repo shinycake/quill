@@ -79,6 +79,18 @@ pub enum RequestPurpose {
     /// `searchMessagesFilterPinned` (schema 1.8.67, line 6316), newest
     /// first. Feeds the pinned bar (Telegram Desktop's pinned tracker).
     GetPinnedMessages,
+    /// The corner "@" / heart button: `searchChatMessages` with
+    /// `searchMessagesFilterUnreadMention` / `…UnreadReaction`; the oldest
+    /// hit becomes the jump target (`Session::unread_jump`).
+    JumpToUnread {
+        kind: UnreadJumpKind,
+    },
+    /// `readAllChatMentions` / `readAllChatReactions` (corner button
+    /// "Mark all as read"). Response is `ok`; counters follow via
+    /// `updateChatUnread*Count`.
+    ReadAllUnreadMarkers {
+        kind: UnreadJumpKind,
+    },
     /// The info panel's media counts: `getChatMessageCount` with the
     /// filter at index `filter` of `MEDIA_COUNT_FILTERS`.
     GetChatMessageCount {

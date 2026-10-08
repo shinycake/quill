@@ -653,6 +653,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             *existing = rich;
         }
+        // Corner "@" / heart buttons: jump to the oldest unread marker the
+        // search found. A failed jump (closed chat) just drops it.
+        if let Some(message_id) = self.session.unread_jump.take() {
+            let _ = self.jump_to_chat_search_message(message_id);
+        }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some(link) = message_link_answer {
             self.session.message_link_result = Some(link);

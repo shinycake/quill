@@ -284,6 +284,41 @@ impl ChatSearchJump {
     }
 }
 
+/// Which unread marker a corner jump button walks (tdesktop
+/// `CornerButtonType::Mentions` / `Reactions`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnreadJumpKind {
+    Mention,
+    Reaction,
+}
+
+impl UnreadJumpKind {
+    /// `searchMessagesFilter*` constructor (`schema/td_api.tl:6317,6320`).
+    pub fn filter_constructor(self) -> &'static str {
+        match self {
+            Self::Mention => "searchMessagesFilterUnreadMention",
+            Self::Reaction => "searchMessagesFilterUnreadReaction",
+        }
+    }
+}
+
+/// The oldest of a `searchChatMessages` page (TDLib answers newest first,
+/// tdesktop jumps to the oldest unread marker first).
+pub fn oldest_message_id(ids: impl IntoIterator<Item = MessageId>) -> Option<MessageId> {
+    ids.into_iter().filter(|id| id.0 > 0).min_by_key(|id| id.0)
+}
+
+/// The history's "N Unread Messages" bar text (tdesktop
+/// `lng_unread_bar#one` / `#other`); a chat opened without a known count
+/// keeps a plain label.
+pub fn unread_bar_text(count: i32) -> String {
+    match count {
+        i32::MIN..=0 => "Unread Messages".into(),
+        1 => "1 Unread Message".into(),
+        n => format!("{n} Unread Messages"),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatSearchJumpNeed {
     AlreadyReady,

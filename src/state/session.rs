@@ -603,6 +603,9 @@ pub struct Session {
     /// (`RequestPurpose::GetPinnedMessages`). Absent until fetched; the
     /// pinned bar then falls back to pinned rows in loaded history.
     pub pinned_messages: HashMap<i64, Vec<HistoryMessage>>,
+    /// The oldest unread mention/reaction found for the corner buttons;
+    /// the driver takes it and jumps (`ConnectDriver::ingest`).
+    pub(crate) unread_jump: Option<MessageId>,
     /// Slice media-shared-gallery: per-chat shared-media gallery state
     /// (Media / Files / Music / Links / Voice / GIFs tabs).
     pub shared_media: SharedMediaState,
@@ -1159,6 +1162,7 @@ impl Session {
             search: SearchState::default(),
             chat_search: ChatSearchState::default(),
             pinned_messages: HashMap::new(),
+            unread_jump: None,
             chat_media_counts: HashMap::new(),
             shared_media: SharedMediaState::default(),
             stickers: StickerPanel::default(),

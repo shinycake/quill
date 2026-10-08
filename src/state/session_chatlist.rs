@@ -124,6 +124,13 @@ impl Session {
             .chats
             .get(&chat_id.0)
             .and_then(ChatSummary::unread_anchor);
+        history.unread_at_open = match history.unread_anchor {
+            Some(_) => self
+                .chats
+                .get(&chat_id.0)
+                .map_or(0, |chat| chat.unread_count),
+            None => 0,
+        };
     }
 
     /// Message ids of the open history that are due for `viewMessages`

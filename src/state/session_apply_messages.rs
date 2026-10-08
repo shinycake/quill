@@ -267,6 +267,15 @@ impl Session {
             }
             return;
         }
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::JumpToUnread { .. })
+        ) {
+            if pending.and_then(|p| p.chat_id) == self.open_chat {
+                self.unread_jump = oldest_message_id(messages.iter().map(|m| m.id));
+            }
+            return;
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPinnedMessages) {
             if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                 for message in &messages {

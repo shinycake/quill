@@ -92,6 +92,7 @@ mod groups_welcome;
 mod history;
 mod inline_mode;
 mod inline_playback;
+mod jump_buttons;
 mod marketplace;
 mod media_panel;
 mod media_viewer;

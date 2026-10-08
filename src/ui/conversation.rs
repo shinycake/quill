@@ -1527,6 +1527,11 @@ impl QuillApp {
         }
         self.history_shared = HistoryShared { media_roots };
         let count = self.history_rows.len();
+        let corner_buttons = self.jump_corner_buttons(
+            chat.as_ref().map_or(0, |c| c.unread_mention_count),
+            chat.as_ref().map_or(0, |c| c.unread_reaction_count),
+            cx,
+        );
         // kit Phase 3: only visible rows render. Row 0 becoming visible
         // pages older history (the driver dedupes in-flight requests and
         // reports exhaustion; the loader notifies only when a request was
@@ -1541,6 +1546,7 @@ impl QuillApp {
                 .flex_col()
                 .flex_1()
                 .min_h_0()
+                .relative()
                 // kit Phase 7: screen-reader landmark for the message history.
                 .role(Role::Log)
                 .aria_label(format!("Message history — {sender_name}"))
@@ -1602,7 +1608,9 @@ impl QuillApp {
                     })
                     .size_full()
                     .min_h_0(),
-                ),
+                )
+                // tdesktop's corner "@" / heart buttons.
+                .children(corner_buttons),
         )
         .into_any_element()
     }
@@ -1645,7 +1653,13 @@ impl QuillApp {
             .when_some(row.day_label(), |this, label| {
                 this.child(day_separator(label, cx))
             })
-            .when(row.unread_divider(), |this| this.child(unread_divider(cx)))
+            .when(row.unread_divider(), |this| {
+                let unread_at_open = self
+                    .session()
+                    .and_then(|s| s.open_chat.and_then(|chat| s.histories.get(&chat.0)))
+                    .map_or(0, |h| h.unread_at_open);
+                this.child(unread_divider(unread_at_open, cx))
+            })
             .child(element)
             .into_any_element()
     }
@@ -1878,8 +1892,9 @@ impl QuillApp {
     }
 }
 
-/// Full-width "Unread messages" bar above the first unread message.
-fn unread_divider(cx: &App) -> impl IntoElement {
+/// Full-width "N Unread Messages" bar above the first unread message.
+fn unread_divider(count: i32, cx: &App) -> impl IntoElement {
+    let text = SharedString::from(quill::state::unread_bar_text(count));
     div()
         .id("unread-divider")
         .w_full()
@@ -1892,8 +1907,8 @@ fn unread_divider(cx: &App) -> impl IntoElement {
         .font_medium()
         .text_color(cx.theme().secondary_foreground)
         .role(Role::Heading)
-        .aria_label("Unread messages")
-        .child("Unread messages")
+        .aria_label(text.clone())
+        .child(text)
 }
 
 /// Centered local-day pill between history rows ("Today", "12 March").

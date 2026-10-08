@@ -333,6 +333,10 @@ pub struct HistoryState {
     /// messages: the window loads around it and the UI draws the "Unread
     /// messages" divider after it. Cleared by jumping to the latest.
     pub unread_anchor: Option<MessageId>,
+    /// The chat's unread count when it was opened with `unread_anchor`:
+    /// the "N Unread Messages" bar text (the live count shrinks as rows
+    /// are read; the bar keeps what was unread on open).
+    pub unread_at_open: i32,
     /// Bumped whenever the window is replaced, so the UI re-anchors its
     /// scroll position (unread divider, jump target, or bottom).
     pub window_epoch: u64,
