@@ -659,3 +659,18 @@ fn reset_all_notification_settings_shape_matches_1_8_67() {
     assert_eq!(v["@type"], "resetAllNotificationSettings");
     assert_eq!(v["@extra"], "64");
 }
+
+#[test]
+fn batch8_action_bar_request_shapes_match_1_8_67() {
+    // `removeChatActionBar chat_id:int53 = Ok;` and
+    // `sharePhoneNumber user_id:int53 = Ok;`
+    let v: serde_json::Value =
+        serde_json::from_str(&remove_chat_action_bar(RequestId(71), 11)).unwrap();
+    assert_eq!(v["@type"], "removeChatActionBar");
+    assert_eq!(v["@extra"], "71");
+    assert_eq!(v["chat_id"], 11);
+    let v: serde_json::Value =
+        serde_json::from_str(&share_phone_number(RequestId(72), 99)).unwrap();
+    assert_eq!(v["@type"], "sharePhoneNumber");
+    assert_eq!(v["user_id"], 99);
+}

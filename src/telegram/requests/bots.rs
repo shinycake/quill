@@ -66,6 +66,28 @@ pub fn report_chat(extra: RequestId, chat_id: i64) -> String {
     .to_string()
 }
 
+/// Batch 8: `removeChatActionBar` (TDLib 1.8.67):
+/// `removeChatActionBar chat_id:int53 = Ok;` — the bar's close button.
+pub fn remove_chat_action_bar(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "removeChatActionBar",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+    })
+    .to_string()
+}
+
+/// Batch 8: `sharePhoneNumber` (TDLib 1.8.67, `schema/td_api.tl:14584`):
+/// `sharePhoneNumber user_id:int53 = Ok;` — "Share my phone number".
+pub fn share_phone_number(extra: RequestId, user_id: i64) -> String {
+    json!({
+        "@type": "sharePhoneNumber",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+    })
+    .to_string()
+}
+
 /// Slice CL3: `setMessageSenderBlockList` (TDLib 1.8.67,
 /// `schema/td_api.tl:14492`):
 /// `setMessageSenderBlockList sender_id:MessageSender

@@ -76,6 +76,7 @@ mod calls;
 mod capture_access;
 mod capture_block;
 mod chat;
+mod chat_bars;
 mod chat_list;
 mod chat_row;
 mod chat_swipe_ui;
