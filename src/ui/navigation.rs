@@ -44,6 +44,8 @@ pub(super) enum NavigationAction {
     CallSettings,
     MarkRead,
     Settings,
+    Archive,
+    ArchiveToList,
 }
 impl QuillApp {
     pub(super) fn navigate(
@@ -175,6 +177,8 @@ impl QuillApp {
             NavigationAction::ContactsSettings => self.settings_page = Some("Contacts"),
             NavigationAction::CallSettings => self.settings_page = Some("Calls"),
             NavigationAction::MarkRead => self.mark_all_chats_as_read(false, cx),
+            NavigationAction::Archive => self.open_archive_folder(cx),
+            NavigationAction::ArchiveToList => self.toggle_archive_in_main_menu(cx),
         }
         cx.notify();
     }
@@ -314,6 +318,13 @@ impl QuillApp {
     }
     pub(super) fn main_navigation_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.entity().downgrade();
+        // tdesktop `archiveInMainMenu`: the archive lives here instead of
+        // on top of the chat list while there is something archived.
+        let archive_in_menu = quill::chatlist_archive::show_in_main_menu(
+            self.session()
+                .is_some_and(|s| !s.ordered_archived_chats().is_empty()),
+            self.appearance.archive_in_main_menu,
+        );
         Button::new("main-menu")
             .icon(gpui_kit::assets::IconName::Menu)
             .ghost()
@@ -330,6 +341,8 @@ impl QuillApp {
             .dropdown_menu(move |mut menu, _, _| {
                 for (label, action) in [
                     ("Saved Messages", NavigationAction::Saved),
+                    ("Archived chats", NavigationAction::Archive),
+                    ("Move archive to chat list", NavigationAction::ArchiveToList),
                     ("New story", NavigationAction::NewStory),
                     ("New group", NavigationAction::Group),
                     ("New supergroup", NavigationAction::Supergroup),
@@ -341,6 +354,13 @@ impl QuillApp {
                     ("Mark all as read", NavigationAction::MarkRead),
                     ("Settings", NavigationAction::Settings),
                 ] {
+                    if matches!(
+                        action,
+                        NavigationAction::Archive | NavigationAction::ArchiveToList
+                    ) && !archive_in_menu
+                    {
+                        continue;
+                    }
                     let owner = owner.clone();
                     menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| this.navigate(action, window, cx));

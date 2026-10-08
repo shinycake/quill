@@ -2,15 +2,22 @@
 use super::*;
 
 impl Session {
-    /// Phase 9.1: insert or drop a story-tray entry. Only the main story
-    /// list shows in the tray; archived (`list == Archive`) and hidden
-    /// (`list == None`) chats are removed.
+    /// Phase 9.1: insert or drop a story-tray entry. Every chat with
+    /// active stories is kept (the chat list paints a ring on its
+    /// avatar whichever story list it is in, like tdesktop's
+    /// `hasActiveStories`); only the main list shows in the tray, see
+    /// `ordered_story_tray`.
     pub(crate) fn upsert_story_tray_entry(&mut self, entry: ChatActiveStoriesView) {
-        if entry.list == Some(StoryListView::Main) {
-            self.story_tray.insert(entry.chat_id, entry);
-        } else {
+        if entry.stories.is_empty() {
             self.story_tray.remove(&entry.chat_id);
+        } else {
+            self.story_tray.insert(entry.chat_id, entry);
         }
+    }
+
+    /// The story ring for a chat's avatar in the chat list.
+    pub fn chat_story_ring(&self, chat_id: i64) -> Option<crate::story_ring::StoryRing> {
+        crate::story_ring::StoryRing::from_active(self.story_tray.get(&chat_id)?)
     }
 
     /// Phase 9.7: start tracking a story-page mutation (`Sending`).

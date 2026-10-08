@@ -242,6 +242,22 @@ impl Session {
             .collect()
     }
 
+    /// What the chat list's "Archived chats" row shows (names of the
+    /// newest archived chats, unread-chat badge); `None` when the archive
+    /// is empty.
+    pub fn archive_row_summary(&self) -> Option<crate::chatlist_archive::ArchiveRowSummary> {
+        let chats: Vec<crate::chatlist_archive::ArchivedChat> = self
+            .ordered_archived_chats()
+            .into_iter()
+            .map(|chat| crate::chatlist_archive::ArchivedChat {
+                title: chat.title.clone(),
+                date: chat.last_message.as_ref().map_or(0, |m| m.date),
+                unread: chat.is_unread(),
+            })
+            .collect();
+        crate::chatlist_archive::ArchiveRowSummary::build(&chats)
+    }
+
     /// Phase 7.1: chats in `chatListFolder(folder_id)`, highest TDLib folder
     /// order first (same convention as main/archive).
     pub fn ordered_folder_chats(&self, folder_id: i32) -> Vec<&ChatSummary> {

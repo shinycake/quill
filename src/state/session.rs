@@ -676,10 +676,6 @@ pub struct Session {
     pub archive_settings_loading: bool,
     /// Slice CL2: the archive-settings panel is open.
     pub archive_settings_open: bool,
-    /// Slice CL2: the Archived section is collapsed to a single summary
-    /// row (TGX `archiveCollapsed`). Client-side only, per session —
-    /// not persisted.
-    pub archive_collapsed: bool,
     /// Phase 6: user directory from `updateUser`, keyed by user id. Feeds
     /// the contacts list and the user info panel.
     pub users: HashMap<i64, ParsedUser>,
@@ -1193,7 +1189,6 @@ impl Session {
             archive_chat_list_settings: None,
             archive_settings_loading: false,
             archive_settings_open: false,
-            archive_collapsed: false,
             users: HashMap::new(),
             profile_accent_colors: Vec::new(),
             available_accent_color_ids: Vec::new(),

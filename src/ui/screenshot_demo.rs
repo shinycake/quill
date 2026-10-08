@@ -88,6 +88,16 @@ pub enum ScreenshotDemo {
     /// Slice CL2: sidebar search with an empty result (injected, no
     /// live Telegram).
     ReadyChatListSearch,
+    /// Archived-chats row on top of the chat list (names + muted unread
+    /// badge) with story rings on avatars and three pinned chats.
+    ReadyArchiveRow,
+    /// Same, with `archiveCollapsed`: the slim bar.
+    ReadyArchiveBar,
+    /// Same, with the archive row's context menu open.
+    ReadyArchiveMenu,
+    /// Same, mid pinned-drag: the dragged row follows the pointer while
+    /// the displaced one slides home.
+    ReadyPinDrag,
     /// Slice media-shared-gallery: per-chat shared-media gallery open on
     /// chat 11 — the Media tab shows its empty state, the Files tab two
     /// injected documents (injected `foundChatMessages` through the real

@@ -2,11 +2,11 @@
 
 use super::app::QuillApp;
 use super::app::{ChatListFilter, PaneMode};
-use super::chat_row::chat_avatar;
 use super::chat_row::{
     ChatListItem, chat_list_caption, chat_list_empty_state, chat_list_skeleton_row,
     chat_row_height, chat_row_tags, static_chat_row,
 };
+use super::chat_row::{PinnedChatDrag, chat_avatar};
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::notifications::notification_settings_json;
 use super::pressable::PressableDiv;
@@ -291,7 +291,6 @@ pub(super) fn apply_ready_chat_list(
             session.apply(owned);
         }
     }
-    session.archive_collapsed = false;
     session.archive_chat_list_settings = Some(ArchiveChatListSettings {
         archive_and_mute_new_chats_from_unknown_users: false,
         keep_unmuted_chats_archived: true,
@@ -1072,33 +1071,53 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice CL2: pin-drag drop — moves the dragged pinned chat to the
-    /// drop target's slot, then sends the full reordered pinned-id list
-    /// via `setPinnedChats` (TGX `ChatsAdapter.movePinnedChat`). A drop
-    /// onto its own row is a no-op.
-    pub(super) fn drop_pinned_chat(
-        &mut self,
-        dragged: ChatId,
-        archived: bool,
-        target: ChatId,
-        cx: &mut Context<Self>,
-    ) {
-        if dragged == target {
-            return;
+    /// Pinned drag, pointer moved (tdesktop `updateReorderPinned`): the
+    /// first move starts the reorder, later ones swap rows live.
+    pub(super) fn pin_drag_move(&mut self, drag: &PinnedChatDrag, y: f32, cx: &mut Context<Self>) {
+        let now = std::time::Instant::now();
+        if let Some(reorder) = self.pin_reorder.as_mut()
+            && reorder.dragging() == Some(drag.chat_id.0)
+        {
+            reorder.drag_to(y, now);
+        } else {
+            let Some(session) = self.session() else {
+                return;
+            };
+            let ids = session.pinned_chat_ids(drag.archived);
+            let names: Vec<(i32, String)> = session
+                .chat_folders
+                .iter()
+                .map(|f| (f.id, f.name.clone()))
+                .collect();
+            let tags = session.are_folder_tags_enabled;
+            let lines = self.appearance.preview_lines;
+            let heights = ids
+                .iter()
+                .filter_map(|id| {
+                    let chat = session.chats.get(id)?;
+                    let height = chat_row_height(&chat_row_tags(chat, &names, tags), lines);
+                    Some((*id, f32::from(height)))
+                })
+                .collect();
+            self.pin_reorder_archived = drag.archived;
+            self.pin_reorder =
+                quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, y);
         }
-        let mut ids = match self.session() {
-            Some(s) => s.pinned_chat_ids(archived),
-            None => return,
+        self.notify_sidebar(cx);
+    }
+
+    /// Pinned drag released (tdesktop `finishReorderOnRelease` +
+    /// `savePinnedOrder`): the dragged row slides into its slot and the
+    /// full order goes out as `setPinnedChats`.
+    pub(super) fn finish_pin_drag(&mut self, cx: &mut Context<Self>) {
+        let archived = self.pin_reorder_archived;
+        let Some(reorder) = self.pin_reorder.as_mut() else {
+            return;
         };
-        if !ids.contains(&dragged.0) || !ids.contains(&target.0) {
+        if reorder.dragging().is_none() {
             return;
         }
-        ids.retain(|id| *id != dragged.0);
-        let at = ids
-            .iter()
-            .position(|id| *id == target.0)
-            .unwrap_or(ids.len());
-        ids.insert(at, dragged.0);
+        let ids = reorder.release(std::time::Instant::now());
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(archived, ids) {
                 self.status_note = format!("pin reorder failed: {err:?}");
@@ -1131,17 +1150,6 @@ impl QuillApp {
                     chat.is_marked_as_unread = false;
                 }
             }
-        }
-        cx.notify();
-    }
-
-    /// Slice CL2: archive section collapse toggle.
-    pub(super) fn toggle_archive_collapsed(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let collapsed = live.driver.session.archive_collapsed;
-            live.driver.session.archive_collapsed = !collapsed;
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.archive_collapsed = !session.archive_collapsed;
         }
         cx.notify();
     }
@@ -1691,7 +1699,46 @@ impl QuillApp {
                             )
                         };
                         let mut items: Vec<ChatListItem> = Vec::with_capacity(chats.len() + 2);
+                        // tdesktop: "Archived chats" is a pinned-top entry
+                        // of the unfiltered main list, a full row or (with
+                        // `archiveCollapsed`) a slim bar, and absent when
+                        // `archiveInMainMenu` moved it to the menu.
+                        // Opening it shows the archive (here: the Archived
+                        // category). The archived chats themselves never
+                        // sit inside the main list.
+                        let has_archived = self
+                            .session()
+                            .is_some_and(|s| !s.ordered_archived_chats().is_empty());
+                        match quill::chatlist_archive::row_mode(
+                            has_archived,
+                            self.appearance.archive_collapsed,
+                            self.appearance.archive_in_main_menu,
+                            filter == ChatListFilter::All
+                                && folder.is_none()
+                                && !self.search_is_open(),
+                        ) {
+                            quill::chatlist_archive::ArchiveRowMode::Row => {
+                                items.push(ChatListItem::ArchiveRow {
+                                    height: chat_row_height(&[], self.appearance.preview_lines),
+                                });
+                            }
+                            quill::chatlist_archive::ArchiveRowMode::Collapsed => {
+                                items.push(ChatListItem::ArchiveBar);
+                            }
+                            quill::chatlist_archive::ArchiveRowMode::Hidden => {}
+                        }
                         if show_main_list {
+                            // A live pinned drag shows its swapped order
+                            // (tdesktop moves rows while dragging); stable,
+                            // so unpinned rows keep their place.
+                            if let Some(reorder) = self.pin_reorder.as_ref()
+                                && reorder.dragging().is_some()
+                                && !self.pin_reorder_archived
+                            {
+                                chats.sort_by_key(|chat| {
+                                    reorder.position(chat.id.0).unwrap_or(usize::MAX)
+                                });
+                            }
                             for chat in chats {
                                 items.push(ChatListItem::Chat {
                                     id: chat.id,
@@ -1705,47 +1752,49 @@ impl QuillApp {
                         // `ok` until a 404 marks the folder exhausted, the
                         // same pattern as the main list. No "Load more"
                         // button: paging is automatic, not user-triggered.
-                        // Archive stays as-is under the main list; a folder
-                        // tab shows only that folder's chats. kit Phase 3:
-                        // the archive header + rows are items in the same
-                        // virtual list so the whole chat list scrolls as one.
-                        if folder.is_none() {
+                        if folder.is_none()
+                            && matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread)
+                        {
                             let mut archived: Vec<&ChatSummary> = self
                                 .session()
                                 .map(|s| s.ordered_archived_chats())
                                 .unwrap_or_default();
                             if filter == ChatListFilter::Unread {
                                 archived.retain(|c| c.is_unread());
+                            } else if let Some(reorder) = self.pin_reorder.as_ref()
+                                && reorder.dragging().is_some()
+                                && self.pin_reorder_archived
+                            {
+                                archived.sort_by_key(|chat| {
+                                    reorder.position(chat.id.0).unwrap_or(usize::MAX)
+                                });
                             }
-                            if !archived.is_empty() || filter == ChatListFilter::Archived {
-                                // Slice CL2: the archive header collapses
-                                // the section, marks the archive read, and
-                                // opens the auto-archive settings. The
-                                // Archived category forces the section open.
-                                let collapsed = filter != ChatListFilter::Archived
-                                    && self.session().is_some_and(|s| s.archive_collapsed);
-                                let any_unread = archived.iter().any(|c| c.is_unread());
-                                let header = ChatListItem::ArchiveHeader {
-                                    count: archived.len(),
-                                    any_unread,
-                                    collapsed,
-                                };
-                                items.push(header);
-                                if !collapsed {
-                                    // Collapsed keeps the rows hidden; the
-                                    // header above still shows the count.
-                                    if archived.is_empty() {
-                                        items.push(ChatListItem::ArchiveEmpty);
-                                    } else {
-                                        for chat in archived {
-                                            items.push(ChatListItem::Chat {
-                                                id: chat.id,
-                                                archived: true,
-                                                height: row_height(chat),
-                                            });
-                                        }
-                                    }
-                                }
+                            if archived.is_empty() && filter == ChatListFilter::Archived {
+                                list = list.child(chat_list_empty_state(
+                                    "📦",
+                                    "No archived chats",
+                                    "Chats you archive stay here until they get a new message.",
+                                    cx,
+                                ));
+                            }
+                            for chat in archived {
+                                items.push(ChatListItem::Chat {
+                                    id: chat.id,
+                                    archived: true,
+                                    height: row_height(chat),
+                                });
+                            }
+                        }
+                        // Pinned-drag animation: keep frames coming while
+                        // rows slide, drop the state once everything settled.
+                        if let Some(reorder) = self.pin_reorder.as_ref() {
+                            let now = std::time::Instant::now();
+                            if reorder.settled(now)
+                                || (!self.window_active.get() && reorder.dragging().is_none())
+                            {
+                                self.pin_reorder = None;
+                            } else {
+                                self.request_animation_tick(60, cx);
                             }
                         }
                         // kit Phase 3: hand the flat item list to the kit
@@ -1758,8 +1807,10 @@ impl QuillApp {
                                 .map(|item| {
                                     let height = match item {
                                         ChatListItem::Chat { height, .. } => *height,
-                                        ChatListItem::ArchiveHeader { .. } => px(32.),
-                                        ChatListItem::ArchiveEmpty => px(24.),
+                                        ChatListItem::ArchiveRow { height } => *height,
+                                        ChatListItem::ArchiveBar => {
+                                            px(quill::chatlist_archive::COLLAPSED_BAR_HEIGHT)
+                                        }
                                     };
                                     ItemSize::new(px(0.), height)
                                 })
@@ -1767,22 +1818,51 @@ impl QuillApp {
                         );
                         self.chat_list_items = items;
                         list = list.child(
-                            v_virtual_list(
-                                cx.entity(),
-                                "chat-list",
-                                sizes,
-                                |this: &mut QuillApp, range, _window, cx| {
-                                    range
-                                        .map(|ix| this.chat_list_item_element(ix, cx))
-                                        .collect::<Vec<_>>()
-                                },
-                            )
-                            // The app-owned handle keeps scroll position
-                            // across re-renders (scroll restoration).
-                            .track_scroll(&self.chat_list_scroll)
-                            .flex_1()
-                            .min_h_0()
-                            .w_full(),
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_h_0()
+                                .w_full()
+                                // Pinned drag: the pointer position drives
+                                // the live reorder; a release anywhere
+                                // ends it.
+                                .on_drag_move(cx.listener(
+                                    |this, event: &DragMoveEvent<PinnedChatDrag>, _, cx| {
+                                        let drag = event.drag(cx).clone();
+                                        this.pin_drag_move(
+                                            &drag,
+                                            f32::from(event.event.position.y),
+                                            cx,
+                                        );
+                                    },
+                                ))
+                                .on_mouse_up(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _, cx| this.finish_pin_drag(cx)),
+                                )
+                                .on_mouse_up_out(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _, cx| this.finish_pin_drag(cx)),
+                                )
+                                .child(
+                                    v_virtual_list(
+                                        cx.entity(),
+                                        "chat-list",
+                                        sizes,
+                                        |this: &mut QuillApp, range, _window, cx| {
+                                            range
+                                                .map(|ix| this.chat_list_item_element(ix, cx))
+                                                .collect::<Vec<_>>()
+                                        },
+                                    )
+                                    // The app-owned handle keeps scroll position
+                                    // across re-renders (scroll restoration).
+                                    .track_scroll(&self.chat_list_scroll)
+                                    .flex_1()
+                                    .min_h_0()
+                                    .w_full(),
+                                ),
                         );
                     }
                 }

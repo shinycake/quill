@@ -444,6 +444,14 @@ pub struct AppearancePrefs {
     /// in the chat-list preview instead of plain text.
     #[serde(default)]
     pub chat_list_rich_preview: bool,
+    /// tdesktop `archiveCollapsed`: the "Archived chats" row shrinks to a
+    /// slim bar at the top of the chat list.
+    #[serde(default)]
+    pub archive_collapsed: bool,
+    /// tdesktop `archiveInMainMenu`: the archive leaves the chat list and
+    /// lives in the main menu.
+    #[serde(default)]
+    pub archive_in_main_menu: bool,
     #[serde(default)]
     pub start_in_tray: bool,
     #[serde(default)]
@@ -482,6 +490,8 @@ impl Default for AppearancePrefs {
             preview_lines: crate::chatlist_style::PREVIEW_LINES_DEFAULT,
             chat_list_media_icons: false,
             chat_list_rich_preview: false,
+            archive_collapsed: false,
+            archive_in_main_menu: false,
             start_in_tray: false,
             minimize_to_tray: false,
             check_updates_on_launch: true,
@@ -1171,6 +1181,8 @@ mod tests {
             preview_lines: 3,
             chat_list_media_icons: true,
             chat_list_rich_preview: true,
+            archive_collapsed: true,
+            archive_in_main_menu: true,
             start_in_tray: true,
             minimize_to_tray: true,
             check_updates_on_launch: false,
