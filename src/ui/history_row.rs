@@ -29,7 +29,6 @@ pub(crate) struct HistoryRowInputs {
     /// First unread incoming message: the "Unread messages" divider sits
     /// above it.
     pub(crate) unread_divider: bool,
-    pub(crate) selected_forward: bool,
     pub(crate) quote_preview: Option<String>,
     pub(crate) forward_from: Option<String>,
     pub(crate) seek_bar: Option<SeekBarView>,
