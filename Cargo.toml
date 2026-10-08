@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "crates/ntgcalls-sys"]
+exclude = ["third_party"]
 resolver = "2"
 
 [package]
@@ -96,3 +97,9 @@ debug = true
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Time", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com"] }
+
+# Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
+# 0.7.0 with a bidi-aware input engine. The commit that adds third_party/gpui-base is
+# the pristine registry copy, so a diff against it isolates the patch.
+[patch.crates-io]
+gpui-base = { path = "third_party/gpui-base" }
