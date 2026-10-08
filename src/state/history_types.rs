@@ -116,6 +116,8 @@ pub struct HistoryMessage {
     pub pending: bool,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
+    /// `edit_date`, `via_bot_user_id` and `import_info`.
+    pub extras: MessageExtras,
     pub interaction_info: Option<MessageInteractionInfo>,
     /// Schema `message.is_pinned` / `updateMessageIsPinned`.
     pub is_pinned: bool,

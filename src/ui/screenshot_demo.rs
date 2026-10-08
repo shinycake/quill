@@ -293,6 +293,12 @@ pub enum ScreenshotDemo {
     /// multi-line Hebrew bubbles with their time footers, a Hebrew reply and a
     /// pinned message. `QUILL_DEMO_RTL_VIEW=chat|search` (default `chat`).
     ReadyRtlPolish,
+    /// Bubble headers and footer (injected, no live Telegram): replies with
+    /// a colored sender name, a quote, a media thumbnail, a reply from another
+    /// chat and a deleted original; forwards from a user, a hidden account, a
+    /// channel and an imported message; "via @bot"; and the footer's
+    /// "edited" / pin / views / "imported" marks.
+    ReadyBubbleHeaders,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting

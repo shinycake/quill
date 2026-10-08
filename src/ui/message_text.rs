@@ -416,26 +416,98 @@ pub(super) fn message_footer(
     )
 }
 
-/// The time footer of a channel post or signed message: author signature,
-/// view count (eye icon) and the time/receipt, on one row.
-pub(super) fn message_footer_meta(
-    date: i32,
-    pending: bool,
-    receipt: OutboxReceipt,
-    views: Option<i32>,
-    signature: Option<String>,
-) -> Option<AnyElement> {
-    let time = message_footer(date, pending, receipt);
-    if views.is_none() && signature.is_none() {
+/// What the in-bubble footer shows besides the time and the receipt.
+#[derive(Clone)]
+pub(super) struct FooterMeta {
+    pub(super) date: i32,
+    pub(super) pending: bool,
+    pub(super) receipt: OutboxReceipt,
+    pub(super) views: Option<i32>,
+    pub(super) signature: Option<String>,
+    /// "edited" before the time (`lng_edited`).
+    pub(super) edited: bool,
+    /// The pin glyph of a pinned message.
+    pub(super) pinned: bool,
+    /// "imported" before the time (`lng_imported`).
+    pub(super) imported: bool,
+    /// Hover text with the full sent / edited / original dates.
+    pub(super) tooltip: Option<String>,
+}
+
+impl FooterMeta {
+    pub(super) fn of(
+        message: &quill::state::HistoryMessage,
+        receipt: OutboxReceipt,
+        views: Option<i32>,
+        signature: Option<String>,
+    ) -> Self {
+        Self {
+            date: message.date,
+            pending: message.pending,
+            receipt,
+            views,
+            signature,
+            edited: message.extras.edit_date > 0,
+            pinned: message.is_pinned,
+            imported: message.extras.import_info.is_some(),
+            tooltip: quill::state::footer_tooltip(message, format_unix_date_time),
+        }
+    }
+
+    /// Width the whole footer needs: `base` (time and receipt) plus the
+    /// extras that precede it.
+    pub(super) fn reserve(&self, base: Pixels) -> Pixels {
+        let mut width = base;
+        if self.edited || self.imported {
+            width += px(44.);
+        }
+        if self.pinned {
+            width += px(20.);
+        }
+        if self.views.is_some() {
+            width += px(48.);
+        }
+        width
+    }
+
+    fn plain(&self) -> bool {
+        self.views.is_none()
+            && self.signature.is_none()
+            && !self.edited
+            && !self.pinned
+            && !self.imported
+            && self.tooltip.is_none()
+    }
+}
+
+/// The time footer of a message: author signature, pin, view count (eye
+/// icon), "edited" / "imported" and the time/receipt, on one row.
+pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
+    let time = message_footer(meta.date, meta.pending, meta.receipt);
+    if meta.plain() {
         return time;
     }
+    let tooltip = meta.tooltip.clone();
+    let label = if meta.imported {
+        Some("imported")
+    } else if meta.edited {
+        Some("edited")
+    } else {
+        None
+    };
     Some(
         div()
+            .id("message-footer")
             .flex()
             .items_center()
             .gap_2()
             .text_xs()
-            .when_some(signature, |this, signature| {
+            .when_some(tooltip, |this, text| {
+                this.tooltip(move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+                })
+            })
+            .when_some(meta.signature.clone(), |this, signature| {
                 this.child(
                     div()
                         .opacity(0.7)
@@ -444,7 +516,17 @@ pub(super) fn message_footer_meta(
                         .child(signature),
                 )
             })
-            .when_some(views, |this, views| {
+            .when(meta.pinned, |this| {
+                this.child(
+                    div()
+                        .id("message-pinned")
+                        .role(Role::Label)
+                        .aria_label("pinned")
+                        .opacity(0.7)
+                        .child(Icon::new(gpui_kit::assets::IconName::Pin).size(px(12.))),
+                )
+            })
+            .when_some(meta.views, |this, views| {
                 this.child(
                     div()
                         .id("message-views")
@@ -460,6 +542,9 @@ pub(super) fn message_footer_meta(
                         .child(Icon::new(gpui_kit::assets::IconName::Eye).size(px(12.)))
                         .child(super::statistics::format_view_count(views)),
                 )
+            })
+            .when_some(label, |this, label| {
+                this.child(div().opacity(0.7).child(label))
             })
             .children(time)
             .into_any_element(),

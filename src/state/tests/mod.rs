@@ -2,6 +2,7 @@
 use super::*;
 
 mod bots;
+mod bubble_headers;
 mod calls;
 mod chat_list;
 mod chat_row;

@@ -29,19 +29,19 @@ use crate::telegram::envelope::{
     ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
     GameHighScore, GameInfo, InlineQueryResultSummary, InlineQueryResultsButton,
     InlineQueryResultsPage, InviteGroupCallParticipantResult, LinkPreview, LoginUrlInfo,
-    MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
-    MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
-    NotificationSound, OptionValue, ParsedCall, ParsedChatEvent, ParsedChatInviteLink,
-    ParsedChatJoinRequest, ParsedChatMember, ParsedCommunity, ParsedCommunityFullInfo, ParsedFile,
-    ParsedGroupCall, ParsedGroupCallMessage, ParsedGroupCallParticipant, ParsedMessage,
-    ParsedSecretChat, ParsedSession, ParsedStory, ParsedUser, ParsedVideoChat, ParsedWebsite,
-    ParsedWelcomeMessage, PasswordState, PaymentFormData, PaymentReceiptData, Poll,
-    ReactionNotificationSettings, ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption,
-    ReportSponsoredResult, ReportStoryResult, RichMessageContent, ScopeNotificationSettings,
-    SecretChatState, SponsoredMessage, StarSubscriptionsData, StickerItem, StickerSetInfo,
-    StorageStats, StoryAvailableReactionView, StoryInteractionView, StoryInteractionsView,
-    StoryListView, TdError, UsernameCheckResult, ValidatedOrderInfoData, effective_content,
-    reply_markup_demands_reply,
+    MessageAutoDelete, MessageContent, MessageExtras, MessageForwardInfo, MessageInteractionInfo,
+    MessageOrigin, MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender,
+    NotificationSettingsScope, NotificationSound, OptionValue, ParsedCall, ParsedChatEvent,
+    ParsedChatInviteLink, ParsedChatJoinRequest, ParsedChatMember, ParsedCommunity,
+    ParsedCommunityFullInfo, ParsedFile, ParsedGroupCall, ParsedGroupCallMessage,
+    ParsedGroupCallParticipant, ParsedMessage, ParsedSecretChat, ParsedSession, ParsedStory,
+    ParsedUser, ParsedVideoChat, ParsedWebsite, ParsedWelcomeMessage, PasswordState,
+    PaymentFormData, PaymentReceiptData, Poll, ReactionNotificationSettings, ReplyKeyboard,
+    ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult, ReportStoryResult,
+    RichMessageContent, ScopeNotificationSettings, SecretChatState, SponsoredMessage,
+    StarSubscriptionsData, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
+    StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
+    ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
@@ -83,6 +83,7 @@ mod session_forward;
 mod session_history_window;
 mod session_members;
 mod session_notifications;
+mod session_reply;
 mod session_requests;
 mod session_search;
 mod session_sponsored;
@@ -108,6 +109,10 @@ pub use search_types::*;
 pub use session::*;
 pub(crate) use session_chat_search::history_message;
 pub use session_history_window::MentionSearch;
+pub use session_reply::{
+    ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,
+    thumb_candidates,
+};
 pub use session_subsection_tabs::{BotTopics, TopicBadge};
 pub use shared_media_types::*;
 pub use sticker_gif_types::*;

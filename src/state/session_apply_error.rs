@@ -29,6 +29,13 @@ impl Session {
         {
             self.adopt_supergroup_status_for_chat(chat_id);
         }
+        if let Some(RequestPurpose::GetRepliedMessage {
+            chat_id,
+            message_id,
+        }) = pending.map(|p| p.purpose)
+        {
+            self.reject_replied_message(chat_id, message_id);
+        }
         // Phase 9.3: a `postStory` / `canPostStory` error — the
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {

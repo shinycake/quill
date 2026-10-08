@@ -29,8 +29,9 @@ pub(crate) struct HistoryRowInputs {
     /// First unread incoming message: the "Unread messages" divider sits
     /// above it.
     pub(crate) unread_divider: bool,
-    pub(crate) quote_preview: Option<String>,
-    pub(crate) forward_from: Option<String>,
+    pub(crate) reply_header: Option<quill::state::ReplyHeader>,
+    pub(crate) forward_header: Option<quill::state::ForwardHeader>,
+    pub(crate) via_bot: Option<String>,
     pub(crate) seek_bar: Option<SeekBarView>,
     pub(crate) animation_playing: bool,
     pub(crate) animation_frame: Option<std::sync::Arc<gpui_kit::RenderImage>>,
@@ -95,8 +96,9 @@ impl HistoryRow {
                 a.message == b.message
                     && a.sender == b.sender
                     && a.receipt == b.receipt
-                    && a.quote_preview == b.quote_preview
-                    && a.forward_from == b.forward_from
+                    && a.reply_header == b.reply_header
+                    && a.forward_header == b.forward_header
+                    && a.via_bot == b.via_bot
                     && a.day_label == b.day_label
                     && a.unread_divider == b.unread_divider
                     && a.run_start == b.run_start

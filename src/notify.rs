@@ -382,6 +382,7 @@ mod tests {
             files: Vec::new(),
             reply_to: None,
             forward_info: None,
+            extras: Default::default(),
             interaction_info: None,
             reply_markup: None,
             self_destruct: None,
