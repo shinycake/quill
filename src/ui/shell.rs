@@ -109,6 +109,10 @@ pub enum DialogKind {
     /// "Open this link?" for a hidden or look-alike message link.
     OpenLink,
     PollVoters,
+    /// The message menu's Report flow.
+    MessageReport,
+    /// "View Sticker Set" / "Add Stickers" from a sticker message.
+    StickerSet,
     ArchiveSettings,
     ArchivedStickers,
     EmojiSets,
@@ -153,9 +157,13 @@ pub enum DialogKind {
     /// Slice parity:platform-shortcuts-reference: read-only keyboard
     /// shortcuts reference dialog.
     Shortcuts,
+    /// Find in history: the "Jump to date" calendar box.
+    JumpToDate,
     /// Batch 4: terms of service, server service popups and the
     /// "New Login Prevented" follow-up.
     AccountNotice,
+    /// Local passcode settings.
+    Passcode,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -181,6 +189,10 @@ impl QuillShell {
     /// The app-side open flag for each dialog kind. Stays in sync with
     /// the render-time overlay conditions the hand-rolled dialogs used.
     fn dialog_is_open(app: &QuillApp, kind: DialogKind) -> bool {
+        // The lock screen covers everything: no dialog stays above it.
+        if app.passcode_ui.locked {
+            return false;
+        }
         match kind {
             DialogKind::Settings => app.settings_open,
             DialogKind::Scheduled => app.scheduled_dialog_open,
@@ -199,6 +211,8 @@ impl QuillShell {
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
             DialogKind::OpenLink => app.open_link_confirm.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
+            DialogKind::MessageReport => app.message_menu_ui.report_open,
+            DialogKind::StickerSet => app.message_menu_ui.sticker_set_open,
             DialogKind::ArchivedStickers => app.sticker_settings_open,
             DialogKind::EmojiSets => app.session().is_some_and(|s| s.emoji.open),
             DialogKind::ArchiveSettings => app.session().is_some_and(|s| s.archive_settings_open),
@@ -234,7 +248,9 @@ impl QuillShell {
             DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
             DialogKind::CommunityHub => app.community_ui.hub_open,
             DialogKind::Shortcuts => app.shortcuts_open,
+            DialogKind::JumpToDate => app.session().is_some_and(|s| s.history_calendar.is_some()),
             DialogKind::AccountNotice => app.account_notice().is_some(),
+            DialogKind::Passcode => app.passcode_ui.open,
         }
     }
 
@@ -252,6 +268,8 @@ impl QuillShell {
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
             DialogKind::OpenLink => QuillApp::build_open_link_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
+            DialogKind::MessageReport => QuillApp::build_message_report_dialog,
+            DialogKind::StickerSet => QuillApp::build_sticker_set_dialog,
             DialogKind::ArchiveSettings => QuillApp::build_archive_settings_dialog,
             DialogKind::ArchivedStickers => QuillApp::build_archived_stickers_dialog,
             DialogKind::EmojiSets => QuillApp::build_emoji_sets_dialog,
@@ -287,7 +305,9 @@ impl QuillShell {
             DialogKind::CommunityCreate => community::build_create_community_dialog,
             DialogKind::CommunityHub => community::build_community_hub_dialog,
             DialogKind::Shortcuts => QuillApp::build_shortcuts_dialog,
+            DialogKind::JumpToDate => QuillApp::build_jump_date_dialog,
             DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
+            DialogKind::Passcode => QuillApp::build_passcode_dialog,
         }
     }
 
@@ -296,6 +316,7 @@ impl QuillShell {
     const KINDS: &[DialogKind] = &[
         // Batch 4: what the server says about the account comes first.
         DialogKind::AccountNotice,
+        DialogKind::Passcode,
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -332,6 +353,8 @@ impl QuillShell {
         DialogKind::ForumManage,
         DialogKind::CommentThread,
         DialogKind::PollVoters,
+        DialogKind::MessageReport,
+        DialogKind::StickerSet,
         DialogKind::Welcome,
         DialogKind::ImportContacts,
         DialogKind::EditProfile,
@@ -348,6 +371,7 @@ impl QuillShell {
         DialogKind::Accounts,
         // Slice parity:platform-shortcuts-reference: informational, lowest
         // priority.
+        DialogKind::JumpToDate,
         DialogKind::Shortcuts,
         DialogKind::Settings,
     ];

@@ -3,6 +3,7 @@
 use super::app::{PaneMode, QuillApp};
 use super::pressable::PressableDiv;
 use super::*;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -273,7 +274,22 @@ impl QuillApp {
                                 if !this.open_shared_media_viewer(message_id, cx) {
                                     this.jump_to_shared_media_item_ui(message_id, cx);
                                 }
-                            })),
+                            }))
+                            // Telegram Desktop's "Go To Message" on a shared
+                            // media item.
+                            .context_menu({
+                                let owner = cx.entity().downgrade();
+                                move |menu, _, _| {
+                                    let owner = owner.clone();
+                                    menu.item(PopupMenuItem::new("Go To Message").on_click(
+                                        move |_, _, cx| {
+                                            let _ = owner.update(cx, |this, cx| {
+                                                this.jump_to_shared_media_item_ui(message_id, cx);
+                                            });
+                                        },
+                                    ))
+                                }
+                            }),
                     );
                 }
                 list.into_any_element()

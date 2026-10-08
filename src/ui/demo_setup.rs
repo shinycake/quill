@@ -33,6 +33,10 @@ use super::demo::{
     demo_star_subscriptions, demo_storage_stats, demo_thumb_png_path, demo_websites,
 };
 use super::drafts::apply_ready_drafts;
+use super::find_demo::{
+    apply_ready_jump_date, apply_ready_search_filters, apply_ready_search_from,
+    apply_ready_search_from_hits,
+};
 use super::folders::apply_ready_folders;
 use super::forward::apply_ready_forward;
 use super::group_calls::demo_group_video_frames;
@@ -227,6 +231,42 @@ impl QuillApp {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_search_in_chat(session, &self.demo_sink, &self.demo_seq);
+            }
+        }
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyJumpDate
+                    | ScreenshotDemo::ReadySearchFrom
+                    | ScreenshotDemo::ReadySearchFromHits
+            )
+        ) && let Some(session) = self.demo_session.as_mut()
+        {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            match demo {
+                Some(ScreenshotDemo::ReadyJumpDate) => {
+                    apply_ready_jump_date(session, &self.demo_sink, &self.demo_seq)
+                }
+                Some(ScreenshotDemo::ReadySearchFrom) => {
+                    apply_ready_search_from(session, &self.demo_sink, &self.demo_seq)
+                }
+                _ => apply_ready_search_from_hits(session, &self.demo_sink, &self.demo_seq),
+            }
+            if !matches!(demo, Some(ScreenshotDemo::ReadyJumpDate)) {
+                self.chat_search_input
+                    .update(cx, |input, cx| input.focus(window, cx));
+            }
+            self.status_note = "screenshot demo — find in history".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySearchFilters)) {
+            self.search_input.update(cx, |input, cx| {
+                input.set_value("hello", window, cx);
+                input.focus(window, cx);
+            });
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_search(session, &self.demo_sink, &self.demo_seq);
+                apply_ready_search_filters(session);
             }
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyReply)) {
@@ -1293,6 +1333,31 @@ impl QuillApp {
         // over the ReadyChats fixture (injected, no live Telegram). The
         // list reads the real local registry, read-only — nothing is
         // added, switched, or removed by the fixture.
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyPasscodeSettings
+                    | ScreenshotDemo::ReadyPasscodeCreate
+                    | ScreenshotDemo::ReadyLockScreen
+            )
+        ) {
+            self.passcode_ui.fixture(
+                !matches!(demo, Some(ScreenshotDemo::ReadyPasscodeCreate)),
+                matches!(demo, Some(ScreenshotDemo::ReadyLockScreen)),
+                matches!(demo, Some(ScreenshotDemo::ReadyLockScreen)).then_some("Wrong passcode"),
+            );
+            self.passcode_ui.autolock_secs = 300;
+            self.passcode_ui.system_unlock = true;
+            if matches!(demo, Some(ScreenshotDemo::ReadyPasscodeSettings)) {
+                self.passcode_ui.open = true;
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyPasscodeCreate)) {
+                self.passcode_ui.open = true;
+                self.passcode_ui.view = super::passcode::PasscodeView::Create;
+                self.passcode_ui.error = Some("Passcodes are different".into());
+            }
+            self.status_note = "screenshot demo — local passcode".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyAccounts)) {
             self.accounts_ui.open = true;
             self.status_note = "screenshot demo — accounts".into();
@@ -1885,6 +1950,81 @@ impl QuillApp {
                 );
             }
             self.status_note = "screenshot demo — bubble headers".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyShowcase)) {
+            use super::showcase_demo as sc;
+            let view = std::env::var("QUILL_DEMO_SHOWCASE").unwrap_or_default();
+            let scene = match view.as_str() {
+                "poll" => sc::Scene::Lunch,
+                "player" | "accent" => sc::Scene::Maya,
+                "channel" => sc::Scene::Channel,
+                _ => sc::Scene::Hikers,
+            };
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                sc::apply_ready_showcase(session, &self.demo_sink, &self.demo_seq, scene);
+            }
+            match view.as_str() {
+                "reactions" => {
+                    if let Some(session) = self.demo_session.as_mut() {
+                        use quill::state::{MessageReactionOptions, ReactionChoice};
+                        let emoji = |e: &str| ReactionChoice::Emoji(e.to_string());
+                        session.message_reaction_options = Some(MessageReactionOptions {
+                            chat_id: ChatId(sc::HIKERS),
+                            message_id: MessageId(sc::HIKERS_FIRST_MESSAGE),
+                            top: ["❤", "👍", "🔥", "😂", "😮", "😢", "🎉"]
+                                .into_iter()
+                                .map(emoji)
+                                .collect(),
+                            recent: vec![emoji("👏")],
+                            popular: [
+                                "🤔", "🙏", "👌", "😍", "🤯", "😱", "🥰", "🤩", "💯", "⚡", "🏆",
+                                "🤝",
+                            ]
+                            .into_iter()
+                            .map(emoji)
+                            .collect(),
+                            allow_custom_emoji: false,
+                        });
+                    }
+                    self.message_menu = Some(MessageMenuState {
+                        chat_id: ChatId(sc::HIKERS),
+                        message_id: MessageId(sc::HIKERS_FIRST_MESSAGE),
+                        position: point(px(560.), px(150.)),
+                    });
+                    self.reactions_expanded = true;
+                }
+                "viewer" => {
+                    self.open_media_viewer(
+                        ChatId(sc::HIKERS),
+                        MessageId(sc::HIKERS_PHOTO_MESSAGE),
+                        cx,
+                    );
+                }
+                "player" => {
+                    self.begin_track_playback(
+                        PlaybackKind::Audio,
+                        ChatId(sc::MAYA),
+                        MessageId(sc::MAYA_AUDIO_MESSAGE),
+                        214.0,
+                        87.0,
+                        cx,
+                    );
+                    self.pause_active_playback();
+                }
+                "appearance" => {
+                    self.appearance.theme = ThemeChoice::Dark;
+                    self.appearance.accent_rgb = 0x8b5cf6;
+                    self.appearance.wallpaper_rgb = Some(0x1b1230);
+                    self.appearance_open = true;
+                }
+                "accent" => {
+                    self.appearance.accent_rgb = 0x8b5cf6;
+                }
+                _ => {}
+            }
+            // The README captures carry no debug caption.
+            self.status_note = String::new();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyRtlPolish)) {
             let view = std::env::var("QUILL_DEMO_RTL_VIEW").unwrap_or_default();

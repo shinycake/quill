@@ -37,7 +37,9 @@ pub mod marketplace;
 pub mod media_session;
 pub mod media_tools;
 pub mod media_viewer;
+pub mod message_menu;
 pub mod notify;
+pub mod passcode;
 pub mod peer_badge;
 pub mod pin_reorder;
 pub mod pins;
@@ -49,6 +51,7 @@ pub mod presence;
 pub mod privacy;
 pub mod rich;
 pub mod row_fx;
+pub mod search_filters;
 pub mod send_button;
 pub mod service_text;
 #[cfg(test)]

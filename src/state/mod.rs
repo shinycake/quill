@@ -58,6 +58,7 @@ mod account_notices;
 mod call_types;
 mod chat_activity;
 mod chat_types;
+mod history_calendar;
 mod history_types;
 mod info_types;
 mod media_library;
@@ -77,11 +78,13 @@ mod session_calls;
 mod session_chat_caps;
 mod session_chat_search;
 mod session_chatlist;
+mod session_date_jump;
 mod session_files;
 mod session_forum;
 mod session_forward;
 mod session_history_window;
 mod session_members;
+mod session_message_menu;
 mod session_notifications;
 mod session_reply;
 mod session_requests;
@@ -100,6 +103,7 @@ pub use account_notices::*;
 pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;
+pub use history_calendar::*;
 pub use history_types::*;
 pub use info_types::*;
 pub use media_library::{MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, ReactionChoice};
@@ -110,6 +114,10 @@ pub use search_types::*;
 pub use session::*;
 pub(crate) use session_chat_search::history_message;
 pub use session_history_window::MentionSearch;
+pub use session_message_menu::{
+    Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
+    StickerSetViewStage,
+};
 pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,
     thumb_candidates,

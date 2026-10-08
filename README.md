@@ -13,18 +13,23 @@ An independent, keyboard-first **Telegram desktop client** written in Rust — a
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/ready-chats.png" alt="Quill main window: chat list and conversation"/><br/><sub>Chat list &amp; conversation</sub></td>
-    <td><img src="docs/screenshots/ready-appearance.png" alt="Appearance settings in the dark theme"/><br/><sub>Appearance settings · dark theme</sub></td>
-    <td><img src="docs/screenshots/ready-rich-message.png" alt="Rich message blocks from a bot"/><br/><sub>Rich message blocks</sub></td>
+    <td><img src="docs/screenshots/readme-chat-dark.png" alt="Group chat in the dark theme: chat list with stories, archive row and badges; voice note, link preview and replies"/><br/><sub>Group chat · dark</sub></td>
+    <td><img src="docs/screenshots/readme-chat-light.png" alt="Group chat in the light theme with reactions, replies and colored sender names"/><br/><sub>Group chat · light</sub></td>
+    <td><img src="docs/screenshots/readme-media-viewer.png" alt="Fullscreen media viewer with zoom, forward and download actions"/><br/><sub>Media viewer</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/ready-channel-stats.png" alt="Channel statistics panel with growth sparklines"/><br/><sub>Channel statistics</sub></td>
-    <td><img src="docs/screenshots/ready-voice.png" alt="Voice message recording bar"/><br/><sub>Voice messages</sub></td>
-    <td><img src="docs/screenshots/ready-call-screenshare-receive.png" alt="Call with incoming screen share"/><br/><sub>Calls &amp; screen sharing</sub></td>
+    <td><img src="docs/screenshots/readme-reactions-menu.png" alt="Reaction picker over the message context menu"/><br/><sub>Reactions &amp; message menu</sub></td>
+    <td><img src="docs/screenshots/readme-polls.png" alt="Polls and a closed quiz with explanation"/><br/><sub>Polls &amp; quizzes</sub></td>
+    <td><img src="docs/screenshots/readme-player-bar.png" alt="Audio player bar above a private chat with music, a photo and reactions"/><br/><sub>Audio player bar</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/readme-channel-photos.png" alt="Channel with photo posts, reactions and view counts"/><br/><sub>Channels</sub></td>
+    <td><img src="docs/screenshots/readme-appearance-dark.png" alt="Appearance settings: themes, accent colors, wallpapers"/><br/><sub>Appearance settings</sub></td>
+    <td><img src="docs/screenshots/readme-accent-light.png" alt="Private chat in the light theme with a purple accent color"/><br/><sub>Accent colors</sub></td>
   </tr>
 </table>
 
-Captured from a real GPUI window using demo fixtures (no live Telegram). The [full gallery](docs/screenshots/README.md) has 120+ captures covering auth, chats, media, calls, bots, settings, and more.
+Captured from a real GPUI window using demo fixtures (no live Telegram). The [full gallery](docs/screenshots/README.md) has 130+ captures covering auth, chats, media, calls, bots, settings, and more.
 
 ## What is Quill?
 
@@ -36,11 +41,12 @@ The goal isn't to clone Telegram Desktop. It's to build the client Telegram *sho
 
 - **Complete auth** — phone/code login, QR login, 2FA with recovery, multi-account switching, active-session management
 - **Full messaging** — rich-text composer (bold, italic, code, spoilers, quotes, links), replies & quote-replies, forwarding, scheduled & silent sends, cloud drafts, in-chat search, reactions, polls
-- **Media** — photos, videos, albums, GIFs, stickers, voice/video notes with transcription, link previews, downloads manager
+- **Media** — photos, videos, albums, GIFs, stickers, in-process voice and video-note recording with transcription, an audio player bar, a fullscreen viewer, link previews, downloads manager
 - **Calls** — 1:1 and group audio/video with screen sharing
 - **Groups & channels** — admin tools, invite links, join requests, statistics with growth sparklines, bots with keyboards and games
 - **Appearance** — light/dark themes, auto-night, accent colors, chat wallpapers, text size, bubble/plain chat styles
 - **Privacy** — secret chats, per-session toggles, granular notification and archive controls
+- **Desktop integration** — `tg://` and `t.me` deep links, tray menu with notification toggles, unread badges, packages for macOS, Windows, and Linux
 
 ## Build
 

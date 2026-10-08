@@ -218,10 +218,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 | EnvelopePayload::UpdateFile(_)
                 | EnvelopePayload::File(_)
         );
+        // Only the first page jumps to its first hit; "older" pages append.
         let chat_search_hits = matches!(
             owned.envelope.payload,
             EnvelopePayload::FoundChatMessages { .. }
-        );
+        ) && view_purpose != Some(RequestPurpose::SearchChatMessagesMore);
         // M2: capture the `getFullRichMessage` answer before `apply`
         // takes the pending request; the full blocks replace the
         // partial message's blocks in history after apply.
@@ -243,13 +244,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // M1: capture the `getMessageLink` answer before `apply` takes the
         // pending request; the UI drains `Session::message_link_result`
         // into the clipboard.
-        let message_link_answer: Option<String> = match &owned.envelope.payload {
-            EnvelopePayload::MessageLink { link, .. } => owned
+        let message_link_answer: Option<(String, bool)> = match &owned.envelope.payload {
+            EnvelopePayload::MessageLink { link, is_public } => owned
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
                 .is_some_and(|purpose| purpose == RequestPurpose::GetMessageLink)
-                .then(|| link.clone()),
+                .then(|| (link.clone(), *is_public)),
             _ => None,
         };
         // Slice msg-richtext-ai-tools: capture AI text answers
@@ -316,6 +317,23 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
+        // The open message menu's properties arrived: chain the seen /
+        // reacted lookups they allow (`getMessageViewers`, ...).
+        let audience_gate: Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)> =
+            match &owned.envelope.payload {
+                EnvelopePayload::MessageProperties(actions) => owned
+                    .envelope
+                    .extra
+                    .and_then(|id| self.session.requests.purpose(id))
+                    .and_then(|purpose| match purpose {
+                        RequestPurpose::GetMessageMenuActions {
+                            chat_id,
+                            message_id,
+                        } => Some((chat_id, message_id, *actions)),
+                        _ => None,
+                    }),
+                _ => None,
+            };
         // A5: capture the `checkChatUsername` verdict before `apply`
         // takes the pending request. The verdict is stashed with the
         // in-flight username text so the edit-profile dialog can ignore
@@ -668,9 +686,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(message_id) = self.session.unread_jump.take() {
             let _ = self.jump_to_chat_search_message(message_id);
         }
+        // Jump to date: `getChatMessageByDate` resolved (or 404'd) a target.
+        if let Some((message_id, mode)) = self.session.date_jump.take() {
+            let _ = self.jump_to_message_with(message_id, mode);
+        }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
-        if let Some(link) = message_link_answer {
+        if let Some((link, is_public)) = message_link_answer {
             self.session.message_link_result = Some(link);
+            self.session.message_link_public = is_public;
         }
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
@@ -725,6 +748,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.message_link_error =
                     Some("message link not available for this message".into());
             }
+        }
+        if let Some((chat_id, message_id, actions)) = audience_gate {
+            let _ = self.fetch_message_audience(chat_id, message_id, actions);
         }
         if emoji_trending_answer {
             self.mark_emoji_packs_viewed()?;
