@@ -643,3 +643,39 @@ impl ChatSummary {
         }
     }
 }
+
+/// A pair of TDLib unread totals: everything, and the unmuted subset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UnreadPair {
+    pub all: i32,
+    pub unmuted: i32,
+}
+
+/// Server-side unread totals for one chat list. `None` until the matching
+/// update has arrived (TDLib sends them only with a message database).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ListUnreadTotals {
+    /// `updateUnreadMessageCount`: unread messages. TDLib counts a chat
+    /// marked as unread as one message, like tdesktop's "marks".
+    pub messages: Option<UnreadPair>,
+    /// `updateUnreadChatCount`: chats with unread messages or marked unread.
+    pub chats: Option<UnreadPair>,
+}
+
+/// Totals for the main list and the archive (the only lists the badge
+/// reads; folder lists are ignored).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UnreadTotals {
+    pub main: ListUnreadTotals,
+    pub archive: ListUnreadTotals,
+}
+
+impl UnreadTotals {
+    pub(crate) fn list_mut(&mut self, list: &ChatList) -> Option<&mut ListUnreadTotals> {
+        match list {
+            ChatList::Main => Some(&mut self.main),
+            ChatList::Archive => Some(&mut self.archive),
+            ChatList::Folder(_) | ChatList::Unknown => None,
+        }
+    }
+}
