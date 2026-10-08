@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">
+  <!-- Q ring: calligraphic, thicker on the left -->
+  <path fill="#000" fill-rule="evenodd" d="M50 10 C27 10 13 26 13 46 C13 63 24 75 39 79 L44 70 C32 67 24 58 24 46 C24 31 35 21 50 21 C64 21 74 31 74 45 C74 52 71 58 66 62 L72 70 C80 64 85 55 85 45 C85 25 70 10 50 10 Z"/>
+  <!-- feather tail sweeping down-right -->
+  <path fill="#000" d="M40 74 C52 66 66 63 76 66 C84 69 89 77 91 90 C82 84 74 82 66 83 C57 84 49 81 40 74 Z"/>
+  <!-- feather spine notch -->
+  <path fill="#fff" d="M47 75 C60 72 72 73 86 85 C72 76 60 75 47 75 Z"/>
+</svg>

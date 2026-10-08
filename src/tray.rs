@@ -70,15 +70,62 @@ pub fn badge_count(session: &Session, prefs: &BadgePrefs) -> u32 {
 const BASE_ICON: &[u8; (ICON_SIZE * ICON_SIZE * 4) as usize] =
     include_bytes!("../assets/icons/tray-64.rgba");
 
+/// Monochrome glyph for the macOS menu bar as a 64x64 alpha mask, rasterized
+/// from `assets/icons/tray-template.svg` with
+/// `magick -background white -density 300 tray-template.svg -flatten
+/// -resize 64x64 -colorspace Gray -negate -depth 8 gray:tray-template-64.a8`.
+const TEMPLATE_MASK: &[u8; (ICON_SIZE * ICON_SIZE) as usize] =
+    include_bytes!("../assets/icons/tray-template-64.a8");
+
 const BADGE_RED: [u8; 4] = [0xFF, 0x3B, 0x30, 0xFF];
 const WHITE: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+const BLACK: [u8; 4] = [0x00, 0x00, 0x00, 0xFF];
+const CLEAR: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
+
+/// Colors of the unread pill: outer ring, fill, digits.
+struct BadgeColors {
+    ring: [u8; 4],
+    fill: [u8; 4],
+    digits: [u8; 4],
+}
 
 /// Rendered icon: raw RGBA bytes plus `(width, height)`.
 pub fn render_tray_icon(unread: u32) -> (Vec<u8>, u32, u32) {
     let mut px = Pixels::new(ICON_SIZE);
     px.buf.copy_from_slice(BASE_ICON);
     if unread > 0 {
-        draw_badge(&mut px, unread);
+        draw_badge(
+            &mut px,
+            unread,
+            &BadgeColors {
+                ring: WHITE,
+                fill: BADGE_RED,
+                digits: WHITE,
+            },
+        );
+    }
+    (px.buf, ICON_SIZE, ICON_SIZE)
+}
+
+/// macOS menu-bar variant: a black glyph with alpha, handed to AppKit as a
+/// template image so the system tints it black or white to match the menu
+/// bar (like every other status item). The count is a solid pill with the
+/// digits and a surrounding gap cut out, so it stays legible in one color.
+pub fn render_tray_template(unread: u32) -> (Vec<u8>, u32, u32) {
+    let mut px = Pixels::new(ICON_SIZE);
+    for (i, alpha) in TEMPLATE_MASK.iter().enumerate() {
+        px.buf[i * 4 + 3] = *alpha;
+    }
+    if unread > 0 {
+        draw_badge(
+            &mut px,
+            unread,
+            &BadgeColors {
+                ring: CLEAR,
+                fill: BLACK,
+                digits: CLEAR,
+            },
+        );
     }
     (px.buf, ICON_SIZE, ICON_SIZE)
 }
@@ -136,8 +183,8 @@ fn badge_text(unread: u32) -> String {
 
 /// Red pill in the top-right corner, sized to take up most of the icon so the
 /// count reads at menu-bar size: 4 px glyph cells for one or two characters,
-/// 3 px for "99+", with a white ring to separate it from the icon art.
-fn draw_badge(px: &mut Pixels, unread: u32) {
+/// 3 px for "99+", with a ring to separate it from the icon art.
+fn draw_badge(px: &mut Pixels, unread: u32, colors: &BadgeColors) {
     let text = badge_text(unread);
     let n = text.len() as u32;
     let scale: u32 = if n >= 3 { 3 } else { 4 };
@@ -150,30 +197,31 @@ fn draw_badge(px: &mut Pixels, unread: u32) {
     let ring: u32 = 2;
     let x0 = ICON_SIZE - pill_w;
     let y0 = 0;
-    px.rounded_rect(x0, y0, pill_w, pill_h, pill_h / 2, WHITE);
+    px.rounded_rect(x0, y0, pill_w, pill_h, pill_h / 2, colors.ring);
     px.rounded_rect(
         x0 + ring,
         y0 + ring,
         pill_w - 2 * ring,
         pill_h - 2 * ring,
         (pill_h - 2 * ring) / 2,
-        BADGE_RED,
+        colors.fill,
     );
     let gx = x0 + (pill_w - text_w) / 2;
     let gy = y0 + (pill_h - text_h) / 2;
     for (i, ch) in text.chars().enumerate() {
-        draw_glyph(px, ch, gx + i as u32 * (glyph_w + gap), gy, scale);
+        let x = gx + i as u32 * (glyph_w + gap);
+        draw_glyph(px, ch, x, gy, scale, colors.digits);
     }
 }
 
-fn draw_glyph(px: &mut Pixels, ch: char, x0: u32, y0: u32, scale: u32) {
+fn draw_glyph(px: &mut Pixels, ch: char, x0: u32, y0: u32, scale: u32, color: [u8; 4]) {
     let rows = glyph(ch).unwrap_or([0; 7]);
     for (ry, row) in rows.iter().enumerate() {
         for rx in 0..5 {
             if (row >> (4 - rx)) & 1 == 1 {
                 for dy in 0..scale {
                     for dx in 0..scale {
-                        px.set(x0 + rx * scale + dx, y0 + ry as u32 * scale + dy, WHITE);
+                        px.set(x0 + rx * scale + dx, y0 + ry as u32 * scale + dy, color);
                     }
                 }
             }
@@ -243,12 +291,13 @@ impl Tray {
             &MenuItem::with_id("quill-tray-quit", "Quit Quill", true, None),
         ])
         .ok()?;
-        let (rgba, w, h) = render_tray_icon(0);
+        let (rgba, w, h) = render_platform_icon(0);
         let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
         let tray = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("Quill")
             .with_icon(icon)
+            .with_icon_as_template(cfg!(target_os = "macos"))
             .build()
             .ok()?;
         Some(Self {
@@ -262,9 +311,11 @@ impl Tray {
             return;
         }
         self.last_shown = Some(unread);
-        let (rgba, w, h) = render_tray_icon(unread);
+        let (rgba, w, h) = render_platform_icon(unread);
         if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) {
-            let _ = self.icon.set_icon(Some(icon));
+            let _ = self
+                .icon
+                .set_icon_with_as_template(Some(icon), cfg!(target_os = "macos"));
         }
         let tooltip = if unread == 0 {
             "Quill".to_string()
@@ -272,6 +323,17 @@ impl Tray {
             format!("Quill — {unread} unread")
         };
         let _ = self.icon.set_tooltip(Some(tooltip));
+    }
+}
+
+/// The macOS menu bar takes a monochrome template; Windows and Linux trays
+/// show the full-color app icon.
+#[cfg(feature = "ui")]
+fn render_platform_icon(unread: u32) -> (Vec<u8>, u32, u32) {
+    if cfg!(target_os = "macos") {
+        render_tray_template(unread)
+    } else {
+        render_tray_icon(unread)
     }
 }
 
@@ -508,6 +570,18 @@ mod tests {
         assert!(red_pixel_count(&rgba) > 100);
         let (rgba, _, _) = render_tray_icon(0);
         assert_eq!(red_pixel_count(&rgba), 0);
+    }
+
+    #[test]
+    fn template_is_black_with_alpha_and_cuts_digits_out() {
+        let (plain, _, _) = render_tray_template(0);
+        let (chunks, _) = plain.as_chunks::<4>();
+        assert!(chunks.iter().all(|p| p[0] == 0 && p[1] == 0 && p[2] == 0));
+        assert!(chunks.iter().any(|p| p[3] == 0xFF), "glyph is drawn");
+        let (badged, _, _) = render_tray_template(7);
+        assert_ne!(plain, badged);
+        let (chunks, _) = badged.as_chunks::<4>();
+        assert!(chunks.iter().all(|p| p[0] == 0 && p[1] == 0 && p[2] == 0));
     }
 
     #[test]
