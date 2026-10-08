@@ -34,12 +34,36 @@ pub const ICON_SIZE: u32 = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
     Open,
+    /// tdesktop tray "Disable notifications" / "Enable notifications".
+    ToggleNotifications,
+    /// Quill's "Disable/Enable notification sounds" (tdesktop "Play sound").
+    ToggleSounds,
     Quit,
+}
+
+/// Tray menu labels for the two notification toggles, tdesktop wording
+/// (`lng_disable_notifications_from_tray` / `lng_enable_…`).
+pub fn notifications_label(enabled: bool) -> &'static str {
+    if enabled {
+        "Disable notifications"
+    } else {
+        "Enable notifications"
+    }
+}
+
+pub fn sounds_label(enabled: bool) -> &'static str {
+    if enabled {
+        "Disable notification sounds"
+    } else {
+        "Enable notification sounds"
+    }
 }
 
 pub fn menu_action(id: &str) -> Option<TrayAction> {
     match id {
         "quill-tray-open" => Some(TrayAction::Open),
+        "quill-tray-notifications" => Some(TrayAction::ToggleNotifications),
+        "quill-tray-sounds" => Some(TrayAction::ToggleSounds),
         "quill-tray-quit" => Some(TrayAction::Quit),
         _ => None,
     }
@@ -429,6 +453,10 @@ impl Pixels {
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub struct Tray {
     icon: tray_icon::TrayIcon,
+    notifications_item: tray_icon::menu::MenuItem,
+    sounds_item: tray_icon::menu::MenuItem,
+    /// Last labels set: (notifications on, sounds on).
+    toggles_shown: Option<(bool, bool)>,
     /// Last drawn (unread, all-muted, dark menu bar) — redraw on change.
     last_shown: Option<(u32, bool, bool)>,
 }
@@ -446,8 +474,19 @@ impl Tray {
             let native = &*menu.ns_menu().cast::<objc2_app_kit::NSMenu>();
             native.setAutoenablesItems(false);
         }
+        // tdesktop's tray menu: Open / Disable notifications / Quit, plus
+        // Quill's notification-sounds toggle next to it.
+        let notifications_item = MenuItem::with_id(
+            "quill-tray-notifications",
+            notifications_label(true),
+            true,
+            None,
+        );
+        let sounds_item = MenuItem::with_id("quill-tray-sounds", sounds_label(true), true, None);
         menu.append_items(&[
             &MenuItem::with_id("quill-tray-open", "Open Quill", true, None),
+            &notifications_item,
+            &sounds_item,
             &PredefinedMenuItem::separator(),
             &MenuItem::with_id("quill-tray-quit", "Quit Quill", true, None),
         ])
@@ -463,8 +502,21 @@ impl Tray {
             .ok()?;
         Some(Self {
             icon: tray,
+            notifications_item,
+            sounds_item,
+            toggles_shown: None,
             last_shown: None,
         })
+    }
+
+    fn set_toggles(&mut self, notifications: bool, sounds: bool) {
+        if self.toggles_shown == Some((notifications, sounds)) {
+            return;
+        }
+        self.toggles_shown = Some((notifications, sounds));
+        self.notifications_item
+            .set_text(notifications_label(notifications));
+        self.sounds_item.set_text(sounds_label(sounds));
     }
 
     fn set_unread(&mut self, unread: u32, muted: bool) {
@@ -546,6 +598,8 @@ thread_local! {
 pub fn sync_tray(session: Option<&Session>) {
     let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
     let muted = session.is_some_and(|s| badge_all_muted(s, unread));
+    let notifications = session.is_none_or(|s| s.desktop_notifications);
+    let sounds = session.is_none_or(|s| s.inapp_sounds_enabled);
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
         // AppKit can return a status-item handle before its native window
@@ -562,6 +616,7 @@ pub fn sync_tray(session: Option<&Session>) {
         }
         if let Some(tray) = slot.as_mut() {
             tray.set_unread(unread, muted);
+            tray.set_toggles(notifications, sounds);
         }
     });
 }
@@ -570,7 +625,11 @@ pub fn sync_tray(session: Option<&Session>) {
 #[cfg(all(feature = "ui", target_os = "linux"))]
 pub fn sync_tray(session: Option<&Session>) {
     let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
-    TRAY.with(|cell| cell.borrow_mut().poll(unread));
+    let toggles = (
+        session.is_none_or(|s| s.desktop_notifications),
+        session.is_none_or(|s| s.inapp_sounds_enabled),
+    );
+    TRAY.with(|cell| cell.borrow_mut().poll(unread, toggles));
 }
 
 /// First sync at window creation. macOS/Windows create the tray
@@ -584,9 +643,13 @@ pub fn sync_tray_startup(session: Option<&Session>) {
 #[cfg(all(feature = "ui", target_os = "linux"))]
 pub fn sync_tray_startup(session: Option<&Session>) {
     let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    let toggles = (
+        session.is_none_or(|s| s.desktop_notifications),
+        session.is_none_or(|s| s.inapp_sounds_enabled),
+    );
     TRAY.with(|cell| {
         cell.borrow_mut()
-            .poll_startup(unread, std::time::Duration::from_millis(1500))
+            .poll_startup(unread, toggles, std::time::Duration::from_millis(1500))
     });
 }
 
@@ -622,6 +685,14 @@ mod tests {
     fn tray_menu_routes_only_its_own_actions() {
         assert_eq!(menu_action("quill-tray-open"), Some(TrayAction::Open));
         assert_eq!(menu_action("quill-tray-quit"), Some(TrayAction::Quit));
+        assert_eq!(
+            menu_action("quill-tray-notifications"),
+            Some(TrayAction::ToggleNotifications)
+        );
+        assert_eq!(
+            menu_action("quill-tray-sounds"),
+            Some(TrayAction::ToggleSounds)
+        );
         assert_eq!(menu_action("quit"), None);
         assert_eq!(menu_action(""), None);
     }

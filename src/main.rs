@@ -531,6 +531,18 @@ fn install_main_window_tray(
                             cx.activate(true);
                             window.activate_window();
                         }
+                        quill::tray::TrayAction::ToggleNotifications => {
+                            let _ = tray_view.update(cx, |this, cx| {
+                                let on = this.desktop_notifications_enabled();
+                                this.set_desktop_notifications(!on, cx);
+                            });
+                        }
+                        quill::tray::TrayAction::ToggleSounds => {
+                            let _ = tray_view.update(cx, |this, cx| {
+                                let on = this.notification_sounds_enabled();
+                                this.set_inapp_sounds_enabled(!on, cx);
+                            });
+                        }
                         quill::tray::TrayAction::Quit => cx.quit(),
                     });
                 }

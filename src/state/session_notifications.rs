@@ -82,6 +82,9 @@ impl Session {
         &self,
         message: &ParsedMessage,
     ) -> Option<OsNotification> {
+        if !self.desktop_notifications {
+            return None;
+        }
         let chat = self.chats.get(&message.chat_id.0)?;
         let chat_muted = self.effective_muted(chat);
         let chat_preview_allowed = self.effective_preview_allowed(chat);

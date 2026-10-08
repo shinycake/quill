@@ -183,6 +183,9 @@ pub struct Session {
     /// tdesktop's "Play sounds" toggle. Loaded from `prefs.json` at
     /// connect time; the notification defaults dialog writes through.
     pub inapp_sounds_enabled: bool,
+    /// Mirror of `settings::Preferences::desktop_notifications` (tdesktop
+    /// `desktopNotify`, toggled from Settings or the tray menu).
+    pub desktop_notifications: bool,
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
@@ -1053,6 +1056,7 @@ impl Session {
             app_active: true,
             hide_notification_previews: true,
             inapp_sounds_enabled: true,
+            desktop_notifications: true,
             pending_notifications: Vec::new(),
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
