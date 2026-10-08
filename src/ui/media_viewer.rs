@@ -1593,13 +1593,11 @@ impl QuillApp {
         self.playback_speed = next;
         let mut restarted = false;
         if let Some(clock) = self.playback_clock.as_mut() {
-            let offset = clock.elapsed_secs();
             let was_playing = clock.is_playing();
             clock.set_rate(next);
-            if was_playing {
-                self.restart_player_at(offset);
-                restarted = true;
-            }
+            // The tempo stretcher follows the new speed on the fly.
+            self.audio.set_speed(next);
+            restarted = was_playing;
         }
         if let Some(video) = self.viewer_native.as_mut() {
             video.set_rate(next as f32);
@@ -1648,14 +1646,7 @@ impl QuillApp {
     /// the sound picks up the new volume.
     pub(super) fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
         self.playback_volume = volume.clamp(0.0, 1.0);
-        if self.playback_clock.as_ref().is_some_and(|c| c.is_playing()) {
-            let offset = self
-                .playback_clock
-                .as_ref()
-                .map(|c| c.elapsed_secs())
-                .unwrap_or(0.0);
-            self.restart_player_at(offset);
-        }
+        self.audio.set_volume(self.playback_volume);
         if let Some(video) = self.viewer_native.as_ref() {
             video.set_volume(self.playback_volume);
         } else if self.viewer_clock.as_ref().is_some_and(|c| c.is_playing())

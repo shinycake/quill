@@ -141,7 +141,10 @@ impl OpusSource {
         let target = (pos.as_secs_f64() * f64::from(RATE)) as u64 + self.pre_skip;
         let target = target.min(self.end);
         let from = target.saturating_sub(PREROLL);
-        let index = self.starts.partition_point(|s| *s <= from).saturating_sub(1);
+        let index = self
+            .starts
+            .partition_point(|s| *s <= from)
+            .saturating_sub(1);
         self.decoder.reset();
         self.next_packet = index;
         self.skip = target - self.starts[index].min(target);

@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use super::audio::SharedOutput;
 
-use rodio::buffer::SamplesBuffer;
 use rodio::Player;
+use rodio::buffer::SamplesBuffer;
 
 use super::call_tones;
 

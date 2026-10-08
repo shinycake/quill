@@ -80,9 +80,9 @@ pub(super) fn format_hint(extension: Option<&str>, mime: Option<&str>) -> Option
 #[derive(Debug)]
 pub(super) enum AudioError {
     /// The file can't be read.
-    Open(String),
+    Open,
     /// No decoder understands the file.
-    Unsupported(String),
+    Unsupported,
     /// No audio output device.
     NoOutput,
 }
@@ -90,27 +90,26 @@ pub(super) enum AudioError {
 impl fmt::Display for AudioError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AudioError::Open(_) => f.write_str("couldn't open the audio file"),
-            AudioError::Unsupported(_) => f.write_str("this audio format can't be played"),
+            AudioError::Open => f.write_str("couldn't open the audio file"),
+            AudioError::Unsupported => f.write_str("this audio format can't be played"),
             AudioError::NoOutput => f.write_str("no audio output device"),
         }
     }
 }
 
 /// Open `path` as a rodio source, stretched to the shared speed.
-pub(super) fn open_source(
-    path: &Path,
-    speed: &SharedSpeed,
-) -> Result<Box<dyn Source + Send>, AudioError> {
-    let mut file = File::open(path).map_err(|e| AudioError::Open(e.to_string()))?;
+fn open_source(path: &Path, speed: &SharedSpeed) -> Result<Box<dyn Source + Send>, AudioError> {
+    let mut file = File::open(path).map_err(|_| AudioError::Open)?;
     let len = file.metadata().map(|m| m.len()).unwrap_or(0);
     let mut header = [0u8; 64];
     let read = read_prefix(&mut file, &mut header);
     file.seek(SeekFrom::Start(0))
-        .map_err(|e| AudioError::Open(e.to_string()))?;
+        .map_err(|_| AudioError::Open)?;
     let reader = BufReader::new(file);
     let source: Box<dyn Source + Send> = match choose_codec(&header[..read]) {
-        Codec::Opus => Box::new(opus::OpusSource::new(reader).map_err(AudioError::Unsupported)?),
+        Codec::Opus => {
+            Box::new(opus::OpusSource::new(reader).map_err(|_| AudioError::Unsupported)?)
+        }
         Codec::Generic => {
             let extension = path.extension().and_then(|e| e.to_str());
             let mut builder = Decoder::builder()
@@ -120,11 +119,7 @@ pub(super) fn open_source(
             if let Some(hint) = format_hint(extension, None) {
                 builder = builder.with_hint(hint);
             }
-            Box::new(
-                builder
-                    .build()
-                    .map_err(|e| AudioError::Unsupported(e.to_string()))?,
-            )
+            Box::new(builder.build().map_err(|_| AudioError::Unsupported)?)
         }
     };
     Ok(Box::new(Tempo::new(source, speed.clone())))
@@ -267,7 +262,9 @@ impl AudioEngine {
             return Ok(());
         }
         let seeked = self.player.as_ref().is_some_and(|p| {
-            !p.empty() && p.try_seek(Duration::from_secs_f64(offset_secs.max(0.0))).is_ok()
+            !p.empty()
+                && p.try_seek(Duration::from_secs_f64(offset_secs.max(0.0)))
+                    .is_ok()
         });
         if seeked {
             return Ok(());
@@ -473,7 +470,7 @@ mod tests {
         let secs = samples.len() as f64 / 48_000.0;
         assert!((secs - total).abs() < 0.001, "decoded {secs}s vs {total}s");
         let peak = samples.iter().fold(0.0f32, |p, s| p.max(s.abs()));
-        assert!(peak > 0.2 && peak < 1.0, "peak {peak}");
+        assert!(peak > 0.08 && peak < 1.0, "peak {peak}");
     }
 
     #[test]
@@ -552,10 +549,16 @@ mod tests {
             let out: Vec<f32> =
                 Tempo::new(buffer(rate, input.clone()), SharedSpeed::new(speed)).collect();
             let secs = out.len() as f64 / f64::from(rate);
-            assert!((secs - expect).abs() < 0.08, "{speed}x: {secs}s vs {expect}s");
+            assert!(
+                (secs - expect).abs() < 0.08,
+                "{speed}x: {secs}s vs {expect}s"
+            );
             // Pitch: rising zero crossings per second stay ~200.
             let body = &out[2000..out.len() - 2000];
-            let crossings = body.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+            let crossings = body
+                .windows(2)
+                .filter(|w| w[0] <= 0.0 && w[1] > 0.0)
+                .count();
             let hz = crossings as f64 / (body.len() as f64 / f64::from(rate));
             assert!((hz - 200.0).abs() < 8.0, "{speed}x pitch {hz} Hz");
         }

@@ -151,7 +151,7 @@ pub(super) fn unmute() -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SAMPLE_RATE, busy, connect, end, incoming, mute, ringback, unmute};
+    use super::{SAMPLE_RATE, busy, connect, end, incoming, mute, notification, ringback, unmute};
 
     fn all() -> Vec<(&'static str, Vec<f32>)> {
         vec![

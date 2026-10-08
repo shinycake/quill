@@ -32,7 +32,8 @@ impl SharedSpeed {
     }
 
     pub(super) fn set(&self, speed: f64) {
-        self.0.store(clamp_speed(speed).to_bits(), Ordering::Relaxed);
+        self.0
+            .store(clamp_speed(speed).to_bits(), Ordering::Relaxed);
     }
 
     pub(super) fn get(&self) -> f32 {
@@ -174,9 +175,14 @@ impl<S: Source> Tempo<S> {
         let low = center.saturating_sub(self.delta);
         let high = center + self.delta;
         // The natural continuation is the best possible match (ties go to
-        // it), so at 1x nothing else can win.
-        let mut best = natural;
-        let mut best_score = self.score(natural, natural);
+        // it), so at 1x nothing else can win. Out of the window (the
+        // stretch has pulled away from it) it simply isn't a candidate.
+        let in_window = (low..=high).contains(&natural);
+        let (mut best, mut best_score) = if in_window {
+            (natural, 1.0)
+        } else {
+            (center, f32::MIN)
+        };
         let mut candidate = low;
         while candidate <= high {
             if candidate != natural {
@@ -221,7 +227,8 @@ impl<S: Source> Tempo<S> {
         self.prev = Some(start);
         self.nominal += self.hs as f64 * speed;
         // Frames before the earliest next search/template position are spent.
-        let keep_from = (start + self.hs).min((self.nominal.round() as usize).saturating_sub(self.delta));
+        let keep_from =
+            (start + self.hs).min((self.nominal.round() as usize).saturating_sub(self.delta));
         if keep_from > self.input_base {
             let drop = (keep_from - self.input_base).min(self.input.len() / self.ch);
             self.input.drain(..drop * self.ch);

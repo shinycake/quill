@@ -589,8 +589,6 @@ pub struct QuillApp {
     /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
     pub(super) pending_audio_play: Option<(MessageId, FileId, f64)>,
     pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
-    /// The audio output shared by every sound the app makes.
-    pub(super) audio_output: super::audio::SharedOutput,
     /// In-process player for the active voice note / audio file.
     pub(super) audio: super::audio::AudioEngine,
     pub(super) notification_sounds: super::audio::NotificationSounds,

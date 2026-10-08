@@ -1696,7 +1696,6 @@ impl QuillApp {
             call_window_closed_by_user: None,
             call_ended_at: None,
             call_sounds: super::call_sounds::CallSounds::new(audio_output.clone()),
-            audio_output: audio_output.clone(),
             call_sound_marks: Default::default(),
             playing_voice: None,
             playing_audio: None,
