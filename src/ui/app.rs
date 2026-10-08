@@ -671,6 +671,8 @@ pub struct QuillApp {
     pub(super) viewer_player: Option<Child>,
     /// Playback clock for the viewer's clip (elapsed/total + pause freeze).
     pub(super) viewer_clock: Option<PlaybackClock>,
+    /// Whether the main window is currently excluded from screen capture.
+    pub(super) capture_blocked: bool,
     /// Decoded frames for the viewer's clip, rendered in-place (parity
     /// slice 5). Pre-decoded `RenderImage` handles: `img()` resolves
     /// `ImageSource::Render` synchronously, so the 125 ms tick can cycle
