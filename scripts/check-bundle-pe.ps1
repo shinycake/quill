@@ -5,7 +5,7 @@ param([Parameter(Mandatory)][string]$Dir)
 . "$PSScriptRoot/windows-common.ps1"
 $Dir = (Resolve-Path $Dir).Path
 
-foreach ($required in 'quill.exe', 'tdjson.dll', 'ntgcalls.dll', 'rlottie.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll') {
+foreach ($required in 'quill.exe', 'tdjson.dll', 'ntgcalls.dll', 'rlottie.dll', 'quillvideo.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll') {
     if (-not (Test-Path (Join-Path $Dir $required))) { throw "package is missing $required" }
 }
 

@@ -194,6 +194,11 @@ fn main() {
         }
         return;
     }
+    if args.get(1).is_some_and(|a| a == "--video-probe") {
+        std::process::exit(quill::video_decode::probe_cli(
+            args.get(2).map(String::as_str),
+        ));
+    }
     if args.iter().skip(1).any(|a| a == "--connect-smoke") {
         std::process::exit(quill::connect_smoke::cli_exit_code());
     }

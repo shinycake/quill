@@ -892,7 +892,7 @@ pub(super) fn video_attachment(
                                         // With the native player, videos play in
                                         // the media viewer (Telegram Desktop's
                                         // behavior); inline frames otherwise.
-                                        if super::native_video::SUPPORTED
+                                        if super::native_video::supported()
                                             && let Some((chat_id, message_id)) = viewer
                                         {
                                             this.open_media_viewer(chat_id, message_id, cx);
@@ -2158,6 +2158,18 @@ fn inline_surface(
     frame_h: Pixels,
     corners: MediaCorners,
 ) -> AnyElement {
+    // A decoded image (FFmpeg) rounds itself like any picture.
+    if inline.picture.clips() {
+        let radii = Corners {
+            top_left: corners.tl,
+            top_right: corners.tr,
+            bottom_right: corners.br,
+            bottom_left: corners.bl,
+        };
+        return inline
+            .picture
+            .element(frame_w, frame_h, ObjectFit::Cover, radii);
+    }
     #[cfg(target_os = "macos")]
     {
         // The native surface can't be clipped to rounded corners, so a mask
@@ -2174,10 +2186,9 @@ fn inline_surface(
             .h(frame_h)
             .overflow_hidden()
             .child(
-                gpui_kit::surface(inline.buffer)
-                    .w(frame_w)
-                    .h(frame_h)
-                    .object_fit(ObjectFit::Cover),
+                inline
+                    .picture
+                    .element(frame_w, frame_h, ObjectFit::Cover, Corners::default()),
             )
             .child(
                 img(ImageSource::Render(mask))
@@ -2190,24 +2201,27 @@ fn inline_surface(
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (inline, corners);
+        // Only images exist off macOS.
         div().w(frame_w).h(frame_h).into_any_element()
     }
 }
 
-/// A round video message's current frame: the square video under a mask
-/// in the history's color that leaves only the circle.
+/// A round video message's current frame: the square video cut to a
+/// circle — an image clips itself; a native surface gets a mask in the
+/// history's color that leaves only the circle.
 fn round_inline_surface(inline: super::inline_video::InlineFrame) -> AnyElement {
     let diameter = px(VIDEO_NOTE_DIAMETER);
+    if inline.picture.clips() {
+        let radius = diameter / 2.;
+        return inline
+            .picture
+            .element(diameter, diameter, ObjectFit::Cover, Corners::all(radius));
+    }
     // Twice the size for Retina edges.
     let mask = super::inline_video::circle_mask(VIDEO_NOTE_DIAMETER as u32 * 2, inline.backdrop);
-    #[cfg(target_os = "macos")]
-    let video = gpui_kit::surface(inline.buffer)
-        .size(diameter)
-        .object_fit(ObjectFit::Cover)
-        .into_any_element();
-    #[cfg(not(target_os = "macos"))]
-    let video = div().size(diameter).into_any_element();
+    let video = inline
+        .picture
+        .element(diameter, diameter, ObjectFit::Cover, Corners::default());
     div()
         .relative()
         .size(diameter)
