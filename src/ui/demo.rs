@@ -367,6 +367,8 @@ pub(super) fn demo_stress_size() -> Option<(usize, usize)> {
 /// In the order they're added (the newest last, at the bottom).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(super) enum HistoryAnim {
+    /// A photo and a text behind spoilers (not part of `all`).
+    Spoiler,
     /// A video that autoplays inline (macOS).
     Video,
     /// A text message with three animated custom emoji.
@@ -377,9 +379,9 @@ pub(super) enum HistoryAnim {
     Note,
 }
 
-/// `QUILL_DEMO_HISTORY_ANIM=stickers,emoji,video,note` (any subset; `all`
-/// for every one): the ready-chats fixture's open chat ends with that
-/// animated content, to measure what history animations cost.
+/// `QUILL_DEMO_HISTORY_ANIM=stickers,emoji,video,note,spoiler` (any
+/// subset; `all` for the first four): the ready-chats fixture's open chat
+/// ends with that content, to measure what history animations cost.
 pub(super) fn demo_history_anim() -> Vec<HistoryAnim> {
     let Ok(value) = std::env::var("QUILL_DEMO_HISTORY_ANIM") else {
         return Vec::new();
@@ -399,6 +401,7 @@ pub(super) fn demo_history_anim() -> Vec<HistoryAnim> {
             "stickers" => &all[2..3],
             "note" => &all[3..4],
             "all" => &all[..],
+            "spoiler" => &[HistoryAnim::Spoiler],
             _ => &[],
         })
         .copied()
@@ -421,6 +424,20 @@ fn history_anim_fixture(wanted: &[HistoryAnim]) -> Vec<String> {
     };
     for item in wanted {
         match item {
+            HistoryAnim::Spoiler => {
+                let photo = demo_file_json(48, &demo_thumb_png_path(), true);
+                out.push(message(
+                    format!(
+                        r#"{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":{{"@type":"minithumbnail","width":40,"height":30,"data":"{DEMO_MINITHUMB}"}},"sizes":[{{"@type":"photoSize","type":"m","photo":{photo},"width":320,"height":240,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":true,"is_secret":false}}"#
+                    ),
+                    true,
+                ));
+                out.push(message(
+                    r#"{"@type":"messageText","text":{"@type":"formattedText","text":"The answer is forty-two, of course.","entities":[{"@type":"textEntity","offset":14,"length":10,"type":{"@type":"textEntityTypeSpoiler"}}]}}"#
+                        .to_string(),
+                    false,
+                ));
+            }
             HistoryAnim::Stickers => {
                 for (file_id, name, format, outgoing) in [
                     (44, "demo-sticker.tgs", "stickerFormatTgs", false),
@@ -480,6 +497,16 @@ fn history_anim_fixture(wanted: &[HistoryAnim]) -> Vec<String> {
         );
     }
     out
+}
+
+/// The first animated sticker message `QUILL_DEMO_HISTORY_ANIM=all` adds.
+pub(super) const HISTORY_ANIM_STICKER: i64 = 90_003;
+
+/// Whether `QUILL_DEMO_HISTORY_ANIM` lists `token` (`panel`, `menu`,
+/// `select`: something over the animated history).
+pub(super) fn demo_history_extra(token: &str) -> bool {
+    std::env::var("QUILL_DEMO_HISTORY_ANIM")
+        .is_ok_and(|value| value.split(',').any(|item| item.trim() == token))
 }
 
 /// `QUILL_DEMO_STRESS_AVATARS=<dir>`: a directory of stress-chat photos.
