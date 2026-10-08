@@ -679,6 +679,30 @@ mod tests {
     }
 
     #[test]
+    fn a_short_rtl_message_measures_its_shaped_width_not_the_available_width() {
+        // A bubble hugs its text: the measured width is the widest row, however wide
+        // the wrap width is.
+        with_composer(None, |cx, handle, _| {
+            cx.update_window(handle, |_, window, _| {
+                let text = "מחכה לעוד עדכונים ממנה";
+                let p = paragraph(text, 560., window);
+                let shaped = px(text.chars().count() as f32 * 9.6);
+                assert!(
+                    (p.size().width - shaped).abs() < px(0.5),
+                    "{:?} vs {shaped:?}",
+                    p.size().width
+                );
+                assert_eq!(p.size().height, px(20.));
+                // And it still wraps at the wrap width when it must.
+                let narrow = paragraph(text, 120., window);
+                assert!(narrow.size().width <= px(120.));
+                assert!(narrow.size().height > px(20.));
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
     fn bubble_hit_testing_and_selection_follow_the_rows() {
         with_composer(None, |cx, handle, _| {
             cx.update_window(handle, |_, window, _| {

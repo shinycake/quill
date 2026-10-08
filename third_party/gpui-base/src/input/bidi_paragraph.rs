@@ -264,15 +264,11 @@ impl BidiParagraph {
         InputLine::bidi(row_text, geometry, shaped_lines)
     }
 
-    /// The size the paragraph takes: the widest row, or the whole wrap width when a row is
-    /// right-aligned (so the text can reach the right edge).
+    /// The size the paragraph takes: the widest row (after wrapping) by the rows' height, as
+    /// GPUI's own text measure reports it, so a bubble hugs short text. A right-aligned row
+    /// reaches the right edge of whatever width the element is then given.
     pub fn size(&self) -> gpui::Size<Pixels> {
-        let any_rtl = self.rows.iter().any(|row| row.rtl);
-        let width = match (any_rtl, self.wrap_width) {
-            (true, Some(wrap)) => wrap.max(self.width),
-            _ => self.width,
-        };
-        size(width, self.line_height * self.rows.len().max(1) as f32)
+        size(self.width, self.line_height * self.rows.len().max(1) as f32)
     }
 
     /// Row height.
