@@ -34,7 +34,9 @@ For every ELF in the package: parses `readelf -d`; every `RUNPATH`/`RPATH` entry
 
 ## CI: `linux-package` job (`.github/workflows/ci.yml`)
 
-Separate from `linux-fmt-clippy-test` (unchanged; still the required check). Not required: it needs a cold ~20 min TDLib build and builds the whole UI. Steps: apt deps, TDLib and rlottie builds restored/saved with `actions/cache` (TDLib keyed on `src/pins.rs`, `build-tdlib.sh`, `native/patches/*`), `vendor-ntgcalls.sh` (SHA-256 pinned), `cargo build --release --features ui --locked`, `linux-package.sh`, the ELF checker, `quill --version` / `--build-info` from the package with `LD_LIBRARY_PATH` unset, the dlopen check, extraction of the tarball and an `install.sh` run into a temp prefix, then upload of `quill-linux-x86_64-bundle`.
+Separate from `linux-fmt-clippy-test` (unchanged; still the required check). Not required: a cold run takes ~65 min (TDLib ~40 min on the 4-core runner, because the LTO link of `libtdjson.so` alone is ~5 min; the job builds only the `tdjson`/`tdjson_static` targets via `TDLIB_BUILD_TARGET`, skipping tg_cli/tests/benchmarks) and a warm run ~10 min (TDLib/rlottie cached, dominated by the ~6 min release UI build). Steps: apt deps, TDLib and rlottie builds restored/saved with `actions/cache` (TDLib keyed on `src/pins.rs`, `build-tdlib.sh`, `native/patches/*`), `vendor-ntgcalls.sh` (SHA-256 pinned), `cargo build --release --features ui --locked`, `linux-package.sh`, the ELF checker (plus a negative test that deleting `libssl.so.3` makes it fail), `quill --version` / `--build-info` from the package with `LD_LIBRARY_PATH` unset, the dlopen check, extraction of the tarball and an `install.sh` run into a temp prefix, then upload of `quill-linux-x86_64-bundle`.
+
+Result (run 37727904807): 6 ELF files checked (quill + 5 libs), tarball 74 MB (artifact `quill-linux-x86_64-bundle`, ~73 MiB zipped). Getting the UI to build on Linux at all required fixing `inline_video::frame`'s non-macOS stub, whose signature had drifted from the macOS one (nobody had built `--features ui` on Linux in CI).
 
 ## Verified vs not
 

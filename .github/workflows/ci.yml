@@ -97,6 +97,11 @@ jobs:
         run: bash scripts/linux-package.sh
       - name: check package (ELF dependencies)
         run: bash scripts/check-bundle-elf.sh dist/linux/quill-linux-x86_64
+      - name: checker negative test (unbundled OpenSSL must fail)
+        run: |
+          cp -a dist/linux/quill-linux-x86_64 "$RUNNER_TEMP/neg"
+          rm "$RUNNER_TEMP/neg/lib/libssl.so.3"
+          if bash scripts/check-bundle-elf.sh "$RUNNER_TEMP/neg"; then echo "checker accepted a package missing libssl" >&2; exit 1; fi
       - name: run from package (no env vars)
         run: |
           env -u LD_LIBRARY_PATH -u QUILL_TDJSON_PATH dist/linux/quill-linux-x86_64/quill --version
