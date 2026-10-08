@@ -357,9 +357,10 @@ impl QuillApp {
                         && chat.is_pinned
                 };
                 // The activity indicator is clock-driven: keep ticking while
-                // a visible row shows one.
-                if chat.peer_activity().is_some() {
-                    self.request_animation_tick(12, cx);
+                // a visible row shows one (the chat list's animation layer
+                // ticks its own).
+                if chat.peer_activity().is_some() && super::anim_layer::current().is_none() {
+                    self.request_animation_tick(super::activity_indicator::FPS, cx);
                 }
                 let saved = self.session().is_some_and(|s| s.is_saved_messages(chat.id));
                 let online = !saved && self.session().is_some_and(|s| s.chat_peer_online(chat));

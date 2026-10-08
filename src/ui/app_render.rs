@@ -50,7 +50,6 @@ impl Render for QuillApp {
             window.toggle_fullscreen();
         }
         self.media_roots_frame.borrow_mut().take();
-        self.tick_animation_layer(cx);
         // Spoiler specks painted last frame keep drifting.
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);

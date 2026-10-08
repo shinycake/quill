@@ -91,7 +91,7 @@ impl QuillApp {
                             this.toggle_forward_select(chat_id, message_id, pending, cx);
                         }))
                 })
-                .child(
+                .child(super::anim_layer::occluder(
                     div()
                         .absolute()
                         .right(px(edge))
@@ -132,7 +132,7 @@ impl QuillApp {
                                     ),
                             )
                         }),
-                )
+                ))
                 .into_any_element()
         });
         SelectionRow {

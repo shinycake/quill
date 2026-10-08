@@ -1,11 +1,14 @@
 //! Shared bounded animated sticker images for history and the picker.
+use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::FileId;
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::StickerFormat;
 use smallvec::SmallVec;
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -20,7 +23,9 @@ pub(super) struct StickerClip {
     fps: f64,
     started: Instant,
     duration: Duration,
-    used: Instant,
+    /// When the clip was last shown; an animation layer drawing it keeps
+    /// this fresh while its row replays (`anim_layer`).
+    used: Rc<Cell<Instant>>,
 }
 pub(super) struct StickerJob {
     cancel: Arc<AtomicBool>,
@@ -71,7 +76,15 @@ impl PlaybackSize {
 #[derive(Default)]
 pub(super) struct PreviewEmoji {
     pub(super) still: HashMap<i64, ImageSource>,
-    pub(super) layered: HashMap<i64, super::app_slice::LayeredFrames>,
+    pub(super) layered: HashMap<i64, LayeredClip>,
+}
+
+/// A decoded animation in a history row: drawn by the conversation's
+/// animation layer when the row is built inside the conversation slice
+/// (`anim_layer`), else the current frame, redrawn with the slice.
+pub(super) enum AnimatedVisual {
+    Image(Arc<RenderImage>),
+    Layered(LayeredClip),
 }
 
 #[derive(Default)]
@@ -128,8 +141,8 @@ impl QuillApp {
             .playback_cache(size)
             .clips
             .iter()
-            .filter(|(_, clip)| clip.used.elapsed() >= ON_SCREEN)
-            .min_by_key(|(_, clip)| clip.used)
+            .filter(|(_, clip)| clip.used.get().elapsed() >= ON_SCREEN)
+            .min_by_key(|(_, clip)| clip.used.get())
             .map(|(id, _)| *id);
         match oldest.and_then(|id| self.playback_cache_mut(size).clips.remove(&id)) {
             Some(clip) => {
@@ -149,7 +162,7 @@ impl QuillApp {
     ) {
         // ponytail: sixteen resident clips and two decoders; larger visible grids may re-decode evicted images.
         if let Some(clip) = self.playback_cache_mut(size).clips.get_mut(&id.0) {
-            clip.used = Instant::now();
+            clip.used.set(Instant::now());
             return;
         }
         let cache = self.playback_cache(size);
@@ -269,7 +282,7 @@ impl QuillApp {
                             return Err("Sticker has no frames".to_string());
                         }
                         let duration = Duration::from_secs_f64(frames.len() as f64 / fps);
-                        let frames = frames
+                        let frames: Arc<[Arc<RenderImage>]> = frames
                             .into_iter()
                             .map(|rgba| {
                                 Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
@@ -278,13 +291,7 @@ impl QuillApp {
                             })
                             .collect::<Vec<_>>()
                             .into();
-                        Ok(StickerClip {
-                            frames,
-                            fps,
-                            used: Instant::now(),
-                            started: Instant::now(),
-                            duration,
-                        })
+                        Ok((frames, fps, duration))
                     })();
                     let _ = std::fs::remove_dir_all(dir);
                     result
@@ -297,8 +304,14 @@ impl QuillApp {
                     }
                     this.playback_cache_mut(size).jobs.remove(&id.0);
                     let duration = match result {
-                        Ok(clip) => {
-                            let duration = clip.duration;
+                        Ok((frames, fps, duration)) => {
+                            let clip = StickerClip {
+                                frames,
+                                fps,
+                                used: Rc::new(Cell::new(Instant::now())),
+                                started: Instant::now(),
+                                duration,
+                            };
                             if this.playback_cache(size).clips.len() >= size.capacity() {
                                 // A clip shown meanwhile may keep its place:
                                 // the cache then runs one over until the
@@ -342,6 +355,37 @@ impl QuillApp {
         self.animated_image(id, format, PlaybackSize::Sticker, cx)
     }
 
+    /// A history row's animated sticker: for the conversation's animation
+    /// layer when the row is built inside the conversation slice, else the
+    /// current frame. `None` while it decodes (the row shows the still).
+    pub(super) fn history_sticker(
+        &self,
+        id: FileId,
+        format: StickerFormat,
+        cx: &mut Context<QuillApp>,
+    ) -> Option<AnimatedVisual> {
+        self.history_animated(id, format, PlaybackSize::Sticker, cx)
+    }
+
+    fn history_animated(
+        &self,
+        id: FileId,
+        format: StickerFormat,
+        size: PlaybackSize,
+        cx: &mut Context<QuillApp>,
+    ) -> Option<AnimatedVisual> {
+        if self.slices.in_conversation() && super::anim_layer::current().is_some() {
+            let looping = self
+                .session()
+                .is_none_or(|s| s.media_prefs.loop_animated_stickers);
+            self.layered_clip(id, format, size, looping, cx)
+                .map(AnimatedVisual::Layered)
+        } else {
+            self.animated_image(id, format, size, cx)
+                .map(AnimatedVisual::Image)
+        }
+    }
+
     /// Decoded animations for the custom emoji in `message`'s text, by
     /// custom emoji id. Emoji still decoding (or static ones) are absent;
     /// the text shows their still image meanwhile.
@@ -349,7 +393,7 @@ impl QuillApp {
         &self,
         message: &quill::state::HistoryMessage,
         cx: &mut Context<QuillApp>,
-    ) -> HashMap<i64, Arc<RenderImage>> {
+    ) -> HashMap<i64, AnimatedVisual> {
         use quill::telegram::envelope::MessageContent;
         use quill::text::TextEntityKind;
         let mut out = HashMap::new();
@@ -376,8 +420,11 @@ impl QuillApp {
             })
             .collect();
         for (id, file_id, format) in wanted {
-            if let Some(frames) = self.custom_emoji_image(file_id, format, cx) {
-                out.insert(id, frames);
+            if out.contains_key(&id) {
+                continue;
+            }
+            if let Some(visual) = self.history_animated(file_id, format, PlaybackSize::Emoji, cx) {
+                out.insert(id, visual);
             }
         }
         out
@@ -385,7 +432,7 @@ impl QuillApp {
 
     /// Images for the custom emoji in a chat-list preview: animated when
     /// decoded, the still meanwhile. Built inside the chat list slice, the
-    /// animated ones are painted by its animation layer (`app_slice`), so
+    /// animated ones are painted by its animation layer (`anim_layer`), so
     /// their ticks don't rebuild the list.
     pub(super) fn preview_emoji_images(
         &self,
@@ -393,7 +440,7 @@ impl QuillApp {
         cx: &mut Context<QuillApp>,
     ) -> PreviewEmoji {
         let entities = &chat.last_preview_style.entities;
-        if !self.slices.in_sidebar() {
+        if !self.slices.in_sidebar() || super::anim_layer::current().is_none() {
             return PreviewEmoji {
                 still: self.custom_emoji_images(entities, cx),
                 layered: HashMap::new(),
@@ -406,7 +453,6 @@ impl QuillApp {
         };
         let roots = self.media_display_roots();
         let looping = session.media_prefs.loop_animated_stickers;
-        let mut fps = 0_u32;
         for entity in entities {
             let TextEntityKind::CustomEmoji { custom_emoji_id } = entity.kind else {
                 continue;
@@ -419,12 +465,10 @@ impl QuillApp {
             else {
                 continue;
             };
-            if let Some(clip) = self.layered_emoji_clip(item.file_id, item.format, looping, cx) {
-                if clip.frames.len() > 1 {
-                    fps = fps.max(clip.fps.ceil() as u32);
-                }
-                out.layered
-                    .insert(custom_emoji_id, self.slices.layered(clip));
+            if let Some(clip) =
+                self.layered_clip(item.file_id, item.format, PlaybackSize::Emoji, looping, cx)
+            {
+                out.layered.insert(custom_emoji_id, clip);
                 continue;
             }
             let still = item
@@ -437,36 +481,35 @@ impl QuillApp {
                 out.still.insert(custom_emoji_id, still);
             }
         }
-        if fps > 0 && self.window_active.get() {
-            self.request_animation_tick_for(self.slices.layer_target(), fps.min(30), cx);
-        }
         out
     }
 
-    /// The decoded clip of an animated custom emoji, for the chat list's
-    /// animation layer; starts decoding it when missing.
-    fn layered_emoji_clip(
+    /// The decoded clip of an animated sticker or custom emoji, for an
+    /// animation layer (which keeps it playing); starts decoding it when
+    /// missing.
+    fn layered_clip(
         &self,
         id: FileId,
         format: StickerFormat,
+        size: PlaybackSize,
         looping: bool,
         cx: &mut Context<QuillApp>,
-    ) -> Option<super::app_slice::LayeredClip> {
+    ) -> Option<LayeredClip> {
         if !matches!(format, StickerFormat::Tgs | StickerFormat::Webm) || id.0 == 0 {
             return None;
         }
-        let size = PlaybackSize::Emoji;
-        let clip =
-            self.playback_cache(size)
-                .clips
-                .get(&id.0)
-                .map(|clip| super::app_slice::LayeredClip {
-                    frames: clip.frames.clone(),
-                    fps: clip.fps,
-                    started: clip.started,
-                    duration: clip.duration,
-                    looping,
-                });
+        let clip = self
+            .playback_cache(size)
+            .clips
+            .get(&id.0)
+            .map(|clip| LayeredClip {
+                frames: clip.frames.clone(),
+                fps: clip.fps,
+                started: clip.started,
+                duration: clip.duration,
+                looping,
+                shown: Some(clip.used.clone()),
+            });
         let weak = cx.entity().downgrade();
         cx.defer(move |cx| {
             let _ = weak.update(cx, |this, cx| {

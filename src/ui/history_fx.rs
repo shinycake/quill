@@ -237,7 +237,9 @@ impl QuillApp {
                 .flex()
                 .justify_center()
                 .opacity(alpha)
-                .child(super::conversation::pill_label(&label, cx))
+                .child(super::anim_layer::occluder(
+                    super::conversation::pill_label(&label, cx),
+                ))
                 .into_any_element(),
         )
     }

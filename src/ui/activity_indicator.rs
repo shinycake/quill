@@ -24,8 +24,10 @@ fn cycle_delta(elapsed_ms: u128) -> f32 {
     (elapsed_ms % CYCLE_MS) as f32 / CYCLE_MS as f32
 }
 
-/// Callers must also `request_animation_tick` so the frame clock redraws;
-/// GPUI's `with_animation` would redraw the window at display rate.
+/// Inside a slice with an animation layer (`anim_layer`) the layer draws
+/// the dots and keeps them pulsing; elsewhere callers must also
+/// `request_animation_tick` so the frame clock redraws (GPUI's
+/// `with_animation` would redraw the window at display rate).
 ///
 /// `key` must be unique per visible indicator (animation state is keyed by
 /// element id).
@@ -33,13 +35,26 @@ pub(super) fn activity_indicator(
     indicator: ActivityIndicator,
     color: Hsla,
     key: SharedString,
-) -> impl IntoElement {
+) -> AnyElement {
     let dots = match indicator {
         ActivityIndicator::Dots => 3,
         ActivityIndicator::Pulse => 1,
     };
-    static START: OnceLock<Instant> = OnceLock::new();
-    let delta = cycle_delta(START.get_or_init(Instant::now).elapsed().as_millis());
+    if super::anim_layer::current().is_some() {
+        let width = dots as f32 * DOT + (dots - 1) as f32 * GAP;
+        return div()
+            .flex_none()
+            .mr_1()
+            .child(
+                super::anim_layer::painter(FPS, move |bounds, window| {
+                    paint_dots(bounds, dots, color, window);
+                })
+                .w(px(width))
+                .h(px(DOT)),
+            )
+            .into_any_element();
+    }
+    let delta = cycle_delta(clock_ms());
     div()
         .flex()
         .flex_none()
@@ -56,6 +71,32 @@ pub(super) fn activity_indicator(
                 .bg(color)
                 .opacity(pulse(delta, phase))
         }))
+        .into_any_element()
+}
+
+/// The indicator's frame rate: its slow pulse looks the same at 12 fps.
+pub(super) const FPS: u32 = 12;
+
+const GAP: f32 = 2.;
+
+fn clock_ms() -> u128 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis()
+}
+
+/// The dots at this moment, left to right in `bounds`.
+fn paint_dots(bounds: Bounds<Pixels>, dots: usize, color: Hsla, window: &mut Window) {
+    let delta = cycle_delta(clock_ms());
+    for index in 0..dots {
+        let phase = 1.0 - index as f32 / 3.;
+        let dot = Bounds::new(
+            point(bounds.left() + px(index as f32 * (DOT + GAP)), bounds.top()),
+            size(px(DOT), px(DOT)),
+        );
+        window.paint_quad(
+            fill(dot, color.opacity(color.a * pulse(delta, phase))).corner_radii(px(DOT / 2.)),
+        );
+    }
 }
 
 #[cfg(test)]

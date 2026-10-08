@@ -20,18 +20,17 @@
 //!
 //! GPUI re-renders every ancestor of a dirty view, and a re-rendered cached
 //! view re-renders its whole subtree, so a slice per chat row would not
-//! help: one animated emoji would still rebuild the list. Animated custom
-//! emoji in chat-list previews are therefore painted by the sidebar's
-//! animation layer instead ([`LayeredFrames`]): the row only reports where
-//! the emoji sits, and a tick redraws the layer while the chat list
+//! help: one animated emoji would still rebuild the list. Each slice
+//! therefore has an animation layer (`anim_layer`), drawn right after it:
+//! animated emoji, stickers, inline videos, spoiler specks and typing dots
+//! only report where they sit, and a tick redraws the layer while the slice
 //! replays its cached frame.
 
+use super::anim_layer::{AnimationLayer, Layer};
 use super::app::QuillApp;
 use gpui_kit::*;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 /// Which part of `QuillApp` a slice draws.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -47,15 +46,18 @@ pub(super) struct AppSlice {
     kind: SliceKind,
 }
 
+/// A slice, its animation layer's content, and the view that draws it.
+struct SliceParts {
+    slice: Entity<AppSlice>,
+    layer: Layer,
+    painter: Entity<AnimationLayer>,
+}
+
 /// `QuillApp`'s slices and the frame-clock bookkeeping that targets them.
 #[derive(Default)]
 pub(super) struct Slices {
-    sidebar: Option<Entity<AppSlice>>,
-    conversation: Option<Entity<AppSlice>>,
-    /// Paints the chat list's animated emoji over its cached frame.
-    layer: Option<Entity<AnimationLayer>>,
-    /// The layer's items, reported by the chat list's last real paint.
-    layer_items: LayerItems,
+    sidebar: Option<SliceParts>,
+    conversation: Option<SliceParts>,
     /// The window's bounded path-image cache (`image_budget`).
     image_cache: Option<Entity<super::image_budget::BoundedImageCache>>,
     /// The slice whose content is being rendered, laid out or painted
@@ -67,48 +69,28 @@ pub(super) struct Slices {
     pub(super) conversation_shown: Cell<bool>,
 }
 
-type LayerItems = Rc<RefCell<Vec<LayerItem>>>;
-
 impl Slices {
     /// The slice whose content is being drawn now, if any.
     pub(super) fn current(&self) -> Option<EntityId> {
         self.scope.get()
     }
 
-    /// Whether content being built now belongs to the chat list, whose
-    /// animated emoji the layer paints.
+    /// Whether content being built now belongs to the chat list.
     pub(super) fn in_sidebar(&self) -> bool {
-        self.scope.get().is_some()
-            && self.scope.get() == self.sidebar.as_ref().map(Entity::entity_id)
+        self.in_slice(self.sidebar.as_ref())
+    }
+
+    /// Whether content being built now belongs to the conversation.
+    pub(super) fn in_conversation(&self) -> bool {
+        self.in_slice(self.conversation.as_ref())
+    }
+
+    fn in_slice(&self, parts: Option<&SliceParts>) -> bool {
+        self.scope.get().is_some() && self.scope.get() == parts.map(|p| p.slice.entity_id())
     }
 
     pub(super) fn image_cache(&self) -> Option<Entity<super::image_budget::BoundedImageCache>> {
         self.image_cache.clone()
-    }
-
-    /// The frame-clock target that redraws the layer only.
-    pub(super) fn layer_target(&self) -> Option<EntityId> {
-        self.layer.as_ref().map(Entity::entity_id)
-    }
-
-    /// An element that reports `clip` to the layer when painted.
-    pub(super) fn layered(&self, clip: LayeredClip) -> LayeredFrames {
-        LayeredFrames {
-            clip,
-            items: self.layer_items.clone(),
-            style: StyleRefinement::default(),
-        }
-    }
-
-    /// The fastest frame rate the layer's items play at (0: none animate).
-    fn layer_fps(&self) -> u32 {
-        self.layer_items
-            .borrow()
-            .iter()
-            .filter(|item| item.clip.animates())
-            .map(|item| item.clip.fps.ceil() as u32)
-            .max()
-            .unwrap_or(0)
     }
 }
 
@@ -117,16 +99,19 @@ impl QuillApp {
     /// them all.
     pub(super) fn init_slices(&mut self, cx: &mut Context<Self>) {
         let app = cx.entity().downgrade();
-        self.slices.sidebar = Some(cx.new(|_| AppSlice {
-            app: app.clone(),
-            kind: SliceKind::Sidebar,
-        }));
-        self.slices.conversation = Some(cx.new(|_| AppSlice {
-            app,
-            kind: SliceKind::Conversation,
-        }));
-        let items = self.slices.layer_items.clone();
-        self.slices.layer = Some(cx.new(|_| AnimationLayer { items }));
+        let mut parts = |kind| {
+            let layer = Layer::default();
+            SliceParts {
+                slice: cx.new(|_| AppSlice {
+                    app: app.clone(),
+                    kind,
+                }),
+                painter: cx.new(|_| AnimationLayer::new(layer.clone(), app.clone())),
+                layer,
+            }
+        };
+        self.slices.sidebar = Some(parts(SliceKind::Sidebar));
+        self.slices.conversation = Some(parts(SliceKind::Conversation));
         let scope = self.slices.scope.clone();
         self.slices.image_cache =
             Some(cx.new(|_| super::image_budget::BoundedImageCache::new(scope)));
@@ -141,7 +126,7 @@ impl QuillApp {
             .sidebar
             .iter()
             .chain(&self.slices.conversation)
-            .map(Entity::entity_id)
+            .map(|parts| parts.slice.entity_id())
             .collect();
         let app: &mut App = cx;
         for id in ids {
@@ -153,8 +138,8 @@ impl QuillApp {
     /// changed); the whole app before the slices exist.
     pub(super) fn notify_conversation(&self, cx: &mut Context<Self>) {
         match &self.slices.conversation {
-            Some(slice) => {
-                let id = slice.entity_id();
+            Some(parts) => {
+                let id = parts.slice.entity_id();
                 let app: &mut App = cx;
                 app.notify(id);
             }
@@ -162,41 +147,67 @@ impl QuillApp {
         }
     }
 
-    /// Keep the layer's emoji playing while the chat list replays.
-    pub(super) fn tick_animation_layer(&self, cx: &mut Context<Self>) {
-        let fps = self.slices.layer_fps();
-        if fps > 0 && self.window_active.get() {
-            self.request_animation_tick_for(self.slices.layer_target(), fps.min(30), cx);
+    /// Keep a layer's content playing: a tick redraws the layer while its
+    /// slice replays, or the slice itself for content something covers
+    /// (drawn inline). The layer (`painter`) calls this after it painted.
+    pub(super) fn tick_animation_layer(&self, painter: EntityId, cx: &mut Context<Self>) {
+        let Some(parts) = [
+            self.slices.sidebar.as_ref(),
+            self.slices.conversation.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|parts| parts.painter.entity_id() == painter) else {
+            return;
+        };
+        let (layer, inline) = parts.layer.demand();
+        let slice = parts.slice.entity_id();
+        if layer > 0 {
+            self.request_animation_tick_for(Some(painter), layer.min(60), cx);
+        }
+        if inline > 0 {
+            self.request_animation_tick_for(Some(slice), inline.min(60), cx);
         }
     }
 
     /// The chat list, as a cached slice filling a `sidebar_width` column,
-    /// with the layer painting its animated emoji just above it.
+    /// with its layer painting the animated content just above it.
     pub(super) fn sidebar_slot(&self) -> AnyElement {
         let column = div().relative().w(self.sidebar_width).flex_none().h_full();
-        match (self.slices.sidebar.clone(), self.slices.layer.clone()) {
-            (Some(slice), Some(layer)) => {
-                super::image_budget::slice_shown(slice.entity_id());
+        match &self.slices.sidebar {
+            Some(parts) => {
+                super::image_budget::slice_shown(parts.slice.entity_id());
                 column
-                    .child(slice.cached(full()))
-                    .child(layer)
+                    .child(parts.slice.clone().cached(full()))
+                    .child(parts.painter.clone())
                     .into_any_element()
             }
-            _ => column.into_any_element(),
+            None => column.into_any_element(),
         }
     }
 
-    /// The conversation, as a cached slice filling the remaining width.
+    /// The conversation, as a cached slice filling the remaining width,
+    /// with its layer painting the history's animations just above it.
     pub(super) fn conversation_slot(&self) -> AnyElement {
         self.slices.conversation_shown.set(true);
-        let slot = div().flex().flex_1().min_w_0().min_h_0();
-        match self.slices.conversation.clone() {
-            Some(slice) => {
-                super::image_budget::slice_shown(slice.entity_id());
-                slot.child(slice.cached(full())).into_any_element()
+        let slot = div().relative().flex().flex_1().min_w_0().min_h_0();
+        match &self.slices.conversation {
+            Some(parts) => {
+                super::image_budget::slice_shown(parts.slice.entity_id());
+                slot.child(parts.slice.clone().cached(full()))
+                    .child(parts.painter.clone())
+                    .into_any_element()
             }
             None => slot.into_any_element(),
         }
+    }
+
+    fn slice_layer(&self, kind: SliceKind) -> Option<Layer> {
+        match kind {
+            SliceKind::Sidebar => self.slices.sidebar.as_ref(),
+            SliceKind::Conversation => self.slices.conversation.as_ref(),
+        }
+        .map(|parts| parts.layer.clone())
     }
 
     fn render_slice(&mut self, kind: SliceKind, cx: &mut Context<Self>) -> AnyElement {
@@ -236,11 +247,11 @@ impl Render for AppSlice {
         super::image_budget::slice_rendered(id);
         app.update(cx, |app, cx| {
             let scope = app.slices.scope.clone();
+            let layer = app.slice_layer(kind);
             let outer = scope.replace(Some(id));
-            let child = app.render_slice(kind, cx);
+            let child =
+                super::anim_layer::with_layer(layer.as_ref(), || app.render_slice(kind, cx));
             scope.set(outer);
-            // The chat list's real paint reports the layer's items afresh.
-            let layer = (kind == SliceKind::Sidebar).then(|| app.slices.layer_items.clone());
             SliceScope {
                 id,
                 scope,
@@ -254,12 +265,21 @@ impl Render for AppSlice {
 
 /// Marks a slice's subtree while it is laid out and painted, so animated
 /// content built lazily there (virtual list rows) asks the frame clock on
-/// behalf of the right slice.
+/// behalf of the right slice, and reports to the slice's layer.
 struct SliceScope {
     id: EntityId,
     scope: Rc<Cell<Option<EntityId>>>,
-    layer: Option<LayerItems>,
+    layer: Option<Layer>,
     child: AnyElement,
+}
+
+impl SliceScope {
+    fn enter<R>(&self, f: impl FnOnce() -> R) -> R {
+        let outer = self.scope.replace(Some(self.id));
+        let result = super::anim_layer::with_layer(self.layer.as_ref(), f);
+        self.scope.set(outer);
+        result
+    }
 }
 
 impl IntoElement for SliceScope {
@@ -289,9 +309,9 @@ impl Element for SliceScope {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let outer = self.scope.replace(Some(self.id));
-        let layout_id = self.child.request_layout(window, cx);
-        self.scope.set(outer);
+        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
+        let layout_id = self.enter(|| child.request_layout(window, cx));
+        self.child = child;
         (layout_id, ())
     }
 
@@ -304,203 +324,13 @@ impl Element for SliceScope {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let outer = self.scope.replace(Some(self.id));
-        self.child.prepaint(window, cx);
-        self.scope.set(outer);
-    }
-
-    fn paint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
-        _: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
+        // The slice really draws: its layer gets this frame's content.
         if let Some(layer) = &self.layer {
-            layer.borrow_mut().clear();
+            layer.begin_frame();
         }
-        let outer = self.scope.replace(Some(self.id));
-        self.child.paint(window, cx);
-        self.scope.set(outer);
-    }
-}
-
-/// A decoded animation and when it started, so the frame to show can be
-/// picked at paint time.
-#[derive(Clone)]
-pub(super) struct LayeredClip {
-    pub(super) frames: Arc<[Arc<RenderImage>]>,
-    pub(super) fps: f64,
-    pub(super) started: Instant,
-    pub(super) duration: Duration,
-    pub(super) looping: bool,
-}
-
-impl LayeredClip {
-    fn animates(&self) -> bool {
-        self.frames.len() > 1 && (self.looping || self.started.elapsed() < self.duration)
-    }
-
-    fn frame_now(&self) -> Option<&Arc<RenderImage>> {
-        let count = self.frames.len();
-        let elapsed = self.started.elapsed();
-        let index = if !self.looping && elapsed >= self.duration {
-            count.saturating_sub(1)
-        } else {
-            (elapsed.as_secs_f64() * self.fps) as usize % count.max(1)
-        };
-        self.frames.get(index)
-    }
-}
-
-/// Where a chat-list emoji was painted, for the layer to draw into.
-struct LayerItem {
-    clip: LayeredClip,
-    bounds: Bounds<Pixels>,
-    mask: ContentMask<Pixels>,
-}
-
-/// An animated custom emoji in the chat list: it takes its place in the
-/// layout and reports its bounds; [`AnimationLayer`] paints the frames.
-#[derive(Clone)]
-pub(super) struct LayeredFrames {
-    clip: LayeredClip,
-    items: LayerItems,
-    style: StyleRefinement,
-}
-
-impl Styled for LayeredFrames {
-    fn style(&mut self) -> &mut StyleRefinement {
-        &mut self.style
-    }
-}
-
-impl IntoElement for LayeredFrames {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for LayeredFrames {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.refine(&self.style);
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
-        _: &mut Window,
-        _: &mut App,
-    ) -> Self::PrepaintState {
-    }
-
-    fn paint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
-        _: &mut Self::PrepaintState,
-        window: &mut Window,
-        _: &mut App,
-    ) {
-        self.items.borrow_mut().push(LayerItem {
-            clip: self.clip.clone(),
-            bounds,
-            mask: window.content_mask(),
-        });
-    }
-}
-
-/// Paints the chat list's animated emoji at the bounds its last real paint
-/// reported, choosing each frame by the time of this paint. Rendered right
-/// after the chat list, so everything painted later (menus, dialogs, drag
-/// previews) still covers it.
-pub(super) struct AnimationLayer {
-    items: LayerItems,
-}
-
-impl Render for AnimationLayer {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        LayerPainter {
-            items: self.items.clone(),
-        }
-    }
-}
-
-struct LayerPainter {
-    items: LayerItems,
-}
-
-impl IntoElement for LayerPainter {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for LayerPainter {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        // Out of the flow: it paints at the bounds the chat list reported.
-        let mut style = Style::default();
-        style.refine(&StyleRefinement::default().absolute().size_0());
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
-        _: &mut Window,
-        _: &mut App,
-    ) -> Self::PrepaintState {
+        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
+        self.enter(|| child.prepaint(window, cx));
+        self.child = child;
     }
 
     fn paint(
@@ -511,70 +341,13 @@ impl Element for LayerPainter {
         _: &mut Self::RequestLayoutState,
         _: &mut Self::PrepaintState,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) {
-        for item in self.items.borrow().iter() {
-            let Some(frame) = item.clip.frame_now().cloned() else {
-                continue;
-            };
-            window.with_content_mask(Some(item.mask), |window| {
-                let _ = window.paint_image(
-                    item.bounds,
-                    item.bounds,
-                    Corners::default(),
-                    frame,
-                    0,
-                    false,
-                );
-            });
+        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
+        self.enter(|| child.paint(window, cx));
+        self.child = child;
+        if let Some(layer) = &self.layer {
+            layer.end_frame();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::LayeredClip;
-    use gpui_kit::RenderImage;
-    use std::sync::Arc;
-    use std::time::{Duration, Instant};
-
-    fn clip(looping: bool, elapsed_ms: u64) -> LayeredClip {
-        let frames: Vec<Arc<RenderImage>> = (0..4)
-            .map(|_| {
-                Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-                    image::Frame::new(image::RgbaImage::new(1, 1)),
-                ])))
-            })
-            .collect();
-        LayeredClip {
-            frames: frames.into(),
-            fps: 10.,
-            started: Instant::now() - Duration::from_millis(elapsed_ms),
-            duration: Duration::from_millis(400),
-            looping,
-        }
-    }
-
-    fn index(clip: &LayeredClip) -> usize {
-        let frame = clip.frame_now().expect("a frame");
-        clip.frames
-            .iter()
-            .position(|f| Arc::ptr_eq(f, frame))
-            .expect("one of the clip's frames")
-    }
-
-    #[test]
-    fn frames_follow_the_clock() {
-        assert_eq!(index(&clip(true, 250)), 2);
-        // Looping wraps around.
-        assert_eq!(index(&clip(true, 650)), 2);
-        assert!(clip(true, 650).animates());
-    }
-
-    #[test]
-    fn a_finished_one_shot_holds_its_last_frame() {
-        let done = clip(false, 900);
-        assert_eq!(index(&done), 3);
-        assert!(!done.animates());
     }
 }

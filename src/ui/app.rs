@@ -335,7 +335,9 @@ pub struct QuillApp {
     /// The open chat's pinned-messages list (bar's list button).
     pub(super) pinned_list_open: bool,
     /// Muted, looping inline players for visible videos and GIFs.
-    pub(super) inline_videos: std::cell::RefCell<super::inline_video::InlineVideos>,
+    /// Shared with the history's animation layer, which draws the clips'
+    /// current frames (`inline_video::LiveSource`).
+    pub(super) inline_videos: std::rc::Rc<std::cell::RefCell<super::inline_video::InlineVideos>>,
     /// Highest frame rate animated content asked for since the last
     /// clock tick (0: nothing animated rendered); see `frame_clock`.
     pub(super) animation_demand: std::cell::Cell<u32>,
