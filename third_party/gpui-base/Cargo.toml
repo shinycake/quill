@@ -144,6 +144,12 @@ package = "gpui-pre-sum-tree"
 [dependencies.tracing]
 version = "0.1.41"
 
+[dependencies.unicode-bidi]
+version = "0.3.18"
+
+[dependencies.unicode-bidi-mirroring]
+version = "0.4.0"
+
 [dependencies.unicode-segmentation]
 version = "1.12.0"
 

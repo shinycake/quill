@@ -1324,11 +1324,11 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     pub(super) fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to(|s, sel| s.previous_boundary(sel.cursor_offset()), cx);
+        self.select_all_cursors_to(|s, sel| s.step_horizontally(sel.cursor_offset(), true), cx);
     }
 
     pub(super) fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_all_cursors_to(|s, sel| s.next_boundary(sel.cursor_offset()), cx);
+        self.select_all_cursors_to(|s, sel| s.step_horizontally(sel.cursor_offset(), false), cx);
     }
 
     pub(super) fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -1437,7 +1437,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         self.undo_manager.break_transaction_coalescing();
         self.select_all_cursors_to(
-            |s, sel| s.previous_start_of_word_at(sel.cursor_offset()),
+            |s, sel| s.step_word_horizontally(sel.cursor_offset(), true),
             cx,
         );
     }
@@ -1449,7 +1449,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to(|s, sel| s.next_end_of_word_at(sel.cursor_offset()), cx);
+        self.select_all_cursors_to(|s, sel| s.step_word_horizontally(sel.cursor_offset(), false), cx);
     }
 
     /// Return the start offset of the previous word.
@@ -2566,6 +2566,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         {
             let line = &last_layout.lines[vi];
             let local_offset = offset.saturating_sub(last_layout.visible_line_byte_offsets[vi]);
+            // A right-to-left paragraph rests against the right edge: no margin there.
+            let safety_margin = if line.is_rtl() { px(0.) } else { safety_margin };
             if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
                 let bounds_width = bounds.size.width - last_layout.line_number_width;
                 let col_offset_x = pos.x;
@@ -3626,6 +3628,26 @@ impl<M: InputModeKind> InputBaseState<M> {
             last_bounds.origin + start_pos,
             last_bounds.origin + end_pos + point(px(0.), last_layout.line_height),
         ))
+    }
+
+    /// Return the rendered rectangles of a UTF-8 byte range in the current input contents, in
+    /// window coordinates: one per visual line the range crosses, and several on one line where
+    /// the range crosses a direction change in bidirectional text (a logical range is not one
+    /// visual interval there). Empty when the range is not currently laid out or visible.
+    pub fn range_to_rects(&self, range: &Range<usize>) -> Vec<Bounds<Pixels>> {
+        let (Some(last_layout), Some(last_bounds)) =
+            (self.last_layout.as_ref(), self.last_bounds.as_ref())
+        else {
+            return Vec::new();
+        };
+        let Some(corners) = TextElement::<M>::layout_range_corners(range, last_layout) else {
+            return Vec::new();
+        };
+        let origin = last_bounds.origin + point(last_layout.line_number_width, px(0.));
+        corners
+            .into_iter()
+            .map(|c| Bounds::from_corners(origin + c.top_left, origin + c.bottom_right))
+            .collect()
     }
 
     /// Replace text in range in silent.

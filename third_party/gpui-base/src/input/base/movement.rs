@@ -34,6 +34,76 @@ impl<M: InputModeKind> InputBaseState<M> {
         Some((pos.x, point.column))
     }
 
+    /// The laid-out paragraph `offset` is in, with the byte offset of its start.
+    fn laid_out_paragraph(&self, offset: usize) -> Option<(&crate::input::display_map::LineLayout, usize)> {
+        let last_layout = self.last_layout.as_ref()?;
+        let row = self.text.offset_to_point(offset).row;
+        Some((last_layout.line(row)?, self.text.line_start_offset(row)))
+    }
+
+    /// Whether the paragraph at `offset` has a right-to-left base direction, which swaps what
+    /// the arrow keys mean: Left moves visually left, so logically forward.
+    pub(super) fn is_rtl_paragraph_at(&self, offset: usize) -> bool {
+        self.laid_out_paragraph(offset)
+            .is_some_and(|(line, _)| line.is_rtl())
+    }
+
+    /// One arrow-key step from `offset`, `left` or right of it on screen.
+    ///
+    /// Like Qt's visual cursor navigation (Telegram Desktop's input field), a caret in a
+    /// paragraph that holds right-to-left text follows the glyphs: it moves to the caret
+    /// stop next to it on screen, whatever the logical order there. At the visual edge of a
+    /// row it stays put, except at the logical end of the paragraph where it crosses into the
+    /// neighbouring paragraph the way the text flows. Plain left-to-right paragraphs step
+    /// logically, as always.
+    pub(super) fn step_horizontally(&self, offset: usize, left: bool) -> usize {
+        let logical = |forward: bool| {
+            if forward {
+                self.next_boundary(offset)
+            } else {
+                self.previous_boundary(offset)
+            }
+        };
+        let Some((line, line_start)) = self.laid_out_paragraph(offset) else {
+            return logical(!left);
+        };
+        if !line.has_bidi() {
+            return logical(!left);
+        }
+        let column = offset - line_start;
+        if let Some(column) = line.visual_step(column, left) {
+            return line_start + column;
+        }
+        // At the visual edge of the row: cross a paragraph boundary only from the logical
+        // end the arrow points at.
+        let forward = left == line.is_rtl();
+        let at_edge = if forward {
+            column == line.len()
+        } else {
+            column == 0
+        };
+        if at_edge { logical(forward) } else { offset }
+    }
+
+    /// Where a collapsing Left (`left`) or Right press lands for a non-empty selection.
+    pub(super) fn collapse_selection_target(&self, sel: &CursorSelection, left: bool) -> usize {
+        if left != self.is_rtl_paragraph_at(sel.cursor_offset()) {
+            sel.start
+        } else {
+            sel.end
+        }
+    }
+
+    /// The word step for Ctrl/Alt+Left (`left`) or Right: a right-to-left paragraph reads the
+    /// other way, so the word to the left is the next one logically.
+    pub(super) fn step_word_horizontally(&self, offset: usize, left: bool) -> usize {
+        if left != self.is_rtl_paragraph_at(offset) {
+            self.previous_start_of_word_at(offset)
+        } else {
+            self.next_end_of_word_at(offset)
+        }
+    }
+
     /// The line-end affinity that applies to `sel`. Only the active cursor
     /// carries one; every other cursor sits at the start of its row.
     pub(super) fn line_end_affinity_for(&self, sel: &CursorSelection) -> bool {
@@ -296,7 +366,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         // palette) can act on it. This is harmless when nothing is bound there.
         // With multiple cursors the others can still move, so only the
         // single-cursor case propagates.
-        if self.selections.is_single() && self.active_selection().is_empty() && self.cursor() == 0 {
+        // "Nowhere to move" is judged on screen: at the right edge of a right-to-left
+        // paragraph the caret sits at offset 0 and Left still has somewhere to go.
+        if self.selections.is_single()
+            && self.active_selection().is_empty()
+            && self.step_horizontally(self.cursor(), true) == self.cursor()
+        {
             cx.propagate();
             return;
         }
@@ -304,9 +379,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.move_all_cursors(
             |s, sel| {
                 let offset = if sel.is_empty() {
-                    s.previous_boundary(sel.cursor_offset())
+                    s.step_horizontally(sel.cursor_offset(), true)
                 } else {
-                    sel.start
+                    s.collapse_selection_target(sel, true)
                 };
                 (offset, s.preferred_column_for(offset), false)
             },
@@ -321,7 +396,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         // move, so let the keystroke bubble to an ancestor.
         if self.selections.is_single()
             && self.active_selection().is_empty()
-            && self.cursor() == self.text.len()
+            && self.step_horizontally(self.cursor(), false) == self.cursor()
         {
             cx.propagate();
             return;
@@ -330,9 +405,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.move_all_cursors(
             |s, sel| {
                 let offset = if sel.is_empty() {
-                    s.next_boundary(sel.cursor_offset())
+                    s.step_horizontally(sel.cursor_offset(), false)
                 } else {
-                    sel.end
+                    s.collapse_selection_target(sel, false)
                 };
                 (offset, s.preferred_column_for(offset), false)
             },
@@ -435,7 +510,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         self.move_all_cursors(
             |s, sel| {
-                let offset = s.previous_start_of_word_at(sel.cursor_offset());
+                let offset = s.step_word_horizontally(sel.cursor_offset(), true);
                 (offset, s.preferred_column_for(offset), false)
             },
             None,
@@ -452,7 +527,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         self.move_all_cursors(
             |s, sel| {
-                let offset = s.next_end_of_word_at(sel.cursor_offset());
+                let offset = s.step_word_horizontally(sel.cursor_offset(), false);
                 (offset, s.preferred_column_for(offset), false)
             },
             None,
