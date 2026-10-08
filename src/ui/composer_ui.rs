@@ -420,12 +420,21 @@ impl QuillApp {
             quill::composer::ComposerEditKind::Text => "Editing message",
             quill::composer::ComposerEditKind::Caption => "Editing caption",
         };
-        composer_context_bar(
+        // An edited photo or video shows its small preview, as tdesktop's
+        // field header does.
+        let thumb = self.bar_thumbnail(edit.chat_id, edit.message_id, cx);
+        composer_context_bar_rich(
             "composer-edit-header",
             gpui_kit::assets::IconName::Pencil,
             accent().into(),
             kind,
-            preview,
+            div()
+                .text_sm()
+                .truncate()
+                .text_color(cx.theme().muted_foreground)
+                .child(preview)
+                .into_any_element(),
+            thumb,
             None,
             Button::new("cancel-edit")
                 .icon(gpui_kit::assets::IconName::X)
@@ -860,6 +869,7 @@ impl QuillApp {
             accent().into(),
             title,
             preview,
+            self.bar_thumbnail(reply.chat_id, reply.message_id, cx),
             None,
             Button::new("cancel-reply")
                 .icon(gpui_kit::assets::IconName::X)
@@ -901,13 +911,16 @@ fn composer_context_bar(
             .text_color(cx.theme().muted_foreground)
             .child(preview)
             .into_any_element(),
+        None,
         trailing,
         close,
         cx,
     )
 }
 
-/// [`composer_context_bar`] with a rendered preview (custom emoji, quotes).
+/// [`composer_context_bar`] with a rendered preview (custom emoji, quotes)
+/// and, for replied-to or edited media, a small rounded thumbnail
+/// (`st::historyReplyPreview`) ahead of the text.
 #[allow(clippy::too_many_arguments)]
 fn composer_context_bar_rich(
     id: &'static str,
@@ -915,6 +928,7 @@ fn composer_context_bar_rich(
     color: Hsla,
     title: impl Into<SharedString>,
     preview: AnyElement,
+    thumb: Option<AnyElement>,
     trailing: Option<AnyElement>,
     close: Button,
     cx: &App,
@@ -930,24 +944,34 @@ fn composer_context_bar_rich(
         .child(
             div()
                 .flex()
-                .flex_col()
+                .items_center()
+                // `st::msgReplyBarSkip`.
+                .gap(px(10.))
                 .flex_1()
                 .min_w_0()
                 .pl_2()
                 .border_l_2()
                 .border_color(color)
+                .children(thumb)
                 .child(
                     div()
-                        .text_sm()
-                        .font_semibold()
-                        .text_color(color)
-                        .child(title.into()),
-                )
-                .child(
-                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
                         .min_w_0()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(preview),
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .text_color(color)
+                                .child(title.into()),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(preview),
+                        ),
                 ),
         )
         .when_some(trailing, |this, trailing| this.child(trailing))

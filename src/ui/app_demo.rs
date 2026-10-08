@@ -191,6 +191,30 @@ pub(super) fn demo_seed_for(
             "screenshot demo — forward message(s) (injected forwardMessages)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadySelectMode => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — message selection mode (injected)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyReplyMedia => (
+            Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — reply bar with a media thumbnail (injected)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyEditMedia => (
+            Some(seed_ready_send_media_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — edit bar with a media thumbnail (injected)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyReveal => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — new message reveal (injected)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyReactions => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1600,6 +1624,7 @@ impl QuillApp {
             window_active: std::cell::Cell::new(true),
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
+            motion: Default::default(),
             composer_link_dialog: None,
             send_morph: Default::default(),
             stream_reveal: Default::default(),
