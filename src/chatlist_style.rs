@@ -58,6 +58,8 @@ impl ChatListRowStyle {
 /// caption; the preview keeps its first 80 chars).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChatPreviewStyle {
+    /// A service message ("X pinned..."): the text already names the actor, so the row shows no sender prefix.
+    pub service: bool,
     pub icon: Option<&'static str>,
     pub entities: Vec<TextEntity>,
 }
@@ -97,6 +99,12 @@ pub fn preview_style(content: &MessageContent, preview: &str) -> ChatPreviewStyl
         _ => Vec::new(),
     };
     ChatPreviewStyle {
+        service: matches!(
+            content,
+            MessageContent::Action(_)
+                | MessageContent::ChatTtlChanged { .. }
+                | MessageContent::ScreenshotTaken
+        ),
         icon: preview_media_icon(content),
         entities,
     }

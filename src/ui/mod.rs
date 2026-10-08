@@ -144,6 +144,8 @@ mod secret_chats;
 mod security;
 mod security_recovery;
 mod send_button_ui;
+mod service_demo;
+mod service_row;
 mod settings_ui;
 mod shared_media;
 mod shell;

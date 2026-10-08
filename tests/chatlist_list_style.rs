@@ -180,6 +180,7 @@ fn preview_style_for_text_keeps_icon_empty_and_entities() {
     assert_eq!(
         style,
         ChatPreviewStyle {
+            service: false,
             icon: None,
             entities: vec![TextEntity {
                 utf8_start: 6,
@@ -190,7 +191,13 @@ fn preview_style_for_text_keeps_icon_empty_and_entities() {
     );
     // Non-text content carries no entities.
     let style = preview_style(&MessageContent::ScreenshotTaken, "Took a screenshot");
-    assert_eq!(style, ChatPreviewStyle::default());
+    assert_eq!(
+        style,
+        ChatPreviewStyle {
+            service: true,
+            ..ChatPreviewStyle::default()
+        }
+    );
 }
 
 #[test]
