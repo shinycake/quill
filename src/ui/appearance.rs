@@ -327,15 +327,24 @@ impl QuillApp {
                 body = body.child(this.appearance_language_section(cx));
                 body = body.child(this.general_autostart_section(cx));
                 body = body.child(this.update_settings_section(cx));
-                body = body.child(this.appearance_section(
-                    cx, "Start in tray", "Open Quill from its tray menu when needed.",
-                    Switch::new("general-start-in-tray").checked(this.appearance.start_in_tray)
-                        .accessibility_label("Start Quill in the system tray")
-                        .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.start_in_tray = on)))
-                        .into_any_element(),
-                ));
+                // Tray-dependent switches only exist while a tray icon does:
+                // a hidden window with no tray to reopen it from would
+                // strand the user (Linux without a StatusNotifier host).
+                let tray = quill::tray::tray_setting_switches(
+                    quill::tray::tray_available(),
+                    cfg!(target_os = "macos"),
+                );
+                if tray.start_in_tray {
+                    body = body.child(this.appearance_section(
+                        cx, "Start in tray", "Open Quill from its tray menu when needed.",
+                        Switch::new("general-start-in-tray").checked(this.appearance.start_in_tray)
+                            .accessibility_label("Start Quill in the system tray")
+                            .on_click(cx.listener(|this, &on, _, cx| this.set_appearance(cx, |a| a.start_in_tray = on)))
+                            .into_any_element(),
+                    ));
+                }
                 // Parity slice (platform-custom-keybindings).
-                if cfg!(target_os = "macos") {
+                if tray.minimize_to_tray {
                     body = body.child(this.appearance_section(
                         cx, "Minimize to tray", "Use the tray menu to reopen Quill.",
                         Switch::new("general-minimize-to-tray").checked(this.appearance.minimize_to_tray)
@@ -835,7 +844,7 @@ impl QuillApp {
             return self.appearance_section(
                 cx,
                 "Launch at login",
-                "Autostart is not supported on this platform yet.",
+                "Autostart is not available on this platform.",
                 div().into_any_element(),
             );
         }

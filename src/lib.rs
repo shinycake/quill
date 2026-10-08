@@ -65,6 +65,8 @@ pub mod suggest;
 pub mod telegram;
 pub mod text;
 pub mod tray;
+#[cfg(all(target_os = "linux", feature = "ui"))]
+pub mod tray_sni;
 pub mod update_install;
 pub mod updater;
 pub mod video;
@@ -73,6 +75,8 @@ pub mod voice;
 pub mod voice_input;
 #[cfg(feature = "ui")]
 pub mod voice_opus;
+#[cfg(windows)]
+pub mod winreg;
 
 use sha2::{Digest, Sha256};
 use std::fs;
