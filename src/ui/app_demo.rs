@@ -1577,6 +1577,7 @@ impl QuillApp {
             archive_menu: None,
             pin_reorder: None,
             pin_reorder_archived: false,
+            pin_drag_anchor: None,
             chat_preview: None,
             preview_press: None,
             selected_chats: HashSet::new(),

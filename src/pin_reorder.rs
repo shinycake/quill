@@ -18,6 +18,9 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::time::{Duration, Instant};
 
+/// `kStartReorderThreshold`: vertical px before a press starts a reorder.
+pub const START_THRESHOLD: f32 = 30.0;
+
 /// `st::stickersRowDuration`.
 pub const SLIDE: Duration = Duration::from_millis(200);
 

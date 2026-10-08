@@ -65,35 +65,33 @@ fn archive_avatar() -> AnyElement {
 fn names_line(summary: &ArchiveRowSummary, cx: &App) -> AnyElement {
     let muted = cx.theme().muted_foreground;
     let strong = cx.theme().foreground;
-    let mut line = div()
-        .flex()
-        .items_center()
+    // One text run so an overlong list ends in an ellipsis; unread names
+    // are highlighted ranges.
+    let text = summary.text();
+    let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
+    let mut at = 0;
+    for name in &summary.names {
+        let end = at + name.title.len();
+        if name.unread {
+            highlights.push((
+                at..end,
+                HighlightStyle {
+                    color: Some(strong),
+                    font_weight: Some(FontWeight::SEMIBOLD),
+                    ..Default::default()
+                },
+            ));
+        }
+        at = end + 2; // ", "
+    }
+    div()
         .min_w_0()
         .flex_1()
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .text_xs();
-    for (index, name) in summary.names.iter().enumerate() {
-        if index > 0 {
-            line = line.child(div().flex_none().text_color(muted).child(", "));
-        }
-        line = line.child(
-            div()
-                .flex_none()
-                .when(name.unread, |this| this.font_semibold().text_color(strong))
-                .when(!name.unread, |this| this.text_color(muted))
-                .child(name.title.clone()),
-        );
-    }
-    if let Some(more) = summary.more_text() {
-        line = line.child(
-            div()
-                .flex_none()
-                .text_color(muted)
-                .child(format!(" {more}")),
-        );
-    }
-    line.into_any_element()
+        .truncate()
+        .text_xs()
+        .text_color(muted)
+        .child(StyledText::new(text).with_highlights(highlights))
+        .into_any_element()
 }
 
 impl QuillApp {

@@ -830,12 +830,15 @@ impl QuillApp {
         }
         let mut row = div()
             .id("story-tray")
+            // tdesktop's strip: one row that scrolls sideways
+            // (`dialogs_stories_list.cpp`), items never wrap.
             .flex()
             .flex_row()
-            .flex_wrap()
+            .flex_none()
+            .overflow_x_scroll()
             .items_start()
-            .gap_2()
-            .px_3()
+            .gap_1()
+            .px_2()
             .py_2()
             .child(
                 div()
@@ -848,7 +851,8 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .w(px(60.))
+                    .flex_none()
+                    .w(px(64.))
                     .gap_1()
                     .child(
                         div()
@@ -869,13 +873,18 @@ impl QuillApp {
                                     .child("+"),
                             ),
                     )
-                    .child(div().text_xs().child("New story"))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .max_w(px(60.))
+                            .truncate()
+                            .child("New story"),
+                    )
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_story_composer(window, cx);
                     })),
             );
         for entry in entries {
-            let unread = entry.has_unread();
             let chat_id = entry.chat_id;
             let title = self
                 .session()
@@ -905,21 +914,25 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .w(px(60.))
+                    .flex_none()
+                    .w(px(64.))
                     .gap_1()
+                    .child(match quill::story_ring::StoryRing::from_active(&entry) {
+                        Some(ring) => super::story_ring::with_story_ring(
+                            |size| chat_avatar(&title, photo.as_deref(), size).into_any_element(),
+                            ring,
+                            46.,
+                            cx.theme().muted_foreground,
+                        ),
+                        None => chat_avatar(&title, photo.as_deref(), 46.).into_any_element(),
+                    })
                     .child(
                         div()
-                            .rounded_full()
-                            .p(px(2.))
-                            .border_2()
-                            .border_color(if unread {
-                                cx.theme().accent
-                            } else {
-                                cx.theme().border
-                            })
-                            .child(chat_avatar(&title, photo.as_deref(), 40.0)),
+                            .text_size(px(11.))
+                            .max_w(px(60.))
+                            .truncate()
+                            .child(title.clone()),
                     )
-                    .child(div().text_xs().max_w(px(60.)).child(title))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_story_viewer(ChatId(chat_id), latest_story, cx);
                     })),
@@ -1080,6 +1093,18 @@ impl QuillApp {
         {
             reorder.drag_to(y, now);
         } else {
+            // tdesktop `kStartReorderThreshold`: the pointer must travel
+            // 30px vertically before the press becomes a reorder.
+            let anchor = match self.pin_drag_anchor {
+                Some((id, anchor)) if id == drag.chat_id.0 => anchor,
+                _ => {
+                    self.pin_drag_anchor = Some((drag.chat_id.0, y));
+                    return;
+                }
+            };
+            if (y - anchor).abs() < quill::pin_reorder::START_THRESHOLD {
+                return;
+            }
             let Some(session) = self.session() else {
                 return;
             };
@@ -1110,6 +1135,7 @@ impl QuillApp {
     /// `savePinnedOrder`): the dragged row slides into its slot and the
     /// full order goes out as `setPinnedChats`.
     pub(super) fn finish_pin_drag(&mut self, cx: &mut Context<Self>) {
+        self.pin_drag_anchor = None;
         let archived = self.pin_reorder_archived;
         let Some(reorder) = self.pin_reorder.as_mut() else {
             return;
