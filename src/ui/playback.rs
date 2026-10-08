@@ -3,7 +3,7 @@ use super::*;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-/// Which kind of track the shared ffplay child is playing (Phase 4.6).
+/// Which kind of track the shared in-process player is playing (Phase 4.6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PlaybackKind {
     Voice,

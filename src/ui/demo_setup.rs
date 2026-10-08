@@ -787,7 +787,7 @@ impl QuillApp {
                 apply_ready_voice(session, &self.demo_sink, &self.demo_seq);
                 apply_ready_audio(session, &self.demo_sink, &self.demo_seq);
             }
-            // Fake an in-progress playback without spawning ffplay: voice
+            // Fake an in-progress playback without starting audio: voice
             // note 90 (12 s) playing from 5.0 s — the tick advances it —
             // and the music track 801 (214 s) paused with a remembered
             // 1:27 position, so both rows show seek bars.
@@ -1689,8 +1689,8 @@ impl QuillApp {
             // playback, not faked: the clock keeps ticking and the 125 ms
             // refresh shows the frame for the current clock position.
             // `viewer_demo_sync_frames` suppresses the async extraction that
-            // `open_media_viewer` would otherwise start. The ffplay
-            // subprocess is skipped (demo), like the audio slice.
+            // `open_media_viewer` would otherwise start. The audio
+            // engine is skipped (demo), like the audio slice.
             self.viewer_demo_sync_frames = true;
             self.open_media_viewer(ChatId(11), MessageId(204), cx);
             if let Some(item) = self.media_viewer.current().cloned()

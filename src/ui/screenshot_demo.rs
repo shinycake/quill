@@ -285,7 +285,7 @@ pub enum ScreenshotDemo {
     ReadyMediaViewer,
     /// Video-playback demo (injected, no live Telegram): the ReadyMedia
     /// seed plus a downloaded video (message 204); the viewer opens on it
-    /// with playback faked mid-track (no ffplay subprocess — the tick
+    /// with playback faked mid-track (no audio — the tick
     /// advances the elapsed label, like the seek-bars demo). The clip's
     /// 12 s duration is fixture data for the screenshot.
     /// (Parity slice 5.)

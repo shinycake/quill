@@ -13,7 +13,6 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::connect::SoundResolution;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
 use quill::notify::NotificationSoundKind;
@@ -34,7 +33,6 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAX_OS_NOTIFICATION_THREADS: usize = 8;
 
 /// Parity slice: cap for concurrent `quill-sound` player threads.
-pub(super) const MAX_OS_NOTIFICATION_SOUND_THREADS: usize = 2;
 
 /// Parity slice: which settings object a sound-picker choice applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1082,28 +1080,16 @@ impl QuillApp {
     /// the MP3 when local, otherwise download it and play on completion
     /// (via `Session::pending_sound_plays`).
     pub(super) fn preview_saved_sound(&mut self, sound_id: i64) {
-        if let Some(live) = self.live.as_mut() {
-            match live
-                .driver
-                .resolve_notification_sound(NotificationSoundKind::Custom(sound_id))
-            {
-                SoundResolution::DefaultTone => {
-                    if let Some(command) = quill::notify::default_tone_command() {
-                        self.spawn_sound_command(command);
-                    }
-                }
-                SoundResolution::FilePath(path) => {
-                    if let Some(command) =
-                        quill::notify::file_sound_command(&path.to_string_lossy())
-                    {
-                        self.spawn_sound_command(command);
-                    }
-                }
-                SoundResolution::Pending => {}
-            }
-        } else if let Some(command) = quill::notify::default_tone_command() {
+        let sound = match self.live.as_mut() {
+            Some(live) => super::audio::notification_sound(
+                live.driver
+                    .resolve_notification_sound(NotificationSoundKind::Custom(sound_id)),
+            ),
             // Screenshot demo: no TDLib files exist — the tone stands in.
-            self.spawn_sound_command(command);
+            None => Some(super::audio::NotificationSound::DefaultTone),
+        };
+        if let Some(sound) = sound {
+            self.notification_sounds.play(sound);
         }
     }
 

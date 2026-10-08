@@ -12,7 +12,6 @@ use quill::playback::PlaybackClock;
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use quill::voice::{self, format_voice_duration};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -68,10 +67,7 @@ pub(super) fn apply_ready_voice(session: &mut Session, sink: &Arc<MemorySink>, s
 
 impl QuillApp {
     pub(super) fn kill_shared_player(&mut self) {
-        if let Some(mut child) = self.voice_player.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        self.audio.stop();
     }
 
     pub(super) fn stop_voice_playback(&mut self) {
@@ -129,7 +125,7 @@ impl QuillApp {
     /// Mark the given row as the active track: sets `playing_voice` /
     /// `playing_audio`, starts the playback clock at `offset_secs`, builds
     /// the seek slider entity, and starts the progress tick. Does not spawn
-    /// ffplay — the caller does that (the screenshot demo fakes playback
+    /// the caller starts the sound (the screenshot demo fakes playback
     /// without a subprocess).
     pub(super) fn begin_track_playback(
         &mut self,
@@ -169,60 +165,33 @@ impl QuillApp {
         self.spawn_playback_tick(cx);
     }
 
-    /// Spawn ffplay for `path`, seeking to `offset_secs` first when positive.
-    /// ffplay takes no seek commands on stdin, so seeking restarts the player
-    /// with `-ss` (input seeking — fast on local files; see DECISIONS.md).
-    /// Returns true when the child spawned.
-    pub(super) fn spawn_ffplay(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
-        self.kill_shared_player();
-        let mut command = self.ffplay_command(offset_secs);
-        match command
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+    /// Start the in-process player on `path` at `offset_secs` with the
+    /// current volume and speed. Returns true when it is playing.
+    pub(super) fn start_player(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
+        match self
+            .audio
+            .start(path, offset_secs, self.playback_volume, self.playback_speed)
         {
-            Ok(child) => {
-                self.voice_player = Some(child);
+            Ok(()) => {
                 self.playback_error = None;
                 true
             }
-            // MED1: honest error instead of the old silent failure.
-            Err(_) => {
-                self.playback_error = Some("audio player (ffplay) couldn't start".into());
+            // MED1: honest error instead of a silent failure.
+            Err(err) => {
+                self.playback_error = Some(err.to_string());
                 false
             }
         }
     }
 
-    /// MED1: ffplay command with volume (`-volume`) and speed
-    /// (`-af atempo=` when != 1x) baked in. `atempo` only accepts
-    /// 0.5–2.0 — the TGX speed span, enforced by `PlaybackClock`.
-    pub(super) fn ffplay_command(&self, offset_secs: f64) -> Command {
-        let mut command = quill::media_tools::command("ffplay");
-        command.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
-        if offset_secs > 0.05 {
-            command.arg("-ss").arg(format!("{offset_secs:.1}"));
-        }
-        let volume = (self.playback_volume.clamp(0.0, 1.0) * 100.0).round() as i32;
-        command.arg("-volume").arg(volume.to_string());
-        if (self.playback_speed - 1.0).abs() > 0.01 {
-            command
-                .arg("-af")
-                .arg(format!("atempo={:.2}", self.playback_speed));
-        }
-        command
-    }
-
-    /// Restart the active track's player at `offset_secs` (seek while playing).
+    /// Move the sound to `offset_secs` (seek while playing).
     pub(super) fn restart_player_at(&mut self, offset_secs: f64) {
-        if let Some(path) = self.playback_path.clone() {
-            self.spawn_ffplay(&path, offset_secs);
+        if let Err(err) = self.audio.seek(offset_secs, true) {
+            self.playback_error = Some(err.to_string());
         }
     }
 
-    /// Pause the active track: freeze the clock, kill ffplay, keep the row
+    /// Pause the active track: freeze the clock and the sound, keep the row
     /// active so the seek bar stays interactive and Play resumes from here.
     pub(super) fn pause_active_playback(&mut self) {
         let id = self.active_playback_id();
@@ -232,16 +201,17 @@ impl QuillApp {
                 self.playback_positions.insert(id, clock.elapsed_secs());
             }
         }
-        self.kill_shared_player();
+        self.audio.pause();
     }
 
     /// Resume the active track from the frozen clock position.
     pub(super) fn resume_active_playback(&mut self) {
         let offset = self.playback_clock.as_ref().map(|c| c.elapsed_secs());
-        let path = self.playback_path.clone();
-        match (offset, path) {
-            (Some(offset), Some(path)) => {
-                self.spawn_ffplay(&path, offset);
+        match offset {
+            Some(offset) => {
+                if let Err(err) = self.audio.resume(offset) {
+                    self.playback_error = Some(err.to_string());
+                }
                 if let Some(clock) = self.playback_clock.as_mut() {
                     clock.resume();
                 }
@@ -271,9 +241,9 @@ impl QuillApp {
         }
     }
 
-    /// Apply a finished seek: clamp, move the clock, and restart ffplay at
-    /// the new offset when the track is playing. Seeking while paused just
-    /// moves the frozen position (no player restart).
+    /// Apply a finished seek: clamp, move the clock, and seek the sound.
+    /// Seeking while paused just moves the frozen position; the sound
+    /// catches up on resume.
     pub(super) fn seek_active_to(&mut self, secs: f64, cx: &mut Context<Self>) {
         let Some(clock) = self.playback_clock.as_mut() else {
             return;
@@ -283,6 +253,9 @@ impl QuillApp {
         let was_playing = clock.is_playing();
         if let Some(id) = self.active_playback_id() {
             self.playback_positions.insert(id, offset);
+        }
+        if !was_playing {
+            let _ = self.audio.seek(offset, false);
         }
         if was_playing {
             self.restart_player_at(offset);
@@ -300,7 +273,7 @@ impl QuillApp {
 
     /// 250 ms progress tick while a track is active: re-renders so the seek
     /// bar advances, and auto-stops when the clock reaches the duration
-    /// (ffplay `-autoexit` exits on its own; this clears our state to match).
+    /// (the sound ending ends the track too).
     pub(super) fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
         if self.playback_tick {
             return;
@@ -317,10 +290,18 @@ impl QuillApp {
                         if !active {
                             return false;
                         }
-                        let finished = this
-                            .playback_clock
-                            .as_ref()
-                            .is_some_and(|clock| clock.is_playing() && clock.finished());
+                        // The sound is the authority on where the track
+                        // ends (its real length can differ from TDLib's
+                        // rounded duration); without one (demo) the clock is.
+                        let sound_ended = this.audio.is_loaded() && this.audio.is_ended();
+                        let finished = this.playback_clock.as_ref().is_some_and(|clock| {
+                            clock.is_playing()
+                                && if this.audio.is_loaded() {
+                                    sound_ended
+                                } else {
+                                    clock.finished()
+                                }
+                        });
                         if finished && !this.seek_scrubbing {
                             // Capture the id first: the stops below save the
                             // (now end-of-track) position via clear_playback_state,
@@ -468,11 +449,11 @@ impl QuillApp {
         if !listened {
             self.mark_voice_opened(chat_id, message_id);
         }
-        self.spawn_ffplay(&safe, offset);
-        self.status_note = if self.voice_player.is_some() {
+        let playing = self.start_player(&safe, offset);
+        self.status_note = if playing {
             "playing voice note".into()
         } else {
-            "playing voice note (no audio player)".into()
+            "voice note can't be played".into()
         };
         cx.notify();
     }
@@ -529,11 +510,11 @@ impl QuillApp {
             .unwrap_or(0.0);
         self.begin_track_playback(PlaybackKind::Audio, message_id, duration_secs, offset, cx);
         self.playback_path = Some(safe.clone().into());
-        self.spawn_ffplay(&safe, offset);
-        self.status_note = if self.voice_player.is_some() {
+        let playing = self.start_player(&safe, offset);
+        self.status_note = if playing {
             "playing audio".into()
         } else {
-            "playing audio (no audio player)".into()
+            "audio can't be played".into()
         };
         cx.notify();
     }

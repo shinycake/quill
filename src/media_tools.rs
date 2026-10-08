@@ -1,4 +1,4 @@
-//! Locating the external media tools (`ffmpeg`, `ffprobe`, `ffplay`).
+//! Locating the external media tools (`ffmpeg`, `ffprobe`).
 //!
 //! An app opened from Finder or the Dock inherits launchd's minimal `PATH`
 //! (`/usr/bin:/bin:/usr/sbin:/sbin`), which misses Homebrew and MacPorts,

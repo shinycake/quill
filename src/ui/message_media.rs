@@ -1324,7 +1324,7 @@ pub(super) fn waveform_row(
 
 /// Phase 4.6 seek bar (tdesktop-style): the interactive gpui-component
 /// `Slider` on the active row — click-to-seek and drag, with the UI layer
-/// restarting ffplay at the released offset via `-ss` — and a static
+/// seeking the sound to the released offset — and a static
 /// track + fill on every other audio/voice row.
 pub(super) fn seek_bar_element(row_key: u64, seek: &SeekBarView, color: Hsla) -> AnyElement {
     if let Some(slider) = &seek.slider {
