@@ -2651,6 +2651,15 @@ mod shortcut_tests {
     }
 
     #[test]
+    fn quote_prefixes_a_fully_selected_single_line() {
+        let (text, sel) = super::apply_format_markup("hello", 0..5, &FormatAction::BlockQuote);
+        assert_eq!(text, "> hello");
+        assert_eq!(sel, 0..7);
+        let (text, _) = super::apply_format_markup("hello", 5..5, &FormatAction::BlockQuote);
+        assert_eq!(text, "> hello");
+    }
+
+    #[test]
     fn shortcuts_apply_the_matching_markup() {
         assert_eq!(
             ComposerShortcut::Bold.format_action("x"),

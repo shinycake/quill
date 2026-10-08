@@ -26,12 +26,14 @@ macro_rules! primary {
     };
 }
 
-/// Quote chord. On macOS GPUI reports Shift+. as the key ">" with Shift
-/// already consumed (gpui-pre-macos events.rs `parse_keystroke`), so the
-/// binding is `cmd->`. Other platforms get both spellings, since their
-/// backends may report either `.` + shift or `>`.
+/// Quote chord. On a US layout macOS GPUI reports Shift+. as the key ">"
+/// with Shift already consumed (gpui-pre-macos events.rs
+/// `parse_keystroke`), but the exact event depends on the keyboard layout
+/// (non-ASCII layouts fall back to the Cmd layout), and a live test of the
+/// `cmd->` form alone did nothing; so every platform binds both spellings
+/// (`.` + Shift and `>`).
 #[cfg(target_os = "macos")]
-const QUOTE_CHORDS: &[&str] = &["cmd->"];
+const QUOTE_CHORDS: &[&str] = &["cmd->", "cmd-shift-."];
 #[cfg(not(target_os = "macos"))]
 const QUOTE_CHORDS: &[&str] = &["ctrl-shift-.", "ctrl->"];
 
@@ -866,10 +868,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(
-            defaults.len(),
-            if cfg!(target_os = "macos") { 46 } else { 47 }
-        );
+        assert_eq!(defaults.len(), 47);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
@@ -1219,11 +1218,11 @@ mod tests {
             key: key.into(),
             key_char: None,
         };
-        let forms: Vec<Keystroke> = if cfg!(target_os = "macos") {
-            vec![reported(">", false, true)]
-        } else {
-            vec![reported(".", true, false), reported(">", false, false)]
-        };
+        let platform = cfg!(target_os = "macos");
+        let forms = [
+            reported(">", false, platform),
+            reported(".", true, platform),
+        ];
         for form in forms {
             let (found, _) = keymap().bindings_for_input(&[form.clone()], &stack);
             assert_eq!(
@@ -1290,11 +1289,7 @@ mod tests {
             let action = REBINDABLE_ACTIONS.iter().find(|a| a.id == id).unwrap();
             assert_eq!(
                 action.defaults.len(),
-                if id == "format-blockquote" && !cfg!(target_os = "macos") {
-                    2
-                } else {
-                    1
-                },
+                if id == "format-blockquote" { 2 } else { 1 },
                 "{id}"
             );
             let wanted = if cfg!(target_os = "macos") {
@@ -1304,5 +1299,74 @@ mod tests {
             };
             assert!(action.defaults[0].starts_with(wanted), "{id}");
         }
+    }
+}
+
+/// Headless key delivery through the real GPUI dispatcher (needs the
+/// `demo-capture` feature for gpui-kit's test support).
+#[cfg(all(test, feature = "demo-capture"))]
+mod dispatch_tests {
+    use super::{COMPOSER_CONTEXT, default_bindings};
+    use crate::ui::actions::{FormatBlockQuote, FormatStrikethrough};
+    use gpui_kit::component::Root;
+    use gpui_kit::component::input::{Textarea, TextareaState};
+    use gpui_kit::test::{TestSupportExt, TestWindowExt};
+    use gpui_kit::{
+        AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
+        Styled, TestAppContext, Window, div, px, size,
+    };
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct Host {
+        input: Entity<TextareaState>,
+        seen: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .on_action(cx.listener(|this, _: &FormatStrikethrough, _, _| {
+                    this.seen.borrow_mut().push("strike")
+                }))
+                .on_action(cx.listener(|this, _: &FormatBlockQuote, _, _| {
+                    this.seen.borrow_mut().push("quote")
+                }))
+                .child(
+                    div()
+                        .id("composer")
+                        .test_support()
+                        .w(px(400.))
+                        .key_context(COMPOSER_CONTEXT)
+                        .child(Textarea::new(&self.input)),
+                )
+        }
+    }
+
+    #[gpui_kit::test]
+    fn real_keystrokes_reach_the_format_actions(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(|cx| cx.bind_keys(default_bindings()));
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let handle = cx.open_window(size(px(640.), px(240.)), |window, cx| {
+            let input = cx.new(|cx| TextareaState::new(window, cx));
+            let seen = seen.clone();
+            let view = cx.new(|_| Host { input, seen });
+            Root::new(view, window, cx)
+        });
+        let (strike, quote) = if cfg!(target_os = "macos") {
+            ("cmd-shift-x", "cmd->")
+        } else {
+            ("ctrl-shift-x", "ctrl->")
+        };
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("composer", cx);
+            window.within("composer").press(strike, cx);
+            window.within("composer").press(quote, cx);
+        })
+        .unwrap();
+        assert_eq!(*seen.borrow(), vec!["strike", "quote"]);
     }
 }
