@@ -35,6 +35,94 @@ jobs:
         with:
           config-path: .gitleaks.toml
 
+  # Not a required check: builds the UI plus native libs and assembles the
+  # relocatable Linux package (docs/decisions/codex-linux-package.md).
+  linux-package:
+    name: linux-package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - name: apt dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake gperf git patchelf pkg-config curl unzip file \
+            zlib1g-dev libssl-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libxcb1-dev libx11-xcb-dev libxcb-xkb-dev libfontconfig-dev \
+            libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev libclang-dev
+      - name: restore TDLib build
+        id: tdlib-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: native/prefix
+          key: tdlib-linux-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
+      - name: build TDLib
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        env:
+          TDLIB_BUILD_TARGET: tdjson tdjson_static
+        run: bash scripts/build-tdlib.sh
+      - name: save TDLib build
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native/prefix
+          key: tdlib-linux-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
+      - name: restore rlottie build
+        id: rlottie-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/rlottie/prefix
+          key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
+      - name: build rlottie
+        if: steps.rlottie-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-rlottie.sh
+      - name: save rlottie build
+        if: steps.rlottie-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor/rlottie/prefix
+          key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
+      - name: vendor ntgcalls (checksum pinned)
+        run: bash scripts/vendor-ntgcalls.sh
+      - name: build release ui
+        run: cargo build --release --features ui --locked
+      - name: package
+        run: bash scripts/linux-package.sh
+      - name: check package (ELF dependencies)
+        run: bash scripts/check-bundle-elf.sh dist/linux/quill-linux-x86_64
+      - name: checker negative test (unbundled OpenSSL must fail)
+        run: |
+          cp -a dist/linux/quill-linux-x86_64 "$RUNNER_TEMP/neg"
+          rm "$RUNNER_TEMP/neg/lib/libssl.so.3"
+          if bash scripts/check-bundle-elf.sh "$RUNNER_TEMP/neg"; then echo "checker accepted a package missing libssl" >&2; exit 1; fi
+      - name: run from package (no env vars)
+        run: |
+          env -u LD_LIBRARY_PATH -u QUILL_TDJSON_PATH dist/linux/quill-linux-x86_64/quill --version
+          test "$(dist/linux/quill-linux-x86_64/quill --build-info)" = ui
+          python3 scripts/check-bundle-dlopen.py dist/linux/quill-linux-x86_64
+      - name: smoke the extracted tarball
+        run: |
+          mkdir -p "$RUNNER_TEMP/extract"
+          tar -C "$RUNNER_TEMP/extract" -xzf dist/linux/quill-linux-x86_64-bundle.tar.gz
+          "$RUNNER_TEMP/extract/quill-linux-x86_64/quill" --version
+          bash "$RUNNER_TEMP/extract/quill-linux-x86_64/install.sh" "$RUNNER_TEMP/prefix"
+          "$RUNNER_TEMP/prefix/bin/quill" --version
+          grep -q "^Exec=$RUNNER_TEMP/prefix/opt/quill/quill" "$RUNNER_TEMP/prefix/share/applications/quill.desktop"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-linux-x86_64-bundle
+          path: |
+            dist/linux/quill-linux-x86_64-bundle.tar.gz
+            dist/linux/quill-linux-x86_64-bundle.tar.gz.sha256
+          if-no-files-found: error
+
   # The required macos-ui-build check is dispatched after source review through
   # quill-ui-build.yml. Public PR workflows must never target the personal Mac.
 

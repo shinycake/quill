@@ -334,7 +334,7 @@ impl InlineVideos {
         &mut self,
         _chat_id: i64,
         _message_id: i64,
-        _path: &Path,
+        _path: impl FnOnce() -> Option<PathBuf>,
     ) -> Option<InlineFrame> {
         None
     }

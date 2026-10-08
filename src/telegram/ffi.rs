@@ -57,6 +57,7 @@ fn bundled_candidate() -> Option<PathBuf> {
     ];
     let search_dirs = [
         dir.to_path_buf(),
+        dir.join("lib"),
         dir.join("Frameworks"),
         dir.join("../Frameworks"),
         dir.join("../Resources/tdjson"),
