@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Quill
-Comment=Quill — Telegram desktop client
+Comment=Unofficial Telegram desktop client
 Exec=quill %u
 Icon=quill
 Terminal=false

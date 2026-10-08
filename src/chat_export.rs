@@ -77,7 +77,13 @@ impl ChatExportState {
 /// Project a parsed message into its export form: text or caption plus a
 /// short media label (e.g. "photo", "document: report.pdf").
 pub fn project_message(message: &ParsedMessage) -> ExportedMessage {
-    let (text, media) = export_text(&message.content);
+    // Self-destructing media must disappear (Telegram API terms 1.4), so the
+    // export keeps only a placeholder row, never its caption.
+    let (text, media) = if message.self_destruct.is_some() {
+        (None, Some("self-destructing message".into()))
+    } else {
+        export_text(&message.content)
+    };
     ExportedMessage {
         id: message.id.0,
         date: message.date,
@@ -239,6 +245,19 @@ mod tests {
         assert_eq!(e.text, None);
         // Non-text, non-media content degrades to the generic label.
         assert_eq!(e.media, Some("message".into()));
+    }
+
+    #[test]
+    fn projection_drops_self_destructing_content() {
+        let mut m = text_message(5, "secret caption");
+        m.self_destruct = Some(crate::telegram::envelope::MessageSelfDestruct {
+            kind: crate::telegram::envelope::SelfDestructKind::Immediately,
+            expires_in_ms: 0,
+            fetched_at_ms: 0,
+        });
+        let e = project_message(&m);
+        assert_eq!(e.text, None);
+        assert_eq!(e.media, Some("self-destructing message".into()));
     }
 
     #[test]

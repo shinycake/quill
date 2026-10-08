@@ -436,12 +436,17 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .map(|c| c.title.clone())
             .unwrap_or_else(|| "chat".to_string());
+        let protected = self
+            .session()
+            .is_some_and(|s| s.chat_has_protected_content(chat_id));
         let started = self
             .live
             .as_mut()
             .is_some_and(|live| live.driver.start_chat_export(chat_id, title).is_ok());
         self.status_note = if started {
             "Exporting chat history…".into()
+        } else if protected {
+            "This chat's content is protected and can't be exported.".into()
         } else {
             "Could not start the export (another export is running).".into()
         };

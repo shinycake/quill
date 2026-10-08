@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.0 (Apache-2.0):
+// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 use crate::input::{InputExtras as _, InputModeKind};
 use gpui::Corners;
 use gpui::Half;
