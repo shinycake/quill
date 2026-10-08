@@ -11,8 +11,9 @@
 //!   Desktop's default: `_includeMutedCounter = true`, tdesktop
 //!   `Telegram/SourceFiles/core/core_settings.h`, i.e. excluding muted is
 //!   the opt-out, not the opt-in; muteness is [`Session::effective_muted`]);
-//! - archived chats are excluded unless `include_archived` is on (both
-//!   clients exclude the archive by default);
+//! - archived chats count as muted (tdesktop folds the archive folder into
+//!   the main list, all-muted), so they are included with muted chats unless
+//!   `include_archived` is turned off;
 //! - the badge shows either the unread-message sum or the unread-chat count
 //!   (`count_messages`). The sum saturates instead of overflowing.
 //!
@@ -44,25 +45,113 @@ pub fn menu_action(id: &str) -> Option<TrayAction> {
     }
 }
 
-/// Badge count honoring [`BadgePrefs`]: archived chats are skipped unless
-/// `include_archived`; muted chats are skipped unless `include_muted`;
-/// the count is the unread-message sum when `count_messages` is on, else
-/// the number of unread chats. Negative per-chat counts (shouldn't happen)
-/// are ignored; the sum saturates.
+/// Badge count, mirroring Telegram Desktop's `Session::computeUnreadBadge`
+/// (`data/data_session.cpp`) over TDLib's server-side totals.
+///
+/// - The main list contributes TDLib's `updateUnreadMessageCount` (or
+///   `updateUnreadChatCount` when `count_messages` is off): the unmuted
+///   subset when `include_muted` is off, the full total otherwise.
+/// - tdesktop folds the archive folder into the main list with everything
+///   counted as muted, so the archive contributes its full total, and only
+///   when muted chats are included. `include_archived` is Quill's extra
+///   opt-out for it (default on, like tdesktop).
+/// - A list whose totals haven't arrived yet (TDLib sends them only with a
+///   message database, and after the first chat load) falls back to summing
+///   the loaded chats of that list; a chat marked as unread counts as one.
+///
+/// The sum saturates.
 pub fn badge_count(session: &Session, prefs: &BadgePrefs) -> u32 {
+    let main = list_badge(session, prefs, false);
+    let archive = if prefs.include_archived && prefs.include_muted {
+        list_badge(session, prefs, true)
+    } else {
+        0
+    };
+    main.saturating_add(archive)
+}
+
+/// `QUILL_TRACE_STATUS=1`: note (once per list/mode) that the badge fell
+/// back to summing loaded chats because TDLib's totals haven't arrived.
+fn trace_fallback(archive: bool, messages: bool) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static SEEN: AtomicU8 = AtomicU8::new(0);
+    let bit = 1u8 << (u8::from(archive) * 2 + u8::from(messages));
+    if std::env::var_os("QUILL_TRACE_STATUS").is_some()
+        && SEEN.fetch_or(bit, Ordering::Relaxed) & bit == 0
+    {
+        eprintln!(
+            "status: badge fallback to loaded-chat sum list={} count_messages={messages}",
+            if archive { "archive" } else { "main" }
+        );
+    }
+}
+
+/// Unread of chats split into topics, on top of the list totals. tdesktop
+/// replaces a forum chat's own state with its topics' (`AdjustedForumUnreadState`:
+/// the topics' message sum, or one chat in chats mode), while TDLib's totals
+/// know nothing of topics the user never opened. Whatever TDLib already counts
+/// for the chat itself (`unread_count`, marked unread) is subtracted so
+/// nothing is counted twice.
+fn forum_topics_extra(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
     session
         .chats
         .values()
-        .filter(|chat| prefs.include_archived || !chat.in_archive)
+        .filter(|chat| chat.in_archive == archive)
         .filter(|chat| prefs.include_muted || !session.effective_muted(chat))
         .map(|chat| {
+            let topics = session.forum_topics_unread(chat.id);
+            if topics <= 0 {
+                return 0;
+            }
             if prefs.count_messages {
-                chat.unread_count.max(0) as u32
+                (topics - chat.unread_count.max(0)).max(0) as u32
             } else {
-                u32::from(chat.unread_count > 0)
+                u32::from(chat.unread_count <= 0 && !chat.is_marked_as_unread)
             }
         })
         .fold(0u32, u32::saturating_add)
+}
+
+fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
+    let totals = if archive {
+        &session.unread_totals.archive
+    } else {
+        &session.unread_totals.main
+    };
+    let pair = if prefs.count_messages {
+        totals.messages
+    } else {
+        totals.chats
+    };
+    let topics = forum_topics_extra(session, prefs, archive);
+    if let Some(pair) = pair {
+        // Archived chats always count as muted: take the full total.
+        let value = if prefs.include_muted || archive {
+            pair.all
+        } else {
+            pair.unmuted
+        };
+        return (value.max(0) as u32).saturating_add(topics);
+    }
+    trace_fallback(archive, prefs.count_messages);
+    session
+        .chats
+        .values()
+        .filter(|chat| chat.in_archive == archive)
+        .filter(|chat| prefs.include_muted || !session.effective_muted(chat))
+        .map(|chat| {
+            if prefs.count_messages {
+                if chat.unread_count > 0 {
+                    chat.unread_count as u32
+                } else {
+                    u32::from(chat.is_marked_as_unread)
+                }
+            } else {
+                u32::from(chat.unread_count > 0 || chat.is_marked_as_unread)
+            }
+        })
+        .fold(0u32, u32::saturating_add)
+        .saturating_add(topics)
 }
 
 /// The app icon downscaled to [`ICON_SIZE`] as straight (non-premultiplied)
@@ -76,7 +165,7 @@ const BASE_ICON: &[u8; (ICON_SIZE * ICON_SIZE * 4) as usize] =
 /// from `assets/icons/tray-template.svg` with
 /// `magick -background white -density 300 tray-template.svg -flatten
 /// -resize 64x64 -colorspace Gray -negate -depth 8 gray:tray-template-64.a8`.
-const TEMPLATE_MASK: &[u8; (ICON_SIZE * ICON_SIZE) as usize] =
+pub(crate) const TEMPLATE_MASK: &[u8; (ICON_SIZE * ICON_SIZE) as usize] =
     include_bytes!("../assets/icons/tray-template-64.a8");
 
 const BADGE_RED: [u8; 4] = [0xFF, 0x3B, 0x30, 0xFF];
@@ -340,7 +429,8 @@ impl Pixels {
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub struct Tray {
     icon: tray_icon::TrayIcon,
-    last_shown: Option<u32>,
+    /// Last drawn (unread, all-muted, dark menu bar) — redraw on change.
+    last_shown: Option<(u32, bool, bool)>,
 }
 
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
@@ -362,7 +452,7 @@ impl Tray {
             &MenuItem::with_id("quill-tray-quit", "Quit Quill", true, None),
         ])
         .ok()?;
-        let (rgba, w, h) = render_platform_icon(0);
+        let (rgba, w, h, _) = render_platform_icon(0, false, true);
         let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
         let tray = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu))
@@ -373,34 +463,65 @@ impl Tray {
             .ok()?;
         Some(Self {
             icon: tray,
-            last_shown: Some(0),
+            last_shown: None,
         })
     }
 
-    fn set_unread(&mut self, unread: u32) {
-        if self.last_shown == Some(unread) {
+    fn set_unread(&mut self, unread: u32, muted: bool) {
+        #[cfg(target_os = "macos")]
+        let dark = self
+            .icon
+            .ns_status_item()
+            .is_none_or(|item| crate::tray_mac::menu_bar_is_dark(&item));
+        #[cfg(not(target_os = "macos"))]
+        let dark = false;
+        let key = (unread, muted, dark);
+        if self.last_shown == Some(key) {
             return;
         }
-        self.last_shown = Some(unread);
-        let (rgba, w, h) = render_platform_icon(unread);
+        self.last_shown = Some(key);
+        let (rgba, w, h, template) = render_platform_icon(unread, muted, dark);
         if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) {
-            let _ = self
-                .icon
-                .set_icon_with_as_template(Some(icon), cfg!(target_os = "macos"));
+            let _ = self.icon.set_icon_with_as_template(Some(icon), template);
         }
         let _ = self.icon.set_tooltip(Some(tray_tooltip(unread)));
     }
 }
 
-/// The macOS menu bar takes a monochrome template; Windows trays show the
-/// full-color app icon.
+/// macOS: the monochrome template while nothing is unread, and tdesktop's
+/// tinted glyph + red counter otherwise ([`crate::tray_mac`]). Windows trays
+/// show the full-color app icon. Returns the RGBA, size and whether AppKit
+/// should treat it as a template.
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
-fn render_platform_icon(unread: u32) -> (Vec<u8>, u32, u32) {
-    if cfg!(target_os = "macos") {
-        render_tray_template(unread)
-    } else {
-        render_tray_icon(unread)
+fn render_platform_icon(unread: u32, muted: bool, dark: bool) -> (Vec<u8>, u32, u32, bool) {
+    #[cfg(target_os = "macos")]
+    {
+        if unread == 0 {
+            let (rgba, w, h) = render_tray_template(0);
+            return (rgba, w, h, true);
+        }
+        let (rgba, w, h) = crate::tray_mac::render(TEMPLATE_MASK, unread, muted, dark);
+        (rgba, w, h, false)
     }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (muted, dark);
+        let (rgba, w, h) = render_tray_icon(unread);
+        (rgba, w, h, false)
+    }
+}
+
+/// tdesktop's `unreadBadgeMuted`: every counted unread chat is muted.
+#[cfg(feature = "ui")]
+fn badge_all_muted(session: &Session, unread: u32) -> bool {
+    if unread == 0 || !session.badge_prefs.include_muted {
+        return false;
+    }
+    let unmuted = BadgePrefs {
+        include_muted: false,
+        ..session.badge_prefs.clone()
+    };
+    badge_count(session, &unmuted) == 0
 }
 
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
@@ -424,6 +545,7 @@ thread_local! {
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 pub fn sync_tray(session: Option<&Session>) {
     let unread = session.map(|s| badge_count(s, &s.badge_prefs)).unwrap_or(0);
+    let muted = session.is_some_and(|s| badge_all_muted(s, unread));
     TRAY.with(|cell| {
         let mut slot = cell.borrow_mut();
         // AppKit can return a status-item handle before its native window
@@ -439,7 +561,7 @@ pub fn sync_tray(session: Option<&Session>) {
             *slot = Tray::new();
         }
         if let Some(tray) = slot.as_mut() {
-            tray.set_unread(unread);
+            tray.set_unread(unread, muted);
         }
     });
 }
@@ -507,7 +629,7 @@ mod tests {
     use crate::diagnostics::MemorySink;
     use crate::ids::{AccountKey, ChatId, MessageId};
     use crate::settings::BadgePrefs;
-    use crate::state::{ChatSummary, Session};
+    use crate::state::{ChatSummary, ListUnreadTotals, Session, UnreadPair};
     use crate::telegram::envelope::{ChatKind, ChatNotificationSettings};
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -615,31 +737,105 @@ mod tests {
     }
 
     #[test]
-    fn badge_count_excludes_archived_chats_by_default() {
-        // Archived chats never count (both official clients exclude them
-        // from the badge by default).
+    fn badge_count_includes_archived_chats_by_default() {
+        // tdesktop folds the all-muted archive into the main list, so it
+        // counts while muted chats do.
         let mut session = Session::new(
             AccountKey("tray-test-archived".into()),
             Arc::new(MemorySink::new()),
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, archived_chat(1, 9));
-        assert_eq!(badge_count(&session, &BadgePrefs::default()), 5);
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 14);
     }
 
     #[test]
-    fn badge_count_includes_archived_when_opted_in() {
+    fn badge_count_excludes_archived_when_opted_out_or_muted_excluded() {
         let mut session = Session::new(
-            AccountKey("tray-test-archived-in".into()),
+            AccountKey("tray-test-archived-out".into()),
             Arc::new(MemorySink::new()),
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, archived_chat(1, 9));
-        let prefs = BadgePrefs {
-            include_archived: true,
+        let no_archive = BadgePrefs {
+            include_archived: false,
             ..BadgePrefs::default()
         };
-        assert_eq!(badge_count(&session, &prefs), 14);
+        assert_eq!(badge_count(&session, &no_archive), 5);
+        let no_muted = BadgePrefs {
+            include_muted: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &no_muted), 5);
+    }
+
+    #[test]
+    fn badge_count_marked_as_unread_counts_one_in_fallback() {
+        let mut session = session_with(&[0, 2]);
+        session.chats.get_mut(&0).unwrap().is_marked_as_unread = true;
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 3);
+        let prefs = BadgePrefs {
+            count_messages: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &prefs), 2);
+    }
+
+    fn with_totals(session: &mut Session) {
+        // Loaded chats are a small slice; the server totals are what count.
+        session.chats.insert(0, chat(0, 1));
+        session.unread_totals.main = ListUnreadTotals {
+            messages: Some(UnreadPair {
+                all: 44,
+                unmuted: 13,
+            }),
+            chats: Some(UnreadPair {
+                all: 20,
+                unmuted: 6,
+            }),
+        };
+        session.unread_totals.archive = ListUnreadTotals {
+            messages: Some(UnreadPair {
+                all: 30,
+                unmuted: 0,
+            }),
+            chats: Some(UnreadPair { all: 9, unmuted: 0 }),
+        };
+    }
+
+    #[test]
+    fn badge_count_uses_server_totals_over_loaded_chats() {
+        let mut session = Session::new(AccountKey("t-totals".into()), Arc::new(MemorySink::new()));
+        with_totals(&mut session);
+        // Default: messages, muted + archive (all-muted) included.
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 44 + 30);
+        let chats = BadgePrefs {
+            count_messages: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &chats), 20 + 9);
+        let unmuted = BadgePrefs {
+            include_muted: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &unmuted), 13);
+        let no_archive = BadgePrefs {
+            include_archived: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &no_archive), 44);
+    }
+
+    #[test]
+    fn badge_count_totals_fall_back_per_list() {
+        // Only the main totals arrived: the archive sums its loaded chats.
+        let mut session = Session::new(AccountKey("t-partial".into()), Arc::new(MemorySink::new()));
+        session.chats.insert(1, archived_chat(1, 4));
+        session.unread_totals.main.messages = Some(UnreadPair {
+            all: 10,
+            unmuted: 7,
+        });
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 14);
     }
 
     #[test]

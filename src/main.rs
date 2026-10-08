@@ -615,6 +615,11 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-archive-bar" => ScreenshotDemo::ReadyArchiveBar,
                 "ready-archive-menu" => ScreenshotDemo::ReadyArchiveMenu,
                 "ready-pin-drag" => ScreenshotDemo::ReadyPinDrag,
+                "ready-swipe-mute" => ScreenshotDemo::ReadySwipeMute,
+                "ready-swipe-reached" => ScreenshotDemo::ReadySwipeReached,
+                "ready-stories-expanded" => ScreenshotDemo::ReadyStoriesExpanded,
+                "ready-stories-collapsing" => ScreenshotDemo::ReadyStoriesCollapsing,
+                "ready-stories-collapsed" => ScreenshotDemo::ReadyStoriesCollapsed,
                 "ready-shared-media" => ScreenshotDemo::ReadySharedMedia,
                 "ready-typing" => ScreenshotDemo::ReadyTyping,
                 "ready-chat-rows" => ScreenshotDemo::ReadyChatRows,
@@ -866,6 +871,11 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyArchiveBar => ".quill-ready-ready-archive-bar",
         ScreenshotDemo::ReadyArchiveMenu => ".quill-ready-ready-archive-menu",
         ScreenshotDemo::ReadyPinDrag => ".quill-ready-ready-pin-drag",
+        ScreenshotDemo::ReadySwipeMute => ".quill-ready-ready-swipe-mute",
+        ScreenshotDemo::ReadySwipeReached => ".quill-ready-ready-swipe-reached",
+        ScreenshotDemo::ReadyStoriesExpanded => ".quill-ready-ready-stories-expanded",
+        ScreenshotDemo::ReadyStoriesCollapsing => ".quill-ready-ready-stories-collapsing",
+        ScreenshotDemo::ReadyStoriesCollapsed => ".quill-ready-ready-stories-collapsed",
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
         ScreenshotDemo::ReadyChatRows => ".quill-ready-ready-chat-rows",
@@ -1092,6 +1102,47 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     // reading it (a kit button) panicked.
                     use gpui_kit::gpui::AnyWindowHandle;
                     for point in clicks.split(';') {
+                        // `w:x,y,dx,dy,s|m|e` sends one phased trackpad scroll
+                        // event (started / moved / ended), to script a swipe.
+                        if let Some(wheel) = point.strip_prefix("w:") {
+                            let parts: Vec<&str> = wheel.split(',').map(str::trim).collect();
+                            if let [x, y, dx, dy, phase] = parts[..]
+                                && let (Ok(x), Ok(y), Ok(dx), Ok(dy)) = (
+                                    x.parse::<f32>(),
+                                    y.parse::<f32>(),
+                                    dx.parse::<f32>(),
+                                    dy.parse::<f32>(),
+                                )
+                            {
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        use gpui_kit::gpui::{
+                                            Modifiers, PlatformInput, ScrollDelta,
+                                            ScrollWheelEvent, TouchPhase, point, px,
+                                        };
+                                        let touch_phase = match phase {
+                                            "s" => TouchPhase::Started,
+                                            "e" => TouchPhase::Ended,
+                                            _ => TouchPhase::Moved,
+                                        };
+                                        window.dispatch_event(
+                                            PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                                position: point(px(x), px(y)),
+                                                delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
+                                                modifiers: Modifiers::default(),
+                                                touch_phase,
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
+                            }
+                            cx.background_executor()
+                                .timer(Duration::from_millis(40))
+                                .await;
+                            continue;
+                        }
                         // `s:x,y,dy` scrolls by `dy` px at the point instead.
                         if let Some(scroll) = point.strip_prefix("s:") {
                             let parts: Vec<f32> = scroll

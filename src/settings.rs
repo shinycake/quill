@@ -452,6 +452,11 @@ pub struct AppearancePrefs {
     /// lives in the main menu.
     #[serde(default)]
     pub archive_in_main_menu: bool,
+    /// tdesktop `quickDialogAction` ("Chat list quick action"): what a
+    /// horizontal trackpad swipe on a chat row does. Disabled by default,
+    /// as in tdesktop.
+    #[serde(default)]
+    pub swipe_action: crate::chat_swipe::SwipeAction,
     #[serde(default)]
     pub start_in_tray: bool,
     #[serde(default)]
@@ -492,6 +497,7 @@ impl Default for AppearancePrefs {
             chat_list_rich_preview: false,
             archive_collapsed: false,
             archive_in_main_menu: false,
+            swipe_action: crate::chat_swipe::SwipeAction::Disabled,
             start_in_tray: false,
             minimize_to_tray: false,
             check_updates_on_launch: true,
@@ -1226,6 +1232,7 @@ mod tests {
             chat_list_rich_preview: true,
             archive_collapsed: true,
             archive_in_main_menu: true,
+            swipe_action: crate::chat_swipe::SwipeAction::Archive,
             start_in_tray: true,
             minimize_to_tray: true,
             check_updates_on_launch: false,
@@ -1360,14 +1367,16 @@ mod tests {
 /// desktop-client concern (TDLib 1.8.67 has no badge settings):
 /// - `include_muted`: count muted chats (Telegram Desktop default: ON —
 ///   its `_includeMutedCounter` is true)
-/// - `include_archived`: count archived chats (default OFF, both clients)
+/// - `include_archived`: count archived chats (default ON: tdesktop folds
+///   the archive into the main list as all-muted, so it counts whenever
+///   muted chats do; this toggle is a Quill-only opt-out)
 /// - `count_messages`: sum unread messages vs count unread chats
 ///   (default: messages)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BadgePrefs {
     #[serde(default = "default_true")]
     pub include_muted: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub include_archived: bool,
     #[serde(default = "default_true")]
     pub count_messages: bool,
@@ -1377,7 +1386,7 @@ impl Default for BadgePrefs {
     fn default() -> Self {
         Self {
             include_muted: true,
-            include_archived: false,
+            include_archived: true,
             count_messages: true,
         }
     }
@@ -1416,7 +1425,7 @@ mod badge_prefs_tests {
     fn badge_prefs_default_matches_telegram_desktop() {
         let prefs = BadgePrefs::default();
         assert!(prefs.include_muted);
-        assert!(!prefs.include_archived);
+        assert!(prefs.include_archived);
         assert!(prefs.count_messages);
     }
 

@@ -522,6 +522,55 @@ impl QuillApp {
             self.status_note =
                 "screenshot demo — notification sounds · per-chat panel · scope defaults".into();
         }
+        // Chat-row swipe and stories-strip collapse over one long list:
+        // the archive-row fixture (story rings, pins, archive) plus the
+        // chat-row fixture's extra chats, so the list scrolls.
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadySwipeMute
+                    | ScreenshotDemo::ReadySwipeReached
+                    | ScreenshotDemo::ReadyStoriesExpanded
+                    | ScreenshotDemo::ReadyStoriesCollapsing
+                    | ScreenshotDemo::ReadyStoriesCollapsed
+            )
+        ) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_archive_row(session, &self.demo_sink, &self.demo_seq);
+                apply_ready_chat_rows(session, &self.demo_sink, &self.demo_seq);
+            }
+            match demo {
+                Some(ScreenshotDemo::ReadySwipeMute) => {
+                    self.appearance.swipe_action = quill::chat_swipe::SwipeAction::Mute;
+                    self.demo_hold_swipe(21, 0.6);
+                }
+                Some(ScreenshotDemo::ReadySwipeReached) => {
+                    self.appearance.swipe_action = quill::chat_swipe::SwipeAction::Delete;
+                    if let Some(chat) = self
+                        .demo_session
+                        .as_mut()
+                        .and_then(|session| session.chats.get_mut(&22))
+                    {
+                        chat.can_be_deleted_only_for_self = true;
+                    }
+                    self.demo_hold_swipe(22, 1.25);
+                }
+                Some(ScreenshotDemo::ReadyStoriesExpanded) => {
+                    // Resting list, Mute configured: the base for scripted
+                    // gestures (`QUILL_DEMO_CLICK=w:x,y,dx,dy,s|m|e`).
+                    self.appearance.swipe_action = quill::chat_swipe::SwipeAction::Mute;
+                }
+                Some(ScreenshotDemo::ReadyStoriesCollapsing) => {
+                    self.chat_list_scroll.set_offset(point(px(0.), px(-38.)));
+                }
+                Some(ScreenshotDemo::ReadyStoriesCollapsed) => {
+                    self.chat_list_scroll.set_offset(point(px(0.), px(-96.)));
+                }
+                _ => {}
+            }
+            self.status_note = "screenshot demo — swipe actions · stories strip".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyChatRows)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

@@ -57,6 +57,10 @@ pub struct QuillApp {
     /// kit Phase 3: chat-list virtualization — the flat item list the
     /// `VirtualList` renders (main rows + archive section).
     pub(super) chat_list_items: Vec<ChatListItem>,
+    /// Chat-row swipe gesture state (`quill::chat_swipe`).
+    pub(super) chat_swipe: super::chat_swipe_ui::ChatSwipeState,
+    /// Stories strip tiles and sideways scroll (`quill::stories_strip`).
+    pub(super) story_strip: super::stories_strip_ui::StoryStripState,
     /// kit Phase 3: message-history virtualization — scroller state with
     /// tail-following, owned by the app so prepend/append keep the anchor.
     pub(super) history_scroller: Entity<MessageScrollerState>,
