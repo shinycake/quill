@@ -160,6 +160,26 @@ impl QuillApp {
                 input.set_value("hello from composer", window, cx);
             });
         }
+        // `QUILL_DEMO_HISTORY_ANIM=…,panel|menu|select`: something over the
+        // animated history, to check what the animation layer draws under it.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChats)) {
+            use super::demo::demo_history_extra;
+            let sticker = quill::ids::MessageId(super::demo::HISTORY_ANIM_STICKER);
+            if demo_history_extra("panel") {
+                self.media_panel.open = true;
+                self.media_panel.tab = super::media_panel::PanelTab::Emoji;
+            }
+            if demo_history_extra("menu") {
+                self.message_menu = Some(super::menu_states::MessageMenuState {
+                    chat_id: ChatId(11),
+                    message_id: sticker,
+                    position: point(px(340.), px(380.)),
+                });
+            }
+            if demo_history_extra("select") {
+                self.toggle_forward_select(ChatId(11), sticker, false, cx);
+            }
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyChannelsAdmin)) {
             self.composer.update(cx, |input, cx| {
                 input.set_value("admin post — hello from the channel", window, cx);
@@ -1868,6 +1888,27 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Avatar click: group history with a member's profile layer open.
+        if matches!(demo, Some(ScreenshotDemo::ReadyAvatarProfile)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::profile_modal::apply_ready_avatar_profile(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                );
+            }
+            self.open_avatar_profile(
+                quill::telegram::envelope::MessageSender::User { user_id: 602 },
+                window,
+                cx,
+            );
+            // Captures show the settled layer, not the fade.
+            self.profile_modal = Some(super::profile_modal::ProfileModal::shown(
+                InfoPanelTarget::User(602),
+            ));
+            self.status_note = "screenshot demo — profile layer from an avatar click".into();
+        }
         // Phase D2: channel statistics fixture, then open the stats panel
         // directly in the info panel (demo path just sets the target).
         if matches!(demo, Some(ScreenshotDemo::ReadyChannelStats)) {

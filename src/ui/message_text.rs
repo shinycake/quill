@@ -1,5 +1,6 @@
 //! message text rendering: rich text, entities, link previews, reply strips.
 
+use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::message_media::{file_is_downloading, photo_display_path};
@@ -503,6 +504,7 @@ pub(super) fn message_chrome(
         footer: message_footer(date, pending, receipt),
         footer_inline: false,
         footer_overlay: false,
+        footer_rebuild: None,
         media_led: false,
         actions: None,
     }
@@ -562,6 +564,9 @@ fn paint_text_run(
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     emoji_paths: &HashMap<i64, ImageSource>,
+    // Decoded animated custom emoji, drawn by the conversation's
+    // animation layer (`anim_layer`); they take precedence over stills.
+    layered: &HashMap<i64, LayeredClip>,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,
@@ -577,11 +582,18 @@ fn paint_text_run(
         let key = (msg_key.0, msg_key.1, index as u64, is_caption);
         // The text keeps its room but is invisible; specks in the text's
         // color drift over it (tdesktop).
+        let layer = super::anim_layer::current();
         let specks = canvas(
             |_, _, _| {},
-            |bounds, _, window, _| {
+            move |bounds, _, window, _| {
                 let color = window.text_style().color;
-                super::spoiler_fx::paint_text_specks(bounds, bounds.origin, color, window);
+                super::spoiler_fx::layer_text_specks(
+                    layer.as_ref(),
+                    bounds,
+                    bounds.origin,
+                    color,
+                    window,
+                );
             },
         )
         .absolute()
@@ -606,18 +618,30 @@ fn paint_text_run(
             .child(specks)
             .into_any_element();
     }
-    if let Some(id) = run.custom_emoji_id
-        && let Some(source) = emoji_paths.get(&id)
-    {
-        let edge = font * 1.25;
+    let edge = font * 1.25;
+    let emoji_image = run.custom_emoji_id.and_then(|id| {
+        if let Some(clip) = layered.get(&id) {
+            // Small emoji look the same at 30 fps.
+            return Some(
+                super::anim_layer::frames(clip.clone(), 30)
+                    .flex_none()
+                    .size(edge)
+                    .into_any_element(),
+            );
+        }
         let fallback_text = run.text.clone();
-        let image = img(source.clone())
-            .id(format!("{run_id}-emoji"))
-            .w(edge)
-            .h(edge)
-            .aspect_square()
-            .object_fit(ObjectFit::Contain)
-            .with_fallback(move || div().child(fallback_text.clone()).into_any_element());
+        emoji_paths.get(&id).map(|source| {
+            img(source.clone())
+                .id(format!("{run_id}-emoji"))
+                .w(edge)
+                .h(edge)
+                .aspect_square()
+                .object_fit(ObjectFit::Contain)
+                .with_fallback(move || div().child(fallback_text.clone()).into_any_element())
+                .into_any_element()
+        })
+    });
+    if let Some(image) = emoji_image {
         // A custom emoji inside a link keeps the link (role + click); the
         // image itself carries no text styling.
         if let Some(href) = run.href.clone() {
@@ -686,6 +710,7 @@ fn quote_block(
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     emoji_paths: &HashMap<i64, ImageSource>,
+    layered: &HashMap<i64, LayeredClip>,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,
@@ -721,6 +746,7 @@ fn quote_block(
         is_caption,
         revealed,
         emoji_paths,
+        layered,
         font,
         None,
         cx,
@@ -785,6 +811,7 @@ pub(super) fn rich_text_line(
         revealed,
         font,
         emoji_paths,
+        &HashMap::new(),
         None,
         cx,
     )
@@ -802,6 +829,8 @@ pub(super) fn rich_text_reserving(
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     font: Pixels,
     emoji_paths: &HashMap<i64, ImageSource>,
+    // Animated custom emoji for the animation layer (see `paint_text_run`).
+    layered: &HashMap<i64, LayeredClip>,
     reserve: Option<Pixels>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -828,6 +857,7 @@ pub(super) fn rich_text_reserving(
                 is_caption,
                 revealed,
                 emoji_paths,
+                layered,
                 font,
                 cx,
             ));
@@ -841,6 +871,7 @@ pub(super) fn rich_text_reserving(
                 is_caption,
                 revealed,
                 emoji_paths,
+                layered,
                 font,
                 cx,
             ));
@@ -858,6 +889,7 @@ pub(super) fn rich_text_reserving(
             is_caption,
             revealed,
             emoji_paths,
+            layered,
             font,
             reserve.filter(|_| last),
             cx,
@@ -892,13 +924,14 @@ fn inline_paragraph(
     is_caption: bool,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     emoji_paths: &HashMap<i64, ImageSource>,
+    layered: &HashMap<i64, LayeredClip>,
     font: Pixels,
     reserve: Option<Pixels>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let has_emoji_image = runs.iter().any(|run| {
         run.custom_emoji_id
-            .is_some_and(|id| emoji_paths.contains_key(&id))
+            .is_some_and(|id| emoji_paths.contains_key(&id) || layered.contains_key(&id))
     });
     if has_emoji_image {
         let mut row = div()
@@ -918,6 +951,7 @@ fn inline_paragraph(
                 is_caption,
                 revealed,
                 emoji_paths,
+                layered,
                 font,
                 cx,
             ));
@@ -1070,7 +1104,7 @@ pub(super) fn message_text_block(
     custom_emoji: &[StickerItem],
     // Animated frames of this message's custom emoji, when decoded; they
     // replace the still images.
-    animated_emoji: &HashMap<i64, Arc<RenderImage>>,
+    animated_emoji: &HashMap<i64, super::sticker_playback::AnimatedVisual>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Settings → Appearance: message font size.
     font: Pixels,
@@ -1100,6 +1134,18 @@ pub(super) fn message_text_block(
             .link_preview
             .as_ref()
             .is_some_and(|preview| preview.has_card());
+    let mut images = custom_emoji_paths(&text.entities, custom_emoji, files, media_roots);
+    let mut layered = HashMap::new();
+    for (id, visual) in animated_emoji {
+        match visual {
+            super::sticker_playback::AnimatedVisual::Image(frame) => {
+                images.insert(*id, ImageSource::from(frame.clone()));
+            }
+            super::sticker_playback::AnimatedVisual::Layered(clip) => {
+                layered.insert(*id, clip.clone());
+            }
+        }
+    }
     let line = rich_text_reserving(
         &text.text,
         &text.entities,
@@ -1107,13 +1153,8 @@ pub(super) fn message_text_block(
         false,
         revealed,
         font,
-        &{
-            let mut images = custom_emoji_paths(&text.entities, custom_emoji, files, media_roots);
-            for (id, frames) in animated_emoji {
-                images.insert(*id, ImageSource::from(frames.clone()));
-            }
-            images
-        },
+        &images,
+        &layered,
         reserve.filter(|_| !card_below),
         cx,
     );

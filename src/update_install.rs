@@ -298,9 +298,9 @@ pub fn apply_update(plan_path: &Path) -> std::io::Result<()> {
     }
     #[cfg(not(unix))]
     {
-        return Err(std::io::Error::other(
+        Err(std::io::Error::other(
             "Binary updates are unavailable on this platform",
-        ));
+        ))
     }
     #[cfg(unix)]
     {

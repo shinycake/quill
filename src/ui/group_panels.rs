@@ -330,8 +330,15 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         use quill::state::SharedMediaTab;
         let session = self.session()?;
-        let chat_id = session.open_chat?;
-        let counts = session.chat_media_counts.get(&chat_id.0)?;
+        // The counts belong to the open chat: they describe the panel's
+        // peer only when the panel is that chat's own (not a group
+        // member's profile opened from a sender avatar).
+        let counts = session
+            .open_chat
+            .filter(|chat_id| {
+                session.info_panel_target_for_chat(*chat_id) == session.open_info_panel
+            })
+            .and_then(|chat_id| session.chat_media_counts.get(&chat_id.0));
         let icons = [
             IconName::Image,
             IconName::Video,
@@ -355,7 +362,10 @@ impl QuillApp {
             .iter()
             .enumerate()
         {
-            let Some(&count) = counts.get(&(index as u8)).filter(|count| **count > 0) else {
+            let Some(&count) = counts
+                .and_then(|counts| counts.get(&(index as u8)))
+                .filter(|count| **count > 0)
+            else {
                 continue;
             };
             let tab = tabs[index];
@@ -418,28 +428,12 @@ impl QuillApp {
     }
 
     pub(super) fn info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let target = self.session()?.open_info_panel?;
-        let (title, content) = match target {
-            InfoPanelTarget::User(user_id) => ("Contact info", self.user_info_panel(user_id, cx)),
-            InfoPanelTarget::Supergroup(supergroup_id) => {
-                ("Group info", self.supergroup_info_panel(supergroup_id, cx))
-            }
-            // Slice G1: basic-group info panel (members, permissions,
-            // invite link, leave/delete).
-            InfoPanelTarget::BasicGroup(basic_group_id) => (
-                "Group info",
-                self.basic_group_info_panel(basic_group_id, cx),
-            ),
-            // Phase D2: channel/group statistics view.
-            InfoPanelTarget::Statistics(chat_id) => {
-                ("Statistics", self.chat_statistics_panel(chat_id, cx))
-            }
-            // Slice G10: community info (name edit, counts, chats).
-            InfoPanelTarget::Community(community_id) => (
-                "Community info",
-                self.community_info_panel(community_id, cx),
-            ),
-        };
+        // A profile opened from a sender avatar is presented as a modal
+        // layer (`profile_modal_overlay`), not in the right column.
+        if self.profile_modal_active() {
+            return None;
+        }
+        let (title, content) = self.info_panel_parts(cx)?;
         Some(
             div()
                 .id("info-panel")
@@ -487,6 +481,37 @@ impl QuillApp {
         )
     }
 
+    /// Title and content of the open info panel, shared by the right
+    /// column and the profile modal.
+    pub(super) fn info_panel_parts(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<(&'static str, AnyElement)> {
+        let target = self.session()?.open_info_panel?;
+        let (title, content) = match target {
+            InfoPanelTarget::User(user_id) => ("Contact info", self.user_info_panel(user_id, cx)),
+            InfoPanelTarget::Supergroup(supergroup_id) => {
+                ("Group info", self.supergroup_info_panel(supergroup_id, cx))
+            }
+            // Slice G1: basic-group info panel (members, permissions,
+            // invite link, leave/delete).
+            InfoPanelTarget::BasicGroup(basic_group_id) => (
+                "Group info",
+                self.basic_group_info_panel(basic_group_id, cx),
+            ),
+            // Phase D2: channel/group statistics view.
+            InfoPanelTarget::Statistics(chat_id) => {
+                ("Statistics", self.chat_statistics_panel(chat_id, cx))
+            }
+            // Slice G10: community info (name edit, counts, chats).
+            InfoPanelTarget::Community(community_id) => (
+                "Community info",
+                self.community_info_panel(community_id, cx),
+            ),
+        };
+        Some((title, content))
+    }
+
     /// User profile panel: photo (downloaded `userFullInfo.photo` size, or
     /// an initials avatar), name, status, username/phone rows, bio, and an
     /// Add contact affordance for known non-contacts.
@@ -500,7 +525,13 @@ impl QuillApp {
             .unwrap_or_else(|| format!("User {user_id}"));
         let status = user
             .as_ref()
-            .map(|u| u.status.display())
+            .map(|u| {
+                if u.is_bot {
+                    "bot".to_string()
+                } else {
+                    u.status.display()
+                }
+            })
             .unwrap_or_default();
         let username = user
             .as_ref()
@@ -565,6 +596,26 @@ impl QuillApp {
         // Primary actions as a row of labeled icon tiles.
         let mut tiles = div().flex().justify_center().gap_2().w_full();
         let mut any_tile = false;
+        // The open chat is this very user's private chat (header panel):
+        // Message and Mute then act on it; from a group member's profile
+        // (avatar click) Message opens the private chat and Mute is left
+        // out (it would mute the group).
+        let in_own_chat = session
+            .and_then(|s| s.open_chat.map(|chat| (s, chat)))
+            .is_some_and(|(s, chat)| s.private_chat_user_id(chat) == Some(user_id));
+        if !is_self && !in_own_chat {
+            any_tile = true;
+            tiles = tiles.child(info_tile(
+                "info-panel-message",
+                gpui_kit::assets::IconName::MessageSquare,
+                "Message",
+                cx.listener(move |this, _, window, cx| {
+                    this.dismiss_profile_modal();
+                    this.open_user_chat(user_id, window, cx);
+                }),
+                cx,
+            ));
+        }
         if can_reach {
             any_tile = true;
             tiles = tiles
@@ -614,7 +665,10 @@ impl QuillApp {
             ));
         }
         // Telegram Desktop's Mute button, for the chat with this user.
-        if !is_self && let Some(chat) = session.and_then(|s| s.open_chat) {
+        if !is_self
+            && in_own_chat
+            && let Some(chat) = session.and_then(|s| s.open_chat)
+        {
             let muted = session
                 .and_then(|s| s.chats.get(&chat.0))
                 .is_some_and(|c| c.is_muted());

@@ -253,6 +253,40 @@ pub(super) fn paint_text_specks(
     window: &mut Window,
 ) {
     TEXT_PAINTED.with(|painted| painted.set(true));
+    draw_text_specks(rect, origin, color, window);
+}
+
+/// Text specks in `rect` for an animation layer, which keeps its own frame
+/// clock (`anim_layer`): drawn there, or right away (and ticking the slice)
+/// when something covers them. Outside a layer: [`paint_text_specks`].
+pub(super) fn layer_text_specks(
+    layer: Option<&super::anim_layer::Layer>,
+    rect: Bounds<Pixels>,
+    origin: Point<Pixels>,
+    color: Hsla,
+    window: &mut Window,
+) {
+    let Some(layer) = layer else {
+        paint_text_specks(rect, origin, color, window);
+        return;
+    };
+    let paint = std::rc::Rc::new(move |rect: Bounds<Pixels>, window: &mut Window| {
+        draw_text_specks(rect, origin, color, window);
+    });
+    layer.paint_now(
+        super::anim_layer::Content::Paint {
+            paint,
+            fps: SPECKS_FPS,
+        },
+        rect,
+        window,
+    );
+}
+
+/// lib_ui redraws spoiler specks every 33 ms.
+pub(super) const SPECKS_FPS: u32 = 30;
+
+fn draw_text_specks(rect: Bounds<Pixels>, origin: Point<Pixels>, color: Hsla, window: &mut Window) {
     let now = loop_ms();
     let (left, top) = (
         (rect.left() - origin.x) / px(1.),

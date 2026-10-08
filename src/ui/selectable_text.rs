@@ -43,6 +43,8 @@ pub(super) struct SelectableRichText {
     message: Option<(i64, u64)>,
     /// Hidden spoiler runs and their specks' opacity.
     spoilers: Vec<(Range<usize>, f32)>,
+    /// The animation layer that draws the specks (`anim_layer`), if any.
+    layer: Option<super::anim_layer::Layer>,
 }
 
 impl SelectableRichText {
@@ -57,6 +59,7 @@ impl SelectableRichText {
             document_order: 0,
             message: None,
             spoilers: Vec::new(),
+            layer: None,
         }
     }
 
@@ -64,6 +67,7 @@ impl SelectableRichText {
     /// itself is styled invisible by the caller), with their opacity.
     pub(super) fn spoilers(mut self, spoilers: Vec<(Range<usize>, f32)>) -> Self {
         self.spoilers = spoilers;
+        self.layer = super::anim_layer::current();
         self
     }
 
@@ -299,7 +303,8 @@ impl Element for SelectableRichText {
                     continue;
                 };
                 for rect in selection_quads(start, end, layout.bounds(), line_height) {
-                    super::spoiler_fx::paint_text_specks(
+                    super::spoiler_fx::layer_text_specks(
+                        self.layer.as_ref(),
                         rect,
                         bounds.origin,
                         color.opacity(color.a * opacity),

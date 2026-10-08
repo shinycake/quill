@@ -1,5 +1,6 @@
 mod account_lifecycle;
 mod accounts;
+mod anim_layer;
 mod app_slice;
 mod appearance;
 mod auth_recovery;
@@ -121,6 +122,7 @@ mod payments;
 mod polls;
 mod pressable;
 mod profile;
+mod profile_modal;
 mod reactions;
 mod recording;
 mod round_record;
