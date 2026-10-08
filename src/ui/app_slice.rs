@@ -135,6 +135,7 @@ impl QuillApp {
 
     fn notify_slices(&self, cx: &mut Context<Self>) {
         super::frame_clock::trace_slice_render("(app notified)");
+        super::frame_clock::trace_notify_origin();
         let ids: Vec<EntityId> = self
             .slices
             .sidebar

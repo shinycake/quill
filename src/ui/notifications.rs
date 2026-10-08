@@ -39,6 +39,9 @@ pub(super) fn notification_settings_json(settings: &ChatNotificationSettings) ->
 /// 60 Hz frame).
 const INGEST_BUDGET: Duration = Duration::from_millis(8);
 
+/// How often TDLib updates may redraw the window while it is inactive.
+const INACTIVE_REDRAW: Duration = Duration::from_millis(500);
+
 impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
         let generation = self.connection_generation;
@@ -95,6 +98,19 @@ impl QuillApp {
     /// Drain and apply everything TDLib has queued. Returns whether
     /// anything arrived, so the poll loop can stay fast during bursts and
     /// back off while idle.
+    /// Redraw for what the TDLib poll applied. Behind another app, a
+    /// steady stream of updates (download progress, presence) redraws at
+    /// most every `INACTIVE_REDRAW`; the last one is never dropped.
+    fn notify_polled(&mut self, cx: &mut Context<Self>) {
+        let now = std::time::Instant::now();
+        if self.window_active.get() || now - self.polled_notify.0 >= INACTIVE_REDRAW {
+            self.polled_notify = (now, false);
+            cx.notify();
+        } else {
+            self.polled_notify.1 = true;
+        }
+    }
+
     pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) -> bool {
         self.poll_device_qr(cx);
         self.apply_pending_keybindings(cx);
@@ -118,6 +134,14 @@ impl QuillApp {
         // back at its busy cadence.
         let budget_start = std::time::Instant::now();
         while let Some(owned) = live.bridge.next_timeout(Duration::from_millis(0)) {
+            if super::frame_clock::trace_notify() {
+                let payload = format!("{:?}", owned.envelope.payload);
+                let name = payload
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .next()
+                    .unwrap_or_default();
+                super::frame_clock::trace_ingested(name);
+            }
             if live.driver.ingest(owned).is_err() {
                 send_failed = true;
             }
@@ -380,7 +404,10 @@ impl QuillApp {
             self.progress_inline_mode(cx);
         }
         if progressed || send_failed {
-            cx.notify();
+            self.notify_polled(cx);
+        } else if self.polled_notify.1 && self.polled_notify.0.elapsed() >= INACTIVE_REDRAW {
+            // The trailing redraw of updates held back while inactive.
+            self.notify_polled(cx);
         }
         self.discard_stopped_media_playback(cx);
         self.resume_pending_gif(cx);

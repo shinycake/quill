@@ -179,6 +179,45 @@ Release build, `QUILL_ASSUME_ACTIVE` unset, CPU over 6 samples:
 In every inactive run the tick trace goes quiet within a second of
 deactivation.
 
+## Inactive window, second pass
+
+The live re-test of the frame-clock gate showed ticks stopping when
+inactive, but CPU staying near the active level: `QuillApp` was still
+notified ~8×/s (both slices redrawing) and CoreMedia threads kept
+decoding. Changes:
+
+- `QUILL_TRACE_NOTIFY=1` logs where `QuillApp` notifies come from, once a
+  second per origin with a rate. The notify observer captures a backtrace
+  right after the update that notified, so it names the app code that ran
+  it (`spawn_video_tick`, `spawn_poll_loop`, `ensure_sticker_playback`…).
+  For the TDLib poll it also logs the applied updates per second
+  (`ingested: 8.0/s UpdateFile`).
+- Muted inline loops: a render while inactive restarted every paused
+  player (`frame()` re-`play()`s a clip that isn't playing, to loop it).
+  Players now hold still while inactive, including ones created then, so
+  AVPlayer stops decoding behind another app.
+- The window state is taken from the window at every render as well as
+  from `observe_window_activation`, so a missed activation callback can't
+  leave the gate stuck.
+- Timers that redrew the whole app for history-only content: the inline
+  video frame tick (400 ms) and GIF autoplay now redraw only the
+  conversation, and nothing while inactive.
+- TDLib updates arriving while inactive (download progress, presence)
+  redraw at most every 500 ms; the last one is never dropped, and
+  activation redraws at once.
+- Sticker/emoji playback no longer evicts a clip shown in the last 500 ms
+  to decode another: with more animations on screen than the cache holds,
+  the extra ones stay stills instead of decoding and evicting each other
+  forever (each decode ended in a full redraw).
+- GIF frames and viewer video frames leave the atlas when playback stops
+  (`retire_all`; a one-line change in `media_viewer.rs`).
+
+Fixtures, inactive via `QUILL_DEMO_DEACTIVATE=1`, CPU over 6 samples:
+round video note 0.2–0.3%, GIF autoplay 0.3–0.5%, 30 animated stickers in
+the picker 0.1–0.2%, animated emoji in a chat row 0.2–0.5%. (Active
+numbers in this round are unreliable: other agents' windows took focus
+during the runs.)
+
 ## Risks
 
 - A slice that reads state of an entity rendered outside it would replay
@@ -188,6 +227,8 @@ deactivation.
 - A `QuillApp` notify made during a draw (render-time) doesn't reach the
   observer; GPUI already doesn't redraw for those, and the next real
   notify refreshes the slices.
+- While inactive, render-time work that follows TDLib updates (desktop
+  notifications, deep-link opens) can lag up to 500 ms.
 - The animation layer paints over the chat list, so anything later drawn
   inside the chat list on top of a preview emoji would be under it.
   Nothing does today.

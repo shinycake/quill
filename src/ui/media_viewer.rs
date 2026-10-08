@@ -430,7 +430,7 @@ impl QuillApp {
             quill::video::discard_viewer_frame_cache(old);
         }
         self.viewer_frame_cache_file = Some(file_id);
-        self.viewer_video_frames.clear();
+        super::image_budget::retire_all(self.viewer_video_frames.drain(..));
         self.viewer_extracting = true;
         // A step between two videos goes through `stop_viewer_video` first,
         // but cancel explicitly anyway: a fresh run must not share the
@@ -760,7 +760,7 @@ impl QuillApp {
         self.viewer_video_path = None;
         self.viewer_clock = None;
         self.viewer_pending_play = None;
-        self.viewer_video_frames.clear();
+        super::image_budget::retire_all(self.viewer_video_frames.drain(..));
         self.viewer_extracting = false;
         self.viewer_seek_slider = None;
         self.viewer_seek_scrubbing = false;

@@ -41,8 +41,10 @@ impl Render for QuillApp {
         let history_drawn = self.slices.conversation_rendered.replace(false)
             || !self.slices.conversation_shown.replace(false);
         self.inline_videos.borrow_mut().frame_start(history_drawn);
-        self.window_active
-            .set(window.is_window_active() || super::frame_clock::assume_active());
+        let active = window.is_window_active() || super::frame_clock::assume_active();
+        if self.window_active.replace(active) != active {
+            self.inline_videos.borrow_mut().set_window_active(active);
+        }
         self.media_roots_frame.borrow_mut().take();
         self.tick_animation_layer(cx);
         // Spoiler specks painted last frame keep drifting.

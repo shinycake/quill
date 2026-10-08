@@ -102,6 +102,9 @@ pub(super) struct InlineVideos {
     render: u64,
     /// The history rendered (and swept the players) this frame.
     swept: bool,
+    /// The window is in the background: muted loops hold still.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    inactive: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -152,6 +155,7 @@ impl InlineVideos {
     /// another app (tdesktop pauses GIFs and round loops there) and resume
     /// on return; a clip playing with sound keeps playing.
     pub(super) fn set_window_active(&mut self, active: bool) {
+        self.inactive = !active;
         #[cfg(target_os = "macos")]
         for slot in self.players.values_mut() {
             if slot.sound || slot.paused {
@@ -302,12 +306,16 @@ impl InlineVideos {
         path: impl FnOnce() -> Option<PathBuf>,
     ) -> Option<InlineFrame> {
         let render = self.render;
+        let inactive = self.inactive;
         let slot = match self.players.entry((chat_id, message_id)) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
                 let mut video = super::native_video::NativeVideo::open(&path()?).ok()?;
                 video.set_volume(0.0);
-                video.play();
+                // Behind another app a new muted loop waits for activation.
+                if !inactive {
+                    video.play();
+                }
                 entry.insert(Slot {
                     video,
                     seen: render,
@@ -326,7 +334,9 @@ impl InlineVideos {
         // Loop: `play` rewinds a clip that reached its end. A clip played
         // with sound goes back to its muted loop; a paused or dragged one
         // holds still.
-        let held = slot.paused || slot.seeking.is_some();
+        // Behind another app muted loops hold still (`set_window_active`);
+        // a render there must not restart them.
+        let held = slot.paused || slot.seeking.is_some() || (inactive && !slot.sound);
         if !held && !slot.video.is_playing() {
             if slot.sound {
                 slot.sound = false;

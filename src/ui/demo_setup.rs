@@ -438,7 +438,47 @@ impl QuillApp {
             }
             // The panel's library holds the demo set's contents.
             if let Some(session) = self.demo_session.as_mut() {
-                let stickers = session.stickers.stickers.clone();
+                let mut stickers = session.stickers.stickers.clone();
+                // Performance fixture: `QUILL_DEMO_STICKERS=<n>` fills the
+                // picker with `n` distinct animated stickers (more than the
+                // playback cache holds).
+                let extra: i32 = std::env::var("QUILL_DEMO_STICKERS")
+                    .ok()
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(0);
+                if demo == Some(ScreenshotDemo::ReadyStickerPlayback) && extra > 0 {
+                    let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
+                    let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                        self.demo_sink.clone();
+                    let root = super::demo::demo_media_allowlist();
+                    for i in 0..extra {
+                        let id = 9_000 + i;
+                        let name = if i % 2 == 0 {
+                            "demo-sticker.tgs"
+                        } else {
+                            "demo-sticker.webm"
+                        };
+                        let json = super::demo::demo_file_json(
+                            id,
+                            &root.join(name).to_string_lossy(),
+                            true,
+                        );
+                        if let Some(owned) =
+                            quill::telegram::client::copy_and_parse(&json, &seq, &sink)
+                        {
+                            session.apply(owned);
+                        }
+                        let mut item = stickers[0].clone();
+                        item.id = i64::from(id);
+                        item.file_id = quill::ids::FileId(id);
+                        item.format = if i % 2 == 0 {
+                            quill::telegram::envelope::StickerFormat::Tgs
+                        } else {
+                            quill::telegram::envelope::StickerFormat::Webm
+                        };
+                        stickers.push(item);
+                    }
+                }
                 session.media_library.set_stickers.insert(77, stickers);
             }
             self.media_panel.open = true;

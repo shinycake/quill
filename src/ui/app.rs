@@ -347,6 +347,9 @@ pub struct QuillApp {
     /// The next tick serves media playing with sound (allowed while the
     /// window is inactive).
     pub(super) animation_sound: std::cell::Cell<bool>,
+    /// When the TDLib poll last redrew, and whether a redraw is held back
+    /// (inactive window; see `notify_polled`).
+    pub(super) polled_notify: (std::time::Instant, bool),
     /// Whether the main window is active this frame: like tdesktop
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.

@@ -1599,6 +1599,7 @@ impl QuillApp {
             row_fx: Default::default(),
             animation_targets: Default::default(),
             animation_sound: Default::default(),
+            polled_notify: (std::time::Instant::now(), false),
             window_active: std::cell::Cell::new(true),
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),

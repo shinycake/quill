@@ -119,16 +119,24 @@ impl QuillApp {
     }
 
     /// Drop the least recently shown clip; its frames leave the atlas
-    /// once nothing can show them (`image_budget`).
-    fn evict_oldest_clip(&mut self, size: PlaybackSize) {
+    /// once nothing can show them (`image_budget`). False when every clip
+    /// was shown just now: evicting one would only decode it again next
+    /// frame, forever (more animations on screen than the cache holds).
+    fn evict_oldest_clip(&mut self, size: PlaybackSize) -> bool {
+        const ON_SCREEN: Duration = Duration::from_millis(500);
         let oldest = self
             .playback_cache(size)
             .clips
             .iter()
+            .filter(|(_, clip)| clip.used.elapsed() >= ON_SCREEN)
             .min_by_key(|(_, clip)| clip.used)
             .map(|(id, _)| *id);
-        if let Some(clip) = oldest.and_then(|id| self.playback_cache_mut(size).clips.remove(&id)) {
-            super::image_budget::retire_all(clip.frames.iter().cloned());
+        match oldest.and_then(|id| self.playback_cache_mut(size).clips.remove(&id)) {
+            Some(clip) => {
+                super::image_budget::retire_all(clip.frames.iter().cloned());
+                true
+            }
+            None => false,
         }
     }
 
@@ -169,8 +177,10 @@ impl QuillApp {
             return;
         };
         let epoch = cache.epoch;
-        if self.playback_cache(size).clips.len() >= size.capacity() {
-            self.evict_oldest_clip(size);
+        // Full of clips on screen: this one stays a still.
+        if self.playback_cache(size).clips.len() >= size.capacity() && !self.evict_oldest_clip(size)
+        {
+            return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(None));
@@ -290,7 +300,10 @@ impl QuillApp {
                         Ok(clip) => {
                             let duration = clip.duration;
                             if this.playback_cache(size).clips.len() >= size.capacity() {
-                                this.evict_oldest_clip(size);
+                                // A clip shown meanwhile may keep its place:
+                                // the cache then runs one over until the
+                                // next decode finds room.
+                                let _ = this.evict_oldest_clip(size);
                             }
                             this.playback_cache_mut(size).clips.insert(id.0, clip);
                             Some(duration)
