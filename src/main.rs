@@ -890,6 +890,10 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                 // at window points before the capture, to verify click paths.
                 #[cfg(feature = "demo-capture")]
                 if let Ok(clicks) = std::env::var("QUILL_DEMO_CLICK") {
+                    // Through the untyped handle: the typed one leases the
+                    // root view while the event dispatches, and a handler
+                    // reading it (a kit button) panicked.
+                    use gpui_kit::gpui::AnyWindowHandle;
                     for point in clicks.split(';') {
                         // `s:x,y,dy` scrolls by `dy` px at the point instead.
                         if let Some(scroll) = point.strip_prefix("s:") {
@@ -898,21 +902,24 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 .filter_map(|v| v.trim().parse().ok())
                                 .collect();
                             if let [x, y, dy] = parts[..] {
-                                let _ = demo_window.update(cx, |_, window, cx| {
-                                    use gpui_kit::gpui::{
-                                        Modifiers, PlatformInput, ScrollDelta, ScrollWheelEvent,
-                                        TouchPhase, point, px,
-                                    };
-                                    window.dispatch_event(
-                                        PlatformInput::ScrollWheel(ScrollWheelEvent {
-                                            position: point(px(x), px(y)),
-                                            delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
-                                            modifiers: Modifiers::default(),
-                                            touch_phase: TouchPhase::Moved,
-                                        }),
-                                        cx,
-                                    );
-                                });
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        use gpui_kit::gpui::{
+                                            Modifiers, PlatformInput, ScrollDelta,
+                                            ScrollWheelEvent, TouchPhase, point, px,
+                                        };
+                                        window.dispatch_event(
+                                            PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                                position: point(px(x), px(y)),
+                                                delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                                                modifiers: Modifiers::default(),
+                                                touch_phase: TouchPhase::Moved,
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
                             }
                             cx.background_executor()
                                 .timer(Duration::from_millis(400))
@@ -928,7 +935,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                         };
                         let position =
                             gpui_kit::gpui::point(gpui_kit::gpui::px(x), gpui_kit::gpui::px(y));
-                        let _ = demo_window.update(cx, |_, window, cx| {
+                        let _ = AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
                             use gpui_kit::gpui::{
                                 Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
                                 PlatformInput,
@@ -958,7 +965,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                         cx.background_executor()
                             .timer(Duration::from_millis(120))
                             .await;
-                        let _ = demo_window.update(cx, |_, window, cx| {
+                        let _ = AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
                             use gpui_kit::gpui::{
                                 Modifiers, MouseButton, MouseUpEvent, PlatformInput,
                             };

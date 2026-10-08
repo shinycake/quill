@@ -168,6 +168,9 @@ the part this removes.
   and a text behind spoilers; read to the end.
 - `…,panel` / `…,menu` / `…,select`: the emoji panel, a message menu or
   selection mode over that history, to check what covers animated content.
+- `QUILL_DEMO_CLICK` (demo-capture builds) now dispatches through the
+  untyped window handle: clicking a kit button (the viewer's close, the
+  emoji button) panicked reading the leased root view.
 
 ## Risks
 
@@ -182,3 +185,72 @@ the part this removes.
 - The layer redraws elements it builds (video tiles, pills) every frame; it
   is a few divs per visible clip, but a history with many visible clips
   pays that per tick.
+
+## What's left (measured for the next round)
+
+### Memory
+
+Release build with `demo-capture` (for scripted clicks), 1200×900,
+`QUILL_DEMO_STRESS=3000,2000` with 3000 distinct 160×160 avatar files,
+`QUILL_DEMO_HISTORY_ANIM=all,spoiler`; `vmmap --summary` physical
+footprint, atlas = `IOAccelerator (graphics)`.
+
+| State | Footprint | Atlas | Malloc (dirty) |
+| --- | --- | --- | --- |
+| Idle after start | 145.6 MB | 22.3 MB | 31 MB |
+| Media viewer open (video playing) | 148.8 MB | 22.3 MB | 58 MB |
+| Viewer opened and closed once | 153.8 MB | 24.4 MB | 59 MB |
+| Opened and closed three times | 150.8 MB | 22.3 MB | 60 MB |
+| Five chats opened, back to the first | 132.8 MB | 14.3 MB | 51 MB |
+| History scrolled through 2000 messages, then idle 40 s | 167.4 MB | 26.4 MB | 73 MB |
+| Chat list scrolled ~1600 rows, then idle 40 s | 251.2 MB | 76.1 MB | 112 MB |
+| All of the above, then idle 40 s | 277.4 MB | 82.2 MB | 130 MB |
+| Chat list scrolling continuously (plateau after 20 s) | 455–460 MB | 174 MB | 72 MB (+142 MB compressed) |
+
+The viewer and chat switches return to the baseline (repeated opens don't
+grow). What doesn't come back is the image memory of a scroll: nothing
+trims while idle, and atlas textures are freed only once every tile in them
+is gone (`gpui-pre-apple` `metal_atlas.rs` `remove`).
+
+Top remaining memory costs, with estimated wins:
+
+1. Path images (avatars, photos): up to 128 MB decoded
+   (`ui/image_budget.rs` `IMAGE_BUDGET_BYTES`) plus their atlas copies,
+   kept after scrolling stops. Trimming to what's on screen after ~2 s
+   without scrolling, and a smaller budget (48–64 MB), would bring the
+   scrolled states back near 150–170 MB and the scrolling plateau down by
+   an estimated 150–200 MB.
+2. Avatars decode at file size (160×160 = 100 KB each) for 40 pt rows; a
+   cache that decodes at display size (80–96 px on Retina) would cut
+   decoded avatar bytes by ~65% (a custom `ImageCache` loader in
+   `image_budget.rs`).
+3. Sticker and emoji clips: up to 16 stickers × 120 frames × 64 KB
+   (123 MB) and 160 emoji × 36 frames × 12.5 KB (72 MB) decoded, plus atlas
+   copies of the frames shown (`ui/sticker_playback.rs` `PlaybackSize`).
+   A byte budget instead of a clip count, and 30 fps decoding of 60 fps
+   Lottie (half the frames), would bound a sticker-heavy chat at an
+   estimated 60–80 MB.
+4. Malloc grows ~20 MB scrolling a 2000-message history and stays (row
+   snapshots in `history_rows`, text layout caches); worth a heap profile
+   before acting.
+
+### CPU
+
+1. Scrolling the history: 19–22% CPU, the conversation re-rendering for
+   every wheel event (58/s). `sample` shows 24% of the main thread in
+   `Window::draw`, more than half of it Taffy layout (`layout_as_root` /
+   `compute_layouts`) of the whole conversation, header and composer
+   included. Header and composer as their own slices would skip their
+   layout on scroll steps (estimate 15–25% of the scroll cost); laying out
+   only rows whose inputs changed needs per-row caching GPUI can't do under
+   a re-rendering ancestor.
+2. Scrolling the chat list: 15–16% (`codex-perf-pass`), the same pattern.
+3. Inline video: 6.6–7.5% for one clip, mostly AVFoundation decoding and
+   surface presentation outside the main thread. A layered tile paints the
+   surface twice (the row's frame under the layer's); dropping the row's
+   copy while layered saves one surface per clip per frame (small).
+4. Animated stickers tick the layer at up to 60 fps (Lottie's rate); at
+   30 fps the layer and presentation cost halves for sticker-only chats.
+5. Every layer tick renders the root `QuillApp` view (`app_render.rs`):
+   0.8% of the main thread with two stickers; fine today, but everything
+   added to `QuillApp::render` is paid per animation frame.
