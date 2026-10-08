@@ -904,10 +904,8 @@ impl Session {
                     ) if *slot == generation
                 );
                 if !stale {
-                    self.deep_link = Some(DeepLinkState::ShowText(format!(
-                        "Couldn't open the link (error {}).",
-                        err.code
-                    )));
+                    let text = deep_link_error_text(self.deep_link.as_ref(), err.code);
+                    self.deep_link = Some(DeepLinkState::ShowText(text));
                 }
             }
             // Phase D3c: a failed first page lands in the fetch
@@ -1408,5 +1406,25 @@ impl Session {
                 flood_wait_secs: err.flood_wait_secs,
             });
         }
+    }
+}
+
+/// tdesktop's wording for a failed link (`lng_username_not_found`,
+/// `lng_group_invite_bad_link`); other failures keep the error code.
+pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> String {
+    let not_found = matches!(code, 400 | 404);
+    match flow {
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::OpenUsername { domain, .. },
+            ..
+        }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::JoinInvite { .. },
+            ..
+        }) if not_found => "This invite link is broken or has expired.".to_string(),
+        Some(DeepLinkState::ResolvingInfo { .. }) if not_found => {
+            "This link isn't supported by Quill.".to_string()
+        }
+        _ => format!("Couldn't open the link (error {code})."),
     }
 }

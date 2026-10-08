@@ -102,3 +102,7 @@ Install the packaged bundle, launch it, then
 `open "tg://resolve?domain=telegram"`; the running window raises and resolves
 the username. Running `Quill.app/Contents/MacOS/quill` a second time exits
 immediately and, with a `tg://` argument, forwards it.
+
+## Link routing fix (live-test finding)
+
+`getDeepLinkInfo` is TDLib's lookup for server-side deep links and answers 404 for `tg://resolve?domain=` and `t.me/<user>`. Like tdesktop's `openLocalUrl`, links are now routed by shape first (`parse_deep_link_url`: `tg://` forms plus `t.me|telegram.me|telegram.dog` usernames, posts, stories, `+hash`, `joinchat`, `c/<id>/<post>`) straight to `searchPublicChat` / `checkChatInviteLink` / `getChat`; only links with no local form still go to `getDeepLinkInfo`. Failures use tdesktop wording ("The username ... is not occupied by anyone.", "This invite link is broken or has expired."); other errors keep the code. Covered by recorded-response tests in `src/connect/tests/deep_link_routing.rs`.
