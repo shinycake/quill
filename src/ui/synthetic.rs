@@ -217,6 +217,9 @@ pub(crate) struct MessageChrome {
     pub footer_inline: bool,
     /// The bubble ends with a picture: paint the footer on it as a pill.
     pub footer_overlay: bool,
+    /// Builds `footer` again: an animation layer drawing a video under the
+    /// pill redraws the pill above it (`anim_layer::mirror`).
+    pub footer_rebuild: Option<std::rc::Rc<dyn Fn() -> Option<AnyElement>>>,
     /// Media-led bubble: thin inset instead of text padding.
     pub media_led: bool,
     /// Hover-revealed control in the bubble's top-right corner (message
@@ -312,6 +315,7 @@ fn message_bubble_with_quote(
         footer,
         footer_inline,
         footer_overlay,
+        footer_rebuild,
         media_led,
         actions,
     } = chrome;
@@ -406,17 +410,28 @@ fn message_bubble_with_quote(
         .line_height(relative(1.4))
         .when(media_led && !look.plain, |this| this.p_0())
         .map(|this| match footer {
-            Some(footer) if footer_overlay => this.child(
-                div()
-                    .absolute()
-                    .right(px(10.))
-                    .bottom(px(10.))
-                    .px_1p5()
-                    .rounded_full()
-                    .bg(gpui_kit::black().opacity(0.45))
-                    .text_color(gpui_kit::white())
-                    .child(footer),
-            ),
+            Some(footer) if footer_overlay => {
+                let pill = |footer: AnyElement| {
+                    div()
+                        .px_1p5()
+                        .rounded_full()
+                        .bg(gpui_kit::black().opacity(0.45))
+                        .text_color(gpui_kit::white())
+                        .child(footer)
+                };
+                let pill_at = |footer| pill(footer).absolute().right(px(10.)).bottom(px(10.));
+                match footer_rebuild {
+                    // Over an inline video the history's animation layer
+                    // draws: it draws the pill again, above the video.
+                    Some(rebuild) => {
+                        this.child(super::anim_layer::mirror(pill_at(footer), move || {
+                            pill(rebuild().unwrap_or_else(|| Empty.into_any_element()))
+                                .into_any_element()
+                        }))
+                    }
+                    None => this.child(pill_at(footer)),
+                }
+            }
             Some(footer) if footer_inline => {
                 this.child(div().absolute().right(px(12.)).bottom(px(7.)).child(footer))
             }

@@ -522,9 +522,9 @@ pub(super) fn session_history_row(
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
     animation_frame: Option<Arc<RenderImage>>,
-    sticker_frame: Option<Arc<RenderImage>>,
+    sticker_frame: Option<super::sticker_playback::AnimatedVisual>,
     // Decoded animations of the message's custom emoji (by custom emoji id).
-    animated_emoji: HashMap<i64, Arc<RenderImage>>,
+    animated_emoji: HashMap<i64, super::sticker_playback::AnimatedVisual>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
     // The row's clip playing inline (muted autoplay), if any.
@@ -1199,6 +1199,7 @@ pub(super) fn session_history_row(
                 look.font,
                 // Captions don't resolve custom emoji in this slice (text fallback).
                 &HashMap::new(),
+                &HashMap::new(),
                 (below && reserve_footer).then(|| footer_reserve(message.is_outgoing)),
                 cx,
             )
@@ -1221,55 +1222,59 @@ pub(super) fn session_history_row(
             .flatten(),
     ) {
         (Some(media), Some(cover_opacity)) => {
-            let cover = match effective_content(&message.content, message.ephemeral.as_ref()) {
-                MessageContent::Photo(photo) if photo.has_spoiler => {
-                    let (frame_w, frame_h) = photo
-                        .largest_size()
-                        .or_else(|| photo.thumb_size())
-                        .map(|size| media_frame(size.width, size.height))
-                        .unwrap_or_else(|| media_frame(0, 0));
-                    Some(spoiler_cover(
-                        message.id.0 as u64,
-                        message.chat_id,
-                        message.id,
-                        photo.minithumbnail.as_ref(),
-                        None,
-                        frame_w,
-                        frame_h,
-                        corners,
-                        cx,
-                    ))
+            // Built outside the animation layer: the cover fades under an
+            // opacity the layer can't apply, so the slice draws its specks.
+            let cover = super::anim_layer::with_layer(None, || {
+                match effective_content(&message.content, message.ephemeral.as_ref()) {
+                    MessageContent::Photo(photo) if photo.has_spoiler => {
+                        let (frame_w, frame_h) = photo
+                            .largest_size()
+                            .or_else(|| photo.thumb_size())
+                            .map(|size| media_frame(size.width, size.height))
+                            .unwrap_or_else(|| media_frame(0, 0));
+                        Some(spoiler_cover(
+                            message.id.0 as u64,
+                            message.chat_id,
+                            message.id,
+                            photo.minithumbnail.as_ref(),
+                            None,
+                            frame_w,
+                            frame_h,
+                            corners,
+                            cx,
+                        ))
+                    }
+                    MessageContent::Video(video) if video.has_spoiler => {
+                        let (frame_w, frame_h) = media_frame(video.width, video.height);
+                        Some(spoiler_cover(
+                            message.id.0 as u64,
+                            message.chat_id,
+                            message.id,
+                            None,
+                            None,
+                            frame_w,
+                            frame_h,
+                            corners,
+                            cx,
+                        ))
+                    }
+                    MessageContent::Animation(animation) if animation.has_spoiler => {
+                        let (frame_w, frame_h) = media_frame(animation.width, animation.height);
+                        Some(spoiler_cover(
+                            message.id.0 as u64,
+                            message.chat_id,
+                            message.id,
+                            None,
+                            None,
+                            frame_w,
+                            frame_h,
+                            corners,
+                            cx,
+                        ))
+                    }
+                    _ => None,
                 }
-                MessageContent::Video(video) if video.has_spoiler => {
-                    let (frame_w, frame_h) = media_frame(video.width, video.height);
-                    Some(spoiler_cover(
-                        message.id.0 as u64,
-                        message.chat_id,
-                        message.id,
-                        None,
-                        None,
-                        frame_w,
-                        frame_h,
-                        corners,
-                        cx,
-                    ))
-                }
-                MessageContent::Animation(animation) if animation.has_spoiler => {
-                    let (frame_w, frame_h) = media_frame(animation.width, animation.height);
-                    Some(spoiler_cover(
-                        message.id.0 as u64,
-                        message.chat_id,
-                        message.id,
-                        None,
-                        None,
-                        frame_w,
-                        frame_h,
-                        corners,
-                        cx,
-                    ))
-                }
-                _ => None,
-            };
+            });
             Some(match cover {
                 Some(cover) => div()
                     .relative()
@@ -1373,6 +1378,12 @@ pub(super) fn session_history_row(
         }
         chrome.footer_inline = footer_inline;
         chrome.footer_overlay = footer_overlay;
+        if footer_overlay && chrome.footer.is_some() {
+            let (date, pending, signature) = (message.date, message.pending, signature.clone());
+            chrome.footer_rebuild = Some(std::rc::Rc::new(move || {
+                message_footer_meta(date, pending, receipt, views, signature.clone())
+            }));
+        }
         chrome.media_led = media_led;
         chrome.actions = more_btn.take().map(IntoElement::into_any_element);
         chrome

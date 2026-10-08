@@ -363,6 +363,152 @@ pub(super) fn demo_stress_size() -> Option<(usize, usize)> {
     ))
 }
 
+/// Animated content `QUILL_DEMO_HISTORY_ANIM` adds to the open chat.
+/// In the order they're added (the newest last, at the bottom).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(super) enum HistoryAnim {
+    /// A photo and a text behind spoilers (not part of `all`).
+    Spoiler,
+    /// A video that autoplays inline (macOS).
+    Video,
+    /// A text message with three animated custom emoji.
+    Emoji,
+    /// Two animated stickers (TGS and WebM).
+    Stickers,
+    /// A round video message that autoplays inline (macOS).
+    Note,
+}
+
+/// `QUILL_DEMO_HISTORY_ANIM=stickers,emoji,video,note,spoiler` (any
+/// subset; `all` for the first four): the ready-chats fixture's open chat
+/// ends with that content, to measure what history animations cost.
+pub(super) fn demo_history_anim() -> Vec<HistoryAnim> {
+    let Ok(value) = std::env::var("QUILL_DEMO_HISTORY_ANIM") else {
+        return Vec::new();
+    };
+    let all = [
+        HistoryAnim::Video,
+        HistoryAnim::Emoji,
+        HistoryAnim::Stickers,
+        HistoryAnim::Note,
+    ];
+    let mut out: Vec<HistoryAnim> = value
+        .split(',')
+        .map(str::trim)
+        .flat_map(|token| match token {
+            "video" => &all[0..1],
+            "emoji" => &all[1..2],
+            "stickers" => &all[2..3],
+            "note" => &all[3..4],
+            "all" => &all[..],
+            "spoiler" => &[HistoryAnim::Spoiler],
+            _ => &[],
+        })
+        .copied()
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn history_anim_fixture(wanted: &[HistoryAnim]) -> Vec<String> {
+    let root = demo_media_allowlist();
+    let file = |id: i32, name: &str| demo_file_json(id, &root.join(name).to_string_lossy(), true);
+    let mut out = Vec::new();
+    let mut id = 90_000;
+    let mut message = |content: String, outgoing: bool| {
+        id += 1;
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":{outgoing},"date":1790633000,"content":{content}}}}}"#
+        )
+    };
+    for item in wanted {
+        match item {
+            HistoryAnim::Spoiler => {
+                let photo = demo_file_json(48, &demo_thumb_png_path(), true);
+                out.push(message(
+                    format!(
+                        r#"{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":{{"@type":"minithumbnail","width":40,"height":30,"data":"{DEMO_MINITHUMB}"}},"sizes":[{{"@type":"photoSize","type":"m","photo":{photo},"width":320,"height":240,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":true,"is_secret":false}}"#
+                    ),
+                    true,
+                ));
+                out.push(message(
+                    r#"{"@type":"messageText","text":{"@type":"formattedText","text":"The answer is forty-two, of course.","entities":[{"@type":"textEntity","offset":14,"length":10,"type":{"@type":"textEntityTypeSpoiler"}}]}}"#
+                        .to_string(),
+                    false,
+                ));
+            }
+            HistoryAnim::Stickers => {
+                for (file_id, name, format, outgoing) in [
+                    (44, "demo-sticker.tgs", "stickerFormatTgs", false),
+                    (45, "demo-sticker.webm", "stickerFormatWebm", true),
+                ] {
+                    let sticker = file(file_id, name);
+                    out.push(message(
+                        format!(
+                            r#"{{"@type":"messageSticker","is_premium":false,"sticker":{{"@type":"sticker","id":"{file_id}","set_id":"77","width":128,"height":128,"emoji":"😀","format":{{"@type":"{format}"}},"full_type":{{"@type":"stickerFullTypeRegular","premium_animation":null}},"thumbnail":null,"sticker":{sticker}}}}}"#
+                        ),
+                        outgoing,
+                    ));
+                }
+            }
+            HistoryAnim::Emoji => {
+                // Three custom emoji (UTF-16 offsets 0, 3 and 6).
+                let entity = |offset: u32| {
+                    format!(
+                        r#"{{"@type":"textEntity","offset":{offset},"length":2,"type":{{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4343"}}}}"#
+                    )
+                };
+                out.push(message(
+                    format!(
+                        r#"{{"@type":"messageText","text":{{"@type":"formattedText","text":"😀 😀 😀 animated custom emoji","entities":[{},{},{}]}}}}"#,
+                        entity(0),
+                        entity(3),
+                        entity(6)
+                    ),
+                    false,
+                ));
+            }
+            HistoryAnim::Video => {
+                let clip = file(46, "demo-clip-12s.mp4");
+                out.push(message(
+                    format!(
+                        r#"{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":640,"height":360,"file_name":"clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":null,"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}"#
+                    ),
+                    true,
+                ));
+            }
+            HistoryAnim::Note => {
+                let clip = file(47, "demo-video-note.mp4");
+                out.push(message(
+                    format!(
+                        r#"{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":8,"waveform":"","length":240,"minithumbnail":null,"thumbnail":null,"speech_recognition_result":null,"video":{clip}}},"is_viewed":true,"is_secret":false}}"#
+                    ),
+                    false,
+                ));
+            }
+        }
+    }
+    if !out.is_empty() {
+        // Read up to the end, so the chat opens at its newest messages.
+        out.push(
+            r#"{"@type":"updateChatReadInbox","chat_id":11,"last_read_inbox_message_id":99999,"unread_count":0}"#
+                .to_string(),
+        );
+    }
+    out
+}
+
+/// The first animated sticker message `QUILL_DEMO_HISTORY_ANIM=all` adds.
+pub(super) const HISTORY_ANIM_STICKER: i64 = 90_003;
+
+/// Whether `QUILL_DEMO_HISTORY_ANIM` lists `token` (`panel`, `menu`,
+/// `select`: something over the animated history).
+pub(super) fn demo_history_extra(token: &str) -> bool {
+    std::env::var("QUILL_DEMO_HISTORY_ANIM")
+        .is_ok_and(|value| value.split(',').any(|item| item.trim() == token))
+}
+
 /// `QUILL_DEMO_STRESS_AVATARS=<dir>`: a directory of stress-chat photos.
 pub(super) fn demo_stress_avatar_dir() -> Option<PathBuf> {
     std::env::var_os("QUILL_DEMO_STRESS_AVATARS").map(PathBuf::from)
@@ -480,7 +626,18 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
             session.apply(owned);
         }
     }
-    if matches!(kind, DemoSeed::ReadyChats) && demo_stress_size().is_some() {
+    let history_anim = match kind {
+        DemoSeed::ReadyChats => demo_history_anim(),
+        _ => Vec::new(),
+    };
+    for json in history_anim_fixture(&history_anim) {
+        if let Some(owned) = copy_and_parse(&json, &seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    if matches!(kind, DemoSeed::ReadyChats)
+        && (demo_stress_size().is_some() || history_anim.contains(&HistoryAnim::Emoji))
+    {
         // The animated custom emoji the newest stress chat previews.
         let path = demo_media_allowlist().join("demo-sticker.tgs");
         if let Some(owned) = copy_and_parse(

@@ -184,8 +184,9 @@ impl QuillApp {
             (!meta.is_empty()).then(|| meta.join(" · "))
         });
         let secret_line = self.secret_pending_subtitle(chat_id);
-        if typing {
-            self.request_animation_tick(12, cx);
+        // The conversation's animation layer ticks the dots on its own.
+        if typing && super::anim_layer::current().is_none() {
+            self.request_animation_tick(super::activity_indicator::FPS, cx);
         }
         let status_indicator = if typing {
             Some(
@@ -550,13 +551,15 @@ impl QuillApp {
                             self.media_panel_open() && self.media_panel.reaction.is_none(),
                             |this| {
                                 let panel = self.media_panel(cx);
+                                // Over the history: animations under it are
+                                // drawn by the conversation (`anim_layer`).
                                 this.child(
                                     div()
                                         .absolute()
                                         .left(px(8.))
                                         .bottom(relative(1.))
                                         .pb_1()
-                                        .child(panel),
+                                        .child(super::anim_layer::occluder(panel)),
                                 )
                             },
                         )
@@ -572,7 +575,7 @@ impl QuillApp {
                                     .pb(px(24.))
                                     .flex()
                                     .justify_center()
-                                    .child(circle),
+                                    .child(super::anim_layer::occluder(circle)),
                             )
                         })
                         .when(
@@ -793,7 +796,7 @@ impl QuillApp {
             })
             .when_some(self.channel_footer(cx), |this, footer| this.child(footer))
             // A deleted message's dust drifts over everything.
-            .children(dust)
+            .children(dust.map(super::anim_layer::occluder))
     }
 
     pub(super) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1547,6 +1550,17 @@ impl QuillApp {
         let top_probe = self.scroll_top_probe.clone();
         let reveal = self.history_reveal(cx);
         let reveal_probe = self.motion.reveal_probe();
+        let jump_zone = self.history_scroller.read(cx).is_scrolled_up().then(|| {
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .h(px(56.))
+                .flex()
+                .justify_center()
+                .child(super::anim_layer::occluder(div().w(px(128.)).h_full()))
+        });
         super::selectable_text::selection_viewport(
             div()
                 .id(id)
@@ -1646,7 +1660,11 @@ impl QuillApp {
                 )
                 .children(date_pill)
                 // tdesktop's corner "@" / heart buttons.
-                .children(corner_buttons),
+                .children(corner_buttons.map(super::anim_layer::occluder))
+                // Where the scroller's jump-to-latest button floats while
+                // scrolled up (it is drawn inside the kit's scroller): what
+                // animates under it is drawn by the conversation.
+                .children(jump_zone),
         )
         .into_any_element()
     }
@@ -1758,11 +1776,13 @@ impl QuillApp {
                 let key = (message.chat_id.0, message.id.0 as u64, u64::MAX, false);
                 // lib_ui draws spoiler frames every 33 ms; a reveal fades
                 // the cover out.
-                if spoiler
-                    && (!self.spoiler_revealed.contains(&key)
-                        || super::spoiler_fx::reveal_fade(key).is_some())
-                {
-                    self.request_animation_tick(30, cx);
+                // Outside an animation layer (`anim_layer`), and while a
+                // reveal fades the cover, the specks are redrawn with the
+                // history.
+                let covered = !self.spoiler_revealed.contains(&key);
+                let fading = super::spoiler_fx::reveal_fade(key).is_some();
+                if spoiler && (fading || (covered && super::anim_layer::current().is_none())) {
+                    self.request_animation_tick(super::spoiler_fx::SPECKS_FPS, cx);
                 }
                 let row = session_history_row(
                     message,
@@ -1780,7 +1800,7 @@ impl QuillApp {
                     inputs.animation_frame.clone(),
                     match &message.content {
                         MessageContent::Sticker(sticker) => {
-                            self.sticker_image(sticker.file_id, sticker.format, cx)
+                            self.history_sticker(sticker.file_id, sticker.format, cx)
                         }
                         _ => None,
                     },

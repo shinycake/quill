@@ -597,7 +597,16 @@ pub(super) fn animation_attachment(
     let (frame_w, frame_h) = media_frame(animation.width, animation.height);
     let live = inline.is_some();
     let picture = if let Some(inline) = inline {
-        inline_surface(inline, frame_w, frame_h, corners)
+        // The badge rides with the clip: an animation layer redraws both.
+        live_tile(inline, move |frame| {
+            div()
+                .relative()
+                .w(frame_w)
+                .h(frame_h)
+                .child(inline_surface(frame, frame_w, frame_h, corners))
+                .child(gif_badge())
+                .into_any_element()
+        })
     } else if !blocked && let Some(path) = visual {
         img(path)
             .id(("gif-img", row_id))
@@ -655,18 +664,7 @@ pub(super) fn animation_attachment(
                 )
                 .group(MEDIA_VISUAL_GROUP)
                 .child(picture)
-                .child(
-                    div()
-                        .absolute()
-                        .top_1()
-                        .left_1()
-                        .px_1p5()
-                        .rounded_md()
-                        .bg(gpui_kit::black().opacity(0.5))
-                        .text_xs()
-                        .text_color(gpui_kit::white())
-                        .child("GIF"),
-                )
+                .when(!live, |this| this.child(gif_badge()))
                 // Autoplaying GIFs show no play control (Telegram Desktop).
                 .when(!blocked && !live, |this| {
                     this.child(
@@ -759,8 +757,23 @@ pub(super) fn video_attachment(
     let blocked = video.is_secret || video.has_spoiler;
     let (frame_w, frame_h) = media_frame(video.width, video.height);
     let live = inline.is_some();
+    let total = video.duration;
     let picture = if let Some(inline) = inline {
-        inline_surface(inline, frame_w, frame_h, corners)
+        // The time left counts down with the clip: an animation layer
+        // redraws the badge with it.
+        live_tile(inline, move |frame| {
+            let left = match frame.remaining_secs {
+                Some(left) => format_voice_duration(left.ceil() as i32),
+                None => format_voice_duration(total),
+            };
+            div()
+                .relative()
+                .w(frame_w)
+                .h(frame_h)
+                .child(inline_surface(frame, frame_w, frame_h, corners))
+                .child(video_badge(left, true))
+                .into_any_element()
+        })
     } else if !blocked && let Some(path) = visual {
         img(path)
             .id(("video-img", row_id))
@@ -825,28 +838,7 @@ pub(super) fn video_attachment(
                 })
                 .group(MEDIA_VISUAL_GROUP)
                 .child(picture)
-                .child(
-                    div()
-                        .absolute()
-                        .bottom_1()
-                        .left_1()
-                        .px_1p5()
-                        .rounded_md()
-                        .bg(gpui_kit::black().opacity(0.5))
-                        .text_xs()
-                        .text_color(gpui_kit::white())
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .child(duration)
-                        .when(live, |this| {
-                            this.child(
-                                Icon::new(gpui_kit::assets::IconName::VolumeX)
-                                    .size(px(12.))
-                                    .text_color(gpui_kit::white()),
-                            )
-                        }),
-                )
+                .when(!live, |this| this.child(video_badge(duration, false)))
                 .when(!blocked && !live, |this| {
                     this.child(
                         div()
@@ -1026,8 +1018,25 @@ pub(super) fn video_note_attachment(
             cx,
         )
     });
+    // A muted loop drawn by the conversation's animation layer: the ring
+    // and the time ride with the video.
+    let layered = inline.as_ref().is_some_and(|inline| inline.live.is_some());
+    let ring_color = cx.theme().primary;
     let picture = if let Some(inline) = inline {
-        round_inline_surface(inline)
+        let duration = duration.clone();
+        live_tile(inline, move |frame| {
+            let video = round_inline_surface(frame);
+            if !layered {
+                return video;
+            }
+            div()
+                .relative()
+                .size(px(VIDEO_NOTE_DIAMETER))
+                .child(video)
+                .when(unseen, |this| this.child(unseen_ring(ring_color)))
+                .child(note_duration_badge(duration.clone(), unseen))
+                .into_any_element()
+        })
     } else {
         match visual.filter(|_| !blocked) {
             // GPUI clips overflow to rectangles: the image and the placeholder
@@ -1129,15 +1138,8 @@ pub(super) fn video_note_attachment(
                 .child(picture)
                 .children(seek_ring)
                 // Over the video's mask, so the ring stays visible.
-                .when(unseen && live, |this| {
-                    this.child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .rounded_full()
-                            .border_2()
-                            .border_color(cx.theme().primary),
-                    )
+                .when(unseen && live && !layered, |this| {
+                    this.child(unseen_ring(ring_color))
                 })
                 // A looping round video shows no play control.
                 .when(!blocked && !live, |this| {
@@ -1157,32 +1159,9 @@ pub(super) fn video_note_attachment(
                             )),
                     )
                 })
-                .child(
-                    div()
-                        .absolute()
-                        .bottom(px(14.))
-                        .left_0()
-                        .right_0()
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1()
-                                .px_1p5()
-                                .rounded_md()
-                                .bg(gpui_kit::black().opacity(0.5))
-                                .text_xs()
-                                .text_color(gpui_kit::white())
-                                .child(duration)
-                                .when(unseen, |this| {
-                                    this.child(
-                                        div().size(px(5.)).rounded_full().bg(gpui_kit::white()),
-                                    )
-                                }),
-                        ),
-                ),
+                .when(!layered, |this| {
+                    this.child(note_duration_badge(duration, unseen))
+                }),
         )
         // MED2: transcription under the play button (schema 1.8.67
         // `speechRecognitionResult` on `videoNote`).
@@ -1202,18 +1181,30 @@ pub(super) fn sticker_attachment(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    animated: Option<Arc<RenderImage>>,
+    animated: Option<super::sticker_playback::AnimatedVisual>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    if let Some(image) = animated {
-        return img(image)
-            .id(("sticker-animated", row_id))
-            .mt_2()
-            .w(px(128.))
-            .h(px(128.))
-            .aspect_ratio(px(128.) / px(128.))
-            .object_fit(ObjectFit::Contain)
-            .into_any_element();
+    match animated {
+        Some(super::sticker_playback::AnimatedVisual::Image(image)) => {
+            return img(image)
+                .id(("sticker-animated", row_id))
+                .mt_2()
+                .w(px(128.))
+                .h(px(128.))
+                .aspect_ratio(px(128.) / px(128.))
+                .object_fit(ObjectFit::Contain)
+                .into_any_element();
+        }
+        // Drawn by the conversation's animation layer (`anim_layer`):
+        // Lottie plays at up to 60 fps.
+        Some(super::sticker_playback::AnimatedVisual::Layered(clip)) => {
+            return super::anim_layer::frames(clip, 60)
+                .mt_2()
+                .flex_none()
+                .size(px(128.))
+                .into_any_element();
+        }
+        None => {}
     }
     let display_id = sticker.display_file_id().unwrap_or(sticker.file_id);
     let fallback_label = sticker_label(sticker);
@@ -2198,6 +2189,100 @@ fn round_inline_surface(inline: super::inline_video::InlineFrame) -> AnyElement 
         .into_any_element()
 }
 
+/// An autoplaying clip's tile, `visual` of its frame. When the clip is
+/// layered (`InlineFrame::live`), the conversation's animation layer
+/// redraws the tile from the player's current frame every tick, over the
+/// one the row rendered (`anim_layer::tile`).
+fn live_tile(
+    inline: super::inline_video::InlineFrame,
+    visual: impl Fn(super::inline_video::InlineFrame) -> AnyElement + 'static,
+) -> AnyElement {
+    match inline.live.clone() {
+        Some(live) => {
+            let visual = std::rc::Rc::new(visual);
+            let rebuild = visual.clone();
+            super::anim_layer::tile(visual(inline), 30, move || live.frame().map(|f| rebuild(f)))
+                .into_any_element()
+        }
+        None => visual(inline),
+    }
+}
+
+/// The "GIF" badge in a GIF tile's top-left corner.
+fn gif_badge() -> Div {
+    div()
+        .absolute()
+        .top_1()
+        .left_1()
+        .px_1p5()
+        .rounded_md()
+        .bg(gpui_kit::black().opacity(0.5))
+        .text_xs()
+        .text_color(gpui_kit::white())
+        .child("GIF")
+}
+
+/// A video tile's duration (time left while it autoplays, with a muted
+/// mark) in its bottom-left corner.
+fn video_badge(duration: String, muted: bool) -> Div {
+    div()
+        .absolute()
+        .bottom_1()
+        .left_1()
+        .px_1p5()
+        .rounded_md()
+        .bg(gpui_kit::black().opacity(0.5))
+        .text_xs()
+        .text_color(gpui_kit::white())
+        .flex()
+        .items_center()
+        .gap_1()
+        .child(duration)
+        .when(muted, |this| {
+            this.child(
+                Icon::new(gpui_kit::assets::IconName::VolumeX)
+                    .size(px(12.))
+                    .text_color(gpui_kit::white()),
+            )
+        })
+}
+
+/// The accent ring over an unseen incoming round video.
+fn unseen_ring(color: Hsla) -> Div {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded_full()
+        .border_2()
+        .border_color(color)
+}
+
+/// A round video's duration, centered near its bottom; a dot while unseen.
+fn note_duration_badge(duration: String, unseen: bool) -> Div {
+    div()
+        .absolute()
+        .bottom(px(14.))
+        .left_0()
+        .right_0()
+        .flex()
+        .justify_center()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .px_1p5()
+                .rounded_md()
+                .bg(gpui_kit::black().opacity(0.5))
+                .text_xs()
+                .text_color(gpui_kit::white())
+                .child(duration)
+                .when(unseen, |this| {
+                    this.child(div().size(px(5.)).rounded_full().bg(gpui_kit::white()))
+                }),
+        )
+}
+
 /// A hidden spoiler (photo, video or GIF): Telegram Desktop covers it with
 /// a soft preview under drifting "dust"; a click reveals it for good (until
 /// the app restarts). The preview is the inline minithumbnail when there
@@ -2230,13 +2315,11 @@ pub(super) fn spoiler_cover(
         });
     // lib_ui `kImageSpoilerDarkenAlpha` (32 / 255) over the preview.
     let shade = if preview.is_some() { 0.125 } else { 0.1 };
-    // tdesktop's spoiler "mess": the shared, pre-rendered speck tile.
-    let dust = canvas(
-        |_, _, _| {},
-        |bounds, _, window, _| {
-            super::spoiler_fx::paint_media_specks(bounds, window);
-        },
-    )
+    // tdesktop's spoiler "mess": the shared, pre-rendered speck tile,
+    // drawn by the conversation's animation layer (`anim_layer`).
+    let dust = super::anim_layer::painter(super::spoiler_fx::SPECKS_FPS, |bounds, window| {
+        super::spoiler_fx::paint_media_specks(bounds, window);
+    })
     .absolute()
     .inset_0()
     .size_full();

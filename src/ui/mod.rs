@@ -1,5 +1,6 @@
 mod account_lifecycle;
 mod accounts;
+mod anim_layer;
 mod app_slice;
 mod appearance;
 mod auth_recovery;

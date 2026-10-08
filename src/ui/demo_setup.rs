@@ -160,6 +160,26 @@ impl QuillApp {
                 input.set_value("hello from composer", window, cx);
             });
         }
+        // `QUILL_DEMO_HISTORY_ANIM=…,panel|menu|select`: something over the
+        // animated history, to check what the animation layer draws under it.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChats)) {
+            use super::demo::demo_history_extra;
+            let sticker = quill::ids::MessageId(super::demo::HISTORY_ANIM_STICKER);
+            if demo_history_extra("panel") {
+                self.media_panel.open = true;
+                self.media_panel.tab = super::media_panel::PanelTab::Emoji;
+            }
+            if demo_history_extra("menu") {
+                self.message_menu = Some(super::menu_states::MessageMenuState {
+                    chat_id: ChatId(11),
+                    message_id: sticker,
+                    position: point(px(340.), px(380.)),
+                });
+            }
+            if demo_history_extra("select") {
+                self.toggle_forward_select(ChatId(11), sticker, false, cx);
+            }
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyChannelsAdmin)) {
             self.composer.update(cx, |input, cx| {
                 input.set_value("admin post — hello from the channel", window, cx);
