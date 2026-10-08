@@ -49,6 +49,16 @@ pub enum ScreenshotDemo {
     ReadyEditDelete,
     /// Forward select + dest picker + success (injected, no live Telegram).
     ReadyForward,
+    /// Message selection mode: check circles, selection tint and the
+    /// Forward N / Delete N / Cancel header (injected, no live Telegram).
+    ReadySelectMode,
+    /// Reply bar above the composer for a photo message, with its thumbnail.
+    ReadyReplyMedia,
+    /// Edit bar above the composer for an outgoing photo (caption edit).
+    ReadyEditMedia,
+    /// A new message revealing at the bottom of the history; freeze the
+    /// frame with `QUILL_MOTION_HOLD_MS`.
+    ReadyReveal,
     /// Emoji react / unreact + chips (injected, no live Telegram).
     ReadyReactions,
     /// Pin / unpin + pinned banner (injected, no live Telegram).
@@ -267,6 +277,10 @@ pub enum ScreenshotDemo {
     /// (Parity slice 5.)
     ReadyVideoPlayback,
     ReadyVideoPip,
+    /// A GIF looping in the viewer, with a custom emoji in its caption.
+    ReadyViewerGif,
+    /// The viewer paging over the Shared Media panel's photos.
+    ReadyViewerShared,
     /// Story viewer demo (injected, no live Telegram): the story tray above
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).

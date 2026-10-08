@@ -45,6 +45,10 @@ impl Render for QuillApp {
         if self.window_active.replace(active) != active {
             self.inline_videos.borrow_mut().set_window_active(active);
         }
+        // The viewer left video full screen: give the window back.
+        if std::mem::take(&mut self.viewer_extra.restore_fullscreen) && window.is_fullscreen() {
+            window.toggle_fullscreen();
+        }
         self.media_roots_frame.borrow_mut().take();
         self.tick_animation_layer(cx);
         // Spoiler specks painted last frame keep drifting.

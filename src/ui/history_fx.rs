@@ -1,12 +1,16 @@
 //! Telegram Desktop history-view polish: the floating date pill that shows
-//! while scrolling, and the jump-target highlight fade.
+//! while scrolling, the jump-target highlight fade, and the reveal of new
+//! messages at the bottom (`motion.rs` holds the timing).
 //!
 //! Both are driven by stored `Instant`s and the shared frame clock
 //! (`QuillApp::request_animation_tick`) only while they are visible — never
 //! GPUI `with_animation`, which would redraw the app at display rate.
 
 use super::app::QuillApp;
+use super::motion::MotionState;
 use gpui_kit::*;
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// A history row painted last frame: `(row, bounds, starts its day)`.
@@ -38,6 +42,73 @@ pub(crate) fn jump_fade(elapsed: Duration) -> f32 {
 /// Whether the highlight still needs frames.
 pub(crate) fn jump_fade_active(elapsed: Duration) -> bool {
     elapsed < JUMP_FADE_IN + JUMP_FADE_OUT
+}
+
+/// Reads the painted height of freshly arrived rows for the reveal.
+pub(crate) struct RevealProbe {
+    first_row: Option<usize>,
+    measure: Rc<Cell<f32>>,
+    fills: Rc<Cell<bool>>,
+}
+
+impl RevealProbe {
+    /// Rows painted this frame: when every row from the first arrival to
+    /// the last (`count` rows in all) is among them, their summed height is
+    /// what the reveal has to hide (plus the 4 px gap under each).
+    pub(crate) fn note(&self, rows: &[ScrollProbeRow], count: usize, viewport_top: Pixels) {
+        // Row 0 sitting at the top edge: the list is short (or scrolled to
+        // its start), so nothing is pinned to the bottom to reveal against.
+        if !rows.is_empty() {
+            self.fills.set(
+                !rows
+                    .iter()
+                    .any(|(ix, bounds, _)| *ix == 0 && bounds.top() >= viewport_top),
+            );
+        }
+        let Some(first) = self.first_row else {
+            return;
+        };
+        let (mut seen, mut height) = (0, 0.);
+        for (ix, bounds, _) in rows {
+            if *ix >= first && *ix < count {
+                seen += 1;
+                height += f32::from(bounds.size.height) + 4.;
+            }
+        }
+        if seen > 0 && seen == count.saturating_sub(first) {
+            self.measure.set(height);
+        }
+    }
+}
+
+impl MotionState {
+    pub(crate) fn reveal_probe(&self) -> RevealProbe {
+        RevealProbe {
+            first_row: self.reveal.borrow().map(|r| r.first_row),
+            measure: self.reveal_measure.clone(),
+            fills: self.list_fills.clone(),
+        }
+    }
+}
+
+/// The history viewport during a reveal. `reveal` is `(shift, extra)` from
+/// `MotionState::reveal_now`: the list is laid out `extra` px taller than
+/// the window and slid down by `shift`, so the new rows rise out of the
+/// bottom edge while the older ones glide up. At rest it is a plain filler.
+pub(crate) fn reveal_viewport(
+    reveal: Option<(f32, f32)>,
+    scroller: impl IntoElement,
+) -> impl IntoElement {
+    let (shift, extra) = reveal.unwrap_or_default();
+    div().relative().flex_1().min_h_0().overflow_hidden().child(
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .top(px(shift - extra))
+            .bottom(px(-shift))
+            .child(scroller),
+    )
 }
 
 /// What the floating date pill shows, and until when.
@@ -96,6 +167,22 @@ impl QuillApp {
         }
         self.request_animation_tick(30, cx);
         Some(jump_fade(elapsed) * JUMP_PEAK_ALPHA)
+    }
+
+    /// The reveal of new bottom rows at render time: `(shift, extra)` while
+    /// it runs (asking for frames), `None` once settled, when the user
+    /// scrolled away, or when the window is inactive.
+    pub(super) fn history_reveal(&self, cx: &mut Context<Self>) -> Option<(f32, f32)> {
+        let list = self.history_scroller.read(cx);
+        // (A list with no rows yet has not anchored: not "scrolled away".)
+        let scrolled_away = list.item_count() > 0 && !list.is_following_tail();
+        if (!self.window_active.get() && !super::motion::held()) || scrolled_away {
+            self.motion.cancel_reveal();
+            return None;
+        }
+        let reveal = self.motion.reveal_now(Instant::now())?;
+        self.request_animation_tick(60, cx);
+        Some(reveal)
     }
 
     /// The history list scrolled (or its rows moved): refresh the pill.

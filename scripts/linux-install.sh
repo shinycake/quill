@@ -11,11 +11,11 @@ if [[ "${1:-}" == --uninstall ]]; then MODE=uninstall; shift; fi
 PREFIX="${1:-$HOME/.local}"
 DEST="$PREFIX/opt/quill"
 APPS="$PREFIX/share/applications"
-ICONS="$PREFIX/share/icons/hicolor/scalable/apps"
+ICONS="$PREFIX/share/icons/hicolor"
 
 if [[ "$MODE" == uninstall ]]; then
   rm -rf "$DEST"
-  rm -f "$PREFIX/bin/quill" "$APPS/quill.desktop" "$ICONS/quill.svg"
+  rm -f "$PREFIX/bin/quill" "$APPS/quill.desktop" "$ICONS"/*/apps/quill.png
   echo "Removed Quill from $PREFIX (account data under ~/.local/share is untouched)."
   exit 0
 fi
@@ -27,7 +27,11 @@ rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
 ln -sf "$DEST/quill" "$PREFIX/bin/quill"
 sed "s|^Exec=.*|Exec=$DEST/quill %u|" "$HERE/share/applications/quill.desktop" > "$APPS/quill.desktop"
-cp "$HERE/share/icons/hicolor/scalable/apps/quill.svg" "$ICONS/quill.svg"
+for icon in "$HERE"/share/icons/hicolor/*/apps/quill.png; do
+  size="$(basename "$(dirname "$(dirname "$icon")")")"
+  mkdir -p "$ICONS/$size/apps"
+  cp "$icon" "$ICONS/$size/apps/quill.png"
+done
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$PREFIX/share/icons/hicolor" || true
 echo "Installed Quill to $DEST (command: $PREFIX/bin/quill)."

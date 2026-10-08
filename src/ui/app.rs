@@ -358,6 +358,8 @@ pub struct QuillApp {
     /// one by one, and it touches the file system).
     pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
+    /// History motion: new-message reveal and selection-mode fades.
+    pub(super) motion: super::motion::MotionState,
     /// The composer's link dialog (Cmd/Ctrl+K on a selection).
     pub(super) composer_link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
     /// Cross-fade timeline of the round Send / Record / Save button.
@@ -685,6 +687,9 @@ pub struct QuillApp {
     pub(super) message_menu_selection: Option<String>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     pub(super) media_viewer: MediaViewer,
+    /// Shared Media paging, video full screen and inactive-window state of
+    /// the viewer.
+    pub(super) viewer_extra: super::media_viewer::ViewerExtra,
     /// The photo editor over a pending photo attachment, when open.
     pub(super) photo_editor: Option<super::photo_editor::PhotoEditor>,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).

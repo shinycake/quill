@@ -7,7 +7,7 @@ const VIEWER_TOP_BAR: f32 = 56.0;
 /// Width kept free on each side of the media for the prev/next arrows.
 const VIEWER_SIDE_LANE: f32 = 80.0;
 use super::message_media::{file_is_downloading, viewer_display_path};
-use super::message_text::rich_text_line;
+use super::message_text::{custom_emoji_paths, rich_text_line};
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -19,13 +19,15 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
     MediaViewer, MediaViewerItem, MediaViewerKind, VIEWER_FADE_MS, VIEWER_SHOW_MS,
-    VIEWER_WAIT_HIDE_MS, VIEWER_WHEEL_NOTCH_PX, ViewerOrientation, ViewerVideoStart,
-    collect_media_items, controls_hide_wait_ms, controls_should_hide, decide_viewer_video_start,
-    orient_rgba, save_media_to_downloads, viewer_delete_gate, wheel_zoom_factor,
+    VIEWER_WAIT_HIDE_MS, VIEWER_WHEEL_NOTCH_PX, ViewerKeyAction, ViewerKeyMods, ViewerOrientation,
+    ViewerSource, ViewerVideoStart, collect_media_items, controls_hide_wait_ms,
+    controls_should_hide, decide_viewer_video_start, orient_rgba, save_media_to_downloads,
+    seek_target_secs, viewer_delete_gate, viewer_key_action, wheel_zoom_factor,
 };
 use quill::playback::PlaybackClock;
 use quill::settings::MediaPrefs;
 use quill::state::HistoryMessage;
+use quill::state::SharedMediaTab;
 use quill::telegram::envelope::{MessageSender, ParsedFile};
 use quill::voice::format_voice_duration;
 use smallvec::SmallVec;
@@ -36,6 +38,25 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+/// Viewer state that is not part of the item list: Shared Media paging,
+/// video full screen, and the inactive-window pause of looping clips.
+#[derive(Default)]
+pub(super) struct ViewerExtra {
+    /// The Shared Media tab the viewer pages over.
+    pub shared_tab: SharedMediaTab,
+    /// Items of that tab the viewer has already merged in.
+    pub shared_seen: usize,
+    /// Video full screen (tdesktop `_fullScreenVideo`): arrows seek, digits
+    /// jump, Escape leaves it.
+    pub video_fullscreen: bool,
+    /// The window was already full screen when the mode was entered.
+    pub window_was_fullscreen: bool,
+    /// Give the window back to windowed mode on the next frame.
+    pub restore_fullscreen: bool,
+    /// A looping clip paused because the window lost focus.
+    pub inactive_paused: bool,
+}
+
 /// Screenshot-capture runs render a single frame: skip fades there so the
 /// shot shows the settled viewer, not frame zero of an animation.
 fn still_frame() -> bool {
@@ -97,6 +118,88 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Open the viewer on a photo, video or GIF of the Shared Media panel,
+    /// paging over that tab's list (tdesktop `SharedMediaWithLastSlice`).
+    /// The list loads older pages as the user pages toward its start.
+    /// `false` when the message is not viewer-openable (a secret photo):
+    /// the caller then jumps to it in the chat.
+    pub(super) fn open_shared_media_viewer(
+        &mut self,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        let state = &session.shared_media;
+        let Some(chat_id) = state.chat_id else {
+            return false;
+        };
+        let tab = state.active_tab;
+        let tab_state = &state.tabs[tab.index()];
+        // The panel lists newest first; the viewer pages oldest first.
+        let messages: Vec<HistoryMessage> = tab_state
+            .items
+            .iter()
+            .rev()
+            .filter_map(|item| item.message.as_deref().cloned())
+            .collect();
+        let loaded = tab_state.items.len();
+        let total = tab_state.total_count.max(0) as usize;
+        let items = collect_media_items(&messages);
+        let Some(index) = items.iter().position(|item| item.message_id == message_id) else {
+            return false;
+        };
+        debug_assert!(items.iter().all(|item| item.chat_id == chat_id));
+        self.media_viewer = MediaViewer::open_shared(items, index, total);
+        self.viewer_extra.shared_tab = tab;
+        self.viewer_extra.shared_seen = loaded;
+        self.viewer_open_gen += 1;
+        self.viewer_note_activity(false, cx);
+        self.reset_viewer_item_state(cx);
+        self.sync_shared_media_viewer(cx);
+        cx.notify();
+        true
+    }
+
+    /// Keep a Shared Media viewer in step with its tab: merge older pages
+    /// that landed, and ask for the next one when the viewer nears the
+    /// start of the loaded list.
+    pub(super) fn sync_shared_media_viewer(&mut self, cx: &mut Context<Self>) {
+        if self.media_viewer.source() != ViewerSource::SharedMedia {
+            return;
+        }
+        let tab = self.viewer_extra.shared_tab;
+        let seen = self.viewer_extra.shared_seen;
+        let grown = self.session().and_then(|session| {
+            let state = &session.shared_media.tabs[tab.index()];
+            (state.items.len() != seen).then(|| {
+                let messages: Vec<HistoryMessage> = state
+                    .items
+                    .iter()
+                    .rev()
+                    .filter_map(|item| item.message.as_deref().cloned())
+                    .collect();
+                (
+                    collect_media_items(&messages),
+                    state.total_count.max(0) as usize,
+                    state.items.len(),
+                )
+            })
+        });
+        if let Some((items, total, loaded)) = grown {
+            self.viewer_extra.shared_seen = loaded;
+            if self.media_viewer.merge_older(items, total) > 0 {
+                cx.notify();
+            }
+        }
+        if self.media_viewer.wants_older()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.fetch_more_shared_media(tab);
+        }
+    }
+
     /// Per-item viewer state: zoom, orientation, playback error, video
     /// and the download / delete-permission lookups for the new current
     /// item. Shared by open, step, and "the current item was deleted".
@@ -107,6 +210,7 @@ impl QuillApp {
         self.viewer_orientation = Default::default();
         self.viewer_rotated = None;
         self.playback_error = None;
+        self.viewer_extra.inactive_paused = false;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.maybe_autoplay_viewer_video(cx);
@@ -119,6 +223,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
+        self.viewer_leave_video_fullscreen();
         self.stop_viewer_video();
         self.media_viewer.close();
         cx.notify();
@@ -229,7 +334,8 @@ impl QuillApp {
                 }
             }
             ViewerVideoStart::PlayNow | ViewerVideoStart::ExtractFrames
-                if super::native_video::SUPPORTED && !self.viewer_demo_sync_frames =>
+                if Self::viewer_uses_native(&item, path.as_deref())
+                    && !self.viewer_demo_sync_frames =>
             {
                 self.viewer_pending_play = None;
                 let path = path.expect("clip checked local by decide_viewer_video_start");
@@ -251,6 +357,26 @@ impl QuillApp {
                 self.extract_viewer_frames(&item, &path, cx);
             }
         }
+    }
+
+    /// Whether the native player (macOS AVPlayer) takes this clip. `.gif`
+    /// files are not a video format for it, so they use the ffmpeg frames.
+    fn viewer_uses_native(item: &MediaViewerItem, path: Option<&std::path::Path>) -> bool {
+        let is_gif_file = item
+            .mime_type
+            .as_deref()
+            .is_some_and(|mime| mime.eq_ignore_ascii_case("image/gif"))
+            || path
+                .and_then(|path| path.extension())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
+        super::native_video::SUPPORTED && !(item.kind.loops() && is_gif_file)
+    }
+
+    /// The current item is a GIF: loops, no sound, no transport.
+    pub(super) fn viewer_loops(&self) -> bool {
+        self.media_viewer
+            .current()
+            .is_some_and(|item| item.kind.loops())
     }
 
     /// Decode extracted viewer frame PNGs into pre-loaded GPUI image handles.
@@ -448,6 +574,7 @@ impl QuillApp {
         let duration = item.duration_secs.unwrap_or(0);
         let start_timestamp = item.start_timestamp.unwrap_or(0);
         let message_id = item.message_id;
+        let looping = item.kind.loops();
         let path = path.to_path_buf();
         let item = item.clone();
         let extract_path = path.clone();
@@ -457,15 +584,25 @@ impl QuillApp {
             let extracted = cx
                 .background_executor()
                 .spawn(async move {
-                    let frames = quill::video::viewer_playback_frames_cancelable(
-                        &extract_path,
-                        &mime,
-                        &cache,
-                        start_timestamp,
-                        duration,
-                        &task_slot,
-                        &task_cancel,
-                    )?;
+                    let frames = if looping {
+                        quill::animation::viewer_loop_frames_cancelable(
+                            &extract_path,
+                            &mime,
+                            &cache,
+                            &task_slot,
+                            &task_cancel,
+                        )?
+                    } else {
+                        quill::video::viewer_playback_frames_cancelable(
+                            &extract_path,
+                            &mime,
+                            &cache,
+                            start_timestamp,
+                            duration,
+                            &task_slot,
+                            &task_cancel,
+                        )?
+                    };
                     // Decode on the background thread: the render path needs
                     // pre-loaded handles, and decoding up to 600 PNGs must
                     // not block the UI thread.
@@ -516,13 +653,18 @@ impl QuillApp {
                         // MED1: TGX distinguishes unsupported formats
                         // (`VideoPlaybackUnsupported`) from generic
                         // playback failures (`VideoPlaybackError`).
-                        let message = if err == "unsupported video" {
-                            "video format not supported"
+                        let noun = if item.kind.loops() {
+                            "animation"
                         } else {
-                            "couldn't play this video"
+                            "video"
                         };
-                        this.playback_error = Some(message.into());
-                        this.status_note = message.into();
+                        let message = if err.starts_with("unsupported") {
+                            format!("{noun} format not supported")
+                        } else {
+                            format!("couldn't play this {noun}")
+                        };
+                        this.status_note = message.clone();
+                        this.playback_error = Some(message);
                     }
                 }
                 cx.notify();
@@ -550,9 +692,10 @@ impl QuillApp {
         if !ready {
             return;
         }
-        let matches = self.media_viewer.current().is_some_and(|item| {
-            item.message_id == message_id && item.kind == MediaViewerKind::Video
-        });
+        let matches = self
+            .media_viewer
+            .current()
+            .is_some_and(|item| item.message_id == message_id && item.kind.is_playable());
         if !matches {
             self.viewer_pending_play = None;
             return;
@@ -576,15 +719,29 @@ impl QuillApp {
         self.stop_audio_playback();
         self.stop_video_playback();
         self.stop_animation_playback();
-        let duration = item.duration_secs.unwrap_or(0).max(0) as f64;
+        let looping = item.kind.loops();
+        let mut duration = item.duration_secs.unwrap_or(0).max(0) as f64;
+        // A loop wraps at the end of its frames, not at TDLib's rounded
+        // duration.
+        if looping && !self.viewer_video_frames.is_empty() && self.viewer_video_fps > 0.0 {
+            duration = self.viewer_video_frames.len() as f64 / self.viewer_video_fps;
+        }
         let mut clock = PlaybackClock::new(duration);
-        clock.set_rate(self.playback_speed);
+        if !looping {
+            clock.set_rate(self.playback_speed);
+        }
         clock.seek(0.0);
         clock.resume();
         self.viewer_clock = Some(clock);
         self.viewer_video = Some(item.message_id);
         self.viewer_video_path = Some(path.to_path_buf());
         self.playback_error = None;
+        if looping {
+            // No transport, no sound: nothing to scrub or mute.
+            self.spawn_viewer_tick(cx);
+            cx.notify();
+            return;
+        }
         // MED1: viewer seek slider (the history-row seek bar pattern).
         let slider = cx.new(|_| {
             SliderState::new()
@@ -624,7 +781,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.begin_viewer_video(item, path, cx);
-        if self.demo_session.is_none() {
+        // GIFs are silent: no audio player.
+        if self.demo_session.is_none() && !item.kind.loops() {
             self.spawn_viewer_ffplay(path, 0.0);
         }
     }
@@ -640,9 +798,14 @@ impl QuillApp {
         self.begin_viewer_video(item, path, cx);
         match super::native_video::NativeVideo::open(path) {
             Ok(mut video) => {
-                video.set_volume(self.playback_volume);
-                video.play();
-                video.set_rate(self.playback_speed as f32);
+                if item.kind.loops() {
+                    video.set_volume(0.0);
+                    video.play();
+                } else {
+                    video.set_volume(self.playback_volume);
+                    video.play();
+                    video.set_rate(self.playback_speed as f32);
+                }
                 self.viewer_native = Some(video);
             }
             Err(err) => {
@@ -703,9 +866,12 @@ impl QuillApp {
 
     /// Resume from the frozen clock position.
     pub(super) fn resume_viewer_video(&mut self, cx: &mut Context<Self>) {
+        let loops = self.viewer_loops();
         if let Some(video) = self.viewer_native.as_mut() {
             video.play();
-            video.set_rate(self.playback_speed as f32);
+            if !loops {
+                video.set_rate(self.playback_speed as f32);
+            }
             if let Some(clock) = self.viewer_clock.as_mut() {
                 clock.seek(video.position_secs());
                 clock.resume();
@@ -717,7 +883,9 @@ impl QuillApp {
         let path = self.viewer_video_path.clone();
         match (offset, path) {
             (Some(offset), Some(path)) => {
-                self.spawn_viewer_ffplay(&path, offset);
+                if !loops {
+                    self.spawn_viewer_ffplay(&path, offset);
+                }
                 if let Some(clock) = self.viewer_clock.as_mut() {
                     clock.resume();
                 }
@@ -883,7 +1051,7 @@ impl QuillApp {
             // Video: save the full clip only — falling back to the
             // thumbnail would write a JPEG as the "video". If the clip
             // isn't local the user gets the honest download-first note.
-            MediaViewerKind::Video => item
+            MediaViewerKind::Video | MediaViewerKind::Animation => item
                 .play_file_id
                 .and_then(|id| files.get(&id.0))
                 .and_then(|file| file.usable_path())
@@ -962,6 +1130,11 @@ impl QuillApp {
     /// Drop viewer items whose message no longer exists, moving to the
     /// next item (or closing when none remain).
     fn prune_deleted_viewer_items(&mut self, cx: &mut Context<Self>) {
+        // Shared Media items reach past the loaded history; absence there
+        // does not mean deleted.
+        if self.media_viewer.source() == ViewerSource::SharedMedia {
+            return;
+        }
         let mut viewer = std::mem::take(&mut self.media_viewer);
         let changed = match self.session() {
             Some(session) => viewer.retain(|item| {
@@ -1227,10 +1400,132 @@ impl QuillApp {
             return;
         }
         if clock.is_playing()
+            && !self.viewer_loops()
             && let Some(path) = self.viewer_video_path.clone()
         {
             self.spawn_viewer_ffplay(&path, offset);
         }
+        cx.notify();
+    }
+
+    /// `J` / `L` and the full-screen arrows: seek `delta_secs` from the
+    /// playhead, inside the clip.
+    pub(super) fn seek_viewer_by(&mut self, delta_secs: f64, cx: &mut Context<Self>) {
+        let Some(clock) = self.viewer_clock.as_ref() else {
+            return;
+        };
+        let position = self
+            .viewer_native
+            .as_ref()
+            .map(|video| video.position_secs())
+            .unwrap_or_else(|| clock.elapsed_secs());
+        let target = seek_target_secs(position, clock.duration_secs(), delta_secs);
+        self.seek_viewer_to(target, cx);
+    }
+
+    /// Full-screen digits: jump to `fraction` of the clip.
+    fn seek_viewer_to_fraction(&mut self, fraction: f64, cx: &mut Context<Self>) {
+        if let Some(clock) = self.viewer_clock.as_ref() {
+            let target = clock.duration_secs() * fraction.clamp(0.0, 1.0);
+            self.seek_viewer_to(target, cx);
+        }
+    }
+
+    /// A viewer playback key (see `quill::media_viewer::viewer_key_action`).
+    /// `true` when the key was consumed.
+    pub(super) fn handle_viewer_key(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(kind) = self.media_viewer.current().map(|item| item.kind) else {
+            return false;
+        };
+        let modifiers = &keystroke.modifiers;
+        let mods = ViewerKeyMods {
+            primary: if cfg!(target_os = "macos") {
+                modifiers.platform
+            } else {
+                modifiers.control
+            },
+            alt: modifiers.alt,
+            shift: modifiers.shift,
+        };
+        let Some(action) = viewer_key_action(
+            &keystroke.key,
+            mods,
+            kind,
+            self.viewer_extra.video_fullscreen,
+        ) else {
+            return false;
+        };
+        self.viewer_note_activity(false, cx);
+        match action {
+            ViewerKeyAction::TogglePlayback => self.toggle_viewer_video(cx),
+            ViewerKeyAction::SeekBy(secs) => self.seek_viewer_by(secs, cx),
+            ViewerKeyAction::SeekToFraction(fraction) => self.seek_viewer_to_fraction(fraction, cx),
+            ViewerKeyAction::ToggleFullscreen => self.viewer_toggle_fullscreen(window, cx),
+        }
+        true
+    }
+
+    /// Video full screen (tdesktop `playbackToggleFullScreen`): the window
+    /// goes full screen, the arrows seek instead of paging, Escape leaves.
+    pub(super) fn viewer_toggle_fullscreen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.viewer_extra.video_fullscreen {
+            self.viewer_leave_video_fullscreen();
+        } else {
+            self.viewer_extra.window_was_fullscreen = window.is_fullscreen();
+            if !self.viewer_extra.window_was_fullscreen {
+                window.toggle_fullscreen();
+            }
+            self.viewer_extra.video_fullscreen = true;
+        }
+        cx.notify();
+    }
+
+    /// Leave video full screen; the window returns to windowed on the next
+    /// frame unless it was full screen before.
+    pub(super) fn viewer_leave_video_fullscreen(&mut self) {
+        if !self.viewer_extra.video_fullscreen {
+            return;
+        }
+        self.viewer_extra.video_fullscreen = false;
+        self.viewer_extra.restore_fullscreen = !self.viewer_extra.window_was_fullscreen;
+    }
+
+    /// Looping clips play only while the window is active (tdesktop pauses
+    /// them in the background): pause on deactivation, resume on return.
+    fn sync_viewer_window_activity(&mut self, active: bool, cx: &mut Context<Self>) {
+        if !self.viewer_loops() || self.viewer_video.is_none() {
+            return;
+        }
+        let playing = self
+            .viewer_clock
+            .as_ref()
+            .is_some_and(|clock| clock.is_playing());
+        if !active && playing {
+            self.viewer_extra.inactive_paused = true;
+            self.pause_viewer_video(cx);
+        } else if active && self.viewer_extra.inactive_paused {
+            self.viewer_extra.inactive_paused = false;
+            self.resume_viewer_video(cx);
+        }
+    }
+
+    /// Open the current clip with the system player (the fallback when
+    /// in-viewer playback fails, e.g. ffmpeg is missing).
+    pub(super) fn open_viewer_clip_externally(&mut self, cx: &mut Context<Self>) {
+        let path = self
+            .media_viewer
+            .current()
+            .and_then(|item| self.viewer_clip_path(item));
+        self.status_note = match path {
+            Some(path) if quill::platform::open_local_file(&path) => "opened externally".into(),
+            Some(_) => "couldn't open the file".into(),
+            None => "download the media first to open it".into(),
+        };
         cx.notify();
     }
 
@@ -1482,11 +1777,25 @@ impl QuillApp {
                             if let Some(error) = video.error() {
                                 this.playback_error = Some(error);
                             }
+                            let looping = this.viewer_loops();
                             if let Some(clock) = this.viewer_clock.as_mut() {
                                 clock.seek(position);
                                 if !playing && clock.is_playing() {
-                                    clock.pause();
+                                    if looping {
+                                        // The clip ended: start over.
+                                        clock.seek(0.0);
+                                    } else {
+                                        clock.pause();
+                                    }
                                 }
+                            }
+                            if looping
+                                && !playing
+                                && this.viewer_clock.as_ref().is_some_and(|c| c.is_playing())
+                                && let Some(video) = this.viewer_native.as_mut()
+                            {
+                                video.seek(0.0);
+                                video.play();
                             }
                             cx.notify();
                             return true;
@@ -1495,6 +1804,13 @@ impl QuillApp {
                             .viewer_clock
                             .as_ref()
                             .is_some_and(|clock| clock.is_playing() && clock.finished());
+                        if finished && this.viewer_loops() {
+                            if let Some(clock) = this.viewer_clock.as_mut() {
+                                clock.seek(0.0);
+                            }
+                            cx.notify();
+                            return true;
+                        }
                         if finished {
                             this.stop_viewer_video();
                             cx.notify();
@@ -1572,18 +1888,35 @@ impl QuillApp {
     ) -> impl IntoElement {
         // A deleted item leaves the viewer (next item, or closed).
         self.prune_deleted_viewer_items(cx);
+        self.sync_shared_media_viewer(cx);
+        self.sync_viewer_window_activity(window.is_window_active(), cx);
         // MED1: keep the viewer seek/volume thumbs on the clocks (the
         // tick has no `&mut Window`, which `SliderState::set_value`
         // needs).
         self.sync_viewer_seek_slider(window, cx);
         self.sync_viewer_volume_slider(window, cx);
-        // Native playback draws a new frame every display refresh.
+        // Native playback draws a new frame every display refresh; a GIF
+        // loop only needs the shared frame clock.
+        let loops = self.viewer_loops();
         if self
             .viewer_native
             .as_mut()
             .is_some_and(|video| video.is_playing())
         {
-            window.request_animation_frame();
+            if loops {
+                self.request_animation_tick(30, cx);
+            } else {
+                window.request_animation_frame();
+            }
+        } else if loops
+            && !self.viewer_video_frames.is_empty()
+            && self
+                .viewer_clock
+                .as_ref()
+                .is_some_and(|clock| clock.is_playing())
+        {
+            let fps = self.viewer_video_fps.round().clamp(1.0, 30.0) as u32;
+            self.request_animation_tick(fps, cx);
         }
         let item = self
             .media_viewer
@@ -1620,7 +1953,7 @@ impl QuillApp {
         // async load). Otherwise it falls back to the thumbnail (or the
         // loading status).
         let frame: Option<Arc<RenderImage>> =
-            if item.kind == MediaViewerKind::Video && !self.viewer_video_frames.is_empty() {
+            if item.kind.is_playable() && !self.viewer_video_frames.is_empty() {
                 self.viewer_render_frame()
             } else {
                 None
@@ -1631,6 +1964,7 @@ impl QuillApp {
             .zip(self.session())
             .is_some_and(|(item, session)| session.chat_has_protected_content(item.chat_id));
         let can_delete = self.viewer_delete_confirm().is_some();
+        let has_local_clip = self.viewer_clip_path(&item).is_some();
         let hidden = self.viewer_controls_hidden;
         let fade_gen = self.viewer_controls_gen;
         let row_id = item.message_id.0 as u64;
@@ -1710,7 +2044,9 @@ impl QuillApp {
         let (pan_x, pan_y) = zoom.pan;
         // The native player's current frame, drawn straight from the GPU.
         #[cfg(target_os = "macos")]
-        let native_frame = (item.kind == MediaViewerKind::Video)
+        let native_frame = item
+            .kind
+            .is_playable()
             .then(|| self.viewer_native.as_mut().and_then(|video| video.frame()))
             .flatten();
         #[cfg(not(target_os = "macos"))]
@@ -1780,8 +2116,12 @@ impl QuillApp {
                     None => "downloading…".to_string(),
                 };
                 let status = match (&item.duration_label, downloading_now) {
-                    (Some(duration), true) => format!("Video · {duration} — {downloading_label}"),
-                    (Some(duration), false) => format!("Video · {duration} — not downloaded"),
+                    (Some(duration), true) => {
+                        format!("{kind_label} · {duration} — {downloading_label}")
+                    }
+                    (Some(duration), false) => {
+                        format!("{kind_label} · {duration} — not downloaded")
+                    }
                     (None, true) => format!("{kind_label} — {downloading_label}"),
                     (None, false) => format!("{kind_label} — not downloaded"),
                 };
@@ -2069,7 +2409,26 @@ impl QuillApp {
                                 .on_click(cx.listener(|this, _, _, cx| this.open_video_pip(cx))),
                             )
                         },
-                    );
+                    )
+                    .child({
+                        let fullscreen = self.viewer_extra.video_fullscreen;
+                        icon_button(
+                            "media-viewer-fullscreen",
+                            if fullscreen {
+                                Lucide::Minimize
+                            } else {
+                                Lucide::Maximize
+                            },
+                            if fullscreen {
+                                "Exit full screen (Esc)"
+                            } else {
+                                "Full screen (Alt+Enter)"
+                            },
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.viewer_toggle_fullscreen(window, cx);
+                        }))
+                    });
                 let _ = (label, volume_pct);
                 div()
                     .id(("media-viewer-player", row_id))
@@ -2161,6 +2520,19 @@ impl QuillApp {
             Some(controls) => controls,
             None => transport.into_any_element(),
         };
+        // Custom emoji in the caption render like they do in message text:
+        // the resolved sticker images, the span text until they are.
+        let caption_emoji = self
+            .session()
+            .map(|session| {
+                custom_emoji_paths(
+                    &item.caption_entities,
+                    &session.emoji.custom_emoji_stickers,
+                    &files,
+                    &roots,
+                )
+            })
+            .unwrap_or_default();
         let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
             rich_text_line(
                 &item.caption,
@@ -2170,8 +2542,7 @@ impl QuillApp {
                 &self.spoiler_revealed,
                 // Settings → Appearance: captions follow the message font size.
                 self.msg_font(),
-                // Captions don't resolve custom emoji in this slice (text fallback).
-                &HashMap::new(),
+                &caption_emoji,
                 cx,
             )
         });
@@ -2319,7 +2690,7 @@ impl QuillApp {
                     this.step_media_viewer(step, cx);
                 }))
         };
-        let prev = (position > 1).then(|| {
+        let prev = self.media_viewer.has_prev().then(|| {
             nav_arrow(
                 "media-viewer-prev",
                 gpui_kit::assets::IconName::ChevronLeft,
@@ -2328,7 +2699,7 @@ impl QuillApp {
                 cx,
             )
         });
-        let next = (position < total).then(|| {
+        let next = self.media_viewer.has_next().then(|| {
             nav_arrow(
                 "media-viewer-next",
                 gpui_kit::assets::IconName::ChevronRight,
@@ -2431,7 +2802,25 @@ impl QuillApp {
                     // MED1: honest playback error (unsupported format /
                     // player failure) instead of a silent stall.
                     .when_some(self.playback_error.clone(), |this, err| {
-                        this.child(div().text_sm().text_color(danger_bright()).child(err))
+                        let can_open = item.kind.is_playable() && has_local_clip;
+                        this.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(div().text_sm().text_color(danger_bright()).child(err))
+                                .when(can_open, |row| {
+                                    row.child(
+                                        Button::new(("media-viewer-open-externally", row_id))
+                                            .label("Open externally")
+                                            .ghost()
+                                            .text_color(gpui_kit::white())
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_viewer_clip_externally(cx);
+                                            })),
+                                    )
+                                }),
+                        )
                     })
                     .child(transport),
                 "viewer-bottom-fade",
