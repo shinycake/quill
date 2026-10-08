@@ -2020,14 +2020,22 @@ fn unread_divider(count: i32, cx: &App) -> impl IntoElement {
 }
 
 /// Centered local-day pill between history rows ("Today", "12 March").
-fn day_separator(label: &str, cx: &App) -> impl IntoElement {
+/// Clicking it opens the "Jump to date" calendar, like tdesktop.
+fn day_separator(label: &str, cx: &mut Context<QuillApp>) -> impl IntoElement {
     div()
         .w_full()
         .flex()
         .justify_center()
         .pt_3()
         .pb_1()
-        .child(pill_label(label, cx))
+        .child(date_pill_button(label, cx))
+}
+
+/// A day pill that opens the calendar box.
+pub(super) fn date_pill_button(label: &str, cx: &mut Context<QuillApp>) -> impl IntoElement {
+    pill_label(label, cx)
+        .cursor_pointer()
+        .on_click(cx.listener(|this, _, _, cx| this.open_jump_date_ui(cx)))
 }
 
 /// The day pill itself, shared by the inline separators and the floating

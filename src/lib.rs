@@ -48,6 +48,7 @@ pub mod presence;
 pub mod privacy;
 pub mod rich;
 pub mod row_fx;
+pub mod search_filters;
 pub mod send_button;
 pub mod service_text;
 #[cfg(test)]

@@ -1,13 +1,17 @@
 //! Connect driver: search, shared media, sponsored messages.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
+use crate::search_filters::{SearchMediaKind, YearMonth};
+use crate::state::DateJumpMode;
 use crate::state::{ChatSearchJumpNeed, RequestPurpose, SearchStatus, SharedMediaTab};
 use crate::telegram::envelope::ChatKind;
+use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests::{
     SendReply, add_recently_found_chat, click_chat_sponsored_message, get_chat_history,
-    get_chat_sponsored_messages, report_chat_sponsored_message, search_chat_messages, search_chats,
-    search_messages, search_messages_filter_json, search_public_chats, search_recently_found_chats,
-    view_sponsored_chat,
+    get_chat_message_by_date, get_chat_message_calendar, get_chat_sponsored_messages,
+    report_chat_sponsored_message, search_chat_members, search_chat_messages,
+    search_chat_messages_from, search_chats, search_messages_filter_json, search_messages_filtered,
+    search_public_chats, search_recently_found_chats, view_sponsored_chat,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -271,6 +275,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_typed_search(trimmed)
     }
 
+    /// The global-search filter bar changed (chat type, media tab, date
+    /// window): store it and rerun the current query so `searchMessages`
+    /// carries the new `chat_type_filter` / `filter` / `min_date`.
+    pub fn set_search_filters(
+        &mut self,
+        filters: crate::search_filters::GlobalSearchFilters,
+    ) -> Result<Option<SearchFlight>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.clear_typed_debounce();
+        self.session.search.filters = filters;
+        let query = self.session.search.query.clone();
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        let _search_gen = self.session.search.begin_query(trimmed);
+        self.send_typed_search(trimmed)
+    }
+
     /// Correlate a failed typed search: drop the pending requests and mark
     /// all three searches errored so the status resolves instead of
     /// stranding the query in `Searching`.
@@ -312,11 +337,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.abort_typed_search(chats_extra, messages_extra, public_extra);
             return Err(err);
         }
-        if let Err(err) = self.sender.send_json(&search_messages(
+        let filters = crate::telegram::requests::SearchMessagesFilters {
+            community_id: self.session.search.community_filter,
+            chat_type: self.session.search.filters.chat_type,
+            media: self.session.search.filters.media,
+            min_date: self
+                .session
+                .search
+                .filters
+                .date
+                .min_date(crate::local_time::now_unix()),
+        };
+        if let Err(err) = self.sender.send_json(&search_messages_filtered(
             messages_extra,
             trimmed,
             SEARCH_LIMIT,
-            self.session.search.community_filter,
+            &filters,
         )) {
             self.abort_typed_search(chats_extra, messages_extra, public_extra);
             return Err(err);
@@ -557,6 +593,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let trimmed = query.trim();
+        if trimmed.is_empty() && self.session.chat_search.has_criteria() {
+            // A chosen sender or media tab keeps the search going without
+            // text (tdesktop lists the member's messages on their own).
+            self.clear_chat_search_debounce();
+            let state = &self.session.chat_search;
+            if state.query.is_empty()
+                && matches!(
+                    state.status,
+                    SearchStatus::Searching
+                        | SearchStatus::Ready
+                        | SearchStatus::Empty
+                        | SearchStatus::Failed
+                )
+            {
+                return Ok(ChatSearchQueryOutcome::Unchanged);
+            }
+            return self.restart_chat_search("");
+        }
         if trimmed.is_empty() {
             self.clear_chat_search_debounce();
             if self.session.chat_search.query.is_empty()
@@ -597,6 +651,242 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(ChatSearchQueryOutcome::Debounced { token })
     }
 
+    /// Re-run the search at once with the current sender / media criteria.
+    fn restart_chat_search(
+        &mut self,
+        query: &str,
+    ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
+        self.clear_chat_search_debounce();
+        let _ = self.session.chat_search.begin_query(query);
+        Ok(match self.send_chat_search(query)? {
+            Some(flight) => ChatSearchQueryOutcome::Sent(flight),
+            None => ChatSearchQueryOutcome::Unchanged,
+        })
+    }
+
+    /// Choose (or clear with `None`) the "From:" member; the search reruns.
+    pub fn set_chat_search_sender(
+        &mut self,
+        sender: Option<MessageSender>,
+    ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.chat_search.open {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.chat_search.sender = sender;
+        self.session.close_from_picker();
+        let query = self.session.chat_search.query.clone();
+        if query.is_empty() && !self.session.chat_search.has_criteria() {
+            self.clear_chat_search_debounce();
+            self.session.chat_search.clear_query();
+            return Ok(ChatSearchQueryOutcome::Unchanged);
+        }
+        self.restart_chat_search(&query)
+    }
+
+    /// Pick the media tab of the in-chat search; the search reruns.
+    pub fn set_chat_search_media(
+        &mut self,
+        media: SearchMediaKind,
+    ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.chat_search.open {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.chat_search.media = media;
+        let query = self.session.chat_search.query.clone();
+        if query.is_empty() && !self.session.chat_search.has_criteria() {
+            self.clear_chat_search_debounce();
+            self.session.chat_search.clear_query();
+            return Ok(ChatSearchQueryOutcome::Unchanged);
+        }
+        self.restart_chat_search(&query)
+    }
+
+    /// Open the "From:" picker and list the group's members.
+    pub fn open_chat_search_from_picker(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.chat_search_can_pick_sender() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.open_from_picker();
+        self.search_from_members("")
+    }
+
+    /// `searchChatMembers` for the picker's field text (empty = everyone).
+    pub fn search_from_members(
+        &mut self,
+        query: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(chat_id) = self.session.chat_search.chat_id.or(self.session.open_chat) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let Some(picker) = self.session.chat_search.from_picker.as_ref() else {
+            return Ok(None);
+        };
+        if picker.query == query && (picker.request.is_some() || !picker.members.is_empty()) {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SearchFromMembers, Some(chat_id));
+        if let Some(picker) = self.session.chat_search.from_picker.as_mut() {
+            picker.query = query.to_string();
+            picker.request = Some(extra);
+        }
+        match self.sender.send_json(&search_chat_members(
+            extra,
+            chat_id,
+            query,
+            FROM_MEMBERS_LIMIT,
+        )) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                if let Some(picker) = self.session.chat_search.from_picker.as_mut() {
+                    picker.request = None;
+                }
+                Err(err)
+            }
+        }
+    }
+
+    /// Fetch the next older page of hits (the first page holds
+    /// [`CHAT_SEARCH_LIMIT`]; "N of M" counts the server's total).
+    pub fn load_more_chat_search(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() || !self.session.chat_search.can_load_more() {
+            return Ok(None);
+        }
+        let Some(chat_id) = self.session.chat_search.chat_id.or(self.session.open_chat) else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let state = &self.session.chat_search;
+        let (search_gen, from, query, sender, media) = (
+            state.generation,
+            state.next_from_message_id,
+            state.query.clone(),
+            state.sender,
+            state.media,
+        );
+        let extra = self.session.request_chat_search(
+            RequestPurpose::SearchChatMessagesMore,
+            chat_id,
+            search_gen,
+        );
+        self.session.chat_search.loading_more = true;
+        match self.sender.send_json(&search_chat_messages_from(
+            extra,
+            chat_id,
+            &TopicId::None,
+            &query,
+            sender,
+            from,
+            0,
+            CHAT_SEARCH_LIMIT,
+            media.constructor().map(search_messages_filter_json),
+        )) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.chat_search.loading_more = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// Open the calendar box on the current month (media tabs highlight
+    /// their days).
+    pub fn open_history_calendar(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let now = crate::local_time::now_unix();
+        if self.session.open_history_calendar(now).is_none() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.fetch_calendar_page()
+    }
+
+    pub fn show_calendar_month(&mut self, month: YearMonth) -> Result<(), ConnectSendError> {
+        if let Some(calendar) = self.session.history_calendar.as_mut() {
+            calendar.show_month(month);
+        }
+        self.fetch_calendar_page()
+    }
+
+    /// Page `getChatMessageCalendar` back until the displayed month is covered.
+    pub fn fetch_calendar_page(&mut self) -> Result<(), ConnectSendError> {
+        let Some(calendar) = self.session.history_calendar.as_ref() else {
+            return Ok(());
+        };
+        if !calendar.needs_older_page() {
+            return Ok(());
+        }
+        let Some(constructor) = calendar.media.constructor() else {
+            return Ok(());
+        };
+        let (chat_id, generation, from) = (
+            calendar.chat_id,
+            calendar.generation,
+            calendar.oldest_loaded,
+        );
+        let extra = self.session.request(
+            RequestPurpose::GetChatMessageCalendar { generation },
+            Some(chat_id),
+        );
+        if let Some(calendar) = self.session.history_calendar.as_mut() {
+            calendar.loading = true;
+        }
+        match self.sender.send_json(&get_chat_message_calendar(
+            extra,
+            chat_id,
+            constructor,
+            from,
+        )) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.session.requests.take(extra);
+                if let Some(calendar) = self.session.history_calendar.as_mut() {
+                    calendar.fail();
+                }
+                Err(err)
+            }
+        }
+    }
+
+    pub fn close_history_calendar(&mut self) {
+        self.session.close_history_calendar();
+    }
+
+    /// A day was picked: a calendar day goes straight to its first message,
+    /// any other asks TDLib for the last message before the day and lands
+    /// on the one after it (`getChatMessageByDate`).
+    pub fn jump_to_date(&mut self, day_number: i64) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let Some(calendar) = self.session.history_calendar.take() else {
+            return Ok(None);
+        };
+        self.session.date_jump_note = None;
+        if let Some(day) = calendar.day(day_number) {
+            return self.jump_to_message_with(day.message_id, DateJumpMode::Exact);
+        }
+        let chat_id = calendar.chat_id;
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatMessageByDate, Some(chat_id));
+        match self.sender.send_json(&get_chat_message_by_date(
+            extra,
+            chat_id,
+            crate::search_filters::before_day_date(day_number),
+        )) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.fail_date_jump(false);
+                Err(err)
+            }
+        }
+    }
+
     pub fn commit_debounced_chat_search(
         &mut self,
         token: u64,
@@ -629,15 +919,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             search_gen,
         );
-        match self.sender.send_json(&search_chat_messages(
+        let (sender, media) = (
+            self.session.chat_search.sender,
+            self.session.chat_search.media,
+        );
+        match self.sender.send_json(&search_chat_messages_from(
             extra,
             chat_id,
             &TopicId::None,
             trimmed,
+            sender,
             MessageId(0),
             0,
             CHAT_SEARCH_LIMIT,
-            None,
+            media.constructor().map(search_messages_filter_json),
         )) {
             Ok(()) => Ok(Some(ChatSearchFlight::Query(extra))),
             Err(err) => {
@@ -654,10 +949,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         message_id: MessageId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.jump_to_message_with(message_id, DateJumpMode::Exact)
+    }
+
+    /// The shared jump pipeline; `mode` retargets a date jump once the
+    /// window around `message_id` is loaded.
+    pub(crate) fn jump_to_message_with(
+        &mut self,
+        message_id: MessageId,
+        mode: DateJumpMode,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        match self.session.begin_chat_search_jump(message_id) {
+        match self.session.begin_date_jump(message_id, mode) {
             ChatSearchJumpNeed::AlreadyReady | ChatSearchJumpNeed::Missing => Ok(None),
             ChatSearchJumpNeed::LoadAround => {
                 // The target is outside the loaded window: replace the
@@ -699,6 +1004,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn chat_search_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        // Prefetch the next page before the last loaded hit is reached.
+        let state = &self.session.chat_search;
+        if state
+            .selected
+            .is_some_and(|i| i + CHAT_SEARCH_PREFETCH >= state.hits.len())
+        {
+            let _ = self.load_more_chat_search();
+        }
         let Some(message_id) = self.session.chat_search.select_older() else {
             return Ok(None);
         };

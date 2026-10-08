@@ -583,6 +583,12 @@ pub enum EnvelopePayload {
         messages: Vec<ParsedMessage>,
         next_from_message_id: MessageId,
     },
+    /// `messageCalendar` — `getChatMessageCalendar` (schema line 3194):
+    /// per-day counts, newest day first.
+    MessageCalendar {
+        total_count: i32,
+        days: Vec<CalendarDay>,
+    },
     /// `updateSupergroup` — `supergroup.is_forum` is how Quill learns a
     /// supergroup is a forum (`chatTypeSupergroup` has no forum flag).
     /// Parity slice: the first active username (`supergroup.usernames`,
@@ -1554,4 +1560,13 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
         birthdate,
         groups_in_common: field(info, "group_in_common_count").max(0) as i32,
     }
+}
+
+/// One `messageCalendarDay` (schema line 3191): the first message sent on
+/// the day and how many matched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalendarDay {
+    pub total_count: i32,
+    pub message_id: MessageId,
+    pub date: i32,
 }

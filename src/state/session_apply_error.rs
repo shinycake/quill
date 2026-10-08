@@ -1204,6 +1204,24 @@ impl Session {
             }
         }
         if self.chat_search.matches_generation(pending)
+            && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
+        {
+            self.chat_search.loading_more = false;
+            self.chat_search.next_from_message_id = MessageId(0);
+        }
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::GetChatMessageByDate) => self.fail_date_jump(err.code == 404),
+            Some(RequestPurpose::GetChatMessageCalendar { .. }) => {
+                self.fail_message_calendar(pending)
+            }
+            Some(RequestPurpose::SearchFromMembers) => {
+                if let Some(picker) = self.chat_search.from_picker.as_mut() {
+                    picker.request = None;
+                }
+            }
+            _ => {}
+        }
+        if self.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
             self.chat_search

@@ -33,6 +33,10 @@ use super::demo::{
     demo_star_subscriptions, demo_storage_stats, demo_thumb_png_path, demo_websites,
 };
 use super::drafts::apply_ready_drafts;
+use super::find_demo::{
+    apply_ready_jump_date, apply_ready_search_filters, apply_ready_search_from,
+    apply_ready_search_from_hits,
+};
 use super::folders::apply_ready_folders;
 use super::forward::apply_ready_forward;
 use super::group_calls::demo_group_video_frames;
@@ -227,6 +231,42 @@ impl QuillApp {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_search_in_chat(session, &self.demo_sink, &self.demo_seq);
+            }
+        }
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyJumpDate
+                    | ScreenshotDemo::ReadySearchFrom
+                    | ScreenshotDemo::ReadySearchFromHits
+            )
+        ) && let Some(session) = self.demo_session.as_mut()
+        {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            match demo {
+                Some(ScreenshotDemo::ReadyJumpDate) => {
+                    apply_ready_jump_date(session, &self.demo_sink, &self.demo_seq)
+                }
+                Some(ScreenshotDemo::ReadySearchFrom) => {
+                    apply_ready_search_from(session, &self.demo_sink, &self.demo_seq)
+                }
+                _ => apply_ready_search_from_hits(session, &self.demo_sink, &self.demo_seq),
+            }
+            if !matches!(demo, Some(ScreenshotDemo::ReadyJumpDate)) {
+                self.chat_search_input
+                    .update(cx, |input, cx| input.focus(window, cx));
+            }
+            self.status_note = "screenshot demo — find in history".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySearchFilters)) {
+            self.search_input.update(cx, |input, cx| {
+                input.set_value("hello", window, cx);
+                input.focus(window, cx);
+            });
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_search(session, &self.demo_sink, &self.demo_seq);
+                apply_ready_search_filters(session);
             }
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyReply)) {
