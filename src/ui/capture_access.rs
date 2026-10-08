@@ -46,7 +46,19 @@ fn access(camera: bool) -> Access {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows has no prompt for desktop apps: the privacy switches in
+/// Settings decide, and a refusal is read from the consent store.
+#[cfg(windows)]
+fn access(camera: bool) -> Access {
+    if quill::media_tools::windows_privacy_denied(camera) {
+        Access::Denied
+    } else {
+        Access::Granted
+    }
+}
+
+/// Linux has no central permission: the capture error says what failed.
+#[cfg(not(any(target_os = "macos", windows)))]
 fn access(_camera: bool) -> Access {
     Access::Granted
 }
@@ -71,6 +83,20 @@ fn request(_camera: bool, done: std::sync::mpsc::Sender<bool>) {
     let _ = done.send(true);
 }
 
+#[cfg(windows)]
+fn denied_note(camera: bool) -> String {
+    let (device, pane) = if camera {
+        ("camera", "Camera")
+    } else {
+        ("microphone", "Microphone")
+    };
+    format!(
+        "Quill needs access to your {device} to record. Turn on \"Let desktop apps access \
+         your {device}\" in Settings › Privacy & security › {pane}."
+    )
+}
+
+#[cfg(not(windows))]
 fn denied_note(camera: bool) -> String {
     let device = if camera { "camera" } else { "microphone" };
     let pane = if camera { "Camera" } else { "Microphone" };

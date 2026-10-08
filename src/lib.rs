@@ -67,6 +67,10 @@ pub mod update_install;
 pub mod updater;
 pub mod video;
 pub mod voice;
+#[cfg(feature = "ui")]
+pub mod voice_input;
+#[cfg(feature = "ui")]
+pub mod voice_opus;
 
 use sha2::{Digest, Sha256};
 use std::fs;

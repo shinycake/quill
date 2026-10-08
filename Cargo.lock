@@ -5950,6 +5950,7 @@ dependencies = [
  "block2 0.6.2",
  "core-foundation 0.10.1",
  "core-video",
+ "cpal",
  "directories",
  "embed-resource",
  "encoding_rs",
@@ -5973,6 +5974,7 @@ dependencies = [
  "rand 0.8.8",
  "raw-window-handle",
  "rodio",
+ "rusty-opus",
  "security-framework",
  "semver",
  "serde",
@@ -6682,6 +6684,12 @@ dependencies = [
  "tempfile",
  "wait-timeout",
 ]
+
+[[package]]
+name = "rusty-opus"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f45b2cc805b83960083f25b77df0c678cae5ac89a3138e6994aed8c62e2cba"
 
 [[package]]
 name = "rustybuzz"
