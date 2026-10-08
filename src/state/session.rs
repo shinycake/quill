@@ -786,6 +786,9 @@ pub struct Session {
     /// Chats whose content is protected (`chat.has_protected_content`,
     /// schema 1.8.67 line 3598): no saving, forwarding or copying.
     pub protected_chats: HashSet<i64>,
+    /// Translation state (`translateText` / `translateMessageText`, the
+    /// chat translate bar).
+    pub translate: TranslateState,
     /// Slice G2: the welcome-message pack per chat
     /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
     pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
@@ -1248,6 +1251,7 @@ impl Session {
             supergroup_send_welcome_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
             protected_chats: HashSet::new(),
+            translate: TranslateState::default(),
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),

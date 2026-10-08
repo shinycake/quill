@@ -1302,6 +1302,11 @@ pub enum RequestPurpose {
     /// 15289). Response is `ok`; same no-local-state treatment as
     /// `DeleteSavedOrderInfo`.
     DeleteSavedCredentials,
+    /// `translateText` / `translateMessageText` (schema 1.8.67). Response
+    /// is `formattedText`; `job` indexes `Session::translate.jobs`.
+    TranslateJob {
+        job: u64,
+    },
     /// Slice msg-richtext-ai-tools: `fixTextWithAi` (schema 1.8.67,
     /// :12172). Response is `fixedText`; the fixed text replaces the
     /// open chat's composer draft.

@@ -240,6 +240,10 @@ pub enum EnvelopePayload {
         /// — the chat's content can't be saved, forwarded or copied.
         /// Refreshed by `updateChatHasProtectedContent` (line 10582).
         has_protected_content: bool,
+        /// `chat.is_translatable` (schema 1.8.67, lines 3599 / 3627) —
+        /// translation of the chat's messages must be suggested.
+        /// Refreshed by `updateChatIsTranslatable` (line 10585).
+        is_translatable: bool,
         /// Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67, lines
         /// 3600 / 3627). Refreshed by `updateChatIsMarkedAsUnread`
         /// (schema line 10588).
@@ -497,11 +501,13 @@ pub enum EnvelopePayload {
         text: String,
     },
     /// Slice msg-richtext-ai-tools: bare `formattedText` (TDLib 1.8.67,
-    /// `schema/td_api.tl:3046`) — the `composeTextWithAi` answer. The
-    /// composer applies `text` (entities are dropped: the draft is plain
-    /// text, documented in the driver).
+    /// `schema/td_api.tl:3046`) — the `composeTextWithAi`,
+    /// `translateText` and `translateMessageText` answer. The composer
+    /// applies `text` (entities are dropped: the draft is plain text,
+    /// documented in the driver); translations keep `entities`.
     FormattedText {
         text: String,
+        entities: Vec<TextEntity>,
     },
     /// MED4: `webPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:4377`)
     /// — the `getWebPageInstantView` answer. `blocks` are the same
@@ -1116,6 +1122,12 @@ pub enum EnvelopePayload {
     UpdateChatHasProtectedContent {
         chat_id: i64,
         has_protected_content: bool,
+    },
+    /// `updateChatIsTranslatable` (schema 1.8.67, line 10585) — translation
+    /// of the chat's messages was enabled or disabled.
+    UpdateChatIsTranslatable {
+        chat_id: i64,
+        is_translatable: bool,
     },
     /// Slice G2: `chatBoostStatus` (schema 1.8.67, line 6943) — the
     /// `getChatBoostStatus` response. Only `level` and `boost_count`

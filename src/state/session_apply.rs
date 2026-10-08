@@ -126,6 +126,7 @@ impl Session {
                 video_chat,
                 has_welcome_messages,
                 has_protected_content,
+                is_translatable,
                 unread_mention_count,
                 unread_reaction_count,
                 can_be_reported,
@@ -135,6 +136,7 @@ impl Session {
                 last_message,
             } => {
                 self.set_chat_protected(chat_id.0, has_protected_content);
+                self.set_chat_translatable(chat_id.0, is_translatable);
                 self.set_chat_action_bar(chat_id.0, action_bar);
                 self.apply_update_new_chat(
                     chat_id,
@@ -396,6 +398,10 @@ impl Session {
                 chat_id,
                 has_protected_content,
             } => self.set_chat_protected(chat_id, has_protected_content),
+            EnvelopePayload::UpdateChatIsTranslatable {
+                chat_id,
+                is_translatable,
+            } => self.set_chat_translatable(chat_id, is_translatable),
             // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line
             // 13917) — correlated via the pending request's `chat_id`.
             EnvelopePayload::ChatBoostStatus { level, boost_count } => {
@@ -2533,6 +2539,16 @@ impl Session {
             // Slice msg-richtext-ai-tools: `fixedText` / `formattedText`
             // answers — captured by the driver before `apply` into
             // `Session::ai_composer_text`; nothing to reduce here.
+            EnvelopePayload::FormattedText { text, entities }
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::TranslateJob { .. })
+                ) =>
+            {
+                if let Some(RequestPurpose::TranslateJob { job }) = pending.map(|p| p.purpose) {
+                    self.finish_translation(job, Translation::Done { text, entities });
+                }
+            }
             EnvelopePayload::FixedText { .. } | EnvelopePayload::FormattedText { .. } => {}
             // MED4: `webPageInstantView` — captured by the driver before
             // `apply` into `Session::instant_view` (success) or

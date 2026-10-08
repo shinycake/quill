@@ -19,6 +19,7 @@ mod privacy;
 mod secret_chats;
 mod stickers;
 mod stories;
+mod translate;
 #[cfg(test)]
 mod tests_auth;
 #[cfg(test)]
@@ -64,4 +65,5 @@ pub use privacy::*;
 pub use secret_chats::*;
 pub use stickers::*;
 pub use stories::*;
+pub use translate::*;
 pub use users::*;

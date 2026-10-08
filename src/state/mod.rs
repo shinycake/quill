@@ -91,6 +91,7 @@ mod session_sponsored;
 mod session_stickers;
 mod session_stories;
 mod session_subsection_tabs;
+mod session_translate;
 mod session_updates;
 mod shared_media_types;
 mod sticker_gif_types;
@@ -115,6 +116,7 @@ pub use session_reply::{
     thumb_candidates,
 };
 pub use session_subsection_tabs::{BotTopics, TopicBadge};
+pub use session_translate::*;
 pub use shared_media_types::*;
 pub use sticker_gif_types::*;
 pub use story_types::*;

@@ -259,7 +259,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // variants); the UI drains `Session::ai_composer_text` into the
         // composer draft.
         let ai_text_answer: Option<(ChatId, String)> = match &owned.envelope.payload {
-            EnvelopePayload::FixedText { text, .. } | EnvelopePayload::FormattedText { text } => {
+            EnvelopePayload::FixedText { text, .. } | EnvelopePayload::FormattedText { text, .. } => {
                 owned
                     .envelope
                     .extra
