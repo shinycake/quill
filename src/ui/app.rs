@@ -275,6 +275,8 @@ pub struct QuillApp {
     /// NSSpellChecker; elsewhere the embedded English wordlist), shared
     /// with background check tasks.
     pub(super) spellchecker: std::sync::Arc<quill::spellcheck::SpellChecker>,
+    /// Which engine that is and its dictionaries (Appearance → Spelling).
+    pub(super) spell_info: super::spellcheck_ui::SpellInfo,
     /// Misspellings underlined in the composer; byte ranges into
     /// `spell_checked_text`.
     pub(super) spell_misspellings: Vec<quill::spellcheck::Misspelling>,
@@ -306,6 +308,9 @@ pub struct QuillApp {
     /// Slice CL: the open peek preview — hovered/press-and-hold chat,
     /// or `None`. Transient; never an open chat.
     pub(super) chat_preview: Option<ChatPreviewState>,
+    /// Profile layer opened from a sender avatar (tdesktop's
+    /// `Info::LayerWidget`); presents `session.open_info_panel`.
+    pub(super) profile_modal: Option<super::profile_modal::ProfileModal>,
     /// Slice CL: an in-progress long press on a chat-list row — the
     /// row's chat id + press start, for the peek preview.
     pub(super) preview_press: Option<(ChatId, Instant)>,
@@ -345,7 +350,9 @@ pub struct QuillApp {
     /// The open chat's pinned-messages list (bar's list button).
     pub(super) pinned_list_open: bool,
     /// Muted, looping inline players for visible videos and GIFs.
-    pub(super) inline_videos: std::cell::RefCell<super::inline_video::InlineVideos>,
+    /// Shared with the history's animation layer, which draws the clips'
+    /// current frames (`inline_video::LiveSource`).
+    pub(super) inline_videos: std::rc::Rc<std::cell::RefCell<super::inline_video::InlineVideos>>,
     /// Highest frame rate animated content asked for since the last
     /// clock tick (0: nothing animated rendered); see `frame_clock`.
     pub(super) animation_demand: std::cell::Cell<u32>,

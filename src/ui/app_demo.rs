@@ -694,6 +694,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — posting to a forum topic".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyAvatarProfile => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — group member profile from an avatar click".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyContacts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1416,6 +1422,7 @@ impl QuillApp {
         let pending_attachments = demo_pending_attachments(demo);
 
         let audio_output = super::audio::SharedOutput::default();
+        let (spellchecker, spell_info) = Self::new_spellchecker(true);
         let mut app = Self {
             update_state: if demo.is_none() {
                 quill::update_install::startup_state()
@@ -1585,6 +1592,7 @@ impl QuillApp {
             pin_reorder_archived: false,
             pin_drag_anchor: None,
             chat_preview: None,
+            profile_modal: None,
             preview_press: None,
             selected_chats: HashSet::new(),
             swipe_reply_start: None,
@@ -1617,7 +1625,8 @@ impl QuillApp {
             keybindings_screenshot: false,
             appearance_applied: None,
             // codex:spellcheck-native: platform engine + persisted app words.
-            spellchecker: Self::new_spellchecker(true),
+            spellchecker,
+            spell_info,
             spell_misspellings: Vec::new(),
             spell_checked_text: String::new(),
             spell_task: None,

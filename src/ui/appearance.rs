@@ -861,10 +861,14 @@ impl QuillApp {
     }
 
     /// parity:platform-spellcheck: the spellcheck toggle (same row
-    /// pattern as `appearance_switch_row`, but wired to ChatPrefs).
+    /// pattern as `appearance_switch_row`, but wired to ChatPrefs), plus
+    /// tdesktop's spell-checker language list where Quill owns the
+    /// dictionaries (Hunspell on Linux, ISpellChecker languages on
+    /// Windows; macOS lets the system pick).
     fn appearance_spellcheck_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let checked = self.chat_prefs.spellcheck_enabled;
-        let control = div()
+        let hint = self.spell_info.hint();
+        let row = div()
             .flex()
             .items_center()
             .justify_between()
@@ -880,7 +884,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(super::spellcheck_ui::SPELLCHECK_SETTING_HINT),
+                            .child(hint),
                     ),
             )
             .child(
@@ -892,9 +896,44 @@ impl QuillApp {
                         let text = this.composer.read(cx).value().to_string();
                         this.sync_spellcheck(&text, cx);
                     })),
-            )
-            .into_any_element();
-        self.appearance_section(cx, "Spelling", "", control)
+            );
+        let mut control = div().flex().flex_col().gap_2().child(row);
+        if checked && !self.spell_info.available.is_empty() {
+            let active = self.spell_info.active.clone();
+            let mut chips = div().flex().flex_wrap().gap_2().child(self.appearance_chip(
+                "spell-lang-auto",
+                "Automatic",
+                self.spell_info.chosen.is_empty(),
+                cx,
+                |this, cx| this.set_spell_languages(Vec::new(), cx),
+            ));
+            for code in self.spell_info.available.clone() {
+                let on = active.contains(&code);
+                let base = active.clone();
+                let toggled = code.clone();
+                chips = chips.child(self.appearance_chip(
+                    SharedString::from(format!("spell-lang-{code}")),
+                    code.clone(),
+                    on && !self.spell_info.chosen.is_empty(),
+                    cx,
+                    move |this, cx| {
+                        let mut next = if this.spell_info.chosen.is_empty() {
+                            base.clone()
+                        } else {
+                            this.spell_info.chosen.clone()
+                        };
+                        if let Some(i) = next.iter().position(|c| *c == toggled) {
+                            next.remove(i);
+                        } else {
+                            next.push(toggled.clone());
+                        }
+                        this.set_spell_languages(next, cx);
+                    },
+                ));
+            }
+            control = control.child(chips);
+        }
+        self.appearance_section(cx, "Spelling", "", control.into_any_element())
     }
 
     /// tdesktop "Suggest emoji replacements" (`suggestEmoji`, default on):

@@ -50,7 +50,6 @@ impl Render for QuillApp {
             window.toggle_fullscreen();
         }
         self.media_roots_frame.borrow_mut().take();
-        self.tick_animation_layer(cx);
         // Spoiler specks painted last frame keep drifting.
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
@@ -747,6 +746,10 @@ impl Render for QuillApp {
                 this.child(overlay)
             })
             .when_some(self.privacy_exceptions_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Avatar-click profile layer (tdesktop `Info::LayerWidget`).
+            .when_some(self.profile_modal_overlay(window, cx), |this, overlay| {
                 this.child(overlay)
             })
             // Phase C1: call overlay above everything else.

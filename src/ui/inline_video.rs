@@ -10,8 +10,10 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageContent;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 /// Largest clip fetched in the background so it can autoplay.
 const AUTOPLAY_PREFETCH_MAX: i64 = 20 * 1024 * 1024;
@@ -35,6 +37,29 @@ pub(super) struct InlineFrame {
     /// its dot has grown under a drag.
     pub(super) seek_shown: f32,
     pub(super) seek_grabbed: f32,
+    /// Set when the conversation's animation layer draws this clip (a
+    /// muted loop in the history): where it gets the next frames.
+    pub(super) live: Option<LiveSource>,
+}
+
+/// A playing clip the history's animation layer redraws every frame
+/// (`anim_layer::tile`), while the conversation replays its cached frame.
+#[derive(Clone)]
+pub(super) struct LiveSource {
+    videos: Rc<RefCell<InlineVideos>>,
+    key: Key,
+    backdrop: Hsla,
+}
+
+impl LiveSource {
+    /// The clip's current frame; `None` once its player stopped.
+    pub(super) fn frame(&self) -> Option<InlineFrame> {
+        let frame = self.videos.borrow_mut().current(self.key.0, self.key.1)?;
+        Some(InlineFrame {
+            backdrop: self.backdrop,
+            ..frame
+        })
+    }
 }
 
 /// tdesktop `VideoMessageSeek`: the ring shows in 220 ms (ease-out-back),
@@ -328,6 +353,26 @@ impl InlineVideos {
             }
         };
         slot.seen = render;
+        Self::slot_frame(slot, inactive)
+    }
+
+    /// The current frame of a running clip, for the history's animation
+    /// layer: [`Self::frame`] without starting a player or marking its row
+    /// rendered.
+    #[cfg(target_os = "macos")]
+    pub(super) fn current(&mut self, chat_id: i64, message_id: i64) -> Option<InlineFrame> {
+        let inactive = self.inactive;
+        let slot = self.players.get_mut(&(chat_id, message_id))?;
+        Self::slot_frame(slot, inactive)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn current(&mut self, _chat_id: i64, _message_id: i64) -> Option<InlineFrame> {
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    fn slot_frame(slot: &mut Slot, inactive: bool) -> Option<InlineFrame> {
         if slot.video.error().is_some() {
             return None;
         }
@@ -365,6 +410,7 @@ impl InlineVideos {
             progress,
             seek_shown: slot.seek_shown.value(SEEK_SHOW, SEEK_HIDE, true),
             seek_grabbed: slot.seek_grabbed.value(SEEK_GRAB, SEEK_GRAB, false),
+            live: None,
         })
     }
 
@@ -445,7 +491,15 @@ impl QuillApp {
             .frame(chat_id.0, message_id.0, || {
                 self.playable_clip_path(chat_id, message_id, file_id)
             });
-        {
+        // A muted loop in the conversation is drawn by its animation layer
+        // (which keeps it playing) while the history replays; a clip with
+        // sound or a seek ring stays with the history, ticking it.
+        let layered = frame
+            .as_ref()
+            .is_some_and(|frame| !frame.sound && frame.seek_shown <= 0.)
+            && self.slices.in_conversation()
+            && super::anim_layer::current().is_some();
+        if !layered {
             let videos = self.inline_videos.borrow();
             if videos.active() {
                 // Seek rings spring in and out more smoothly at 60.
@@ -462,7 +516,16 @@ impl QuillApp {
             .appearance
             .wallpaper_rgb
             .map_or(cx.theme().background, |color| rgb(color).into());
-        frame.map(|frame| InlineFrame { backdrop, ..frame })
+        let live = layered.then(|| LiveSource {
+            videos: self.inline_videos.clone(),
+            key: (chat_id.0, message_id.0),
+            backdrop,
+        });
+        frame.map(|frame| InlineFrame {
+            backdrop,
+            live,
+            ..frame
+        })
     }
 }
 
