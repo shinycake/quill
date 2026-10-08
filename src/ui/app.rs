@@ -120,6 +120,8 @@ pub struct QuillApp {
     pub(super) command_menu_selected: usize,
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
+    /// Composer `#hashtag` / `:emoji` autocomplete popup.
+    pub(super) suggest: super::composer_suggest::SuggestUi,
     /// Bots slice: `@botname query` inline-mode results dropdown above
     /// the composer. `inline_results_selected` is the highlighted row
     /// (Up/Down/Enter); `inline_query_token` debounces the
@@ -273,6 +275,8 @@ pub struct QuillApp {
     /// NSSpellChecker; elsewhere the embedded English wordlist), shared
     /// with background check tasks.
     pub(super) spellchecker: std::sync::Arc<quill::spellcheck::SpellChecker>,
+    /// Which engine that is and its dictionaries (Appearance → Spelling).
+    pub(super) spell_info: super::spellcheck_ui::SpellInfo,
     /// Misspellings underlined in the composer; byte ranges into
     /// `spell_checked_text`.
     pub(super) spell_misspellings: Vec<quill::spellcheck::Misspelling>,
@@ -293,6 +297,14 @@ pub struct QuillApp {
     /// Slice CL1: right-click chat-row context menu target + window
     /// position.
     pub(super) chat_menu: Option<ChatMenuState>,
+    /// Right-click menu of the "Archived chats" row (window position).
+    pub(super) archive_menu: Option<Point<Pixels>>,
+    /// Pinned-chat drag in progress (or its release slide), see
+    /// `quill::pin_reorder`; `pin_reorder_archived` says which pinned list.
+    pub(super) pin_reorder: Option<quill::pin_reorder::PinReorder>,
+    pub(super) pin_reorder_archived: bool,
+    /// Where a pinned-row press started moving, until the 30px threshold.
+    pub(super) pin_drag_anchor: Option<(i64, f32)>,
     /// Slice CL: the open peek preview — hovered/press-and-hold chat,
     /// or `None`. Transient; never an open chat.
     pub(super) chat_preview: Option<ChatPreviewState>,
@@ -341,6 +353,15 @@ pub struct QuillApp {
     pub(super) animation_demand: std::cell::Cell<u32>,
     /// Chat-row online-dot and unread-badge animation state.
     pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
+    /// What asked for the next tick: cached slices by entity id, `None`
+    /// for `QuillApp` itself (see `frame_clock`).
+    pub(super) animation_targets: std::cell::RefCell<std::collections::HashSet<Option<EntityId>>>,
+    /// The next tick serves media playing with sound (allowed while the
+    /// window is inactive).
+    pub(super) animation_sound: std::cell::Cell<bool>,
+    /// When the TDLib poll last redrew, and whether a redraw is held back
+    /// (inactive window; see `notify_polled`).
+    pub(super) polled_notify: (std::time::Instant, bool),
     /// Whether the main window is active this frame: like tdesktop
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.
@@ -355,6 +376,10 @@ pub struct QuillApp {
     pub(super) composer_link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
     /// Cross-fade timeline of the round Send / Record / Save button.
     pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
+    /// Cached child views (chat list, conversation) the frame clock can
+    /// redraw on their own, and the chat list's animation layer; see
+    /// `app_slice`.
+    pub(super) slices: super::app_slice::Slices,
     /// Smooth reveal of a bot's streaming reply (`bot_stream`).
     pub(super) stream_reveal: std::cell::RefCell<super::bot_stream::StreamReveal>,
     /// Deleted messages still dissolving (`vanish`).
@@ -674,6 +699,9 @@ pub struct QuillApp {
     pub(super) message_menu_selection: Option<String>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     pub(super) media_viewer: MediaViewer,
+    /// Shared Media paging, video full screen and inactive-window state of
+    /// the viewer.
+    pub(super) viewer_extra: super::media_viewer::ViewerExtra,
     /// The photo editor over a pending photo attachment, when open.
     pub(super) photo_editor: Option<super::photo_editor::PhotoEditor>,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
@@ -958,7 +986,9 @@ impl QuillApp {
         let primary = if let Some(live) = self.live.as_ref() {
             live.driver.tdlib_media_roots()
         } else if self.demo_session.is_some() {
-            vec![demo_media_allowlist()]
+            let mut roots = vec![demo_media_allowlist()];
+            roots.extend(super::demo::demo_stress_avatar_dir());
+            roots
         } else {
             Vec::new()
         };

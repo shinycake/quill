@@ -522,7 +522,7 @@ pub(super) const MONO_FONT: &str = "monospace";
 /// EmojiPanel's `getCustomEmojiStickers` cache (thumbnail first, else static
 /// WEBP — `StickerItem::display_file_id`). Ids without a resolved, downloaded
 /// sticker are absent; the renderer falls back to the span text.
-fn custom_emoji_paths(
+pub(super) fn custom_emoji_paths(
     entities: &[TextEntity],
     stickers: &[StickerItem],
     files: &HashMap<i32, ParsedFile>,

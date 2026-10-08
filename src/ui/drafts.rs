@@ -269,6 +269,7 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value(&text, window, cx));
         // `set_value` emits no Change: re-check the restored draft.
         self.sync_spellcheck(&text, cx);
+        self.sync_suggest_menu(cx);
     }
 
     pub(super) fn sync_composer_typing(&mut self, text: &str) {

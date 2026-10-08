@@ -89,7 +89,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -251,6 +251,15 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — chat list: archive settings dialog".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyArchiveRow
+        | ScreenshotDemo::ReadyArchiveBar
+        | ScreenshotDemo::ReadyArchiveMenu
+        | ScreenshotDemo::ReadyPinDrag => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat list: archive row · story rings · pinned drag".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyChatListSearch => (
@@ -609,6 +618,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — in-viewer video playback".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyViewerGif | ScreenshotDemo::ReadyViewerShared => (
+            Some(seed_ready_custom_emoji_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — viewer GIF loop / Shared Media paging".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyStories => (
@@ -1197,10 +1212,12 @@ impl QuillApp {
                         this.close_command_menu(cx);
                         this.close_inline_results(cx);
                         this.close_mention_menu(cx);
+                        this.close_suggest_menu(false, cx);
                     }
                     _ => {
                         this.sync_command_menu(cx);
                         this.sync_mention_menu(cx);
+                        this.sync_suggest_menu(cx);
                         this.sync_inline_mode(cx);
                         // codex:spellcheck-native: shift underlines with
                         // the edit and debounce a background re-check.
@@ -1219,6 +1236,8 @@ impl QuillApp {
                             // Enter was consumed by the inline results.
                         } else if this.pick_mention_selection(window, cx) {
                             // Enter completed the highlighted mention.
+                        } else if this.pick_suggest_selection(window, cx) {
+                            // Enter inserted the highlighted hashtag/emoji.
                         } else if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
                         } else if !text.trim().is_empty() || !this.pending_attachments.is_empty() {
@@ -1396,6 +1415,7 @@ impl QuillApp {
 
         let pending_attachments = demo_pending_attachments(demo);
 
+        let (spellchecker, spell_info) = Self::new_spellchecker(true);
         let mut app = Self {
             update_state: if demo.is_none() {
                 quill::update_install::startup_state()
@@ -1438,6 +1458,7 @@ impl QuillApp {
             command_menu_open: false,
             command_menu_selected: 0,
             mention_selected: 0,
+            suggest: super::composer_suggest::SuggestUi::load(),
             inline_results_open: false,
             inline_results_selected: 0,
             inline_query_token: 0,
@@ -1559,6 +1580,10 @@ impl QuillApp {
             rich_editor_open: false,
             message_menu: None,
             chat_menu: None,
+            archive_menu: None,
+            pin_reorder: None,
+            pin_reorder_archived: false,
+            pin_drag_anchor: None,
             chat_preview: None,
             preview_press: None,
             selected_chats: HashSet::new(),
@@ -1592,7 +1617,8 @@ impl QuillApp {
             keybindings_screenshot: false,
             appearance_applied: None,
             // codex:spellcheck-native: platform engine + persisted app words.
-            spellchecker: Self::new_spellchecker(true),
+            spellchecker,
+            spell_info,
             spell_misspellings: Vec::new(),
             spell_checked_text: String::new(),
             spell_task: None,
@@ -1621,12 +1647,16 @@ impl QuillApp {
             inline_videos: Default::default(),
             animation_demand: Default::default(),
             row_fx: Default::default(),
+            animation_targets: Default::default(),
+            animation_sound: Default::default(),
+            polled_notify: (std::time::Instant::now(), false),
             window_active: std::cell::Cell::new(true),
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
             motion: Default::default(),
             composer_link_dialog: None,
             send_morph: Default::default(),
+            slices: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),
             group_call_title_dialog: None,
@@ -1735,6 +1765,7 @@ impl QuillApp {
             viewer_controls_gen: 0,
             viewer_over_controls: false,
             viewer_hide_timer: false,
+            viewer_extra: Default::default(),
             viewer_seek_slider: None,
             viewer_seek_scrubbing: false,
             viewer_seek_preview_secs: None,
@@ -1825,6 +1856,7 @@ impl QuillApp {
         app.demo_setup_calls(demo, window, cx);
         app.demo_setup_privacy_media(demo, window, cx);
         app.demo_setup_payments(demo, window, cx);
+        app.demo_setup_viewer_extras(demo, cx);
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
@@ -1840,12 +1872,16 @@ impl QuillApp {
             if !capturing {
                 let menu_handled = menu_app
                     .update(cx, |this, cx| {
-                        if this.message_menu.is_none() && this.chat_menu.is_none() {
+                        if this.message_menu.is_none()
+                            && this.chat_menu.is_none()
+                            && this.archive_menu.is_none()
+                        {
                             return false;
                         }
                         if event.keystroke.key == "escape" {
                             this.message_menu = None;
                             this.chat_menu = None;
+                            this.archive_menu = None;
                             cx.notify();
                             return true;
                         }
@@ -1853,6 +1889,20 @@ impl QuillApp {
                     })
                     .unwrap_or(false);
                 if menu_handled {
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+            // Viewer playback keys (Space/K/J/L/Enter, tdesktop
+            // `handleKeyPress`). A dialog over the viewer (delete
+            // confirmation) keeps its own Enter and Space.
+            if !capturing && !window.has_active_dialog(cx) {
+                let viewer_handled = menu_app
+                    .update(cx, |this, cx| {
+                        this.handle_viewer_key(&event.keystroke, window, cx)
+                    })
+                    .unwrap_or(false);
+                if viewer_handled {
                     cx.stop_propagation();
                     return;
                 }
@@ -1868,17 +1918,15 @@ impl QuillApp {
                             || this.close_media_panel(cx)
                             || this.close_inline_results(cx)
                             || this.close_mention_menu(cx)
+                            || this.close_suggest_menu(true, cx)
                             || this.close_command_menu(cx)
                     })
-                    .unwrap_or(false),
-                // Telegram Desktop: Space plays/pauses the viewer's video.
-                "space" => menu_app
-                    .update(cx, |this, cx| this.toggle_viewer_video_on_space(cx))
                     .unwrap_or(false),
                 "up" => menu_app
                     .update(cx, |this, cx| {
                         this.step_inline_results(-1, cx)
                             || this.step_mention_menu(-1, cx)
+                            || this.step_suggest_menu(-1, false, cx)
                             || this.step_command_menu(-1, cx)
                     })
                     .unwrap_or(false),
@@ -1886,12 +1934,24 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         this.step_inline_results(1, cx)
                             || this.step_mention_menu(1, cx)
+                            || this.step_suggest_menu(1, false, cx)
                             || this.step_command_menu(1, cx)
                     })
                     .unwrap_or(false),
-                // Tab completes the highlighted `@` suggestion.
+                // Tab completes the highlighted `@` / `#` / `:` suggestion.
                 "tab" => menu_app
-                    .update(cx, |this, cx| this.pick_mention_selection(window, cx))
+                    .update(cx, |this, cx| {
+                        this.pick_mention_selection(window, cx)
+                            || this.pick_suggest_selection(window, cx)
+                    })
+                    .unwrap_or(false),
+                // The emoji strip is horizontal (tdesktop steps with
+                // Left/Right too); the key keeps moving the caret otherwise.
+                "left" => menu_app
+                    .update(cx, |this, cx| this.step_suggest_menu(-1, true, cx))
+                    .unwrap_or(false),
+                "right" => menu_app
+                    .update(cx, |this, cx| this.step_suggest_menu(1, true, cx))
                     .unwrap_or(false),
                 _ => false,
             };
@@ -1969,14 +2029,28 @@ impl QuillApp {
         // notifies when the effective theme actually changed, so the
         // tick is free when idle.
         app.apply_appearance(cx);
+        app.init_slices(cx);
+        // Animations stop behind another app and resume on activation:
+        // update the gate now and redraw (the content asks for ticks again).
+        cx.observe_window_activation(window, |this, window, cx| {
+            let active = window.is_window_active() || super::frame_clock::assume_active();
+            this.window_active.set(active);
+            this.inline_videos.borrow_mut().set_window_active(active);
+            cx.notify();
+        })
+        .detach();
         // Remember the window's geometry when the user moves or resizes it.
         cx.observe_window_bounds(window, |this, window, cx| {
             this.schedule_window_state_save(window, cx);
         })
         .detach();
         // Performance fixture: keep rendering at ~60 Hz so a profiler sees
-        // steady-state frames.
-        if demo.is_some() && super::demo::demo_stress_size().is_some() {
+        // steady-state frames (`QUILL_DEMO_STRESS_REDRAW=0`: only what the
+        // app itself asks for, to measure idle animation cost).
+        if demo.is_some()
+            && super::demo::demo_stress_size().is_some()
+            && std::env::var_os("QUILL_DEMO_STRESS_REDRAW").is_none_or(|v| v != "0")
+        {
             cx.spawn(async move |this, cx| {
                 loop {
                     cx.background_executor()

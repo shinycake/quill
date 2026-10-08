@@ -31,6 +31,10 @@ pub enum ScreenshotDemo {
     /// renders with its per-state label ("Updating…").
     ReadyReconnecting,
     ReadyChatsComposer,
+    /// Composer `#ru` with the recent-hashtag popup open.
+    ReadySuggestHashtag,
+    /// Composer `:fire` with the emoji suggestion strip open.
+    ReadySuggestEmoji,
     ReadyUnread,
     ReadyUnreadRead,
     ReadyMedia,
@@ -88,6 +92,16 @@ pub enum ScreenshotDemo {
     /// Slice CL2: sidebar search with an empty result (injected, no
     /// live Telegram).
     ReadyChatListSearch,
+    /// Archived-chats row on top of the chat list (names + muted unread
+    /// badge) with story rings on avatars and three pinned chats.
+    ReadyArchiveRow,
+    /// Same, with `archiveCollapsed`: the slim bar.
+    ReadyArchiveBar,
+    /// Same, with the archive row's context menu open.
+    ReadyArchiveMenu,
+    /// Same, mid pinned-drag: the dragged row follows the pointer while
+    /// the displaced one slides home.
+    ReadyPinDrag,
     /// Slice media-shared-gallery: per-chat shared-media gallery open on
     /// chat 11 — the Media tab shows its empty state, the Files tab two
     /// injected documents (injected `foundChatMessages` through the real
@@ -277,6 +291,10 @@ pub enum ScreenshotDemo {
     /// (Parity slice 5.)
     ReadyVideoPlayback,
     ReadyVideoPip,
+    /// A GIF looping in the viewer, with a custom emoji in its caption.
+    ReadyViewerGif,
+    /// The viewer paging over the Shared Media panel's photos.
+    ReadyViewerShared,
     /// Story viewer demo (injected, no live Telegram): the story tray above
     /// the chat list for "Demo chat A"/"Demo chat B" plus the story viewer
     /// overlay open on Demo chat A's downloaded photo story (Phase 9.1).

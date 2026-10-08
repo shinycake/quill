@@ -19,6 +19,7 @@ use super::chat_list::{
     apply_ready_mute_archive, apply_ready_pin,
 };
 use super::chat_row::ChatPreviewState;
+use super::chatlist_demo::apply_ready_archive_row;
 use super::composer::apply_ready_reply;
 use super::composer_ui::apply_ready_stickers;
 use super::contacts::apply_ready_contacts;
@@ -105,7 +106,13 @@ impl QuillApp {
         ) {
             self.chat_prefs.spellcheck_enabled = true;
             // Ignore persisted app words so this fixture always shows typos.
-            self.spellchecker = Self::new_spellchecker(false);
+            self.spellchecker = Self::new_spellchecker(false).0;
+            // Off macOS the fixture must not depend on the host's dictionaries.
+            #[cfg(not(target_os = "macos"))]
+            {
+                self.spellchecker =
+                    std::sync::Arc::new(quill::spellcheck::SpellChecker::wordlist());
+            }
             // `-panel`: a multi-line draft proving the skip rules — the
             // link, mention, hashtag, command and code stay unmarked.
             let draft = if matches!(demo, Some(ScreenshotDemo::ReadySpellcheckPanel)) {
@@ -119,6 +126,34 @@ impl QuillApp {
                 input.set_value(draft, window, cx);
             });
             self.spellcheck_now(cx);
+        }
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji)
+        ) {
+            // In-memory fixtures; nothing is persisted.
+            self.chat_prefs.suggest_emoji = true;
+            self.suggest.hashtags = quill::suggest::RecentHashtags::default();
+            for tag in [
+                "#rustlang",
+                "#rust",
+                "#rustacean",
+                "#ruby",
+                "#gpui",
+                "#rustlang",
+            ] {
+                self.suggest.hashtags.record_message(tag);
+            }
+            let draft = if matches!(demo, Some(ScreenshotDemo::ReadySuggestHashtag)) {
+                "shipping the new composer today #ru"
+            } else {
+                "that release was :fire"
+            };
+            self.composer.update(cx, |input, cx| {
+                input.set_value(draft, window, cx);
+                input.set_selected_range(draft.len()..draft.len(), cx);
+            });
+            self.sync_suggest_menu(cx);
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             self.composer.update(cx, |input, cx| {
@@ -366,6 +401,40 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — archive settings dialog".into();
         }
+        // Archive row / bar / menu and the pinned drag, over the same
+        // fixture (archived chats, story rings, three pinned chats).
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyArchiveRow
+                    | ScreenshotDemo::ReadyArchiveBar
+                    | ScreenshotDemo::ReadyArchiveMenu
+                    | ScreenshotDemo::ReadyPinDrag
+            )
+        ) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_archive_row(session, &self.demo_sink, &self.demo_seq);
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyArchiveBar)) {
+                self.appearance.archive_collapsed = true;
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyArchiveMenu)) {
+                self.archive_menu = Some(Point::new(px(120.), px(150.)));
+            }
+            if matches!(demo, Some(ScreenshotDemo::ReadyPinDrag)) {
+                // Pinned 11 / 12 / 13: drag 12 past 13. 13 has just
+                // started sliding back up into the slot above.
+                let heights = [11, 12, 13].into_iter().map(|id| (id, 64.0)).collect();
+                if let Some(mut drag) =
+                    quill::pin_reorder::PinReorder::begin(vec![11, 12, 13], heights, 12, 300.)
+                {
+                    drag.drag_to(352., std::time::Instant::now());
+                    self.pin_reorder = Some(drag);
+                }
+            }
+            self.status_note = "screenshot demo — archive row · story rings".into();
+        }
         // Slice CL2: sidebar search showing the empty-result state.
         if matches!(demo, Some(ScreenshotDemo::ReadyChatListSearch)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -491,7 +560,47 @@ impl QuillApp {
             }
             // The panel's library holds the demo set's contents.
             if let Some(session) = self.demo_session.as_mut() {
-                let stickers = session.stickers.stickers.clone();
+                let mut stickers = session.stickers.stickers.clone();
+                // Performance fixture: `QUILL_DEMO_STICKERS=<n>` fills the
+                // picker with `n` distinct animated stickers (more than the
+                // playback cache holds).
+                let extra: i32 = std::env::var("QUILL_DEMO_STICKERS")
+                    .ok()
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(0);
+                if demo == Some(ScreenshotDemo::ReadyStickerPlayback) && extra > 0 {
+                    let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
+                    let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                        self.demo_sink.clone();
+                    let root = super::demo::demo_media_allowlist();
+                    for i in 0..extra {
+                        let id = 9_000 + i;
+                        let name = if i % 2 == 0 {
+                            "demo-sticker.tgs"
+                        } else {
+                            "demo-sticker.webm"
+                        };
+                        let json = super::demo::demo_file_json(
+                            id,
+                            &root.join(name).to_string_lossy(),
+                            true,
+                        );
+                        if let Some(owned) =
+                            quill::telegram::client::copy_and_parse(&json, &seq, &sink)
+                        {
+                            session.apply(owned);
+                        }
+                        let mut item = stickers[0].clone();
+                        item.id = i64::from(id);
+                        item.file_id = quill::ids::FileId(id);
+                        item.format = if i % 2 == 0 {
+                            quill::telegram::envelope::StickerFormat::Tgs
+                        } else {
+                            quill::telegram::envelope::StickerFormat::Webm
+                        };
+                        stickers.push(item);
+                    }
+                }
                 session.media_library.set_stickers.insert(77, stickers);
             }
             self.media_panel.open = true;

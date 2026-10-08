@@ -18,6 +18,22 @@ use quill::telegram::envelope::AuthorizationState;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// Whether one `pump_deep_link` step has something to show: a terminal
+/// state to consume, or an invite preview not on screen yet. No flow, a
+/// request in flight, and the invite already shown change nothing.
+fn deep_link_step_redraws(
+    state: Option<&DeepLinkState>,
+    shown_invite: Option<&DeepLinkState>,
+) -> bool {
+    match state {
+        None | Some(DeepLinkState::ResolvingInfo { .. } | DeepLinkState::ResolvingChat { .. }) => {
+            false
+        }
+        Some(preview @ DeepLinkState::InvitePreview { .. }) => shown_invite != Some(preview),
+        Some(_) => true,
+    }
+}
+
 impl QuillApp {
     /// Driver-facing half of the deep-link flow, run from `poll_live`.
     /// Fires `getDeepLinkInfo` once auth is Ready, then turns each
@@ -35,6 +51,12 @@ impl QuillApp {
         }
         // Consume terminal states once, retaining the invite preview until a decision.
         let state = live.driver.session.deep_link.take();
+        if !deep_link_step_redraws(state.as_ref(), self.deep_link_invite.as_ref()) {
+            // Nothing new (this runs on every poll, ~8×/s when idle): put
+            // the state back and don't redraw.
+            live.driver.session.deep_link = state;
+            return;
+        }
         match state {
             None
             | Some(DeepLinkState::ResolvingInfo { .. })
@@ -284,5 +306,35 @@ impl QuillApp {
                 .footer(footer)
                 .on_close(on_close)
         })
+    }
+}
+
+#[cfg(test)]
+mod pump_tests {
+    use super::deep_link_step_redraws;
+    use quill::state::DeepLinkState;
+
+    #[test]
+    fn an_idle_poll_does_not_redraw() {
+        // No deep-link flow at all: the case on every idle poll.
+        assert!(!deep_link_step_redraws(None, None));
+        let resolving = DeepLinkState::ResolvingInfo { generation: 1 };
+        assert!(!deep_link_step_redraws(Some(&resolving), None));
+    }
+
+    #[test]
+    fn an_invite_redraws_once() {
+        let invite = DeepLinkState::InvitePreview {
+            hash: "h".into(),
+            title: "Group".into(),
+            member_count: 3,
+            creates_join_request: false,
+            is_channel: false,
+            generation: 1,
+        };
+        assert!(deep_link_step_redraws(Some(&invite), None));
+        assert!(!deep_link_step_redraws(Some(&invite), Some(&invite)));
+        let text = DeepLinkState::ShowText("Unknown link".into());
+        assert!(deep_link_step_redraws(Some(&text), None));
     }
 }

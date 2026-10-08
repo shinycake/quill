@@ -444,6 +444,14 @@ pub struct AppearancePrefs {
     /// in the chat-list preview instead of plain text.
     #[serde(default)]
     pub chat_list_rich_preview: bool,
+    /// tdesktop `archiveCollapsed`: the "Archived chats" row shrinks to a
+    /// slim bar at the top of the chat list.
+    #[serde(default)]
+    pub archive_collapsed: bool,
+    /// tdesktop `archiveInMainMenu`: the archive leaves the chat list and
+    /// lives in the main menu.
+    #[serde(default)]
+    pub archive_in_main_menu: bool,
     #[serde(default)]
     pub start_in_tray: bool,
     #[serde(default)]
@@ -482,6 +490,8 @@ impl Default for AppearancePrefs {
             preview_lines: crate::chatlist_style::PREVIEW_LINES_DEFAULT,
             chat_list_media_icons: false,
             chat_list_rich_preview: false,
+            archive_collapsed: false,
+            archive_in_main_menu: false,
             start_in_tray: false,
             minimize_to_tray: false,
             check_updates_on_launch: true,
@@ -592,6 +602,10 @@ pub struct ChatPrefs {
     pub send_key_mode: crate::composer::SendKeyMode,
     #[serde(default = "default_true")]
     pub spellcheck_enabled: bool,
+    /// Telegram Desktop's "Suggest emoji replacements" (`suggestEmoji`,
+    /// default on): `:name` in the composer offers matching emoji.
+    #[serde(default = "default_true")]
+    pub suggest_emoji: bool,
 }
 
 impl Default for ChatPrefs {
@@ -600,6 +614,7 @@ impl Default for ChatPrefs {
             send_key_mode: crate::composer::SendKeyMode::default(),
             // Telegram Desktop ships spellcheck on; match that.
             spellcheck_enabled: true,
+            suggest_emoji: true,
         }
     }
 }
@@ -614,6 +629,20 @@ pub fn load_chat_prefs(paths: &AccountPaths) -> ChatPrefs {
 /// in the status note.
 pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) -> std::io::Result<()> {
     save_json_prefs(paths, "chat_prefs.json", prefs)
+}
+
+/// Load the hashtags the user has sent (`recent_hashtags.json`); missing
+/// or corrupt files read as empty.
+pub fn load_recent_hashtags(paths: &AccountPaths) -> crate::suggest::RecentHashtags {
+    load_json_prefs(paths, "recent_hashtags.json")
+}
+
+/// Persist the recent hashtags; failures are returned to the caller.
+pub fn save_recent_hashtags(
+    paths: &AccountPaths,
+    recent: &crate::suggest::RecentHashtags,
+) -> std::io::Result<()> {
+    save_json_prefs(paths, "recent_hashtags.json", recent)
 }
 
 /// Slice parity:platform-spellcheck: the user's own words ("Add to
@@ -635,6 +664,30 @@ pub fn load_spellcheck_words(paths: &AccountPaths) -> SpellcheckWords {
 /// Persist custom words; failures are returned to the caller.
 pub fn save_spellcheck_words(paths: &AccountPaths, prefs: &SpellcheckWords) -> std::io::Result<()> {
     save_json_prefs(paths, "spellcheck_words.json", prefs)
+}
+
+/// The spelling dictionaries the user picked (Linux: Hunspell codes such
+/// as `en_US`; tdesktop's "Settings > Advanced > Spell checker" language
+/// list), persisted as `spellcheck_languages.json`. Empty follows the
+/// system locale.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpellcheckLanguages {
+    #[serde(default)]
+    pub languages: Vec<String>,
+}
+
+/// Load the picked spelling languages; missing or corrupt files read as
+/// empty (automatic).
+pub fn load_spellcheck_languages(paths: &AccountPaths) -> SpellcheckLanguages {
+    load_json_prefs(paths, "spellcheck_languages.json")
+}
+
+/// Persist the picked spelling languages; failures are returned.
+pub fn save_spellcheck_languages(
+    paths: &AccountPaths,
+    prefs: &SpellcheckLanguages,
+) -> std::io::Result<()> {
+    save_json_prefs(paths, "spellcheck_languages.json", prefs)
 }
 
 /// Slice parity:settings-language: local-only app language preference,
@@ -1171,6 +1224,8 @@ mod tests {
             preview_lines: 3,
             chat_list_media_icons: true,
             chat_list_rich_preview: true,
+            archive_collapsed: true,
+            archive_in_main_menu: true,
             start_in_tray: true,
             minimize_to_tray: true,
             check_updates_on_launch: false,

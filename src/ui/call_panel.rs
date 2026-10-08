@@ -142,7 +142,14 @@ fn backdrop(colors: &[u32]) -> Option<Arc<RenderImage>> {
     let render = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
         image::Frame::new(image),
     ])));
-    CACHE.with(|cache| cache.borrow_mut().insert(key, render.clone()));
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        // One per peer palette; a few calls' worth is plenty.
+        if cache.len() >= 8 {
+            super::image_budget::retire_all(cache.drain().map(|(_, image)| image));
+        }
+        cache.insert(key, render.clone());
+    });
     Some(render)
 }
 

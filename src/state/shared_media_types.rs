@@ -145,6 +145,10 @@ pub struct SharedMediaItem {
     pub message_id: MessageId,
     pub glyph: &'static str,
     pub label: String,
+    /// The message itself for the viewable tabs (Media, GIFs): the media
+    /// viewer pages over these (tdesktop `SharedMediaWithLastSlice`).
+    /// `None` for tabs the viewer never opens.
+    pub message: Option<Box<HistoryMessage>>,
 }
 
 impl SharedMediaItem {
@@ -181,10 +185,13 @@ impl SharedMediaItem {
             }
             _ => tab.label().to_string(),
         };
+        let message_copy = matches!(tab, SharedMediaTab::Media | SharedMediaTab::Gifs)
+            .then(|| Box::new(history_message(message.clone(), false)));
         SharedMediaItem {
             message_id: message.id,
             glyph,
             label,
+            message: message_copy,
         }
     }
 }
@@ -204,9 +211,16 @@ pub(crate) fn caption_or(candidates: &[&str], fallback: &str) -> String {
 #[derive(Debug, Clone, Default)]
 pub struct SharedMediaTabState {
     pub status: SharedMediaTabStatus,
+    /// Newest first, as `searchChatMessages` returns them.
     pub items: Vec<SharedMediaItem>,
     pub total_count: i32,
     pub error: String,
+    /// `foundChatMessages.next_from_message_id` of the last page; `0` once
+    /// the oldest message has been reached.
+    pub next_from: MessageId,
+    /// An older page is in flight (the viewer pages toward the end of the
+    /// list and asks for more).
+    pub loading_more: bool,
 }
 
 impl SharedMediaTabState {
@@ -215,6 +229,13 @@ impl SharedMediaTabState {
         self.items.clear();
         self.total_count = 0;
         self.error.clear();
+        self.next_from = MessageId(0);
+        self.loading_more = false;
+    }
+
+    /// Whether an older page exists and none is in flight.
+    pub fn can_load_more(&self) -> bool {
+        self.status == SharedMediaTabStatus::Ready && !self.loading_more && self.next_from.0 != 0
     }
 }
 
@@ -283,6 +304,7 @@ impl SharedMediaState {
         generation: u64,
         items: Vec<SharedMediaItem>,
         total_count: i32,
+        next_from: MessageId,
     ) {
         if !self.open || self.chat_id != Some(chat_id) || self.generation != generation {
             return;
@@ -290,12 +312,68 @@ impl SharedMediaState {
         let state = self.tab_state(tab);
         state.items = items;
         state.total_count = total_count;
+        state.next_from = next_from;
+        state.loading_more = false;
         state.error.clear();
         state.status = if state.items.is_empty() {
             SharedMediaTabStatus::Empty
         } else {
             SharedMediaTabStatus::Ready
         };
+    }
+
+    /// Start fetching the next older page of `tab`: returns the generation
+    /// to stamp and the `from_message_id` to send, or `None` when there is
+    /// nothing more to load or a page is already in flight. The generation
+    /// is not bumped, so the first-page answers of other tabs stay valid.
+    pub fn begin_fetch_more(&mut self, tab: SharedMediaTab) -> Option<(u64, MessageId)> {
+        let generation = self.generation;
+        let state = self.tab_state(tab);
+        if !state.can_load_more() {
+            return None;
+        }
+        state.loading_more = true;
+        Some((generation, state.next_from))
+    }
+
+    /// An older page landed: append the messages not yet listed. A page
+    /// with nothing new ends the list.
+    pub fn accept_more(
+        &mut self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        generation: u64,
+        items: Vec<SharedMediaItem>,
+        total_count: i32,
+        next_from: MessageId,
+    ) {
+        if !self.open || self.chat_id != Some(chat_id) || self.generation != generation {
+            return;
+        }
+        let state = self.tab_state(tab);
+        state.loading_more = false;
+        let before = state.items.len();
+        for item in items {
+            if !state
+                .items
+                .iter()
+                .any(|old| old.message_id == item.message_id)
+            {
+                state.items.push(item);
+            }
+        }
+        let grew = state.items.len() > before;
+        state.total_count = total_count.max(state.items.len() as i32);
+        // A page with nothing new cannot make progress: stop asking.
+        state.next_from = if grew { next_from } else { MessageId(0) };
+    }
+
+    /// An older page failed: allow a retry on the next request.
+    pub fn fail_more(&mut self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) {
+        if !self.open || self.chat_id != Some(chat_id) || self.generation != generation {
+            return;
+        }
+        self.tab_state(tab).loading_more = false;
     }
 
     pub fn fail(&mut self, chat_id: ChatId, tab: SharedMediaTab, generation: u64, error: String) {

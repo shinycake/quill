@@ -76,8 +76,13 @@ impl QuillApp {
             .as_ref()
             .map(|c| c.elapsed_secs())
             .unwrap_or(0.0);
-        let index = ((elapsed * self.viewer_video_fps) as usize)
-            .min(self.viewer_video_frames.len().saturating_sub(1));
+        let at = (elapsed * self.viewer_video_fps) as usize;
+        // A looping animation wraps; a video holds its last frame.
+        let index = if self.viewer_loops() {
+            at % self.viewer_video_frames.len().max(1)
+        } else {
+            at.min(self.viewer_video_frames.len().saturating_sub(1))
+        };
         self.viewer_video_frames.get(index).cloned()
     }
     pub(super) fn open_video_pip(&mut self, cx: &mut Context<Self>) {

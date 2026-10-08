@@ -938,6 +938,7 @@ pub(super) fn session_history_row(
             animation_frame,
             inline,
             None,
+            Some((message.chat_id, message.id)),
             corners,
             cx,
         )),

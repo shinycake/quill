@@ -10,11 +10,17 @@
 //! recognizes the language per word with CLD3 and checks that one). With
 //! a single spelling language picked there, only that one.
 //!
-//! Called from background threads (tdesktop checks through `crl::async`
-//! too); a process-wide mutex serializes every call and each one runs in
-//! its own autorelease pool.
+//! Every `NSSpellChecker` call runs on one dedicated serial worker thread
+//! (callers block on a reply channel; they are already background tasks),
+//! inside an autorelease pool, with one app-wide spell-document tag.
+//! Calling the checker from several pool threads at once, or while the
+//! spelling server was still loading a dictionary, made AppKit log
+//! "NSSpellServer findMisspelledWordInString timed out" and drop the
+//! answer. The worker is warmed up at startup so the first real check
+//! doesn't pay the dictionary load.
 
-use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::sync::mpsc::{self, Sender};
 
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSSpellChecker;
@@ -24,8 +30,46 @@ use quill::spellcheck::{Script, SpellBackend, locale_script, spelling_languages}
 /// `NSNotFound` (`NSIntegerMax`) as an `NSRange.location`.
 const NOT_FOUND: usize = isize::MAX as usize;
 
-/// Serializes all `NSSpellChecker` traffic.
-static SPELL_LOCK: Mutex<()> = Mutex::new(());
+type Job = Box<dyn FnOnce(&NSSpellChecker, isize) + Send>;
+
+/// The serial worker; started on first use.
+fn worker() -> &'static Sender<Job> {
+    static WORKER: OnceLock<Sender<Job>> = OnceLock::new();
+    WORKER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<Job>();
+        let spawned = std::thread::Builder::new()
+            .name("quill-spell".into())
+            .spawn(move || {
+                // The tag is created on this thread, like every other call.
+                let tag = autoreleasepool(|_| NSSpellChecker::uniqueSpellDocumentTag());
+                while let Ok(job) = rx.recv() {
+                    autoreleasepool(|_| job(&NSSpellChecker::sharedSpellChecker(), tag));
+                }
+            });
+        if let Err(err) = spawned {
+            eprintln!("quill: couldn't start the spellcheck thread: {err}");
+        }
+        tx
+    })
+}
+
+/// Runs `f` on the worker and waits for its result; `None` when the
+/// worker is gone.
+fn with_checker<T: Send + 'static>(
+    f: impl FnOnce(&NSSpellChecker, isize) -> T + Send + 'static,
+) -> Option<T> {
+    let (tx, rx) = mpsc::channel();
+    let job: Job = Box::new(move |checker, tag| {
+        let _ = tx.send(f(checker, tag));
+    });
+    worker().send(job).ok()?;
+    rx.recv().ok()
+}
+
+/// Queues `f` without waiting.
+fn post_to_checker(f: impl FnOnce(&NSSpellChecker, isize) + Send + 'static) {
+    let _ = worker().send(Box::new(f));
+}
 
 pub(super) struct SystemSpellBackend {
     /// Spelling languages with their script, in preference order.
@@ -37,7 +81,6 @@ impl SystemSpellBackend {
     /// shared checker is created here). `None` when no language with a
     /// checkable script is configured.
     pub(super) fn new() -> Option<Self> {
-        let _guard = SPELL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let languages: Vec<(String, Script)> = autoreleasepool(|_| {
             let checker = NSSpellChecker::sharedSpellChecker();
             let codes: Vec<String> = if checker.automaticallyIdentifiesLanguages() {
@@ -72,21 +115,40 @@ impl SystemSpellBackend {
             }
             out
         });
-        (!languages.is_empty()).then_some(Self { languages })
+        if languages.is_empty() {
+            return None;
+        }
+        // Load each dictionary now, off the UI thread, so the first
+        // keystroke-driven check doesn't time out waiting for the server.
+        for (code, _) in &languages {
+            let code = code.clone();
+            post_to_checker(move |checker, tag| {
+                let ns_word = NSString::from_str("a");
+                let lang = NSString::from_str(&code);
+                // SAFETY: `word_count` may be null per the API contract.
+                let _ = unsafe {
+                    checker.checkSpellingOfString_startingAt_language_wrap_inSpellDocumentWithTag_wordCount(
+                        &ns_word,
+                        0,
+                        Some(&lang),
+                        false,
+                        tag,
+                        std::ptr::null_mut(),
+                    )
+                };
+            });
+        }
+        Some(Self { languages })
     }
 
-    fn languages_for(&self, word: &str) -> impl Iterator<Item = &str> {
+    fn languages_for(&self, word: &str) -> Vec<String> {
         let script = quill::spellcheck::word_script(word);
         self.languages
             .iter()
-            .filter(move |(_, s)| Some(*s) == script)
-            .map(|(code, _)| code.as_str())
+            .filter(|(_, s)| Some(*s) == script)
+            .map(|(code, _)| code.clone())
+            .collect()
     }
-}
-
-fn with_checker<T>(f: impl FnOnce(&NSSpellChecker) -> T) -> T {
-    let _guard = SPELL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    autoreleasepool(|_| f(&NSSpellChecker::sharedSpellChecker()))
 }
 
 /// UTF-16 length, for `NSRange`s over an `NSString`.
@@ -100,9 +162,11 @@ impl SpellBackend for SystemSpellBackend {
     }
 
     fn is_correct(&self, word: &str) -> bool {
-        let ns_word = NSString::from_str(word);
-        with_checker(|checker| {
-            self.languages_for(word).any(|lang| {
+        let langs = self.languages_for(word);
+        let word = word.to_string();
+        with_checker(move |checker, tag| {
+            let ns_word = NSString::from_str(&word);
+            langs.iter().any(|lang| {
                 let lang = NSString::from_str(lang);
                 // SAFETY: `word_count` may be null per the API contract.
                 let range = unsafe {
@@ -111,28 +175,32 @@ impl SpellBackend for SystemSpellBackend {
                         0,
                         Some(&lang),
                         false,
-                        0,
+                        tag,
                         std::ptr::null_mut(),
                     )
                 };
                 range.location == NOT_FOUND || range.length == 0
             })
         })
+        // No answer is no verdict: don't underline.
+        .unwrap_or(true)
     }
 
     fn suggestions(&self, word: &str, limit: usize) -> Vec<String> {
-        let ns_word = NSString::from_str(word);
-        let range = NSRange::new(0, utf16_len(word));
-        with_checker(|checker| {
+        let langs = self.languages_for(word);
+        let word = word.to_string();
+        with_checker(move |checker, tag| {
+            let ns_word = NSString::from_str(&word);
+            let range = NSRange::new(0, utf16_len(&word));
             let mut out: Vec<String> = Vec::new();
-            for lang in self.languages_for(word) {
+            for lang in &langs {
                 let lang = NSString::from_str(lang);
                 let Some(guesses) = checker
                     .guessesForWordRange_inString_language_inSpellDocumentWithTag(
                         range,
                         &ns_word,
                         Some(&lang),
-                        0,
+                        tag,
                     )
                 else {
                     continue;
@@ -149,32 +217,37 @@ impl SpellBackend for SystemSpellBackend {
             }
             out
         })
+        .unwrap_or_default()
     }
 
     fn learn(&self, word: &str) -> bool {
-        let ns_word = NSString::from_str(word);
-        with_checker(|checker| checker.learnWord(&ns_word));
-        true
+        let word = word.to_string();
+        with_checker(move |checker, _| checker.learnWord(&NSString::from_str(&word))).is_some()
     }
 
     fn unlearn(&self, word: &str) -> bool {
-        let ns_word = NSString::from_str(word);
-        with_checker(|checker| {
+        let word = word.to_string();
+        with_checker(move |checker, _| {
+            let ns_word = NSString::from_str(&word);
             let learned = checker.hasLearnedWord(&ns_word);
             if learned {
                 checker.unlearnWord(&ns_word);
             }
             learned
         })
+        .unwrap_or(false)
     }
 
     fn has_learned(&self, word: &str) -> bool {
-        let ns_word = NSString::from_str(word);
-        with_checker(|checker| checker.hasLearnedWord(&ns_word))
+        let word = word.to_string();
+        with_checker(move |checker, _| checker.hasLearnedWord(&NSString::from_str(&word)))
+            .unwrap_or(false)
     }
 
     fn ignore(&self, word: &str) {
-        let ns_word = NSString::from_str(word);
-        with_checker(|checker| checker.ignoreWord_inSpellDocumentWithTag(&ns_word, 0));
+        let word = word.to_string();
+        post_to_checker(move |checker, tag| {
+            checker.ignoreWord_inSpellDocumentWithTag(&NSString::from_str(&word), tag);
+        });
     }
 }
