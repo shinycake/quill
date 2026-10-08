@@ -20,6 +20,7 @@ mod media;
 mod media_library;
 pub use media_library::REACTION_STRIP_SIZE;
 mod message_actions;
+mod message_menu;
 mod messages;
 mod moderation;
 mod payments;
@@ -38,6 +39,7 @@ mod typing;
 pub use connect_flow::*;
 pub use deep_links::detect_deep_link_arg;
 pub use live::*;
+pub use message_menu::{ADDED_REACTIONS_PAGE, ModerationChoice};
 pub use sender::*;
 pub use types::*;
 
