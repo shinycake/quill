@@ -71,6 +71,24 @@ pub struct EmojiPanel {
     pub categories: Vec<EmojiCategory>,
 }
 
+/// Custom emoji ids in the caption of a photo, video or animation: the
+/// media viewer renders captions with them.
+fn viewer_caption_custom_emoji(content: &MessageContent) -> Vec<i64> {
+    let entities = match content {
+        MessageContent::Photo(photo) => &photo.caption_entities,
+        MessageContent::Video(video) => &video.caption_entities,
+        MessageContent::Animation(animation) => &animation.caption_entities,
+        _ => return Vec::new(),
+    };
+    entities
+        .iter()
+        .filter_map(|entity| match entity.kind {
+            TextEntityKind::CustomEmoji { custom_emoji_id } => Some(custom_emoji_id),
+            _ => None,
+        })
+        .collect()
+}
+
 impl Session {
     pub fn remember_emoji_pack_usage(&mut self, custom_emoji_ids: &[i64]) -> bool {
         for id in custom_emoji_ids.iter().filter(|id| **id > 0) {
@@ -352,6 +370,18 @@ impl Session {
                     _ => None,
                 }));
             }
+            ids.extend(viewer_caption_custom_emoji(&message.content));
+        }
+        // Captions of the Shared Media lists the viewer pages over.
+        for item in self
+            .shared_media
+            .tabs
+            .iter()
+            .flat_map(|tab| tab.items.iter())
+        {
+            if let Some(message) = &item.message {
+                ids.extend(viewer_caption_custom_emoji(&message.content));
+            }
         }
         // Custom emoji in chat-list previews.
         for chat in self.chats.values() {
@@ -545,6 +575,54 @@ mod tests {
         // Attempted ids are excluded.
         session.emoji.status_resolution_attempted.insert(12345);
         assert!(session.message_custom_emoji_ids_to_resolve().is_empty());
+    }
+
+    /// Captions of photos, videos and animations contribute custom emoji
+    /// too: the media viewer renders its caption with them.
+    #[test]
+    fn viewer_caption_custom_emoji_covers_media_captions() {
+        use crate::telegram::envelope::{AnimationContent, PhotoContent};
+        use crate::text::TextEntity;
+        let entity = TextEntity {
+            utf8_start: 0,
+            utf8_end: 4,
+            kind: TextEntityKind::CustomEmoji {
+                custom_emoji_id: 777,
+            },
+        };
+        let photo = MessageContent::Photo(PhotoContent {
+            caption: "x".into(),
+            caption_entities: vec![entity.clone()],
+            show_caption_above_media: false,
+            sizes: Vec::new(),
+            is_secret: false,
+            has_spoiler: false,
+            minithumbnail: None,
+        });
+        assert_eq!(viewer_caption_custom_emoji(&photo), vec![777]);
+        let gif = MessageContent::Animation(AnimationContent {
+            duration: 1,
+            width: 1,
+            height: 1,
+            file_name: String::new(),
+            mime_type: String::new(),
+            caption: "x".into(),
+            caption_entities: vec![entity],
+            show_caption_above_media: false,
+            has_spoiler: false,
+            is_secret: false,
+            file_id: crate::ids::FileId(1),
+            thumb_file_id: None,
+            thumb_width: 0,
+            thumb_height: 0,
+        });
+        assert_eq!(viewer_caption_custom_emoji(&gif), vec![777]);
+        assert!(
+            viewer_caption_custom_emoji(&MessageContent::Unsupported {
+                type_name: "x".into()
+            })
+            .is_empty()
+        );
     }
 
     /// Custom-emoji reactions count as open-chat custom emoji, and resolved

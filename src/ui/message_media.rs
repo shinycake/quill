@@ -563,6 +563,9 @@ pub(super) fn animation_attachment(
     frame: Option<Arc<RenderImage>>,
     inline: Option<super::inline_video::InlineFrame>,
     sponsored: Option<(ChatId, i64)>,
+    // `(chat_id, message_id)` when a click should open the fullscreen
+    // viewer, which plays the GIF in a loop (history rows only).
+    viewer: Option<(ChatId, MessageId)>,
     corners: MediaCorners,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -637,6 +640,19 @@ pub(super) fn animation_attachment(
             div()
                 .id(("gif-visual", row_id))
                 .relative()
+                .when_some(
+                    (!blocked).then_some(viewer).flatten(),
+                    |this, (chat_id, message_id)| {
+                        this.role(gpui_kit::Role::Button)
+                            .aria_label("Open GIF")
+                            .tab_index(0)
+                            .cursor_pointer()
+                            .pressable(cx.theme())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_media_viewer(chat_id, message_id, cx);
+                            }))
+                    },
+                )
                 .group(MEDIA_VISUAL_GROUP)
                 .child(picture)
                 .child(

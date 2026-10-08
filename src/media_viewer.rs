@@ -6,7 +6,7 @@
 //! machinery (`usable_path` + `sandboxed_display_path`), and triggers
 //! `downloadFile` when nothing viewable is local yet.
 //!
-//! Scope: photos and videos only. Documents, animations (GIFs), stickers,
+//! Scope: photos, videos and animations (GIFs). Documents, stickers,
 //! voice notes, and audio never open the viewer. Secret and spoiler media are
 //! excluded too — the viewer is a full-bleed surface and must not bypass
 //! their hidden-until-revealed contract.
@@ -22,6 +22,10 @@ use crate::voice::format_voice_duration;
 pub enum MediaViewerKind {
     Photo,
     Video,
+    /// A GIF / MPEG4 animation: plays in a loop without sound or controls
+    /// (tdesktop streams it with `options.loop` and no playback controls,
+    /// media_view_overlay_widget.cpp:5614 and :1491).
+    Animation,
 }
 
 impl MediaViewerKind {
@@ -29,9 +33,35 @@ impl MediaViewerKind {
         match self {
             MediaViewerKind::Photo => "Photo",
             MediaViewerKind::Video => "Video",
+            MediaViewerKind::Animation => "GIF",
         }
     }
+
+    /// Has a clip to play (video or animation).
+    pub fn is_playable(self) -> bool {
+        matches!(self, MediaViewerKind::Video | MediaViewerKind::Animation)
+    }
+
+    /// Restarts by itself at the end and has no transport controls.
+    pub fn loops(self) -> bool {
+        self == MediaViewerKind::Animation
+    }
 }
+
+/// Where the viewer's item list comes from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ViewerSource {
+    /// The open chat's loaded history.
+    #[default]
+    Chat,
+    /// A Shared Media tab (tdesktop `SharedMediaWithLastSlice`): the list
+    /// grows toward older messages as the viewer pages toward its start.
+    SharedMedia,
+}
+
+/// Items left before the loaded edge at which the viewer asks for the
+/// next older Shared Media page.
+pub const VIEWER_PRELOAD_AHEAD: usize = 6;
 
 /// One openable media item.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +107,10 @@ pub struct MediaViewerItem {
 pub struct MediaViewer {
     items: Vec<MediaViewerItem>,
     index: usize,
+    source: ViewerSource,
+    /// Shared Media only: the tab's total count, so the header can say
+    /// "Photo 120 of 340" while only a prefix of the list is loaded.
+    total: usize,
 }
 
 impl MediaViewer {
@@ -91,12 +125,73 @@ impl MediaViewer {
     /// Open on `index`, clamped into range. An empty list stays closed.
     pub fn open(items: Vec<MediaViewerItem>, index: usize) -> Self {
         let index = index.min(items.len().saturating_sub(1));
-        Self { items, index }
+        Self {
+            items,
+            index,
+            ..Self::default()
+        }
+    }
+
+    /// Open over a Shared Media list (oldest first). `total` is the tab's
+    /// full count (items older than the loaded prefix are not listed yet).
+    pub fn open_shared(items: Vec<MediaViewerItem>, index: usize, total: usize) -> Self {
+        let mut viewer = Self::open(items, index);
+        viewer.source = ViewerSource::SharedMedia;
+        viewer.total = total;
+        viewer
+    }
+
+    pub fn source(&self) -> ViewerSource {
+        self.source
     }
 
     pub fn close(&mut self) {
         self.items.clear();
         self.index = 0;
+        self.source = ViewerSource::Chat;
+        self.total = 0;
+    }
+
+    /// Whether the previous / next arrow has an item to go to.
+    pub fn has_prev(&self) -> bool {
+        self.is_open() && self.index > 0
+    }
+
+    pub fn has_next(&self) -> bool {
+        self.is_open() && self.index + 1 < self.items.len()
+    }
+
+    /// Shared Media: the viewer is close enough to the start of the loaded
+    /// list that the next older page should be requested (it is safe to
+    /// ask repeatedly; the state layer drops a request while one is in
+    /// flight or the list is complete).
+    pub fn wants_older(&self) -> bool {
+        self.is_open()
+            && self.source == ViewerSource::SharedMedia
+            && self.index < VIEWER_PRELOAD_AHEAD
+            && self.total > self.items.len()
+    }
+
+    /// Shared Media: merge the tab's loaded list (oldest first, possibly
+    /// longer than the viewer's) in. Only items older than the current
+    /// first one are taken, in front, and the position follows the item
+    /// the user is on. Returns how many were added.
+    pub fn merge_older(&mut self, all_oldest_first: Vec<MediaViewerItem>, total: usize) -> usize {
+        if self.source != ViewerSource::SharedMedia || !self.is_open() {
+            return 0;
+        }
+        self.total = total.max(self.items.len());
+        let first = self.items[0].message_id;
+        let older: Vec<MediaViewerItem> = all_oldest_first
+            .into_iter()
+            .filter(|item| item.message_id < first)
+            .collect();
+        let added = older.len();
+        if added > 0 {
+            self.items.splice(0..0, older);
+            self.index += added;
+        }
+        added
     }
 
     pub fn prev(&mut self) {
@@ -115,9 +210,13 @@ impl MediaViewer {
         self.items.get(self.index)
     }
 
-    /// 1-based `(position, total)` for the "Photo 2 of 5" header.
+    /// 1-based `(position, total)` for the "Photo 2 of 5" header. Over a
+    /// Shared Media list the total is the tab's count and the position
+    /// counts the older items that are not loaded yet.
     pub fn position(&self) -> Option<(usize, usize)> {
-        self.is_open().then(|| (self.index + 1, self.items.len()))
+        let total = self.total.max(self.items.len());
+        let unloaded = total - self.items.len();
+        self.is_open().then(|| (unloaded + self.index + 1, total))
     }
 
     pub fn len(&self) -> usize {
@@ -189,7 +288,7 @@ pub fn decide_viewer_video_start(
     clip_local: bool,
     frames_ready: bool,
 ) -> ViewerVideoStart {
-    if item.kind != MediaViewerKind::Video || item.play_file_id.is_none() {
+    if !item.kind.is_playable() || item.play_file_id.is_none() {
         return ViewerVideoStart::Nothing;
     }
     if !clip_local {
@@ -583,6 +682,107 @@ fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
                     .then_some((video.width, video.height)),
             })
         }
+        // GIFs open the viewer too (secret ones never; spoilers once revealed).
+        MessageContent::Animation(animation) if !animation.is_secret => {
+            let thumb = animation.thumb_file_id();
+            let download = thumb.unwrap_or(animation.file_id);
+            if download.0 == 0 {
+                return None;
+            }
+            Some(MediaViewerItem {
+                chat_id: message.chat_id,
+                message_id: message.id,
+                kind: MediaViewerKind::Animation,
+                display_file_ids: thumb.into_iter().collect(),
+                download_file_id: download,
+                play_file_id: animation.play_file_id(),
+                duration_secs: Some(animation.duration.max(0)),
+                mime_type: Some(animation.mime_type.clone()),
+                start_timestamp: Some(0),
+                caption: animation.caption.clone(),
+                caption_entities: animation.caption_entities.clone(),
+                duration_label: Some(format_voice_duration(animation.duration)),
+                natural_size: (animation.width > 0 && animation.height > 0)
+                    .then_some((animation.width, animation.height)),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Seconds the viewer seeks per `J` / `L` (tdesktop `kSeekTimeMsLong`,
+/// media_view_overlay_widget.cpp:209).
+pub const VIEWER_SEEK_LONG_SECS: f64 = 10.0;
+/// Seconds per arrow key while a video is full screen (`kSeekTimeMs`,
+/// :208).
+pub const VIEWER_SEEK_SECS: f64 = 5.0;
+
+/// New playhead after seeking `delta_secs`, kept inside the clip.
+pub fn seek_target_secs(position: f64, duration: f64, delta_secs: f64) -> f64 {
+    (position + delta_secs).clamp(0.0, duration.max(0.0))
+}
+
+/// What a viewer key does. Mirrors the `_streamed` branch of
+/// `OverlayWidget::handleKeyPress` (media_view_overlay_widget.cpp
+/// :7322-7402); the generic keys (Escape, arrows, `H`/`V`, copy, save,
+/// zoom) stay on the app's action bindings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewerKeyAction {
+    /// Space / K / Enter on a playing clip.
+    TogglePlayback,
+    /// `J` / `L` (10 s) and the arrows in full-screen video (5 s).
+    SeekBy(f64),
+    /// Full-screen video: `0` restarts, `1`..`9` jump to n/10 of the clip.
+    SeekToFraction(f64),
+    /// Alt/Ctrl(Cmd) + Enter.
+    ToggleFullscreen,
+}
+
+/// Modifier keys of a viewer keystroke; `primary` is Cmd on macOS and
+/// Ctrl elsewhere.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ViewerKeyMods {
+    pub primary: bool,
+    pub alt: bool,
+    pub shift: bool,
+}
+
+impl ViewerKeyMods {
+    fn none(self) -> bool {
+        !self.primary && !self.alt && !self.shift
+    }
+}
+
+/// Map a keystroke (`key` as GPUI names it: "space", "enter", "k", "left",
+/// "5") to the clip action it triggers, for a viewer showing `kind`.
+/// `video_fullscreen` is the viewer's video full-screen mode. `None` when
+/// the key is not a playback key (it then reaches the normal bindings).
+pub fn viewer_key_action(
+    key: &str,
+    mods: ViewerKeyMods,
+    kind: MediaViewerKind,
+    video_fullscreen: bool,
+) -> Option<ViewerKeyAction> {
+    if !kind.is_playable() {
+        return None;
+    }
+    if (mods.alt || mods.primary) && matches!(key, "enter" | "return") {
+        return Some(ViewerKeyAction::ToggleFullscreen);
+    }
+    if !mods.none() {
+        return None;
+    }
+    match key {
+        "k" | "space" | "enter" | "return" => Some(ViewerKeyAction::TogglePlayback),
+        "j" => Some(ViewerKeyAction::SeekBy(-VIEWER_SEEK_LONG_SECS)),
+        "l" => Some(ViewerKeyAction::SeekBy(VIEWER_SEEK_LONG_SECS)),
+        "left" if video_fullscreen => Some(ViewerKeyAction::SeekBy(-VIEWER_SEEK_SECS)),
+        "right" if video_fullscreen => Some(ViewerKeyAction::SeekBy(VIEWER_SEEK_SECS)),
+        d if video_fullscreen && d.len() == 1 => d
+            .chars()
+            .next()
+            .and_then(|c| c.to_digit(10))
+            .map(|n| ViewerKeyAction::SeekToFraction(f64::from(n) / 10.0)),
         _ => None,
     }
 }
@@ -1211,6 +1411,231 @@ mod tests {
         let second = save_media_to_downloads_in_dir(&src, &dir).unwrap();
         assert_eq!(second.file_name().unwrap(), "photo (2).jpg");
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    fn animation_message(id: i64, file: i32, secret: bool) -> HistoryMessage {
+        test_message(
+            7,
+            id,
+            MessageContent::Animation(crate::telegram::envelope::AnimationContent {
+                duration: 3,
+                width: 320,
+                height: 240,
+                file_name: "loop.mp4".into(),
+                mime_type: "video/mp4".into(),
+                caption: "looping".into(),
+                caption_entities: Vec::new(),
+                show_caption_above_media: false,
+                has_spoiler: false,
+                is_secret: secret,
+                file_id: FileId(file),
+                thumb_file_id: Some(FileId(file + 1)),
+                thumb_width: 160,
+                thumb_height: 120,
+            }),
+        )
+    }
+
+    #[test]
+    fn animations_open_the_viewer_as_looping_clips() {
+        let items = collect_media_items(&[
+            animation_message(1, 10, false),
+            animation_message(2, 20, true),
+        ]);
+        assert_eq!(items.len(), 1, "secret animations never open");
+        let gif = &items[0];
+        assert_eq!(gif.kind, MediaViewerKind::Animation);
+        assert_eq!(gif.kind.label(), "GIF");
+        assert!(gif.kind.is_playable() && gif.kind.loops());
+        assert!(MediaViewerKind::Video.is_playable() && !MediaViewerKind::Video.loops());
+        assert!(!MediaViewerKind::Photo.is_playable());
+        assert_eq!(gif.play_file_id, Some(FileId(10)));
+        assert_eq!(gif.display_file_ids, vec![FileId(11)]);
+        assert_eq!(gif.natural_size, Some((320, 240)));
+        // An animation starts like a video: download, extract, or play.
+        assert_eq!(
+            decide_viewer_video_start(gif, false, false),
+            ViewerVideoStart::ParkDownload
+        );
+        assert_eq!(
+            decide_viewer_video_start(gif, true, false),
+            ViewerVideoStart::ExtractFrames
+        );
+        assert_eq!(
+            decide_viewer_video_start(gif, true, true),
+            ViewerVideoStart::PlayNow
+        );
+    }
+
+    fn shared_items(ids: &[i64]) -> Vec<MediaViewerItem> {
+        ids.iter()
+            .map(|id| item(MediaViewerKind::Photo, *id))
+            .collect()
+    }
+
+    #[test]
+    fn shared_media_viewer_counts_unloaded_older_items() {
+        // 340 items in the tab, the newest 4 loaded (oldest first).
+        let viewer = MediaViewer::open_shared(shared_items(&[97, 98, 99, 100]), 3, 340);
+        assert_eq!(viewer.source(), ViewerSource::SharedMedia);
+        assert_eq!(viewer.position(), Some((340, 340)));
+        let mut viewer = viewer;
+        viewer.prev();
+        assert_eq!(viewer.position(), Some((339, 340)));
+        // A chat viewer counts only what it holds.
+        let chat = MediaViewer::open(shared_items(&[1, 2, 3]), 1);
+        assert_eq!(chat.source(), ViewerSource::Chat);
+        assert_eq!(chat.position(), Some((2, 3)));
+    }
+
+    #[test]
+    fn shared_media_viewer_asks_for_older_pages_near_the_start() {
+        let ids: Vec<i64> = (50..100).collect();
+        let mut viewer = MediaViewer::open_shared(shared_items(&ids), 49, 200);
+        assert!(!viewer.wants_older(), "far from the loaded start");
+        for _ in 0..(49 - VIEWER_PRELOAD_AHEAD + 1) {
+            viewer.prev();
+        }
+        assert!(viewer.wants_older(), "within the preload margin");
+        // Everything loaded: nothing to ask for.
+        let all = MediaViewer::open_shared(shared_items(&ids), 0, ids.len());
+        assert!(!all.wants_older());
+        // A chat viewer never pages.
+        let chat = MediaViewer::open(shared_items(&ids), 0);
+        assert!(!chat.wants_older());
+    }
+
+    #[test]
+    fn merge_older_prepends_and_keeps_the_current_item() {
+        let mut viewer = MediaViewer::open_shared(shared_items(&[80, 90, 100]), 1, 6);
+        assert_eq!(viewer.current().unwrap().message_id, MessageId(90));
+        assert!(viewer.has_prev() && viewer.has_next());
+        // The tab now holds three more, older than the viewer's first.
+        let added = viewer.merge_older(shared_items(&[50, 60, 70, 80, 90, 100]), 6);
+        assert_eq!(added, 3);
+        assert_eq!(viewer.len(), 6);
+        assert_eq!(viewer.current().unwrap().message_id, MessageId(90));
+        assert_eq!(viewer.position(), Some((5, 6)));
+        // Merging the same list again adds nothing.
+        assert_eq!(
+            viewer.merge_older(shared_items(&[50, 60, 70, 80, 90, 100]), 6),
+            0
+        );
+        // The user can now page back to the new items.
+        viewer.prev();
+        viewer.prev();
+        viewer.prev();
+        assert_eq!(viewer.current().unwrap().message_id, MessageId(60));
+        assert!(viewer.has_prev());
+        viewer.prev();
+        assert!(!viewer.has_prev());
+        // A chat viewer ignores merges.
+        let mut chat = MediaViewer::open(shared_items(&[80, 90]), 0);
+        assert_eq!(chat.merge_older(shared_items(&[1, 2, 80, 90]), 4), 0);
+        assert_eq!(chat.len(), 2);
+    }
+
+    #[test]
+    fn closing_the_viewer_forgets_its_source() {
+        let mut viewer = MediaViewer::open_shared(shared_items(&[1, 2]), 0, 9);
+        viewer.close();
+        assert_eq!(viewer.source(), ViewerSource::Chat);
+        assert_eq!(viewer.position(), None);
+    }
+
+    fn keys(key: &str, kind: MediaViewerKind, fullscreen: bool) -> Option<ViewerKeyAction> {
+        viewer_key_action(key, ViewerKeyMods::default(), kind, fullscreen)
+    }
+
+    #[test]
+    fn playback_keys_follow_tdesktop() {
+        use MediaViewerKind::{Animation, Photo, Video};
+        // Space, K and Enter pause / resume (handleKeyPress :7329, :7416).
+        for key in ["space", "k", "enter"] {
+            assert_eq!(
+                keys(key, Video, false),
+                Some(ViewerKeyAction::TogglePlayback)
+            );
+            assert_eq!(
+                keys(key, Animation, false),
+                Some(ViewerKeyAction::TogglePlayback)
+            );
+        }
+        // J / L seek 10 s (:7338-7345).
+        assert_eq!(
+            keys("j", Video, false),
+            Some(ViewerKeyAction::SeekBy(-10.0))
+        );
+        assert_eq!(keys("l", Video, false), Some(ViewerKeyAction::SeekBy(10.0)));
+        // Arrows page outside full-screen video, seek 5 s inside (:7394).
+        assert_eq!(keys("left", Video, false), None);
+        assert_eq!(keys("right", Video, false), None);
+        assert_eq!(
+            keys("left", Video, true),
+            Some(ViewerKeyAction::SeekBy(-5.0))
+        );
+        assert_eq!(
+            keys("right", Video, true),
+            Some(ViewerKeyAction::SeekBy(5.0))
+        );
+        // Full-screen digits jump to n/10 of the clip, 0 restarts (:7387).
+        assert_eq!(
+            keys("0", Video, true),
+            Some(ViewerKeyAction::SeekToFraction(0.0))
+        );
+        assert_eq!(
+            keys("5", Video, true),
+            Some(ViewerKeyAction::SeekToFraction(0.5))
+        );
+        assert_eq!(
+            keys("5", Video, false),
+            None,
+            "zoom keys outside full screen"
+        );
+        // Photos have no playback keys.
+        for key in ["space", "k", "j", "l", "enter"] {
+            assert_eq!(keys(key, Photo, false), None);
+        }
+        // Unrelated keys fall through to the normal bindings.
+        assert_eq!(keys("h", Video, false), None);
+        assert_eq!(keys("x", Video, true), None);
+    }
+
+    #[test]
+    fn modified_enter_toggles_fullscreen_and_other_chords_pass() {
+        let ctrl = ViewerKeyMods {
+            primary: true,
+            ..Default::default()
+        };
+        let alt = ViewerKeyMods {
+            alt: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            viewer_key_action("enter", ctrl, MediaViewerKind::Video, false),
+            Some(ViewerKeyAction::ToggleFullscreen)
+        );
+        assert_eq!(
+            viewer_key_action("enter", alt, MediaViewerKind::Video, false),
+            Some(ViewerKeyAction::ToggleFullscreen)
+        );
+        assert_eq!(
+            viewer_key_action("enter", alt, MediaViewerKind::Photo, false),
+            None
+        );
+        // Cmd/Ctrl + K is quick switch, not play/pause.
+        assert_eq!(
+            viewer_key_action("k", ctrl, MediaViewerKind::Video, false),
+            None
+        );
+    }
+
+    #[test]
+    fn seek_target_stays_inside_the_clip() {
+        assert_eq!(seek_target_secs(30.0, 60.0, 10.0), 40.0);
+        assert_eq!(seek_target_secs(3.0, 60.0, -10.0), 0.0);
+        assert_eq!(seek_target_secs(55.0, 60.0, 10.0), 60.0);
+        assert_eq!(seek_target_secs(1.0, 0.0, 5.0), 0.0);
     }
 }
 

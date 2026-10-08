@@ -144,3 +144,136 @@ fn open_chat_closes_shared_media_gallery() {
     assert!(session.shared_media.open);
     assert_eq!(session.shared_media.chat_id, Some(ChatId(12)));
 }
+
+fn found_documents(extra: RequestId, total: i32, next_from: i64, ids: &[i64]) -> String {
+    let messages: Vec<String> = ids
+        .iter()
+        .map(|id| {
+            format!(
+                r#"{{"id":{id},"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"f{id}.pdf","mime_type":"application/pdf","document":{{"@type":"file","id":{file},"size":1,"expected_size":1,"local":{{"@type":"localFile","path":"","is_downloading_completed":false,"is_downloading_active":false}},"remote":{{"@type":"remoteFile","id":"x"}}}}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}"#,
+                file = 1000 + id
+            )
+        })
+        .collect();
+    format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":{total},"next_from_message_id":{next_from},"messages":[{}]}}"#,
+        extra.0,
+        messages.join(",")
+    )
+}
+
+#[test]
+fn shared_media_pages_older_messages_for_the_viewer() {
+    // The viewer over a Shared Media list asks for the next older page
+    // with `from_message_id = next_from_message_id` and appends it.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    let tab = SharedMediaTab::Media;
+    session.shared_media.open_for(chat);
+    let generation = session.shared_media.begin_fetch(tab);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia { tab, generation },
+        Some(chat),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &found_documents(extra, 4, 150, &[200, 150]),
+    );
+    let state = &session.shared_media.tabs[tab.index()];
+    assert_eq!(state.status, SharedMediaTabStatus::Ready);
+    assert_eq!(state.next_from, MessageId(150));
+    assert!(state.can_load_more());
+    assert!(
+        state.items.iter().all(|item| item.message.is_some()),
+        "the viewable tabs keep the messages"
+    );
+
+    let (more_generation, from) = session.shared_media.begin_fetch_more(tab).unwrap();
+    assert_eq!(from, MessageId(150));
+    assert_eq!(more_generation, generation, "paging keeps the generation");
+    assert!(
+        session.shared_media.begin_fetch_more(tab).is_none(),
+        "one page in flight at a time"
+    );
+    let extra = session.request(
+        RequestPurpose::GetSharedMediaMore {
+            tab,
+            generation: more_generation,
+        },
+        Some(chat),
+    );
+    // The page repeats message 150 (TDLib includes `from_message_id`).
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &found_documents(extra, 4, 0, &[150, 120, 100]),
+    );
+    let state = &session.shared_media.tabs[tab.index()];
+    let ids: Vec<i64> = state.items.iter().map(|item| item.message_id.0).collect();
+    assert_eq!(ids, vec![200, 150, 120, 100]);
+    assert_eq!(state.total_count, 4);
+    assert!(!state.loading_more);
+    assert!(!state.can_load_more(), "oldest message reached");
+    assert!(session.shared_media.begin_fetch_more(tab).is_none());
+}
+
+#[test]
+fn shared_media_older_page_failure_allows_a_retry_and_stale_pages_drop() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    let tab = SharedMediaTab::Media;
+    session.shared_media.open_for(chat);
+    let generation = session.shared_media.begin_fetch(tab);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia { tab, generation },
+        Some(chat),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &found_documents(extra, 9, 150, &[200, 150]),
+    );
+    let (g, _) = session.shared_media.begin_fetch_more(tab).unwrap();
+    let extra = session.request(
+        RequestPurpose::GetSharedMediaMore { tab, generation: g },
+        Some(chat),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"TIMEOUT"}}"#,
+            extra.0
+        ),
+    );
+    let state = &session.shared_media.tabs[tab.index()];
+    assert_eq!(state.status, SharedMediaTabStatus::Ready, "list stays");
+    assert_eq!(state.items.len(), 2);
+    assert!(
+        state.can_load_more(),
+        "the failed page can be requested again"
+    );
+
+    // A page that lands after the gallery closed is dropped.
+    let (g, _) = session.shared_media.begin_fetch_more(tab).unwrap();
+    let extra = session.request(
+        RequestPurpose::GetSharedMediaMore { tab, generation: g },
+        Some(chat),
+    );
+    session.shared_media.close();
+    session.shared_media.open_for(chat);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &found_documents(extra, 9, 0, &[120]),
+    );
+    assert!(session.shared_media.tabs[tab.index()].items.is_empty());
+}

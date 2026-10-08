@@ -103,6 +103,12 @@ pub enum RequestPurpose {
         tab: SharedMediaTab,
         generation: u64,
     },
+    /// The next older `searchChatMessages` page for a gallery tab, asked
+    /// for while the media viewer pages toward the end of the list.
+    GetSharedMediaMore {
+        tab: SharedMediaTab,
+        generation: u64,
+    },
     /// `getChatHistory` around a jump target (Unigram `LoadMessageSliceImpl`).
     GetHistoryAround,
     /// `getChatHistory` with a negative offset: the page newer than the

@@ -122,6 +122,7 @@ pub(super) fn sponsored_message_row(
                     None,
                     None,
                     Some((chat_id, message.message_id)),
+                    None,
                     MediaCorners::small(),
                     cx,
                 ))

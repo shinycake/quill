@@ -672,6 +672,9 @@ pub struct QuillApp {
     pub(super) message_menu_selection: Option<String>,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     pub(super) media_viewer: MediaViewer,
+    /// Shared Media paging, video full screen and inactive-window state of
+    /// the viewer.
+    pub(super) viewer_extra: super::media_viewer::ViewerExtra,
     /// The photo editor over a pending photo attachment, when open.
     pub(super) photo_editor: Option<super::photo_editor::PhotoEditor>,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
