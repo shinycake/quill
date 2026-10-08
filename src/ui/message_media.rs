@@ -427,35 +427,44 @@ pub(super) fn photo_attachment(
         && !photo.has_spoiler
         && let Some(path) = photo_display_path(photo, files, media_roots)
     {
-        return img(path)
-            .id(("photo-img", row_id))
-            .w(frame_w)
-            .h(frame_h)
-            .aspect_ratio(frame_w / frame_h)
-            .map(|this| corners.round(this))
-            .object_fit(ObjectFit::Cover)
-            .when_some(viewer, |this, (chat_id, message_id)| {
-                this.role(gpui_kit::Role::Button)
-                    .aria_label("Open photo")
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_media_viewer(chat_id, message_id, cx);
-                    }))
-            })
-            .with_fallback(move || {
-                div()
-                    .w(frame_w)
-                    .h(frame_h)
-                    .map(|this| corners.round(this))
-                    .bg(fill_muted())
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child("Photo")
-                    .into_any_element()
-            })
-            .into_any_element();
+        let dims = photo
+            .largest_size()
+            .or_else(|| photo.thumb_size())
+            .map(|size| (size.width, size.height));
+        return img(super::image_budget::sized_media(
+            &path,
+            (frame_w, frame_h),
+            dims,
+            super::image_budget::Fit::Cover,
+        ))
+        .id(("photo-img", row_id))
+        .w(frame_w)
+        .h(frame_h)
+        .aspect_ratio(frame_w / frame_h)
+        .map(|this| corners.round(this))
+        .object_fit(ObjectFit::Cover)
+        .when_some(viewer, |this, (chat_id, message_id)| {
+            this.role(gpui_kit::Role::Button)
+                .aria_label("Open photo")
+                .tab_index(0)
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_media_viewer(chat_id, message_id, cx);
+                }))
+        })
+        .with_fallback(move || {
+            div()
+                .w(frame_w)
+                .h(frame_h)
+                .map(|this| corners.round(this))
+                .bg(fill_muted())
+                .flex()
+                .items_center()
+                .justify_center()
+                .child("Photo")
+                .into_any_element()
+        })
+        .into_any_element();
     }
     let downloading_now = file_is_downloading(open_id, files, downloading);
     let ready = files
@@ -589,7 +598,14 @@ pub(super) fn animation_attachment(
                 .get(&id.0)
                 .and_then(|file| file.usable_path())
                 .and_then(|path| sandboxed_display_path(path, media_roots))
-                .map(ImageSource::from)
+                .map(|path| {
+                    super::image_budget::sized_media(
+                        &path,
+                        media_frame(animation.width, animation.height),
+                        Some((animation.width, animation.height)),
+                        super::image_budget::Fit::Cover,
+                    )
+                })
         })
     });
     let downloading_now = file_is_downloading(play_id, files, downloading)
@@ -776,22 +792,27 @@ pub(super) fn video_attachment(
                 .into_any_element()
         })
     } else if !blocked && let Some(path) = visual {
-        img(path)
-            .id(("video-img", row_id))
-            .w(frame_w)
-            .h(frame_h)
-            .aspect_ratio(frame_w / frame_h)
-            .map(|this| corners.round(this))
-            .object_fit(ObjectFit::Cover)
-            .with_fallback(move || {
-                div()
-                    .w(frame_w)
-                    .h(frame_h)
-                    .map(|this| corners.round(this))
-                    .bg(success_bg())
-                    .into_any_element()
-            })
-            .into_any_element()
+        img(super::image_budget::sized_media(
+            &path,
+            (frame_w, frame_h),
+            Some((video.width, video.height)),
+            super::image_budget::Fit::Cover,
+        ))
+        .id(("video-img", row_id))
+        .w(frame_w)
+        .h(frame_h)
+        .aspect_ratio(frame_w / frame_h)
+        .map(|this| corners.round(this))
+        .object_fit(ObjectFit::Cover)
+        .with_fallback(move || {
+            div()
+                .w(frame_w)
+                .h(frame_h)
+                .map(|this| corners.round(this))
+                .bg(success_bg())
+                .into_any_element()
+        })
+        .into_any_element()
     } else {
         div()
             .id(("video-ph", row_id))
@@ -871,7 +892,7 @@ pub(super) fn video_attachment(
                                         // With the native player, videos play in
                                         // the media viewer (Telegram Desktop's
                                         // behavior); inline frames otherwise.
-                                        if super::native_video::SUPPORTED
+                                        if super::native_video::supported()
                                             && let Some((chat_id, message_id)) = viewer
                                         {
                                             this.open_media_viewer(chat_id, message_id, cx);
@@ -1216,26 +1237,31 @@ pub(super) fn sticker_attachment(
         .find_map(|path| sandboxed_display_path(path, media_roots))
     {
         let fallback_label = fallback_label.clone();
-        return img(path)
-            .id(("sticker-img", row_id))
-            .mt_2()
-            .w(px(128.))
-            .h(px(128.))
-            .aspect_ratio(px(128.) / px(128.))
-            .object_fit(ObjectFit::Contain)
-            .with_fallback(move || {
-                div()
-                    .w(px(128.))
-                    .h(px(128.))
-                    .rounded_md()
-                    .bg(fill_muted())
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(fallback_label.clone())
-                    .into_any_element()
-            })
-            .into_any_element();
+        return img(super::image_budget::sized_media(
+            &path,
+            (px(128.), px(128.)),
+            Some((sticker.width, sticker.height)),
+            super::image_budget::Fit::Contain,
+        ))
+        .id(("sticker-img", row_id))
+        .mt_2()
+        .w(px(128.))
+        .h(px(128.))
+        .aspect_ratio(px(128.) / px(128.))
+        .object_fit(ObjectFit::Contain)
+        .with_fallback(move || {
+            div()
+                .w(px(128.))
+                .h(px(128.))
+                .rounded_md()
+                .bg(fill_muted())
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(fallback_label.clone())
+                .into_any_element()
+        })
+        .into_any_element();
     }
     // Until the image lands: the sticker's emoji, faded, in a box the size
     // of the sticker itself so the row doesn't jump when it arrives.
@@ -1610,10 +1636,15 @@ pub(super) fn audio_row(
             .tab_index(0)
             .cursor_pointer()
             .child(
-                img(path)
-                    .id(("audio-cover", row_key))
-                    .size_full()
-                    .object_fit(ObjectFit::Cover),
+                img(super::image_budget::sized_media(
+                    &path,
+                    (px(44.), px(44.)),
+                    None,
+                    super::image_budget::Fit::Cover,
+                ))
+                .id(("audio-cover", row_key))
+                .size_full()
+                .object_fit(ObjectFit::Cover),
             )
             .child(
                 div()
@@ -2127,6 +2158,18 @@ fn inline_surface(
     frame_h: Pixels,
     corners: MediaCorners,
 ) -> AnyElement {
+    // A decoded image (FFmpeg) rounds itself like any picture.
+    if inline.picture.clips() {
+        let radii = Corners {
+            top_left: corners.tl,
+            top_right: corners.tr,
+            bottom_right: corners.br,
+            bottom_left: corners.bl,
+        };
+        return inline
+            .picture
+            .element(frame_w, frame_h, ObjectFit::Cover, radii);
+    }
     #[cfg(target_os = "macos")]
     {
         // The native surface can't be clipped to rounded corners, so a mask
@@ -2143,10 +2186,9 @@ fn inline_surface(
             .h(frame_h)
             .overflow_hidden()
             .child(
-                gpui_kit::surface(inline.buffer)
-                    .w(frame_w)
-                    .h(frame_h)
-                    .object_fit(ObjectFit::Cover),
+                inline
+                    .picture
+                    .element(frame_w, frame_h, ObjectFit::Cover, Corners::default()),
             )
             .child(
                 img(ImageSource::Render(mask))
@@ -2159,24 +2201,27 @@ fn inline_surface(
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (inline, corners);
+        // Only images exist off macOS.
         div().w(frame_w).h(frame_h).into_any_element()
     }
 }
 
-/// A round video message's current frame: the square video under a mask
-/// in the history's color that leaves only the circle.
+/// A round video message's current frame: the square video cut to a
+/// circle — an image clips itself; a native surface gets a mask in the
+/// history's color that leaves only the circle.
 fn round_inline_surface(inline: super::inline_video::InlineFrame) -> AnyElement {
     let diameter = px(VIDEO_NOTE_DIAMETER);
+    if inline.picture.clips() {
+        let radius = diameter / 2.;
+        return inline
+            .picture
+            .element(diameter, diameter, ObjectFit::Cover, Corners::all(radius));
+    }
     // Twice the size for Retina edges.
     let mask = super::inline_video::circle_mask(VIDEO_NOTE_DIAMETER as u32 * 2, inline.backdrop);
-    #[cfg(target_os = "macos")]
-    let video = gpui_kit::surface(inline.buffer)
-        .size(diameter)
-        .object_fit(ObjectFit::Cover)
-        .into_any_element();
-    #[cfg(not(target_os = "macos"))]
-    let video = div().size(diameter).into_any_element();
+    let video = inline
+        .picture
+        .element(diameter, diameter, ObjectFit::Cover, Corners::default());
     div()
         .relative()
         .size(diameter)

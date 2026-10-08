@@ -369,7 +369,7 @@ impl QuillApp {
             || path
                 .and_then(|path| path.extension())
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
-        super::native_video::SUPPORTED && !(item.kind.loops() && is_gif_file)
+        super::native_video::supported() && !(item.kind.loops() && is_gif_file)
     }
 
     /// The current item is a GIF: loops, no sound, no transport.
@@ -796,7 +796,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.begin_viewer_video(item, path, cx);
-        match super::native_video::NativeVideo::open(path) {
+        match super::native_video::NativeVideo::open(path, super::native_video::Purpose::Viewer) {
             Ok(mut video) => {
                 if item.kind.loops() {
                     video.set_volume(0.0);
@@ -1647,7 +1647,7 @@ impl QuillApp {
     pub(super) fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
         self.playback_volume = volume.clamp(0.0, 1.0);
         self.audio.set_volume(self.playback_volume);
-        if let Some(video) = self.viewer_native.as_ref() {
+        if let Some(video) = self.viewer_native.as_mut() {
             video.set_volume(self.playback_volume);
         } else if self.viewer_clock.as_ref().is_some_and(|c| c.is_playing())
             && let Some(path) = self.viewer_video_path.clone()
@@ -2023,26 +2023,20 @@ impl QuillApp {
         let zoom = self.viewer_zoom;
         let (zoom_w, zoom_h) = (media_w * zoom.zoom, media_h * zoom.zoom);
         let (pan_x, pan_y) = zoom.pan;
-        // The native player's current frame, drawn straight from the GPU.
-        #[cfg(target_os = "macos")]
+        // The player's current frame (an AVPlayer GPU buffer on macOS, a
+        // decoded FFmpeg image on Linux and Windows).
         let native_frame = item
             .kind
             .is_playable()
             .then(|| self.viewer_native.as_mut().and_then(|video| video.frame()))
             .flatten();
-        #[cfg(not(target_os = "macos"))]
-        let native_frame: Option<()> = None;
-        let content: AnyElement = if let Some(_frame) = native_frame {
-            #[cfg(target_os = "macos")]
-            {
-                gpui_kit::surface(_frame)
-                    .w(px(zoom_w))
-                    .h(px(zoom_h))
-                    .object_fit(ObjectFit::Contain)
-                    .into_any_element()
-            }
-            #[cfg(not(target_os = "macos"))]
-            div().into_any_element()
+        let content: AnyElement = if let Some(frame) = native_frame {
+            frame.element(
+                px(zoom_w),
+                px(zoom_h),
+                ObjectFit::Contain,
+                Corners::default(),
+            )
         } else {
             // Pre-decoded video frame and thumbnail both render through
             // `img`; the frame is an `ImageSource::Render` (synchronous),

@@ -296,6 +296,110 @@ impl AudioEngine {
     }
 }
 
+thread_local! {
+    /// The app's output, shared with video soundtracks (`StreamSound`),
+    /// which are started from places that don't hold the app.
+    static VIDEO_OUTPUT: RefCell<Option<SharedOutput>> = const { RefCell::new(None) };
+}
+
+/// Let video soundtracks play on the app's one output.
+pub(super) fn share_output_with_video(output: &SharedOutput) {
+    VIDEO_OUTPUT.with(|slot| *slot.borrow_mut() = Some(output.clone()));
+}
+
+/// A video's soundtrack from the in-process decoder
+/// (`quill::video_decode::AudioTap`), on the shared output and stretched to
+/// the playback speed without changing pitch. The decoder's player keeps
+/// time from what this pulls, so pausing it pauses the picture too.
+pub(super) struct StreamSound {
+    player: Player,
+    speed: SharedSpeed,
+}
+
+impl StreamSound {
+    /// `None` when there is no output device (the tap is dropped, and the
+    /// video falls back to its wall clock).
+    pub(super) fn start(
+        tap: quill::video_decode::AudioTap,
+        volume: f32,
+        speed: f64,
+        playing: bool,
+    ) -> Option<Self> {
+        let mixer =
+            VIDEO_OUTPUT.with(|slot| slot.borrow().as_ref().and_then(SharedOutput::mixer))?;
+        let speed = SharedSpeed::new(speed);
+        let player = Player::connect_new(&mixer);
+        player.set_volume(volume.clamp(0.0, 1.0));
+        if !playing {
+            player.pause();
+        }
+        player.append(Tempo::new(TapSource(tap), speed.clone()));
+        Some(Self { player, speed })
+    }
+
+    pub(super) fn play(&self) {
+        self.player.play();
+    }
+
+    pub(super) fn pause(&self) {
+        self.player.pause();
+    }
+
+    pub(super) fn set_volume(&self, volume: f32) {
+        self.player.set_volume(volume.clamp(0.0, 1.0));
+    }
+
+    pub(super) fn set_speed(&self, speed: f64) {
+        self.speed.set(speed);
+    }
+
+    /// After a seek: drop what the speed stretcher buffered from before.
+    pub(super) fn flush(&self) {
+        let _ = self.player.try_seek(Duration::ZERO);
+    }
+}
+
+impl Drop for StreamSound {
+    fn drop(&mut self) {
+        self.player.stop();
+    }
+}
+
+/// The decoder's sound as a rodio source: endless (silence while the
+/// decoder catches up or after the end), seeking is the decoder's job.
+struct TapSource(quill::video_decode::AudioTap);
+
+impl Iterator for TapSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        Some(self.0.next_sample())
+    }
+}
+
+impl Source for TapSource {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        rodio::ChannelCount::new(self.0.channels()).unwrap_or(rodio::ChannelCount::MIN)
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        rodio::SampleRate::new(self.0.sample_rate()).unwrap_or(rodio::SampleRate::MIN)
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+
+    fn try_seek(&mut self, _pos: Duration) -> Result<(), rodio::source::SeekError> {
+        // The decoder already moved; this only resets the stretcher above.
+        Ok(())
+    }
+}
+
 /// What a notification plays.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum NotificationSound {

@@ -6,7 +6,8 @@ Install:        ./install.sh            (to ~/.local; add a prefix argument to c
 Uninstall:      ./install.sh --uninstall
 
 This directory is relocatable. Quill finds its native libraries in lib/ beside
-the executable (libtdjson.so, libntgcalls.so, librlottie.so, plus a bundled
+the executable (libtdjson.so, libntgcalls.so, librlottie.so, libquillvideo.so
+with the FFmpeg libraries it plays video through, plus a bundled
 OpenSSL 3), so no environment variables are needed. Do not move quill out of
 this directory without lib/.
 
@@ -20,4 +21,5 @@ ALSA (libasound), zlib.
                      libfontconfig1 libasound2 mesa-vulkan-drivers
 
 Telegram API credentials: see docs/credentials.md in the source repository.
-Licenses: LICENSE and THIRD_PARTY.md (libntgcalls and OpenSSL notices).
+Licenses: LICENSE and THIRD_PARTY.md (libntgcalls and OpenSSL notices);
+FFmpeg (LGPL-2.1+, dynamically linked, replaceable): licenses/ffmpeg/.

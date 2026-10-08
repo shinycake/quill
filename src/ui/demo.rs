@@ -612,6 +612,32 @@ pub(super) fn demo_stress_avatar_dir() -> Option<PathBuf> {
     std::env::var_os("QUILL_DEMO_STRESS_AVATARS").map(PathBuf::from)
 }
 
+/// `QUILL_DEMO_STRESS_PHOTOS=<dir>`: a directory of `photo-<i>.jpg` files
+/// (any size, e.g. 2560 px) that become photo messages at the bottom of the
+/// open chat, one per file, for profiling media-heavy history.
+pub(super) fn demo_stress_photo_dir() -> Option<PathBuf> {
+    std::env::var_os("QUILL_DEMO_STRESS_PHOTOS").map(PathBuf::from)
+}
+
+/// One photo message per `photo-<i>.jpg`, `i` from 0 until a file is missing.
+fn stress_photos_fixture(dir: &std::path::Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for i in 0.. {
+        let path = dir.join(format!("photo-{i}.jpg"));
+        let Ok((width, height)) = image::image_dimensions(&path) else {
+            break;
+        };
+        let file = demo_file_json(60_000 + i as i32, &path.to_string_lossy(), true);
+        out.push(format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":{out},"date":{date},"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{file},"width":{width},"height":{height},"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Photo {i}","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#,
+            id = 50_000 + i as i64,
+            out = i % 2 == 0,
+            date = 1_791_000_000 + i as i64 * 600,
+        ));
+    }
+    out
+}
+
 fn demo_stress_avatar(i: usize) -> Option<String> {
     let path = demo_stress_avatar_dir()?.join(format!("avatar-{i}.jpg"));
     path.exists().then(|| path.to_string_lossy().into_owned())
@@ -708,10 +734,15 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
     // Performance fixture: `QUILL_DEMO_STRESS=<chats>,<messages>` adds that
     // many chats (each with an avatar file) and that many formatted
     // messages in the open chat, for profiling realistic volumes.
-    let stress: Vec<String> = match (kind, demo_stress_size()) {
+    let mut stress: Vec<String> = match (kind, demo_stress_size()) {
         (DemoSeed::ReadyChats, Some((chats, messages))) => stress_fixture(chats, messages),
         _ => Vec::new(),
     };
+    if matches!(kind, DemoSeed::ReadyChats)
+        && let Some(dir) = demo_stress_photo_dir()
+    {
+        stress.extend(stress_photos_fixture(&dir));
+    }
     for json in jsons.into_iter().chain(stress) {
         if matches!(kind, DemoSeed::Media | DemoSeed::SendMedia)
             && (json.contains(r#""id":101"#)

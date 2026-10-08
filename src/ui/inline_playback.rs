@@ -207,7 +207,7 @@ impl QuillApp {
             return;
         }
         // MP4 GIFs autoplay on the native inline player (`inline_video`).
-        if super::native_video::SUPPORTED && animation.mime_type != "image/gif" {
+        if super::native_video::supported() && animation.mime_type != "image/gif" {
             return;
         }
         let Some(file_id) = animation.play_file_id().filter(|id| {
