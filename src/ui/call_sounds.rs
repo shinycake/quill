@@ -43,8 +43,8 @@ impl CallSound {
     /// The pause before a looping sound starts again.
     fn gap(self) -> Duration {
         match self {
-            CallSound::Ringback => Duration::from_millis(2500),
-            _ => Duration::from_millis(1000),
+            CallSound::Ringback => Duration::from_millis(call_tones::RINGBACK_GAP_MS),
+            _ => Duration::from_millis(call_tones::INCOMING_GAP_MS),
         }
     }
 }
@@ -81,7 +81,7 @@ impl Default for CallSounds {
 impl CallSounds {
     /// Follow the "Play sounds" preference; turning it off cuts any sound.
     pub(super) fn set_enabled(&mut self, enabled: bool) {
-        if self.enabled && !enabled {
+        if self.enabled && !enabled && self.looping.is_none() {
             self.stop_player();
         }
         self.enabled = enabled;
@@ -106,7 +106,9 @@ impl CallSounds {
 
     fn spawn(&mut self, sound: CallSound) {
         self.stop_player();
-        if !self.enabled {
+        // Ringing always plays; the "Play sounds" toggle only mutes cues.
+        let rings = matches!(sound, CallSound::Incoming | CallSound::Ringback);
+        if !self.enabled && !rings {
             return;
         }
         let Some(output) = self.output() else {

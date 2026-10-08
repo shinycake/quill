@@ -8,6 +8,10 @@ use std::f32::consts::{PI, TAU};
 
 pub(super) const SAMPLE_RATE: u32 = 48_000;
 
+/// Pauses between repeats of the looping tones.
+pub(super) const INCOMING_GAP_MS: u64 = 1000;
+pub(super) const RINGBACK_GAP_MS: u64 = 2500;
+
 /// Master level: calls are heard over speech, so keep cues modest.
 const LEVEL: f32 = 0.5;
 
@@ -149,6 +153,52 @@ mod tests {
             ("mute", mute()),
             ("unmute", unmute()),
         ]
+    }
+
+    /// Dev tool, not run by default: `cargo test --features ui --bin quill
+    /// export_wavs -- --ignored` writes every tone as a 16-bit WAV into
+    /// `$QUILL_TONES_OUT` (looping tones as two cycles with their gap).
+    #[test]
+    #[ignore = "writes files for listening"]
+    fn export_wavs() {
+        use super::{INCOMING_GAP_MS, RINGBACK_GAP_MS};
+        let Some(dir) = std::env::var_os("QUILL_TONES_OUT") else {
+            return;
+        };
+        let twice = |tone: Vec<f32>, gap_ms: u64| {
+            let gap = vec![0.0; (SAMPLE_RATE as u64 * gap_ms / 1000) as usize];
+            [tone.clone(), gap, tone].concat()
+        };
+        let files = [
+            ("incoming", twice(incoming(), INCOMING_GAP_MS)),
+            ("ringback", twice(ringback(), RINGBACK_GAP_MS)),
+            ("connect", connect()),
+            ("end", end()),
+            ("busy", busy()),
+            ("mute", mute()),
+            ("unmute", unmute()),
+        ];
+        for (name, samples) in files {
+            let data_len = (samples.len() * 2) as u32;
+            let mut wav = Vec::new();
+            wav.extend(b"RIFF");
+            wav.extend((36 + data_len).to_le_bytes());
+            wav.extend(b"WAVEfmt ");
+            wav.extend(16u32.to_le_bytes());
+            wav.extend(1u16.to_le_bytes());
+            wav.extend(1u16.to_le_bytes());
+            wav.extend(SAMPLE_RATE.to_le_bytes());
+            wav.extend((SAMPLE_RATE * 2).to_le_bytes());
+            wav.extend(2u16.to_le_bytes());
+            wav.extend(16u16.to_le_bytes());
+            wav.extend(b"data");
+            wav.extend(data_len.to_le_bytes());
+            for s in samples {
+                wav.extend(((s * 32767.0) as i16).to_le_bytes());
+            }
+            let path = std::path::Path::new(&dir).join(format!("{name}.wav"));
+            std::fs::write(path, wav).expect("write wav");
+        }
     }
 
     fn seconds(samples: &[f32]) -> f32 {
