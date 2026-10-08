@@ -50,10 +50,10 @@ cmake -S "$SRC" -B "$BUILD" \
   -DTD_ENABLE_LTO=ON \
   ${EXTRA_CMAKE[@]+"${EXTRA_CMAKE[@]}"}
 
-# TDLIB_BUILD_TARGET=tdjson skips tg_cli, the test runner and benchmarks (CI
+# TDLIB_BUILD_TARGET="tdjson tdjson_static" skips tg_cli, the test runner and benchmarks (CI
 # packaging only needs the shared library); the default builds everything.
 TARGET="${TDLIB_BUILD_TARGET:-install}"
-cmake --build "$BUILD" --target "$TARGET" --parallel "${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}"
+cmake --build "$BUILD" --target $TARGET --parallel "${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}"
 if [[ "$TARGET" != install ]]; then
   cmake --install "$BUILD"
 fi
