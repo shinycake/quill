@@ -405,9 +405,18 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn conversation(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// One part of the open chat's column: the composer
+    /// (`ConversationPart::Bottom`) renders as its own cached slice, so
+    /// typing and the caret's blink don't rebuild the history
+    /// (`app_slice`).
+    pub(super) fn conversation(
+        &mut self,
+        part: ConversationPart,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let mode = self.pane_mode();
         let history = match mode {
+            _ if !part.top() => Empty.into_any_element(),
             PaneMode::Synthetic => div()
                 .id("conversation-history")
                 .flex()
@@ -516,25 +525,33 @@ impl QuillApp {
                 .and_then(|s| s.chats.get(&id.0))
                 .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
         });
-        let dust = self.vanish_overlay();
-        let call_bar = self.call_bar(cx).or_else(|| self.group_call_bar(cx));
-        let capture_notice = self.capture_notice(cx);
+        let top = part.top();
+        let dust = top.then(|| self.vanish_overlay()).flatten();
+        let call_bar = top
+            .then(|| self.call_bar(cx).or_else(|| self.group_call_bar(cx)))
+            .flatten();
+        let capture_notice = top.then(|| self.capture_notice(cx)).flatten();
         div()
             .relative()
             .flex()
             .flex_col()
-            .flex_1()
+            .when(top, |this| this.flex_1().min_h_0())
             .min_w_0()
-            .min_h_0()
             .children(call_bar)
             .children(capture_notice)
-            .child(history)
-            .children(self.subsection_tabs_strip(SubsectionTabsMode::Bottom, cx))
+            .when(top, |this| this.child(history))
+            .children(
+                top.then(|| self.subsection_tabs_strip(SubsectionTabsMode::Bottom, cx))
+                    .flatten(),
+            )
             // Phase C2i: busy-decline banner — the calls that arrived
             // while another call was active were declined with
             // `discardCall` (TDLib has no hold/swap API). Dismissible.
-            .when_some(self.call_busy_banner(cx), |this, banner| this.child(banner))
-            .when(composer.is_some(), |this| {
+            .when_some(
+                top.then(|| self.call_busy_banner(cx)).flatten(),
+                |this, banner| this.child(banner),
+            )
+            .when(composer.is_some() && part.bottom(), |this| {
                 let show_attach = matches!(mode, PaneMode::Ready) && self.pending_edit.is_none();
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
@@ -783,7 +800,7 @@ impl QuillApp {
                         }),
                 )
             })
-            .when_some(composer_note, |this, note| {
+            .when_some(composer_note.filter(|_| part.bottom()), |this, note| {
                 this.child(
                     div()
                         .p_3()
@@ -794,7 +811,10 @@ impl QuillApp {
                         .child(note),
                 )
             })
-            .when_some(self.channel_footer(cx), |this, footer| this.child(footer))
+            .when_some(
+                part.bottom().then(|| self.channel_footer(cx)).flatten(),
+                |this, footer| this.child(footer),
+            )
             // A deleted message's dust drifts over everything.
             .children(dust.map(super::anim_layer::occluder))
     }
@@ -2054,5 +2074,25 @@ impl QuillApp {
             self.reported_visible = Some((chat_id, ids));
             cx.notify();
         }
+    }
+}
+
+/// Which part of the conversation column `QuillApp::conversation` builds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum ConversationPart {
+    /// Call bars, history, bottom tabs and banners: all but the composer.
+    Top,
+    /// The composer with its popups, or the note / channel footer that
+    /// replaces it.
+    Bottom,
+}
+
+impl ConversationPart {
+    pub(super) fn top(self) -> bool {
+        self == Self::Top
+    }
+
+    pub(super) fn bottom(self) -> bool {
+        self == Self::Bottom
     }
 }

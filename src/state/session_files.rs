@@ -52,7 +52,7 @@ impl Session {
                 if self.pending_sound_downloads.remove(&sound_id) {
                     // Parity slice: a completed notification-sound download
                     // with playback requested → hand the path to the UI for
-                    // ffplay. The reducer never spawns processes.
+                    // the in-process player. The reducer never spawns processes.
                     self.pending_sound_plays.push(path.into());
                 }
             } else if from_file_update && file.local.is_idle_incomplete() {

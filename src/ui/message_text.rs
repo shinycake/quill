@@ -420,7 +420,11 @@ pub(super) fn kit_avatar_element(
         return Avatar::new()
             .name(name)
             .with_size(size)
-            .src(path.to_path_buf())
+            // Decoded at the drawn size, not the file's (`image_budget`).
+            .src(super::image_budget::sized_image(
+                super::image_budget::SizedSource::Path(std::sync::Arc::from(path)),
+                size,
+            ))
             .into_any_element();
     }
     initials_circle(name, size)

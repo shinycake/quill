@@ -64,11 +64,15 @@ impl LiveSource {
 
 /// tdesktop `VideoMessageSeek`: the ring shows in 220 ms (ease-out-back),
 /// hides in 150 ms, and the dot grows or shrinks in 150 ms.
+#[cfg(any(target_os = "macos", test))]
 const SEEK_SHOW: f32 = 0.22;
+#[cfg(any(target_os = "macos", test))]
 const SEEK_HIDE: f32 = 0.15;
+#[cfg(any(target_os = "macos", test))]
 const SEEK_GRAB: f32 = 0.15;
 
 /// `anim::easeOutBack`: overshoots a little, then settles.
+#[cfg(any(target_os = "macos", test))]
 fn ease_out_back(t: f32) -> f32 {
     const S: f32 = 1.70158;
     let t = t - 1.0;
@@ -76,6 +80,7 @@ fn ease_out_back(t: f32) -> f32 {
 }
 
 /// A value that eases between 0 and 1 when its target flips.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy)]
 struct Toggle {
     on: bool,
@@ -83,6 +88,7 @@ struct Toggle {
     from: f32,
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl Toggle {
     fn new() -> Self {
         Self {
@@ -574,6 +580,7 @@ pub(super) fn circle_mask(edge: u32, color: Hsla) -> std::sync::Arc<RenderImage>
 /// (`[top-left, top-right, bottom-right, bottom-left]`, in points): laid
 /// over a native video surface, which GPUI can't clip, it rounds the video
 /// to match the bubble. Rendered at twice the size for Retina edges.
+#[cfg(any(target_os = "macos", test))]
 pub(super) fn corner_mask(
     width: u32,
     height: u32,

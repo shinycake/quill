@@ -327,19 +327,21 @@ impl QuillApp {
                 // Slice CL2: pin drag runs only on the unfiltered list with
                 // at least two pinned chats (TGX `ChatsAdapter`); the
                 // archive has its own pinned set.
+                // (Pinned flag first: counting the pinned chats walks every
+                // chat, so only pinned rows pay for it.)
                 let draggable = if archived {
-                    self.chat_filter == ChatListFilter::Archived
+                    chat.archive_is_pinned
+                        && self.chat_filter == ChatListFilter::Archived
                         && self
                             .session()
                             .is_some_and(|s| s.pinned_chat_ids(true).len() >= 2)
-                        && chat.archive_is_pinned
                 } else {
-                    self.chat_filter == ChatListFilter::All
+                    chat.is_pinned
+                        && self.chat_filter == ChatListFilter::All
                         && self.folder_tab.is_none()
                         && self
                             .session()
                             .is_some_and(|s| s.pinned_chat_ids(false).len() >= 2)
-                        && chat.is_pinned
                 };
                 // The activity indicator is clock-driven: keep ticking while
                 // a visible row shows one (the chat list's animation layer
@@ -797,12 +799,12 @@ pub(super) fn session_chat_row(
                                                 .filter(|_| from_last && topic_line.is_none()),
                                             |this, mini| {
                                                 this.child(
-                                                    img(ImageSource::Image(std::sync::Arc::new(
-                                                        gpui_kit::Image::from_bytes(
-                                                            gpui_kit::ImageFormat::Jpeg,
-                                                            mini.data.clone(),
+                                                    img(super::image_budget::sized_image(
+                                                        super::image_budget::SizedSource::Mini(
+                                                            mini,
                                                         ),
-                                                    )))
+                                                        px(18.),
+                                                    ))
                                                     .id(("preview-thumb", id.0 as u64))
                                                     .size(px(18.))
                                                     .aspect_square()

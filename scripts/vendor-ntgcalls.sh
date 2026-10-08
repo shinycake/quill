@@ -29,6 +29,12 @@ case "$(uname -s):$(uname -m)" in
         LIB_NAME="libntgcalls.dylib"
         NTGCALLS_SHA256="20cac9a1516c75e08d81049d2d8126e7d156ad800aaa1314f14f66b13f83508a"
         ;;
+    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
+        # Git Bash on Windows; the zip keeps the DLL under lib/Release.
+        ASSET="ntgcalls.windows-x86_64-shared_libs.zip"
+        LIB_NAME="Release/ntgcalls.dll"
+        NTGCALLS_SHA256="454ee2282cac29de79f7836a2af915f6e7ff8e1378b6500976c2a2b7e9ed6d0d"
+        ;;
     *) echo "vendor-ntgcalls: unsupported host $(uname -s) $(uname -m)" >&2; exit 1 ;;
 esac
 NTGCALLS_URL="https://github.com/pytgcalls/ntgcalls/releases/download/${NTGCALLS_VERSION}/${ASSET}"
@@ -37,7 +43,7 @@ need() {
     command -v "$1" >/dev/null 2>&1 || { echo "vendor-ntgcalls: missing required tool: $1" >&2; exit 1; }
 }
 need curl
-need unzip
+if command -v unzip >/dev/null 2>&1; then EXTRACT=(unzip -q -o); else need tar; EXTRACT=(tar -xf); fi  # Git Bash: bsdtar reads zips
 if command -v sha256sum >/dev/null 2>&1; then CHECKSUM=(sha256sum); else CHECKSUM=(shasum -a 256); fi
 need "${CHECKSUM[0]}"
 
@@ -67,13 +73,20 @@ echo "vendor-ntgcalls: checksum OK"
 # Re-extract idempotently: wipe + unzip so a stale vendor dir can't linger.
 rm -rf "$VENDOR_DIR"
 mkdir -p "$VENDOR_DIR"
-unzip -q -o "$ZIP" -d "$VENDOR_DIR"
+if [ "${EXTRACT[0]}" = unzip ]; then unzip -q -o "$ZIP" -d "$VENDOR_DIR"; else tar -xf "$ZIP" -C "$VENDOR_DIR"; fi
 
 LIB="$VENDOR_DIR/lib/$LIB_NAME"
 HDR="$VENDOR_DIR/include/ntgcalls.h"
 [ -f "$LIB" ] || { echo "vendor-ntgcalls: expected $LIB after extraction" >&2; exit 1; }
 [ -f "$HDR" ] || { echo "vendor-ntgcalls: expected $HDR after extraction" >&2; exit 1; }
 
+case "$(uname -s)" in
+MINGW*|MSYS*|CYGWIN*)
+    echo "vendor-ntgcalls: vendored into $VENDOR_DIR (symbol listing skipped on Windows)"
+    echo "vendor-ntgcalls: DONE (not committed to git by design)"
+    exit 0
+    ;;
+esac
 if [[ "$(uname -s)" == Darwin ]]; then
     nm -gU "$LIB" > "$STAGE_DIR/symbols.txt"
 else

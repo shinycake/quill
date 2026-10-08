@@ -1504,6 +1504,12 @@ impl Loader {
                 for directory in [
                     ancestor.join("Frameworks"),
                     ancestor.join("vendor/ntgcalls/lib"),
+                    // Windows: the package keeps ntgcalls.dll beside quill.exe; the
+                    // upstream zip puts it under lib/Release.
+                    #[cfg(windows)]
+                    ancestor.to_path_buf(),
+                    #[cfg(windows)]
+                    ancestor.join("vendor/ntgcalls/lib/Release"),
                 ] {
                     let candidate = directory.join(library_filename());
                     if candidate.exists() {
