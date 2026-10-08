@@ -1727,3 +1727,102 @@ fn event_log_admin_ids_dedupes_and_skips_chat_senders() {
     };
     assert_eq!(page.admin_user_ids(), vec![7, 9]);
 }
+
+#[test]
+fn pending_join_request_updates_keep_requester_ids() {
+    // Batch 8: the requests bar draws avatars for `user_ids`.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatPendingJoinRequests","chat_id":13,"pending_join_requests":{"@type":"chatJoinRequestsInfo","total_count":2,"user_ids":[7001,7002]}}"#,
+    );
+    assert_eq!(
+        session.pending_join_request_users.get(&13),
+        Some(&vec![7001, 7002])
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatPendingJoinRequests","chat_id":13,"pending_join_requests":{"@type":"chatJoinRequestsInfo","total_count":0,"user_ids":[]}}"#,
+    );
+    assert_eq!(session.pending_join_request_counts.get(&13), Some(&0));
+    assert!(!session.pending_join_request_users.contains_key(&13));
+}
+
+#[test]
+fn chat_action_bar_from_new_chat_and_updates() {
+    // Batch 8: recorded-shape `chat.action_bar`, then `updateChatActionBar`
+    // changing and clearing it (schema 1.8.67 lines 3667-3690, 10526).
+    use crate::telegram::envelope::ChatActionBar;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":501,"title":"Stranger","type":{"@type":"chatTypePrivate","user_id":501},"action_bar":{"@type":"chatActionBarReportAddBlock","can_unarchive":true,"account_info":null}}}"#,
+    );
+    let bar = session.chat_action_bar(ChatId(501)).expect("bar stored");
+    assert_eq!(
+        bar,
+        &ChatActionBar::ReportAddBlock {
+            can_unarchive: true
+        }
+    );
+    assert!(bar.can_unarchive() && bar.is_dismissible());
+
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatActionBar","chat_id":501,"action_bar":{"@type":"chatActionBarSharePhoneNumber"}}"#,
+    );
+    assert_eq!(
+        session.chat_action_bar(ChatId(501)),
+        Some(&ChatActionBar::SharePhoneNumber)
+    );
+
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatActionBar","chat_id":501,"action_bar":{"@type":"chatActionBarJoinRequest","title":"Cats","is_channel":true,"request_date":1788500000}}"#,
+    );
+    assert!(
+        !session
+            .chat_action_bar(ChatId(501))
+            .unwrap()
+            .is_dismissible()
+    );
+
+    // An unknown (newer) constructor shows no bar rather than a wrong one.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatActionBar","chat_id":501,"action_bar":{"@type":"chatActionBarReportUnrelatedLocation"}}"#,
+    );
+    assert!(session.chat_action_bar(ChatId(501)).is_none());
+
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatActionBar","chat_id":501,"action_bar":{"@type":"chatActionBarAddContact"}}"#,
+    );
+    assert_eq!(
+        session.chat_action_bar(ChatId(501)),
+        Some(&ChatActionBar::AddContact)
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatActionBar","chat_id":501,"action_bar":null}"#,
+    );
+    assert!(session.chat_action_bar(ChatId(501)).is_none());
+}

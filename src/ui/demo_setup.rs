@@ -585,6 +585,34 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — non-member channel".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyTopBars)) {
+            let variant = std::env::var("QUILL_DEMO_BAR").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::chat_bars::apply_ready_top_bars(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &variant,
+                );
+            }
+            match variant.as_str() {
+                "requests-box" => {
+                    self.join_requests_dialog =
+                        Some(quill::ids::ChatId(super::chat_bars::DEMO_GROUP));
+                }
+                "block-box" => {
+                    self.block_bar_dialog = Some(super::chat_bars::BlockBarDialog {
+                        chat_id: quill::ids::ChatId(super::chat_bars::DEMO_STRANGER),
+                        user_id: super::chat_bars::DEMO_STRANGER,
+                        report: true,
+                        delete_chat: true,
+                    });
+                }
+                _ => {}
+            }
+            self.status_note = "screenshot demo — chat top bars".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadySearchPreviews)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

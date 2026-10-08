@@ -172,6 +172,8 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("can_be_reported")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // Batch 8: `chat.action_bar` (schema 1.8.67, line 3627).
+        action_bar: parse_chat_action_bar(chat.get("action_bar")),
         // Slice CL3: `chat.block_list` (schema 1.8.67, lines 3627/9692);
         // `blockListMain` means the peer is blocked.
         blocked: is_block_list_main(chat.get("block_list")),

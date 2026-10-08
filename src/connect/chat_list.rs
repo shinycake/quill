@@ -9,7 +9,7 @@ use crate::telegram::requests::{
     ArchiveChatListSettings, add_chat_to_list, add_chat_to_list_value, clear_recently_found_chats,
     create_chat_folder, create_private_chat, delete_chat, delete_chat_folder, delete_chat_history,
     edit_chat_folder, get_archive_chat_list_settings, get_chat_folder, get_chat_lists_to_add_chat,
-    load_chats_list, read_chat_list, reorder_chat_folders, report_chat,
+    load_chats_list, read_chat_list, remove_chat_action_bar, reorder_chat_folders, report_chat,
     set_archive_chat_list_settings, set_pinned_chats, toggle_chat_folder_tags,
     toggle_chat_is_marked_as_unread, toggle_chat_is_pinned, view_messages,
 };
@@ -958,6 +958,34 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        Ok(Some(extra))
+    }
+
+    /// Batch 8: `removeChatActionBar` — the bar's close button. The bar is
+    /// dropped locally at once; TDLib confirms with `updateChatActionBar`.
+    pub fn dismiss_chat_action_bar(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.chat_action_bar(chat_id).is_none() {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::RemoveChatActionBar;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&remove_chat_action_bar(extra, chat_id.0))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.set_chat_action_bar(chat_id.0, None);
         Ok(Some(extra))
     }
 
