@@ -504,6 +504,7 @@ impl QuillApp {
         });
         let dust = self.vanish_overlay();
         let call_bar = self.call_bar(cx).or_else(|| self.group_call_bar(cx));
+        let capture_notice = self.capture_notice(cx);
         div()
             .relative()
             .flex()
@@ -512,6 +513,7 @@ impl QuillApp {
             .min_w_0()
             .min_h_0()
             .children(call_bar)
+            .children(capture_notice)
             .child(history)
             // Phase C2i: busy-decline banner — the calls that arrived
             // while another call was active were declined with

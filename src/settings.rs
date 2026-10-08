@@ -4,7 +4,6 @@ use crate::ids::AccountKey;
 use crate::sticker_suggest::StickerSuggestMode;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const APP_DIR_NAME: &str = "Quill";
 pub const PREFS_VERSION: u32 = 1;
@@ -515,19 +514,13 @@ pub fn night_active(start_minutes: u16, end_minutes: u16, now_minutes: u16) -> b
     }
 }
 
-/// Minutes since local midnight, for scheduled auto-night. A thin
-/// `libc::localtime_r` wrapper — no chrono/time dependency for one
-/// call; the testable predicate is `night_active`.
+/// Minutes since local midnight, for scheduled auto-night (the
+/// testable predicate is `night_active`). Uses the cross-platform
+/// `local_time` (Unix `localtime_r`, Windows time-zone API).
 pub fn local_minutes_since_midnight() -> u16 {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as libc::time_t)
-        .unwrap_or(0);
-    let mut broken: libc::tm = unsafe { std::mem::zeroed() };
-    if unsafe { libc::localtime_r(&now, &mut broken) }.is_null() {
-        return 0;
-    }
-    (broken.tm_hour.max(0) as u16) * 60 + (broken.tm_min.max(0) as u16)
+    let now = crate::local_time::now_unix();
+    let local = crate::local_time::civil_local(now);
+    u16::from(local.hour) * 60 + u16::from(local.minute)
 }
 
 fn default_true() -> bool {

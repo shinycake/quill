@@ -1685,6 +1685,7 @@ impl QuillApp {
             viewer_player: None,
             viewer_clock: None,
             capture_blocked: false,
+            capture_notice_dismissed: false,
             viewer_tick: false,
             viewer_pending_play: None,
             viewer_orientation: Default::default(),
