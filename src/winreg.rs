@@ -121,15 +121,16 @@ pub fn delete_value(subkey: &str, name: &str) -> io::Result<()> {
     }
 }
 
-/// Delete the whole `HKCU\<subkey>` tree (test cleanup).
-#[cfg(test)]
-pub fn delete_tree(subkey: &str) {
+/// Delete the whole `HKCU\<subkey>` tree; a missing key is success.
+pub fn delete_tree(subkey: &str) -> io::Result<()> {
     use windows_sys::Win32::System::Registry::RegDeleteTreeW;
     let subkey = wide(subkey);
     // SAFETY: `subkey` is a live NUL-terminated buffer.
-    unsafe {
-        RegDeleteTreeW(HKEY_CURRENT_USER, subkey.as_ptr());
+    let code = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, subkey.as_ptr()) };
+    if code == ERROR_FILE_NOT_FOUND {
+        return Ok(());
     }
+    check(code)
 }
 
 #[cfg(test)]

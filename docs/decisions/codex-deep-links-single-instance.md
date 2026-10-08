@@ -57,6 +57,8 @@ invite preview waits instead of being dropped.
 
 ### URL scheme registration
 
+> Superseded: Quill no longer registers itself; see `codex-link-handler-opt-in.md`.
+
 - macOS: `CFBundleURLTypes` (`tg`) in the Info.plist written by
   `scripts/macos-package-smoke.sh`; URLs arrive through GPUI's
   `Application::on_open_urls` (`application:openURLs:`), both on cold launch

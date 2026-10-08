@@ -33,7 +33,8 @@ for icon in "$HERE"/share/icons/hicolor/*/apps/quill.png; do
   cp "$icon" "$ICONS/$size/apps/quill.png"
 done
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" || true
-# Make Quill the handler for tg:// links (browsers and `xdg-open tg://...`).
-command -v xdg-mime >/dev/null && xdg-mime default quill.desktop x-scheme-handler/tg || true
+# The tg:// scheme handler is NOT claimed here: Quill never becomes the default
+# on its own. Users opt in from Settings (or pick it in their desktop settings);
+# the .desktop file still advertises x-scheme-handler/tg so it stays selectable.
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$PREFIX/share/icons/hicolor" || true
 echo "Installed Quill to $DEST (command: $PREFIX/bin/quill)."

@@ -730,7 +730,12 @@ impl QuillApp {
         if !looping {
             clock.set_rate(self.playback_speed);
         }
-        clock.seek(0.0);
+        // A media-timestamp link opened this clip at a given second.
+        let start = self
+            .pending_viewer_seek
+            .take_if(|(id, _)| *id == item.message_id)
+            .map_or(0.0, |(_, secs)| secs.clamp(0.0, duration));
+        clock.seek(start);
         clock.resume();
         self.viewer_clock = Some(clock);
         self.viewer_video = Some(item.message_id);
@@ -783,7 +788,8 @@ impl QuillApp {
         self.begin_viewer_video(item, path, cx);
         // GIFs are silent: no audio player.
         if self.demo_session.is_none() && !item.kind.loops() {
-            self.start_viewer_audio(path, 0.0);
+            let start = self.viewer_clock.as_ref().map_or(0.0, |c| c.elapsed_secs());
+            self.start_viewer_audio(path, start);
         }
     }
 
@@ -805,6 +811,10 @@ impl QuillApp {
                     video.set_volume(self.playback_volume);
                     video.play();
                     video.set_rate(self.playback_speed as f32);
+                }
+                let start = self.viewer_clock.as_ref().map_or(0.0, |c| c.elapsed_secs());
+                if start > 0.0 {
+                    video.seek(start);
                 }
                 self.viewer_native = Some(video);
             }

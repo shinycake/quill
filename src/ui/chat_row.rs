@@ -540,6 +540,14 @@ pub(super) fn session_chat_row(
     // (When the shown text equals `last_preview` the entities describe
     // it even if the text arrived via the draft path.)
     let from_last = draft.is_none() && preview == chat.last_preview;
+    // A sender prefix and a right-to-left preview are one line of text, whose direction
+    // comes from the first strong character (a Latin name: left-to-right).
+    let combine_prefix = preview_sender.is_some()
+        && from_last
+        && topic_line.is_none()
+        && activity.is_none()
+        && chat.last_preview_thumb.is_none()
+        && quill::text::has_rtl_text(&preview);
     let icon: Option<&str> = if row_style.media_icons && from_last {
         chat.last_preview_style.icon
     } else {
@@ -726,7 +734,11 @@ pub(super) fn session_chat_row(
                                             this.child(row_glyph(icon, cx.theme().muted_foreground))
                                         })
                                         .child(
-                                            div().font_semibold().min_w_0().truncate().child(title),
+                                            div()
+                                                .font_semibold()
+                                                .min_w_0()
+                                                .truncate()
+                                                .child(super::bidi_line::one_line_plain(title)),
                                         )
                                         .when_some(title_badge, |this, badge| {
                                             this.child(title_badge_element(
@@ -797,7 +809,9 @@ pub(super) fn session_chat_row(
                                         )
                                         .when_some(
                                             preview_sender
-                                                .filter(|_| from_last && topic_line.is_none()),
+                                                .clone()
+                                                .filter(|_| from_last && topic_line.is_none())
+                                                .filter(|_| !combine_prefix),
                                             |this, sender| {
                                                 this.child(
                                                     div()
@@ -866,6 +880,13 @@ pub(super) fn session_chat_row(
                                                         entities,
                                                         &preview_emoji.still,
                                                         &preview_emoji.layered,
+                                                        combine_prefix
+                                                            .then(|| {
+                                                                preview_sender
+                                                                    .as_ref()
+                                                                    .map(|sender| format!("{sender}: "))
+                                                            })
+                                                            .flatten(),
                                                         cx,
                                                     ),
                                                 )

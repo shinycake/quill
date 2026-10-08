@@ -73,7 +73,7 @@ ksni = { version = "0.3", optional = true, default-features = false, features = 
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSMenu", "NSView", "NSWindow", "NSPasteboard", "NSPasteboardItem", "NSImage", "NSFont", "NSStringDrawing", "NSAttributedString", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSSpellChecker", "NSApplication", "NSDockTile", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSResponder", "NSAppearance", "NSBezierPath", "NSColor", "NSGraphicsContext"], optional = true }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSMenu", "NSView", "NSWindow", "NSPasteboard", "NSPasteboardItem", "NSImage", "NSFont", "NSStringDrawing", "NSAttributedString", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSSpellChecker", "NSApplication", "NSDockTile", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSResponder", "NSAppearance", "NSBezierPath", "NSColor", "NSGraphicsContext", "NSWorkspace", "block2"], optional = true }
 # Native video playback (AVPlayer → CVPixelBuffer → GPUI surface).
 objc2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSValue", "NSObject", "NSError", "NSArray", "NSData", "NSGeometry", "NSAttributedString", "NSRange", "NSLocale"] }

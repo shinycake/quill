@@ -1809,6 +1809,25 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — expandable block quotes".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRtlPolish)) {
+            let view = std::env::var("QUILL_DEMO_RTL_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::rtl_demo::apply_ready_rtl_polish(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            if view == "search" {
+                self.search_input.update(cx, |input, cx| {
+                    input.set_value("שלום", window, cx);
+                    input.focus(window, cx);
+                });
+            }
+            self.status_note = "screenshot demo — RTL polish".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyRtlComposer)) {
             let text = match std::env::var("QUILL_DEMO_RTL").as_deref() {
                 Ok("mixed") => "היי, ההזמנה 12345 מוכנה ב-Telegram Desktop",

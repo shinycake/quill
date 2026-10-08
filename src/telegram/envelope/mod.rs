@@ -69,6 +69,8 @@ mod tests_chats;
 #[cfg(test)]
 mod tests_core;
 #[cfg(test)]
+mod tests_entities;
+#[cfg(test)]
 mod tests_keyboards;
 #[cfg(test)]
 mod tests_media;

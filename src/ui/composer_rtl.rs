@@ -418,7 +418,8 @@ mod tests {
                     if after == before {
                         break;
                     }
-                    let nx = caret(&input, after, cx).left();
+                    // Drawn where the caret really is (a boundary offset has two places).
+                    let nx = input.read(cx).caret_bounds().unwrap().left();
                     assert!(nx > x, "Right moves rightwards: {x:?} -> {nx:?}");
                     x = nx;
                     stops += 1;
@@ -770,5 +771,325 @@ mod tests {
         let x = |at: usize| auto[text.char_indices().position(|(i, _)| i == at).unwrap()];
         assert!(x(0) > x(hello) && x(hello) > x(world));
         assert!(x(hello + 3) > x(hello));
+    }
+
+    #[cfg(target_os = "macos")]
+    const WORD_LEFT: &str = "alt-left";
+    #[cfg(target_os = "macos")]
+    const WORD_RIGHT: &str = "alt-right";
+    #[cfg(not(target_os = "macos"))]
+    const WORD_LEFT: &str = "ctrl-left";
+    #[cfg(not(target_os = "macos"))]
+    const WORD_RIGHT: &str = "ctrl-right";
+
+    /// Presses `key` until the caret stops, returning each `(offset, hangs on the character
+    /// before it)` stop the caret visited, starting with where it was, and the x it was
+    /// drawn at.
+    fn walk_keys(
+        input: &Entity<TextareaState>,
+        key: &str,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> Vec<((usize, bool), Pixels)> {
+        let here = |cx: &gpui_kit::App| {
+            let state = input.read(cx);
+            (
+                (state.cursor(), state.caret_hangs_on_previous_character()),
+                state.caret_bounds().expect("the caret is laid out").left(),
+            )
+        };
+        let mut stops = vec![here(cx)];
+        for _ in 0..40 {
+            window.press(key, cx);
+            window.render_frame(cx);
+            let next = here(cx);
+            if next.0 == stops.last().unwrap().0 {
+                return stops;
+            }
+            stops.push(next);
+        }
+        panic!("the caret never stopped: {stops:?}");
+    }
+
+    fn park(input: &Entity<TextareaState>, at: usize, window: &mut Window, cx: &mut gpui_kit::App) {
+        input.update(cx, |state, cx| state.set_selected_range(at..at, cx));
+        window.render_frame(cx);
+    }
+
+    #[test]
+    fn a_direction_boundary_offset_is_reached_from_both_sides() {
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                // "ab" then Hebrew: offset 2 is after "b" and before the Hebrew "ש".
+                set_text(&input, "abשג", window, cx);
+                park(&input, 0, window, cx);
+                let right = walk_keys(&input, "right", window, cx);
+                let stops: Vec<_> = right.iter().map(|(stop, _)| *stop).collect();
+                // 0, 1, then offset 2 after "b", 4 inside the Hebrew run, and offset 2
+                // again on the other side (before "ש", the run's right edge).
+                assert_eq!(
+                    stops,
+                    vec![(0, false), (1, false), (2, true), (4, false), (2, false)]
+                );
+                // The caret moves strictly rightwards through all of them.
+                for pair in right.windows(2) {
+                    assert!(pair[1].1 > pair[0].1, "{right:?}");
+                }
+                // And back with Left, through the Hebrew run to the start.
+                let left = walk_keys(&input, "left", window, cx);
+                let stops: Vec<_> = left.iter().map(|(stop, _)| *stop).collect();
+                assert_eq!(
+                    stops,
+                    vec![(2, false), (4, false), (6, false), (1, false), (0, false)]
+                );
+                for pair in left.windows(2) {
+                    assert!(pair[1].1 < pair[0].1, "{left:?}");
+                }
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn typing_at_a_boundary_stop_goes_to_the_side_the_caret_hangs_on() {
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                set_text(&input, "abשג", window, cx);
+                park(&input, 0, window, cx);
+                window.press("right", cx);
+                window.press("right", cx);
+                let state = input.read(cx);
+                assert_eq!(
+                    (state.cursor(), state.caret_hangs_on_previous_character()),
+                    (2, true)
+                );
+                // The caret after "b" is where an inserted letter lands next to "b", and
+                // an edit places the caret by offset again.
+                type_char(window, 'c', cx);
+                assert_eq!(input.read(cx).value().as_ref(), "abcשג");
+                assert!(!input.read(cx).caret_hangs_on_previous_character());
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn clicking_picks_the_side_of_a_direction_boundary() {
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                set_text(&input, "abשג", window, cx);
+                let field = window.find("composer").bounds();
+                // The two places of offset 2: after "b", and at the Hebrew run's right edge.
+                park(&input, 0, window, cx);
+                window.press("right", cx);
+                window.press("right", cx);
+                window.render_frame(cx);
+                let after_b = input.read(cx).caret_bounds().unwrap();
+                park(&input, 2, window, cx);
+                let hebrew_right = input.read(cx).caret_bounds().unwrap().left();
+                let after_b_x = after_b.left();
+                assert!(hebrew_right > after_b_x);
+                let y = after_b.center().y - field.top();
+                let after_b = after_b_x;
+                window.click_at("composer", point(after_b - field.left() - px(1.), y), cx);
+                let state = input.read(cx);
+                assert_eq!(
+                    (state.cursor(), state.caret_hangs_on_previous_character()),
+                    (2, true)
+                );
+                let drawn = state.caret_bounds().unwrap().left();
+                assert!((drawn - after_b).abs() < px(1.), "{drawn:?} vs {after_b:?}");
+                window.click_at(
+                    "composer",
+                    point(hebrew_right - field.left() + px(1.), y),
+                    cx,
+                );
+                let state = input.read(cx);
+                assert_eq!(
+                    (state.cursor(), state.caret_hangs_on_previous_character()),
+                    (2, false)
+                );
+                let drawn = state.caret_bounds().unwrap().left();
+                assert!(
+                    (drawn - hebrew_right).abs() < px(1.),
+                    "{drawn:?} vs {hebrew_right:?}"
+                );
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn word_movement_follows_the_runs_of_a_mixed_paragraph() {
+        // Visually, left to right: עולם  hello  שלום (a right-to-left paragraph).
+        let text = "שלום hello עולם";
+        let hello = text.find("hello").unwrap();
+        let world = text.find("עולם").unwrap();
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                set_text(&input, text, window, cx);
+                park(&input, 0, window, cx);
+                // From the right edge, each press goes one word to the left on screen,
+                // whichever way the word reads.
+                let left = walk_keys(&input, WORD_LEFT, window, cx);
+                let offsets: Vec<_> = left.iter().map(|((o, _), _)| *o).collect();
+                assert_eq!(
+                    offsets,
+                    vec![0, "שלום".len(), hello, text.len()],
+                    "{left:?}"
+                );
+                for pair in left.windows(2) {
+                    assert!(pair[1].1 < pair[0].1, "{left:?}");
+                }
+                // And back to the right.
+                let right = walk_keys(&input, WORD_RIGHT, window, cx);
+                for pair in right.windows(2) {
+                    assert!(pair[1].1 > pair[0].1, "{right:?}");
+                }
+                assert_eq!(right.len(), 4, "{right:?}");
+                assert_eq!(right.last().unwrap().0.0, 0);
+                assert_eq!(right[1].0.0, world);
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn word_movement_in_a_latin_paragraph_crosses_a_hebrew_word_by_its_run() {
+        // "one שלום two": Latin paragraph holding a Hebrew word.
+        let text = "one שלום two";
+        let hebrew = text.find("שלום").unwrap();
+        let two = text.find("two").unwrap();
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                set_text(&input, text, window, cx);
+                park(&input, 0, window, cx);
+                let right = walk_keys(&input, WORD_RIGHT, window, cx);
+                for pair in right.windows(2) {
+                    assert!(pair[1].1 > pair[0].1, "moves right on screen: {right:?}");
+                }
+                let offsets: Vec<_> = right.iter().map(|((o, _), _)| *o).collect();
+                // "one", the Hebrew word (entered at its left edge, i.e. its logical end,
+                // and left at its right edge), then "two".
+                assert_eq!(offsets.len(), 4, "{right:?}");
+                assert_eq!(offsets[1], 3);
+                assert_eq!(offsets[2], hebrew);
+                assert_eq!(offsets[3], text.len());
+                let _ = two;
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn plain_paragraphs_keep_logical_word_movement() {
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                set_text(&input, "one two three", window, cx);
+                park(&input, 0, window, cx);
+                let right = walk_keys(&input, WORD_RIGHT, window, cx);
+                let offsets: Vec<_> = right.iter().map(|((o, _), _)| *o).collect();
+                assert_eq!(offsets, vec![0, 3, 7, 13]);
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn selecting_by_word_extends_along_the_runs() {
+        let text = "שלום hello עולם";
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                set_text(&input, text, window, cx);
+                park(&input, 0, window, cx);
+                let key = format!("shift-{WORD_LEFT}");
+                window.press(&key, cx);
+                assert_eq!(input.read(cx).selected_range(), 0.."שלום".len());
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn a_hebrew_preview_is_elided_at_its_logical_end() {
+        with_composer(None, |cx, handle, _| {
+            cx.update_window(handle, |_, window, _| {
+                let text = "שלום עולם מה שלומך היום זו הודעה ארוכה מאוד";
+                let style = window.text_style();
+                let size = style.font_size.to_pixels(window.rem_size());
+                let runs = vec![style.to_run(text.len())];
+                let shared: gpui_kit::SharedString = text.to_string().into();
+                let line = |width: f32, window: &mut Window| {
+                    BidiParagraph::layout_one_line(&shared, &runs, size, px(20.), px(width), window)
+                        .expect("the text has right-to-left characters")
+                };
+                // Roomy: nothing elided, the line is as wide as the text.
+                let whole = line(2000., window);
+                assert!(whole.width() < px(2000.));
+                assert!(whole.is_rtl());
+                // Narrow: it fits, starts at the right edge like the sentence does, and
+                // ends (at its left) in the ellipsis; a longer allowance keeps more text.
+                let narrow = line(120., window);
+                let wider = line(200., window);
+                assert!(narrow.width() <= px(120.), "{:?}", narrow.width());
+                assert!(wider.width() <= px(200.) && wider.width() > narrow.width());
+                assert!(narrow.is_rtl());
+                // Position 0 is the first word, at the right edge of the allowance.
+                let first = narrow.position_for_index(0, px(120.)).unwrap();
+                assert!(first.x > px(100.), "{first:?}");
+                // The ellipsis is the last character: leftmost.
+                let end = narrow.position_for_index(narrow.len(), px(120.)).unwrap();
+                assert!(end.x < px(20.), "{end:?}");
+                // Latin text with no Hebrew in sight is left to GPUI.
+                let latin: gpui_kit::SharedString = "hello world".to_string().into();
+                assert!(
+                    BidiParagraph::layout_one_line(
+                        &latin,
+                        &[style.to_run(11)],
+                        size,
+                        px(20.),
+                        px(50.),
+                        window
+                    )
+                    .is_none()
+                );
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn a_latin_preview_with_hebrew_late_is_elided_at_the_right() {
+        with_composer(None, |cx, handle, _| {
+            cx.update_window(handle, |_, window, _| {
+                let text = "meeting at noon שלום עולם";
+                let style = window.text_style();
+                let size = style.font_size.to_pixels(window.rem_size());
+                let runs = vec![style.to_run(text.len())];
+                let shared: gpui_kit::SharedString = text.to_string().into();
+                let line =
+                    BidiParagraph::layout_one_line(&shared, &runs, size, px(20.), px(90.), window)
+                        .expect("has right-to-left characters");
+                // A Latin-first line stays left-aligned: its start at the left edge.
+                assert!(!line.is_rtl());
+                assert!(line.width() <= px(90.));
+                assert!(line.position_for_index(0, px(90.)).unwrap().x < px(2.));
+            })
+            .unwrap();
+        });
     }
 }

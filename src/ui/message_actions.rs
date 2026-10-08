@@ -209,6 +209,47 @@ impl QuillApp {
                 }
             );
         }
+        // Over a link, the menu leads with what Telegram Desktop adds for it:
+        // a copy entry named for the kind of link (`copyToClipboardContextItemText`),
+        // and, for web links, Open.
+        if let Some(link) = self.message_menu_link.clone() {
+            let msg_key = (chat_id.0, message_id.0 as u64);
+            if matches!(link, quill::text::LinkTarget::Url { .. }) {
+                let open = link.clone();
+                item!(
+                    4,
+                    gpui_kit::assets::IconName::ExternalLink,
+                    "menu-open-link",
+                    "Open Link",
+                    this,
+                    _window,
+                    cx,
+                    {
+                        this.message_menu = None;
+                        this.queue_link(open.clone(), msg_key, cx);
+                    }
+                );
+            }
+            if let (Some(label), Some(text)) = (link.copy_label(), link.copy_text())
+                && !protected
+            {
+                let text = text.to_string();
+                item!(
+                    41,
+                    gpui_kit::assets::IconName::Copy,
+                    "menu-copy-link",
+                    label,
+                    this,
+                    _window,
+                    cx,
+                    {
+                        this.message_menu = None;
+                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                        cx.notify();
+                    }
+                );
+            }
+        }
         let is_secret = matches!(chat_kind, Some(ChatKind::Secret { .. }));
         if !is_secret
             && !protected
@@ -1418,11 +1459,11 @@ impl QuillApp {
                                         .child(title),
                                 )
                                 .child(
-                                    div()
-                                        .text_sm()
-                                        .truncate()
-                                        .text_color(text_primary())
-                                        .child(preview),
+                                    div().text_sm().truncate().text_color(text_primary()).child(
+                                        super::bidi_line::one_line_plain(
+                                            super::search_ui::one_line_preview(&preview),
+                                        ),
+                                    ),
                                 ),
                         ),
                 )
@@ -1469,13 +1510,11 @@ impl QuillApp {
                             &now,
                         )),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .truncate()
-                        .text_color(text_primary())
-                        .child(effective_preview(message)),
-                )
+                .child(div().text_sm().truncate().text_color(text_primary()).child(
+                    super::bidi_line::one_line_plain(super::search_ui::one_line_preview(
+                        &effective_preview(message),
+                    )),
+                ))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.jump_to_pinned_message(message_id, cx);
                     this.pinned_cursor.insert(chat_id.0, index);

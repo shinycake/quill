@@ -289,6 +289,10 @@ pub enum ScreenshotDemo {
     /// RTL composer demo: a Hebrew / mixed / multi-paragraph draft chosen by
     /// `QUILL_DEMO_RTL=he|mixed|lines` (default `he`).
     ReadyRtlComposer,
+    /// RTL polish demo: Hebrew chat-list previews, search results, short and
+    /// multi-line Hebrew bubbles with their time footers, a Hebrew reply and a
+    /// pinned message. `QUILL_DEMO_RTL_VIEW=chat|search` (default `chat`).
+    ReadyRtlPolish,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting
