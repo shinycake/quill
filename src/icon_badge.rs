@@ -58,6 +58,13 @@ fn overlay_description(unread: u32) -> String {
     }
 }
 
+/// `QUILL_TRACE_STATUS=1`: print badge pushes (same switch as status notes).
+fn trace(line: &str) {
+    if std::env::var_os("QUILL_TRACE_STATUS").is_some() {
+        eprintln!("{line}");
+    }
+}
+
 /// Sync the taskbar/dock app-icon badge with the session's unread count.
 /// Call from the UI thread (the 1s tray timer); emits only on change.
 pub fn sync_icon_badge(session: Option<&Session>) {
@@ -68,7 +75,9 @@ pub fn sync_icon_badge(session: Option<&Session>) {
         if last.get() == Some(unread) {
             return;
         }
-        if push_badge(unread) {
+        let pushed = push_badge(unread);
+        trace(&format!("icon-badge: unread={unread} pushed={pushed}"));
+        if pushed {
             last.set(Some(unread));
         }
     });
@@ -86,12 +95,18 @@ fn push_badge(unread: u32) -> bool {
     use objc2_app_kit::NSApplication;
     use objc2_foundation::NSString;
     let Some(mtm) = MainThreadMarker::new() else {
+        trace("icon-badge: not on the main thread, dock label skipped");
         return false;
     };
     let label = dock_badge_label(unread).map(|text| NSString::from_str(&text));
-    NSApplication::sharedApplication(mtm)
-        .dockTile()
-        .setBadgeLabel(label.as_deref());
+    let tile = NSApplication::sharedApplication(mtm).dockTile();
+    tile.setBadgeLabel(label.as_deref());
+    // Read back what AppKit now holds, so a trace shows whether it stuck.
+    let held = tile.badgeLabel().map(|l| l.to_string());
+    trace(&format!(
+        "icon-badge: dock label set={label:?} readback={held:?}",
+        label = dock_badge_label(unread)
+    ));
     true
 }
 
