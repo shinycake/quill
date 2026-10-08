@@ -609,16 +609,25 @@ fn standalone_animated_emoji_keeps_readable_content() {
 }
 
 #[test]
-fn ordinary_service_messages_keep_readable_content() {
+fn service_messages_parse_to_structured_actions() {
     for (kind, expected) in [
-        ("messageChatChangeTitle", "Chat renamed to New title"),
-        ("messageChatChangePhoto", "Chat photo changed"),
-        ("messagePinMessage", "A message was pinned"),
-        ("messageCustomServiceAction", "Welcome"),
+        (
+            "messageChatChangeTitle",
+            ServiceAction::ChatTitle {
+                title: "New title".into(),
+            },
+        ),
+        ("messagePinMessage", ServiceAction::Pin { message_id: 7 }),
+        (
+            "messageCustomServiceAction",
+            ServiceAction::Custom {
+                text: "Welcome".into(),
+            },
+        ),
     ] {
-        let value = serde_json::json!({"@type":kind,"title":"New title","text":"Welcome"});
+        let value =
+            serde_json::json!({"@type":kind,"title":"New title","text":"Welcome","message_id":7});
         let (content, _) = parse_content(Some(&value));
-        assert_eq!(content, MessageContent::Service(expected.into()));
-        assert_eq!(content.preview(), expected);
+        assert_eq!(content, MessageContent::Action(Box::new(expected)));
     }
 }

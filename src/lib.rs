@@ -47,6 +47,9 @@ pub mod privacy;
 pub mod rich;
 pub mod row_fx;
 pub mod send_button;
+pub mod service_text;
+#[cfg(test)]
+mod service_text_tests;
 pub mod settings;
 pub mod single_instance;
 pub mod spell_dict;

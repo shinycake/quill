@@ -1346,14 +1346,16 @@ impl Session {
             EnvelopePayload::UpdateMessageEdited {
                 chat_id,
                 message_id,
+                edit_date,
                 reply_markup,
-                ..
             } => {
                 // Phase 3.2: bots edit inline keyboards via `updateMessageEdited`
                 // (schema 1.8.67 line 10431) — the new `reply_markup` (possibly
                 // None) replaces the message's keyboard.
+                // The same update stamps the edit date shown as "edited".
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.reply_markup = reply_markup.clone();
+                    message.extras.edit_date = edit_date;
                 });
             }
             EnvelopePayload::UpdatePoll { poll } => {
@@ -1706,6 +1708,14 @@ impl Session {
                 self.apply_messages(messages, pending, extra, seq)
             }
             EnvelopePayload::Message(message) => {
+                if let Some(RequestPurpose::GetRepliedMessage {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.accept_replied_message(chat_id, message_id, message);
+                    return;
+                }
                 // M1 fix-up: editing a scheduled send returns the edited
                 // `message` with `scheduling_state` set — refresh the
                 // scheduled-list entry instead of inserting a phantom row
@@ -2627,13 +2637,20 @@ impl Session {
         chat_id: ChatId,
         message: Option<&ParsedMessage>,
     ) {
+        // Service messages preview as their wording ("Dana pinned \"hi\""),
+        // computed before the chat is borrowed mutably.
+        let service_preview = message.and_then(|message| {
+            let content = effective_content(&message.content, message.ephemeral.as_ref());
+            self.service_text_for(chat_id, content, message.sender, message.is_outgoing)
+                .map(|text| text.plain())
+        });
         let chat = self
             .chats
             .entry(chat_id.0)
             .or_insert_with(|| placeholder_chat(chat_id));
         if let Some(message) = message {
             let content = effective_content(&message.content, message.ephemeral.as_ref());
-            chat.last_preview = content.preview();
+            chat.last_preview = service_preview.unwrap_or_else(|| content.preview());
             chat.last_preview_style = preview_style(content, &chat.last_preview);
             chat.last_preview_thumb = match content {
                 MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => photo
@@ -2643,11 +2660,15 @@ impl Session {
                     .map(std::sync::Arc::new),
                 _ => None,
             };
-            chat.last_preview_sender = preview_sender_name(
-                message.is_outgoing,
-                message.author_signature.as_deref(),
-                &chat.title,
-            );
+            chat.last_preview_sender = if chat.last_preview_style.service {
+                String::new()
+            } else {
+                preview_sender_name(
+                    message.is_outgoing,
+                    message.author_signature.as_deref(),
+                    &chat.title,
+                )
+            };
             chat.last_message = Some(ChatLastMessage {
                 id: message.id,
                 date: message.date,

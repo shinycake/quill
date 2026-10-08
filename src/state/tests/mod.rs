@@ -2,6 +2,7 @@
 use super::*;
 
 mod bots;
+mod bubble_headers;
 mod calls;
 mod chat_list;
 mod chat_row;
@@ -15,6 +16,7 @@ mod payments;
 mod requests;
 mod search;
 mod send_permissions;
+mod service_preview;
 mod sessions;
 mod shared_media;
 mod stickers;

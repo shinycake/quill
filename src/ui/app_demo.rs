@@ -603,6 +603,18 @@ pub(super) fn demo_seed_for(
             "screenshot demo — RTL polish".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyServiceMessages => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — service messages".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyBubbleHeaders => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — bubble headers".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyPoll => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
