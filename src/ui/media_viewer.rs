@@ -10,6 +10,7 @@ use super::message_media::{file_is_downloading, viewer_display_path};
 use super::message_text::rich_text_line;
 use super::*;
 use gpui_kit::component::button::*;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -17,8 +18,10 @@ use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
-    MediaViewer, MediaViewerItem, MediaViewerKind, ViewerVideoStart, collect_media_items,
-    decide_viewer_video_start, rotate_rgba_quarter_turns, save_media_to_downloads,
+    MediaViewer, MediaViewerItem, MediaViewerKind, VIEWER_FADE_MS, VIEWER_SHOW_MS,
+    VIEWER_WAIT_HIDE_MS, VIEWER_WHEEL_NOTCH_PX, ViewerOrientation, ViewerVideoStart,
+    collect_media_items, controls_hide_wait_ms, controls_should_hide, decide_viewer_video_start,
+    orient_rgba, save_media_to_downloads, viewer_delete_gate, wheel_zoom_factor,
 };
 use quill::playback::PlaybackClock;
 use quill::settings::MediaPrefs;
@@ -33,6 +36,31 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+/// Screenshot-capture runs render a single frame: skip fades there so the
+/// shot shows the settled viewer, not frame zero of an animation.
+fn still_frame() -> bool {
+    std::env::var_os("QUILL_DEMO_CAPTURE").is_some()
+}
+
+/// Fade a group of viewer controls in or out over `VIEWER_FADE_MS`
+/// (tdesktop `mediaviewFadeDuration`). The animation id carries the flip
+/// generation, so each show/hide restarts it.
+fn fade_controls<E: Styled + IntoElement + 'static>(
+    element: E,
+    id: &'static str,
+    generation: u64,
+    hidden: bool,
+) -> AnimationElement<E> {
+    element.with_animation(
+        (id, generation as usize),
+        Animation::new(Duration::from_millis(VIEWER_FADE_MS)),
+        move |element, t| {
+            let t = if still_frame() { 1.0 } else { t };
+            element.opacity(if hidden { 1.0 - t } else { t })
+        },
+    )
+}
+
 impl QuillApp {
     /// Phase 4.5: open the fullscreen media viewer on the clicked message.
     /// Items are the chat's photo/video messages (oldest first); the clicked
@@ -63,16 +91,31 @@ impl QuillApp {
             return;
         };
         self.media_viewer = MediaViewer::open(items, index);
+        self.viewer_open_gen += 1;
+        self.viewer_note_activity(false, cx);
+        self.reset_viewer_item_state(cx);
+        cx.notify();
+    }
+
+    /// Per-item viewer state: zoom, orientation, playback error, video
+    /// and the download / delete-permission lookups for the new current
+    /// item. Shared by open, step, and "the current item was deleted".
+    fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
         self.viewer_zoom.reset();
         self.viewer_drag = None;
-        // MED1: rotation and playback error are per-item state.
-        self.viewer_rotation = 0;
+        // MED1: orientation and playback error are per-item state.
+        self.viewer_orientation = Default::default();
         self.viewer_rotated = None;
         self.playback_error = None;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.maybe_autoplay_viewer_video(cx);
-        cx.notify();
+        // What TDLib allows for this message (Delete in the toolbar).
+        if let (Some(item), Some(live)) = (self.media_viewer.current(), self.live.as_mut()) {
+            let _ = live
+                .driver
+                .fetch_message_menu_actions(item.chat_id, item.message_id);
+        }
     }
 
     pub(super) fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
@@ -87,14 +130,8 @@ impl QuillApp {
         } else {
             self.media_viewer.next();
         }
-        self.viewer_zoom.reset();
-        self.viewer_drag = None;
-        // MED1: rotation is per-item.
-        self.viewer_rotation = 0;
-        self.viewer_rotated = None;
-        self.stop_viewer_video();
-        self.ensure_viewer_download(cx);
-        self.maybe_autoplay_viewer_video(cx);
+        self.viewer_note_activity(false, cx);
+        self.reset_viewer_item_state(cx);
         cx.notify();
     }
 
@@ -130,7 +167,7 @@ impl QuillApp {
     /// overlay keeps Play/Pause and elapsed/total; the thumbnail shows
     /// until frames are ready. Closing or stepping the viewer stops
     /// playback and drops the frame cache.
-
+    ///
     /// Sandbox-checked local path of the current item's full video clip.
     pub(super) fn viewer_clip_path(&self, item: &MediaViewerItem) -> Option<PathBuf> {
         self.playable_clip_path(item.chat_id, item.message_id, item.play_file_id?)
@@ -737,18 +774,39 @@ impl QuillApp {
 
     // ===================== MED1: viewer actions =====================
 
-    /// MED1: rotate the viewer photo 90° clockwise (photos only). The
-    /// rotated pixels are decoded eagerly and cached in `viewer_rotated`
-    /// so the overlay render stays allocation-free; reset on open/step.
+    /// MED1: rotate the viewer photo 90° clockwise (photos only).
     pub(super) fn rotate_viewer_photo(&mut self, cx: &mut Context<Self>) {
+        self.reorient_viewer_photo(|o| o.rotate_cw(), cx);
+    }
+
+    /// `H`: mirror the viewer photo left-to-right (tdesktop `_flip`).
+    pub(super) fn flip_viewer_horizontal(&mut self, cx: &mut Context<Self>) {
+        self.reorient_viewer_photo(|o| o.flip_horizontal(), cx);
+    }
+
+    /// `V`: mirror the viewer photo top-to-bottom.
+    pub(super) fn flip_viewer_vertical(&mut self, cx: &mut Context<Self>) {
+        self.reorient_viewer_photo(|o| o.flip_vertical(), cx);
+    }
+
+    /// Apply an orientation change and decode the re-oriented pixels
+    /// eagerly into `viewer_rotated`, so the overlay render stays
+    /// allocation-free; reset on open/step. A photo that is not local or
+    /// cannot be decoded keeps its previous orientation.
+    fn reorient_viewer_photo(
+        &mut self,
+        change: impl FnOnce(&mut ViewerOrientation),
+        cx: &mut Context<Self>,
+    ) {
         let item = self.media_viewer.current().cloned();
         let Some(item) = item else { return };
         if item.kind != MediaViewerKind::Photo {
             return;
         }
-        self.viewer_rotation = (self.viewer_rotation + 1) % 4;
+        let previous = (self.viewer_orientation, self.viewer_rotated.clone());
+        change(&mut self.viewer_orientation);
         self.viewer_rotated = None;
-        if self.viewer_rotation == 0 {
+        if self.viewer_orientation.is_identity() {
             cx.notify();
             return;
         }
@@ -756,30 +814,34 @@ impl QuillApp {
             self.session().map(|s| s.files.clone()).unwrap_or_default();
         let roots = self.media_display_roots();
         let path = viewer_display_path(&item, &files, &roots);
+        let orientation = self.viewer_orientation;
         match path {
-            Some(path) => match Self::rotated_render_image(&path, self.viewer_rotation) {
+            Some(path) => match Self::rotated_render_image(&path, orientation) {
                 Some(image) => {
-                    self.viewer_rotated = Some((path, self.viewer_rotation, image));
+                    self.viewer_rotated = Some((path, orientation.code(), image));
                 }
                 None => {
                     self.status_note = "couldn't rotate this photo".into();
-                    self.viewer_rotation = 0;
+                    (self.viewer_orientation, self.viewer_rotated) = previous;
                 }
             },
             None => {
                 self.status_note = "download the photo first to rotate it".into();
-                self.viewer_rotation = 0;
+                (self.viewer_orientation, self.viewer_rotated) = previous;
             }
         }
         cx.notify();
     }
 
-    /// MED1: decode `path` and rotate it by `turns` quarter-turns into a
+    /// MED1: decode `path` and orient it (flip, then rotate) into a
     /// `RenderImage` (the `decode_viewer_frames` construction pattern).
-    pub(super) fn rotated_render_image(path: &PathBuf, turns: u8) -> Option<Arc<RenderImage>> {
+    pub(super) fn rotated_render_image(
+        path: &PathBuf,
+        orientation: ViewerOrientation,
+    ) -> Option<Arc<RenderImage>> {
         let rgba = image::open(path).ok()?.to_rgba8();
         let (pixels, width, height) =
-            rotate_rgba_quarter_turns(rgba.as_raw(), rgba.width(), rgba.height(), turns);
+            orient_rgba(rgba.as_raw(), rgba.width(), rgba.height(), orientation);
         let rotated = image::RgbaImage::from_raw(width, height, pixels)?;
         Some(Arc::new(RenderImage::new(SmallVec::from_buf([
             image::Frame::new(rotated),
@@ -846,6 +908,187 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    /// The delete confirmation for the current viewer item, when the
+    /// message may be deleted (same gate as the message menu).
+    pub(super) fn viewer_delete_confirm(&self) -> Option<quill::composer::DeleteConfirm> {
+        let item = self.media_viewer.current()?;
+        let session = self.session()?;
+        let chat_id = item.chat_id;
+        let message = session
+            .histories
+            .get(&chat_id.0)?
+            .messages
+            .get(&item.message_id.0)?;
+        let mut confirm = quill::composer::DeleteConfirm::for_message(
+            chat_id,
+            item.message_id,
+            message.is_outgoing,
+            message.pending,
+        )?;
+        let actions = session
+            .message_menu_actions
+            .filter(|(c, m, _)| *c == chat_id && *m == item.message_id)
+            .map(|(_, _, actions)| actions);
+        let is_channel_post = matches!(
+            session.chats.get(&chat_id.0).map(|chat| &chat.kind),
+            Some(quill::telegram::envelope::ChatKind::Supergroup {
+                is_channel: true,
+                ..
+            })
+        );
+        let can_revoke = viewer_delete_gate(
+            actions,
+            message.is_outgoing,
+            is_channel_post,
+            session.is_saved_messages(chat_id),
+        )?;
+        confirm.can_revoke = can_revoke;
+        confirm.revoke = can_revoke;
+        Some(confirm)
+    }
+
+    /// Trash: open the message menu's delete confirmation ("Also delete
+    /// for {name}" checkbox) for the current item. Once the message is
+    /// gone from the history `prune_deleted_viewer_items` moves the
+    /// viewer to the next item, or closes it.
+    pub(super) fn delete_viewer_media(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(confirm) = self.viewer_delete_confirm() {
+            self.open_delete_dialog(confirm, window, cx);
+        }
+    }
+
+    /// Drop viewer items whose message no longer exists, moving to the
+    /// next item (or closing when none remain).
+    fn prune_deleted_viewer_items(&mut self, cx: &mut Context<Self>) {
+        let mut viewer = std::mem::take(&mut self.media_viewer);
+        let changed = match self.session() {
+            Some(session) => viewer.retain(|item| {
+                session
+                    .histories
+                    .get(&item.chat_id.0)
+                    .is_none_or(|history| history.messages.contains_key(&item.message_id.0))
+            }),
+            None => false,
+        };
+        self.media_viewer = viewer;
+        if !changed {
+            return;
+        }
+        if self.media_viewer.is_open() {
+            self.reset_viewer_item_state(cx);
+        } else {
+            self.stop_viewer_video();
+        }
+        cx.notify();
+    }
+
+    /// Cmd+C: copy the current photo to the clipboard as an image (with
+    /// the viewer's rotation and flips applied).
+    pub(super) fn copy_viewer_photo(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.media_viewer.current().cloned() else {
+            return;
+        };
+        if item.kind != MediaViewerKind::Photo {
+            self.status_note = "only photos can be copied".into();
+            cx.notify();
+            return;
+        }
+        if self.refuse_protected_copy(item.chat_id, cx) {
+            return;
+        }
+        let files: HashMap<i32, ParsedFile> =
+            self.session().map(|s| s.files.clone()).unwrap_or_default();
+        let roots = self.media_display_roots();
+        let orientation = self.viewer_orientation;
+        let png = viewer_display_path(&item, &files, &roots)
+            .ok_or("download the photo first to copy it")
+            .and_then(|path| {
+                let rgba = image::open(path)
+                    .map_err(|_| "couldn't copy this photo")?
+                    .to_rgba8();
+                let (pixels, width, height) =
+                    orient_rgba(rgba.as_raw(), rgba.width(), rgba.height(), orientation);
+                let oriented = image::RgbaImage::from_raw(width, height, pixels)
+                    .ok_or("couldn't copy this photo")?;
+                let mut bytes = std::io::Cursor::new(Vec::new());
+                image::DynamicImage::ImageRgba8(oriented)
+                    .write_to(&mut bytes, image::ImageFormat::Png)
+                    .map_err(|_| "couldn't copy this photo")?;
+                Ok(bytes.into_inner())
+            });
+        match png {
+            Ok(bytes) => {
+                cx.write_to_clipboard(ClipboardItem::new_image(&gpui_kit::Image::from_bytes(
+                    gpui_kit::ImageFormat::Png,
+                    bytes,
+                )));
+                self.status_note = "photo copied".into();
+            }
+            Err(note) => self.status_note = note.into(),
+        }
+        cx.notify();
+    }
+
+    /// Mouse-move listener for the control surfaces: keeps them shown.
+    fn over_controls_listener(
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static {
+        cx.listener(|this, _: &MouseMoveEvent, _, cx| {
+            this.viewer_note_activity(true, cx);
+        })
+    }
+
+    /// Mouse moved over the viewer: show the controls and restart the
+    /// 1100 ms idle clock (tdesktop `mediaviewWaitHide`). `over_controls`
+    /// keeps them up while the pointer rests on one.
+    pub(super) fn viewer_note_activity(&mut self, over_controls: bool, cx: &mut Context<Self>) {
+        self.viewer_last_activity = std::time::Instant::now();
+        self.viewer_over_controls = over_controls;
+        if self.viewer_controls_hidden {
+            self.viewer_controls_hidden = false;
+            self.viewer_controls_gen += 1;
+            cx.notify();
+        }
+        // Captures render once, after the idle wait: keep the controls up.
+        if self.viewer_hide_timer || still_frame() {
+            return;
+        }
+        self.viewer_hide_timer = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                let wait = this
+                    .update(cx, |this, cx| {
+                        let idle = this.viewer_last_activity.elapsed().as_millis() as u64;
+                        let done = !this.media_viewer.is_open() || this.viewer_controls_hidden;
+                        if !done && controls_should_hide(idle, this.viewer_over_controls) {
+                            this.viewer_controls_hidden = true;
+                            this.viewer_controls_gen += 1;
+                            cx.notify();
+                        } else if !done {
+                            return Some(if this.viewer_over_controls {
+                                VIEWER_WAIT_HIDE_MS
+                            } else {
+                                controls_hide_wait_ms(idle).max(16)
+                            });
+                        }
+                        this.viewer_hide_timer = false;
+                        None
+                    })
+                    .ok()
+                    .flatten();
+                match wait {
+                    Some(ms) => {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(ms))
+                            .await;
+                    }
+                    None => break,
+                }
+            }
+        })
+        .detach();
     }
 
     /// MED1: "Show in chat" — close the viewer and jump to the source
@@ -1272,13 +1515,20 @@ impl QuillApp {
         .detach();
     }
 
-    /// Parity slice 5: scroll-zoom the viewer visual (scroll up = zoom in,
-    /// matching the platform's positive-y convention).
-    pub(super) fn viewer_zoom_scroll(&mut self, delta_y: f32, cx: &mut Context<Self>) {
+    /// Scroll-zoom the viewer visual around the pointer (`anchor`, px from
+    /// the visual's top-left): the point under it stays put and the step
+    /// scales with the scroll distance (positive y zooms in).
+    pub(super) fn viewer_zoom_scroll(
+        &mut self,
+        delta_y: f32,
+        anchor: (f32, f32),
+        cx: &mut Context<Self>,
+    ) {
         if delta_y == 0.0 {
             return;
         }
-        self.viewer_zoom.step(delta_y > 0.0, self.viewer_frame);
+        self.viewer_zoom
+            .zoom_at(wheel_zoom_factor(delta_y), anchor, self.viewer_frame);
         cx.notify();
     }
 
@@ -1320,6 +1570,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        // A deleted item leaves the viewer (next item, or closed).
+        self.prune_deleted_viewer_items(cx);
         // MED1: keep the viewer seek/volume thumbs on the clocks (the
         // tick has no `&mut Window`, which `SliderState::set_value`
         // needs).
@@ -1378,6 +1630,9 @@ impl QuillApp {
             .current()
             .zip(self.session())
             .is_some_and(|(item, session)| session.chat_has_protected_content(item.chat_id));
+        let can_delete = self.viewer_delete_confirm().is_some();
+        let hidden = self.viewer_controls_hidden;
+        let fade_gen = self.viewer_controls_gen;
         let row_id = item.message_id.0 as u64;
         let downloading_now = item
             .display_file_ids
@@ -1435,7 +1690,7 @@ impl QuillApp {
         // dimensions (axes swapped for a quarter turn) rather than trusting
         // object-fit, so it can never spill out of the frame.
         let natural = item.natural_size.map(|(w, h)| {
-            if self.viewer_rotation % 2 == 1 {
+            if self.viewer_orientation.swaps_axes() {
                 (h as f32, w as f32)
             } else {
                 (w as f32, h as f32)
@@ -1481,7 +1736,8 @@ impl QuillApp {
                 .then(|| self.viewer_rotated.as_ref())
                 .flatten()
                 .filter(|(path, turns, _)| {
-                    *turns == self.viewer_rotation && Some(path.as_path()) == thumb_path.as_deref()
+                    *turns == self.viewer_orientation.code()
+                        && Some(path.as_path()) == thumb_path.as_deref()
                 })
                 .map(|(_, _, image)| ImageSource::from(image.clone()));
             let source: Option<ImageSource> = frame
@@ -1546,7 +1802,17 @@ impl QuillApp {
             let scroll_view = view.clone();
             let down_view = view.clone();
             let move_view = view.clone();
-            let up_view = view;
+            let up_view = view.clone();
+            // Window position of the visual's top-left (it is centered in
+            // the frame): wheel zoom keeps the point under the pointer.
+            let origin = (
+                (f32::from(viewport.width) - media_w) / 2.0,
+                VIEWER_TOP_BAR + (frame_h - media_h) / 2.0,
+            );
+            let menu_view = view;
+            let is_photo = item.kind == MediaViewerKind::Photo;
+            let menu_protected = protected;
+            let menu_can_delete = can_delete;
             div()
                 .id(("media-viewer-visual", row_id))
                 .relative()
@@ -1565,10 +1831,17 @@ impl QuillApp {
                 .on_scroll_wheel(move |event, _window, cx| {
                     let dy = match event.delta {
                         ScrollDelta::Pixels(p) => f32::from(p.y),
-                        ScrollDelta::Lines(l) => l.y,
+                        ScrollDelta::Lines(l) => l.y * VIEWER_WHEEL_NOTCH_PX,
                     };
+                    let anchor = (
+                        f32::from(event.position.x) - origin.0,
+                        f32::from(event.position.y) - origin.1,
+                    );
                     if let Some(view) = scroll_view.upgrade() {
-                        view.update(cx, |this, cx| this.viewer_zoom_scroll(dy, cx));
+                        view.update(cx, |this, cx| {
+                            this.viewer_note_activity(false, cx);
+                            this.viewer_zoom_scroll(dy, anchor, cx)
+                        });
                     }
                 })
                 .on_mouse_down(MouseButton::Left, move |event, _window, cx| {
@@ -1584,6 +1857,7 @@ impl QuillApp {
                     let pos = (f32::from(event.position.x), f32::from(event.position.y));
                     if let Some(view) = move_view.upgrade() {
                         view.update(cx, |this, cx| {
+                            this.viewer_note_activity(false, cx);
                             if let Some((lx, ly)) = this.viewer_drag {
                                 this.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
                                 this.viewer_drag = Some(pos);
@@ -1607,6 +1881,51 @@ impl QuillApp {
                 }))
                 // The media itself never closes the viewer.
                 .occlude()
+                // Right-click menu (tdesktop's viewer context menu).
+                .context_menu(move |menu, _, _| {
+                    let item = |label: &'static str,
+                                run: fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>)| {
+                        let view = menu_view.clone();
+                        PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                            let _ = view.update(cx, |this, cx| run(this, window, cx));
+                        })
+                    };
+                    let mut menu = menu;
+                    if !menu_protected {
+                        menu = menu.item(item("Forward", |this, window, cx| {
+                            this.share_viewer_media(window, cx)
+                        }));
+                    }
+                    if menu_can_delete {
+                        menu = menu.item(item("Delete", |this, window, cx| {
+                            this.delete_viewer_media(window, cx)
+                        }));
+                    }
+                    if !menu_protected {
+                        menu = menu
+                            .item(PopupMenuItem::separator())
+                            .item(item("Save As…", |this, _, cx| this.save_viewer_media(cx)));
+                        if is_photo {
+                            menu =
+                                menu.item(item("Copy", |this, _, cx| this.copy_viewer_photo(cx)));
+                        }
+                    }
+                    menu = menu.item(item("Show in Chat", |this, _, cx| {
+                        this.show_viewer_in_chat(cx)
+                    }));
+                    if is_photo {
+                        menu = menu
+                            .item(PopupMenuItem::separator())
+                            .item(item("Rotate", |this, _, cx| this.rotate_viewer_photo(cx)))
+                            .item(item("Flip Horizontally", |this, _, cx| {
+                                this.flip_viewer_horizontal(cx)
+                            }))
+                            .item(item("Flip Vertically", |this, _, cx| {
+                                this.flip_viewer_vertical(cx)
+                            }));
+                    }
+                    menu
+                })
         };
         // Parity slice 5: video transport under the visual. ffplay runs
         // `-nodisp` for audio only (no GPUI video element in this stack);
@@ -1868,7 +2187,10 @@ impl QuillApp {
         // Every control surface occludes: GPUI delivers a click to all
         // hitboxes under the cursor down to the first occluding one, so
         // without it the backdrop below also gets the click and closes.
+        let over_controls = Self::over_controls_listener;
         let top_bar = div()
+            .id("media-viewer-top-bar")
+            .on_mouse_move(over_controls(cx))
             .occlude()
             .absolute()
             .top_0()
@@ -1951,6 +2273,20 @@ impl QuillApp {
                                 })),
                         )
                     })
+                    .when(can_delete, |this| {
+                        this.child(
+                            icon_action(
+                                ("media-viewer-delete", row_id),
+                                gpui_kit::assets::IconName::Trash,
+                                "Delete",
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.delete_viewer_media(window, cx);
+                                },
+                            )),
+                        )
+                    })
                     .child(
                         icon_action(
                             ("media-viewer-close", row_id),
@@ -2001,6 +2337,8 @@ impl QuillApp {
                 cx,
             )
         });
+        let open_gen = self.viewer_open_gen as usize;
+        let arrow_top = px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0);
         div()
             .id("media-viewer-overlay")
             .occlude()
@@ -2017,11 +2355,14 @@ impl QuillApp {
                     .absolute()
                     .inset_0()
                     .bg(gpui_kit::black().opacity(0.92))
+                    .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
+                        this.viewer_note_activity(false, cx);
+                    }))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.close_media_viewer(cx);
                     })),
             )
-            .child(top_bar)
+            .child(fade_controls(top_bar, "viewer-top-fade", fade_gen, hidden))
             .child(
                 div()
                     .absolute()
@@ -2035,27 +2376,39 @@ impl QuillApp {
                     .child(visual),
             )
             .when_some(prev, |this, prev| {
-                this.child(
+                this.child(fade_controls(
                     div()
+                        .id("media-viewer-prev-lane")
+                        .on_mouse_move(over_controls(cx))
                         .occlude()
                         .absolute()
                         .left(px(16.))
-                        .top(px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0))
+                        .top(arrow_top)
                         .child(prev),
-                )
+                    "viewer-prev-fade",
+                    fade_gen,
+                    hidden,
+                ))
             })
             .when_some(next, |this, next| {
-                this.child(
+                this.child(fade_controls(
                     div()
+                        .id("media-viewer-next-lane")
+                        .on_mouse_move(over_controls(cx))
                         .occlude()
                         .absolute()
                         .right(px(16.))
-                        .top(px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0))
+                        .top(arrow_top)
                         .child(next),
-                )
+                    "viewer-next-fade",
+                    fade_gen,
+                    hidden,
+                ))
             })
-            .child(
+            .child(fade_controls(
                 div()
+                    .id("media-viewer-bottom-bar")
+                    .on_mouse_move(over_controls(cx))
                     .occlude()
                     .absolute()
                     .left_0()
@@ -2081,6 +2434,17 @@ impl QuillApp {
                         this.child(div().text_sm().text_color(danger_bright()).child(err))
                     })
                     .child(transport),
+                "viewer-bottom-fade",
+                fade_gen,
+                hidden,
+            ))
+            // Fade the whole overlay in over 200 ms when it opens
+            // (tdesktop `mediaviewShowDuration`). Closing is instant: a
+            // fade-out would have to keep the closed viewer's state alive.
+            .with_animation(
+                ("media-viewer-fade-in", open_gen),
+                Animation::new(Duration::from_millis(VIEWER_SHOW_MS)),
+                |overlay, t| overlay.opacity(if still_frame() { 1.0 } else { t }),
             )
     }
 }

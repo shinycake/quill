@@ -52,6 +52,12 @@ actions!(
         /// Parity slice 5: zoom the viewer visual in/out (`=` / `-`,
         /// viewer-open only).
         ViewerZoomIn,
-        ViewerZoomOut
+        ViewerZoomOut,
+        /// Viewer-open only: flip the photo horizontally (`h`) / vertically
+        /// (`v`), copy it as an image (cmd-c), save it (cmd-s).
+        ViewerFlipHorizontal,
+        ViewerFlipVertical,
+        ViewerCopy,
+        ViewerSave
     ]
 );

@@ -2,7 +2,8 @@ use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
     FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, NextChat, OpenChatSearch,
     OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, ToggleFullscreen,
-    ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev,
+    ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -147,6 +148,26 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
         label: "Zoom out",
         defaults: &["-"],
     },
+    RebindableAction {
+        id: "viewer-flip-h",
+        label: "Flip photo horizontally",
+        defaults: &["h"],
+    },
+    RebindableAction {
+        id: "viewer-flip-v",
+        label: "Flip photo vertically",
+        defaults: &["v"],
+    },
+    RebindableAction {
+        id: "viewer-copy",
+        label: "Copy photo",
+        defaults: &["cmd-c"],
+    },
+    RebindableAction {
+        id: "viewer-save",
+        label: "Save media",
+        defaults: &["cmd-s"],
+    },
 ];
 
 /// Parity slice (platform-custom-keybindings): build the key binding for a
@@ -181,6 +202,10 @@ pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
         "viewer-zoom-reset" => Some(KeyBinding::new(keystroke, ViewerZoomReset, None)),
         "viewer-zoom-in" => Some(KeyBinding::new(keystroke, ViewerZoomIn, None)),
         "viewer-zoom-out" => Some(KeyBinding::new(keystroke, ViewerZoomOut, None)),
+        "viewer-flip-h" => Some(KeyBinding::new(keystroke, ViewerFlipHorizontal, None)),
+        "viewer-flip-v" => Some(KeyBinding::new(keystroke, ViewerFlipVertical, None)),
+        "viewer-copy" => Some(KeyBinding::new(keystroke, ViewerCopy, None)),
+        "viewer-save" => Some(KeyBinding::new(keystroke, ViewerSave, None)),
         _ => None,
     }
 }
@@ -586,6 +611,15 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("0", "Reset zoom", "Media viewer", ViewerZoomReset),
         row("=", "Zoom in", "Media viewer", ViewerZoomIn),
         row("-", "Zoom out", "Media viewer", ViewerZoomOut),
+        row(
+            "h",
+            "Flip horizontally",
+            "Media viewer",
+            ViewerFlipHorizontal,
+        ),
+        row("v", "Flip vertically", "Media viewer", ViewerFlipVertical),
+        row("cmd-c", "Copy photo", "Media viewer", ViewerCopy),
+        row("cmd-s", "Save", "Media viewer", ViewerSave),
         // M1: composer formatting shortcuts; the handlers no-op unless
         // the composer textarea has focus.
         row("ctrl-b", "Bold", "Composer", FormatBold),
@@ -703,7 +737,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 35);
+        assert_eq!(defaults.len(), 39);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
