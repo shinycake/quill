@@ -627,11 +627,6 @@ impl QuillApp {
                         .when_some(self.animated_emoji_suggestion(cx), |this, row| {
                             this.child(row)
                         })
-                        // parity:platform-spellcheck: corrections panel
-                        // above the composer (badge button toggles it).
-                        .when(self.spellcheck_open, |this| {
-                            this.child(self.spellcheck_panel(cx))
-                        })
                         // Phase A1: slow-mode countdown. The composer stays
                         // usable (typing is fine) but sends are blocked
                         // until the wait expires; `ensure_slow_mode_tick`
@@ -710,17 +705,35 @@ impl QuillApp {
                                     .child(self.format_menu_button(cx))
                                 })
                                 .child(
-                                    div().flex_1().min_w_0().child(
-                                        Textarea::new(&self.composer)
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .aria_label("Message"),
-                                    ),
+                                    div()
+                                        .relative()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(
+                                            Textarea::new(&self.composer)
+                                                .appearance(false)
+                                                .bordered(false)
+                                                .aria_label("Message")
+                                                // codex:spellcheck-native:
+                                                // suggestions / Add to
+                                                // Dictionary / Ignore on a
+                                                // misspelled word.
+                                                .context_menu({
+                                                    let owner = cx.entity().downgrade();
+                                                    move |menu, _, cx| {
+                                                        QuillApp::composer_context_menu(
+                                                            &owner, menu, cx,
+                                                        )
+                                                    }
+                                                }),
+                                        )
+                                        // Red wavy underlines over the
+                                        // misspelled words.
+                                        .when_some(
+                                            self.spellcheck_underlines(cx),
+                                            |wrap, lines| wrap.child(lines),
+                                        ),
                                 )
-                                // parity:platform-spellcheck: the "ABC n"
-                                // badge — only while the draft has
-                                // misspellings; opens the corrections panel.
-                                .when_some(self.spellcheck_badge(cx), |row, badge| row.child(badge))
                                 // Telegram Desktop shows the mic while there's
                                 // nothing to send, and Send once there is.
                                 .when(show_attach && !sendable, |row| {

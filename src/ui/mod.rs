@@ -121,6 +121,8 @@ mod settings_ui;
 mod shared_media;
 mod shell;
 mod shortcuts;
+#[cfg(target_os = "macos")]
+mod spellcheck_mac;
 mod spellcheck_ui;
 mod spoiler_fx;
 mod sponsored;

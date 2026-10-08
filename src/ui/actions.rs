@@ -55,3 +55,37 @@ actions!(
         ViewerZoomOut
     ]
 );
+
+/// codex:spellcheck-native: composer context-menu "spelling" items. They
+/// carry their word, so they are built per menu and dispatched by the
+/// native menu (`NativeMenu` items are actions); never bound to keys.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct SpellingReplace {
+    /// Byte range of `word` in the draft when the menu opened.
+    pub start: usize,
+    pub end: usize,
+    pub word: String,
+    pub replacement: String,
+}
+
+/// "Add to Dictionary".
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct SpellingLearn {
+    pub word: String,
+}
+
+/// "Remove from Dictionary" (a word the user added earlier).
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct SpellingUnlearn {
+    pub word: String,
+}
+
+/// "Ignore" — accepted until quit.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct SpellingIgnore {
+    pub word: String,
+}

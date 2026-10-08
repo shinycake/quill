@@ -216,10 +216,6 @@ impl QuillApp {
         if self.pending_edit.is_some() {
             return;
         }
-        // parity:platform-spellcheck: new chat, new draft — session
-        // ignores don't carry over.
-        self.spellchecker.clear_ignored();
-        self.spellcheck_open = false;
         let Some(chat_id) = self.open_chat_id() else {
             return;
         };
@@ -271,6 +267,8 @@ impl QuillApp {
         });
         self.composer
             .update(cx, |input, cx| input.set_value(&text, window, cx));
+        // `set_value` emits no Change: re-check the restored draft.
+        self.sync_spellcheck(&text, cx);
     }
 
     pub(super) fn sync_composer_typing(&mut self, text: &str) {

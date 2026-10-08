@@ -3,9 +3,10 @@
 use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
     FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, NextChat, OpenChatSearch,
-    OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, SubmitCode,
-    SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev,
-    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, SpellingIgnore,
+    SpellingLearn, SpellingReplace, SpellingUnlearn, SubmitCode, SubmitPassword, SubmitPhone,
+    ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut,
+    ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -415,6 +416,19 @@ impl Render for QuillApp {
             // M1: formatting shortcuts only apply when the composer has
             // focus (otherwise the keystroke belongs to whatever is
             // focused).
+            // codex:spellcheck-native: composer context-menu spelling items.
+            .on_action(cx.listener(|this, action: &SpellingReplace, window, cx| {
+                this.on_spelling_replace(action, window, cx);
+            }))
+            .on_action(cx.listener(|this, action: &SpellingLearn, _, cx| {
+                this.on_spelling_learn(action, cx);
+            }))
+            .on_action(cx.listener(|this, action: &SpellingUnlearn, _, cx| {
+                this.on_spelling_unlearn(action, cx);
+            }))
+            .on_action(cx.listener(|this, action: &SpellingIgnore, _, cx| {
+                this.on_spelling_ignore(action, cx);
+            }))
             .on_action(cx.listener(|this, _: &FormatBold, window, cx| {
                 if this.composer.read(cx).focus_handle(cx).is_focused(window) {
                     this.apply_composer_format(FormatAction::Bold, window, cx);
