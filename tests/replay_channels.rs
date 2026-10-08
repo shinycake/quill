@@ -413,3 +413,104 @@ fn replay_channel_admin_status_change_flips_composer() {
     assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Creator));
     assert!(chat.can_post());
 }
+
+/// A public channel opened from search / a `t.me` link is not in the chat
+/// list and the viewer never joined it. TDLib sends `updateSupergroup` with
+/// `chatMemberStatusLeft` before `updateNewChat`; `getChatMember(me)` fails
+/// with "Member not found". The bar must resolve to Join from the supergroup
+/// status instead of waiting forever.
+#[test]
+fn replay_non_member_channel_resolves_left_without_get_chat_member() {
+    use quill::telegram::envelope::ChannelMemberStatus;
+
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    let chat_id = quill::ids::ChatId(-1001006503122);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":1006503122,"usernames":{"@type":"usernames","active_usernames":["durov"],"disabled_usernames":[],"editable_username":"durov"},"status":{"@type":"chatMemberStatusLeft"},"member_count":0,"is_channel":true,"is_broadcast_group":false}}"#,
+            r#"{"@type":"updateNewChat","chat":{"id":-1001006503122,"title":"Durov's Channel","type":{"@type":"chatTypeSupergroup","supergroup_id":1006503122,"is_channel":true},"unread_count":0}}"#,
+        ],
+    );
+    let chat = session.chats.get(&chat_id.0).unwrap();
+    assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Left));
+    assert!(!chat.can_post());
+
+    // A failing getChatMember must not undo the resolved state.
+    let me_extra = session.request(RequestPurpose::GetMe, None);
+    let member_extra = session.request(RequestPurpose::GetChatMember, Some(chat_id));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            &format!(r#"{{"@type":"user","@extra":"{}","id":777}}"#, me_extra.0),
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"Member not found"}}"#,
+                member_extra.0
+            ),
+        ],
+    );
+    assert_eq!(
+        session.chats.get(&chat_id.0).unwrap().my_member_status,
+        Some(ChannelMemberStatus::Left)
+    );
+
+    // Joined later: `updateSupergroup` flips Left -> Member.
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":1006503122,"status":{"@type":"chatMemberStatusMember"},"is_channel":true}}"#,
+        ],
+    );
+    assert_eq!(
+        session.chats.get(&chat_id.0).unwrap().my_member_status,
+        Some(ChannelMemberStatus::Member)
+    );
+}
+
+/// The chat can arrive first and `getChatMember` can fail afterwards: the
+/// `getSupergroup` answer still resolves the bar.
+#[test]
+fn replay_non_member_channel_get_supergroup_resolves_left() {
+    use quill::telegram::envelope::ChannelMemberStatus;
+
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
+    let mut session = Session::new(AccountKey::primary(), dyn_sink);
+    let seq = AtomicU64::new(0);
+    let chat_id = quill::ids::ChatId(-1001006503122);
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[
+            r#"{"@type":"updateNewChat","chat":{"id":-1001006503122,"title":"Durov's Channel","type":{"@type":"chatTypeSupergroup","supergroup_id":1006503122,"is_channel":true},"unread_count":0}}"#,
+        ],
+    );
+    assert_eq!(
+        session.chats.get(&chat_id.0).unwrap().my_member_status,
+        None
+    );
+    let sg_extra = session.request(RequestPurpose::GetSupergroup, Some(chat_id));
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(
+            r#"{{"@type":"supergroup","@extra":"{}","id":1006503122,"status":{{"@type":"chatMemberStatusLeft"}},"is_channel":true}}"#,
+            sg_extra.0
+        )],
+    );
+    assert_eq!(
+        session.chats.get(&chat_id.0).unwrap().my_member_status,
+        Some(ChannelMemberStatus::Left)
+    );
+}

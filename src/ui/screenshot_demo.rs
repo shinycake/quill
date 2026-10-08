@@ -113,6 +113,15 @@ pub enum ScreenshotDemo {
     /// Premium / SCAM / FAKE title badges, online dot (injected, no live
     /// Telegram).
     ReadyChatRows,
+    /// Non-member public channel opened from search: the bottom bar must
+    /// resolve to "Join channel" (injected, no live Telegram).
+    ReadyJoinBar,
+    /// Chat-list search with a custom-emoji, multi-line public-chat preview
+    /// and a multi-line chat preview (injected, no live Telegram).
+    ReadySearchPreviews,
+    /// Chat-list rows whose last message has hard newlines / a leading
+    /// custom emoji (injected, no live Telegram).
+    ReadyMultilineRows,
     /// Sticker panel + sticker in history (injected, no live Telegram).
     ReadyStickers,
     ReadyStickerPlayback,

@@ -95,6 +95,59 @@ impl Session {
         })
     }
 
+    /// `supergroup.status` carries the viewer's own membership for any chat
+    /// TDLib has loaded, including a public channel opened from search or a
+    /// `t.me` link that is not in the chat list. `getChatMember(me)` can fail
+    /// for such a non-member, so the bar must not depend on it alone.
+    /// Adopt the supergroup status for every channel chat of `supergroup_id`:
+    /// an unresolved chat takes any status; an already-resolved non-admin chat
+    /// follows join/leave. Admin rights stay with `getChatMember`, so an
+    /// administrator status never overwrites a resolved chat.
+    pub(crate) fn adopt_supergroup_status(&mut self, supergroup_id: i64) {
+        let Some(status) = self.supergroup_member_status.get(&supergroup_id).copied() else {
+            return;
+        };
+        if status == ChannelMemberStatus::Unknown {
+            return;
+        }
+        for chat in self.chats.values_mut() {
+            let ChatKind::Supergroup {
+                supergroup_id: id, ..
+            } = chat.kind
+            else {
+                continue;
+            };
+            if id != supergroup_id {
+                continue;
+            }
+            match chat.my_member_status {
+                None => {
+                    chat.set_member_status(status, None);
+                }
+                Some(
+                    ChannelMemberStatus::Left
+                    | ChannelMemberStatus::Member
+                    | ChannelMemberStatus::Banned
+                    | ChannelMemberStatus::Restricted,
+                ) if !status.is_admin() => {
+                    chat.set_member_status(status, None);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `getChatMember(me)` failed (TDLib answers "Member not found" for a
+    /// channel the viewer never joined): fall back to the supergroup status.
+    pub(crate) fn adopt_supergroup_status_for_chat(&mut self, chat_id: ChatId) {
+        let Some(ChatKind::Supergroup { supergroup_id, .. }) =
+            self.chats.get(&chat_id.0).map(|chat| chat.kind.clone())
+        else {
+            return;
+        };
+        self.adopt_supergroup_status(supergroup_id);
+    }
+
     /// Record own channel membership from `getChatMember` / `updateChatMember`.
     /// The member is only trusted when `member_id` is the current user.
     pub fn accept_own_chat_member(&mut self, chat_id: ChatId, member: ParsedChatMember) {
