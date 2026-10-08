@@ -1,13 +1,40 @@
 use super::actions::{
-    CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
-    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, NextChat, OpenChatSearch,
-    OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, ToggleFullscreen,
-    ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev,
-    ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
+    ComposerPastePlain, FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear,
+    FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, LoadOlder,
+    MinimizeWindow, NextChat, OpenChatSearch, OpenHelp, OpenSearch, OpenSettings, OpenShortcuts,
+    PrevChat, QuitApp, ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
+    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
+    ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::settings::CustomKeybinding;
+
+/// The platform's primary modifier plus a key, as a keystroke literal:
+/// `cmd-` on macOS, `ctrl-` elsewhere (GPUI's `secondary`). The composer
+/// formatting shortcuts use only this, as Telegram Desktop does (Qt maps
+/// `ctrl` to Cmd on macOS), so Linux and Windows get Ctrl and macOS keeps
+/// Ctrl+B and friends for text-field editing.
+macro_rules! primary {
+    ($key:literal) => {
+        if cfg!(target_os = "macos") {
+            concat!("cmd-", $key)
+        } else {
+            concat!("ctrl-", $key)
+        }
+    };
+}
+
+/// Key context of the composer's Textarea wrapper (see
+/// [`composer_bindings`]).
+pub(super) const COMPOSER_CONTEXT: &str = "QuillComposer";
+
+/// Where the link chord applies: the Textarea (kit context `Input`) inside
+/// the composer wrapper. It matches at the same depth as the unscoped
+/// quick-switch binding, so it must be added after it (a later binding wins
+/// a depth tie), which `apply_custom_bindings` and `shortcut_rows` do.
+const COMPOSER_INPUT_CONTEXT: &str = "QuillComposer > Input";
 
 /// Dismissing Appearance must also release ownership of composer keystrokes.
 pub(super) fn close_appearance_capture(
@@ -111,17 +138,42 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "format-bold",
         label: "Bold",
-        defaults: &["ctrl-b"],
+        defaults: &[primary!("b")],
     },
     RebindableAction {
         id: "format-italic",
         label: "Italic",
-        defaults: &["ctrl-i"],
+        defaults: &[primary!("i")],
     },
     RebindableAction {
         id: "format-underline",
         label: "Underline",
-        defaults: &["ctrl-u"],
+        defaults: &[primary!("u")],
+    },
+    RebindableAction {
+        id: "format-strikethrough",
+        label: "Strikethrough",
+        defaults: &[primary!("shift-x")],
+    },
+    RebindableAction {
+        id: "format-monospace",
+        label: "Monospace",
+        defaults: &[primary!("shift-m")],
+    },
+    RebindableAction {
+        id: "format-blockquote",
+        label: "Quote",
+        defaults: &[primary!("shift-.")],
+    },
+    RebindableAction {
+        id: "format-spoiler",
+        label: "Spoiler",
+        defaults: &[primary!("shift-p")],
+    },
+    RebindableAction {
+        id: "format-clear",
+        label: "Clear formatting",
+        defaults: &[primary!("shift-n")],
     },
     RebindableAction {
         id: "viewer-prev",
@@ -197,6 +249,11 @@ pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
         "format-bold" => Some(KeyBinding::new(keystroke, FormatBold, None)),
         "format-italic" => Some(KeyBinding::new(keystroke, FormatItalic, None)),
         "format-underline" => Some(KeyBinding::new(keystroke, FormatUnderline, None)),
+        "format-strikethrough" => Some(KeyBinding::new(keystroke, FormatStrikethrough, None)),
+        "format-monospace" => Some(KeyBinding::new(keystroke, FormatMonospace, None)),
+        "format-blockquote" => Some(KeyBinding::new(keystroke, FormatBlockQuote, None)),
+        "format-spoiler" => Some(KeyBinding::new(keystroke, FormatSpoiler, None)),
+        "format-clear" => Some(KeyBinding::new(keystroke, FormatClear, None)),
         "viewer-prev" => Some(KeyBinding::new(keystroke, ViewerPrev, None)),
         "viewer-next" => Some(KeyBinding::new(keystroke, ViewerNext, None)),
         "viewer-zoom-reset" => Some(KeyBinding::new(keystroke, ViewerZoomReset, None)),
@@ -208,6 +265,27 @@ pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
         "viewer-save" => Some(KeyBinding::new(keystroke, ViewerSave, None)),
         _ => None,
     }
+}
+
+/// The composer link chord: Cmd+K on macOS, Ctrl+K elsewhere
+/// (`kEditLinkSequence`).
+pub(super) fn link_chord() -> &'static str {
+    primary!("k")
+}
+
+/// Plain paste chord: Cmd+Shift+V / Ctrl+Shift+V.
+fn paste_plain_chord() -> &'static str {
+    primary!("shift-v")
+}
+
+/// Composer-only bindings that are not user-rebindable: the link chord
+/// (scoped to the composer's key context so it overrides quick switch only
+/// there) and paste-as-plain-text.
+fn composer_bindings() -> Vec<KeyBinding> {
+    vec![
+        KeyBinding::new(link_chord(), ComposerEditLink, Some(COMPOSER_INPUT_CONTEXT)),
+        KeyBinding::new(paste_plain_chord(), ComposerPastePlain, None),
+    ]
 }
 
 /// Fixed bindings: window chrome and app lifecycle — not rebindable.
@@ -515,6 +593,9 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
             }
         }
     }
+    // After the rebindable rows: the composer link chord ties with quick
+    // switch on depth and the later binding wins.
+    bindings.extend(composer_bindings());
     cx.clear_key_bindings();
     cx.bind_keys(bindings);
 }
@@ -622,9 +703,42 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("cmd-s", "Save", "Media viewer", ViewerSave),
         // M1: composer formatting shortcuts; the handlers no-op unless
         // the composer textarea has focus.
-        row("ctrl-b", "Bold", "Composer", FormatBold),
-        row("ctrl-i", "Italic", "Composer", FormatItalic),
-        row("ctrl-u", "Underline", "Composer", FormatUnderline),
+        row(primary!("b"), "Bold", "Composer", FormatBold),
+        row(primary!("i"), "Italic", "Composer", FormatItalic),
+        row(primary!("u"), "Underline", "Composer", FormatUnderline),
+        row(
+            primary!("shift-x"),
+            "Strikethrough",
+            "Composer",
+            FormatStrikethrough,
+        ),
+        row(
+            primary!("shift-m"),
+            "Monospace",
+            "Composer",
+            FormatMonospace,
+        ),
+        row(primary!("shift-."), "Quote", "Composer", FormatBlockQuote),
+        row(primary!("shift-p"), "Spoiler", "Composer", FormatSpoiler),
+        row(
+            primary!("shift-n"),
+            "Clear formatting",
+            "Composer",
+            FormatClear,
+        ),
+        // Scoped to the composer's key context; with nothing selected it
+        // falls back to quick switch (see `composer_bindings`).
+        ShortcutRow {
+            label: "Link (selected text)",
+            section: "Composer",
+            binding: KeyBinding::new(link_chord(), ComposerEditLink, Some(COMPOSER_INPUT_CONTEXT)),
+        },
+        row(
+            paste_plain_chord(),
+            "Paste as plain text",
+            "Composer",
+            ComposerPastePlain,
+        ),
     ]
 }
 
@@ -720,8 +834,8 @@ mod tests {
     // attribute and fail macro expansion ("recursion limit reached").
     use super::{
         Action, KeybindingConflict, Keystroke, Modifiers, QuitApp, REBINDABLE_ACTIONS,
-        canonical_event_chord, capture_active, close_appearance_capture, conflict_message,
-        context_menu_captures_key, default_bindings, fixed_keystrokes,
+        canonical_event_chord, capture_active, close_appearance_capture, composer_bindings,
+        conflict_message, context_menu_captures_key, default_bindings, fixed_keystrokes,
         invalidate_account_keybindings, keybinding_conflict, keybinding_for, resolve_keybindings,
         same_chord,
     };
@@ -737,7 +851,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 39);
+        assert_eq!(defaults.len(), 46);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
@@ -931,7 +1045,7 @@ mod tests {
                 other_label: "Focus composer",
             })
         );
-        assert_eq!(bold.live, vec!["ctrl-b".to_string()]);
+        assert_eq!(bold.live, vec![primary("b")]);
         assert!(!bold.live.iter().any(|chord| chord == "ctrl-k"));
 
         let message = conflict_message("cmd-q", &KeybindingConflict::FixedChrome);
@@ -945,7 +1059,7 @@ mod tests {
             custom("open-search", "cmd-q"),
             custom("focus-composer", "ctrl-k"),
             custom("format-bold", "ctrl-k"),
-            custom("format-italic", "ctrl-b"),
+            custom("format-italic", &primary("b")),
         ];
         let resolved = resolve_keybindings(&customs);
         let mut seen: Vec<Keystroke> = fixed_keystrokes();
@@ -971,7 +1085,7 @@ mod tests {
             italic.rejected,
             Some(KeybindingConflict::Rebindable { .. })
         ));
-        assert_eq!(italic.live, vec!["ctrl-i".to_string()]);
+        assert_eq!(italic.live, vec![primary("i")]);
     }
 
     #[test]
@@ -1016,6 +1130,121 @@ mod tests {
                 }),
                 captured
             );
+        }
+    }
+
+    fn keymap() -> gpui_kit::Keymap {
+        gpui_kit::Keymap::new(default_bindings())
+    }
+
+    /// The action name a chord resolves to with `contexts` focused.
+    fn resolve(chord: &str, contexts: &[&str]) -> Option<String> {
+        let stack: Vec<gpui_kit::KeyContext> = contexts
+            .iter()
+            .map(|c| gpui_kit::KeyContext::parse(c).unwrap())
+            .collect();
+        let input = [Keystroke::parse(chord).unwrap()];
+        let (bindings, _) = keymap().bindings_for_input(&input, &stack);
+        bindings.first().map(|b| b.action().name().to_string())
+    }
+
+    fn primary(rest: &str) -> String {
+        format!(
+            "{}-{rest}",
+            if cfg!(target_os = "macos") {
+                "cmd"
+            } else {
+                "ctrl"
+            }
+        )
+    }
+
+    #[test]
+    fn composer_shortcuts_resolve_to_their_format_actions() {
+        use quill::composer::COMPOSER_SHORTCUTS;
+        let expected = [
+            ("b", false, "quill_ui::FormatBold"),
+            ("i", false, "quill_ui::FormatItalic"),
+            ("u", false, "quill_ui::FormatUnderline"),
+            ("x", true, "quill_ui::FormatStrikethrough"),
+            ("m", true, "quill_ui::FormatMonospace"),
+            (".", true, "quill_ui::FormatBlockQuote"),
+            ("p", true, "quill_ui::FormatSpoiler"),
+            ("n", true, "quill_ui::FormatClear"),
+            ("k", false, "quill_ui::ComposerEditLink"),
+        ];
+        assert_eq!(expected.len(), COMPOSER_SHORTCUTS.len());
+        for (key, shift, action) in expected {
+            let chord = primary(&format!("{}{key}", if shift { "shift-" } else { "" }));
+            assert_eq!(
+                resolve(&chord, &["Workspace", "QuillComposer", "Input"]).as_deref(),
+                Some(action),
+                "{chord}"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_paste_chord_is_bound() {
+        assert_eq!(
+            resolve(&primary("shift-v"), &["Input"]).as_deref(),
+            Some("quill_ui::ComposerPastePlain")
+        );
+    }
+
+    #[test]
+    fn link_chord_beats_quick_switch_only_inside_the_composer() {
+        let chord = primary("k");
+        assert_eq!(
+            resolve(&chord, &["Workspace", "QuillComposer", "Input"]).as_deref(),
+            Some("quill_ui::ComposerEditLink")
+        );
+        assert_eq!(
+            resolve(&chord, &["Workspace"]).as_deref(),
+            Some("quill_ui::OpenSearch")
+        );
+        assert_eq!(
+            resolve(&chord, &[]).as_deref(),
+            Some("quill_ui::OpenSearch")
+        );
+    }
+
+    #[test]
+    fn rebound_quick_switch_keeps_working_inside_the_composer() {
+        let live = resolve_keybindings(&[custom("open-search", "cmd-p")]);
+        let row = live.iter().find(|row| row.id == "open-search").unwrap();
+        assert_eq!(row.live, vec!["cmd-p".to_string()]);
+        let mut bindings = vec![keybinding_for("open-search", "cmd-p").unwrap()];
+        bindings.extend(composer_bindings());
+        let keymap = gpui_kit::Keymap::new(bindings);
+        let stack: Vec<gpui_kit::KeyContext> = ["QuillComposer", "Input"]
+            .iter()
+            .map(|c| gpui_kit::KeyContext::parse(c).unwrap())
+            .collect();
+        let (found, _) = keymap.bindings_for_input(&[Keystroke::parse("cmd-p").unwrap()], &stack);
+        assert_eq!(found[0].action().name(), "quill_ui::OpenSearch");
+    }
+
+    #[test]
+    fn format_defaults_use_only_the_platform_modifier() {
+        for id in [
+            "format-bold",
+            "format-italic",
+            "format-underline",
+            "format-strikethrough",
+            "format-monospace",
+            "format-blockquote",
+            "format-spoiler",
+            "format-clear",
+        ] {
+            let action = REBINDABLE_ACTIONS.iter().find(|a| a.id == id).unwrap();
+            assert_eq!(action.defaults.len(), 1, "{id}");
+            let wanted = if cfg!(target_os = "macos") {
+                "cmd-"
+            } else {
+                "ctrl-"
+            };
+            assert!(action.defaults[0].starts_with(wanted), "{id}");
         }
     }
 }
