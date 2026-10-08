@@ -611,6 +611,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — in-viewer video playback".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyViewerGif | ScreenshotDemo::ReadyViewerShared => (
+            Some(seed_ready_custom_emoji_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — viewer GIF loop / Shared Media paging".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyStories => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1735,6 +1741,7 @@ impl QuillApp {
             viewer_controls_gen: 0,
             viewer_over_controls: false,
             viewer_hide_timer: false,
+            viewer_extra: Default::default(),
             viewer_seek_slider: None,
             viewer_seek_scrubbing: false,
             viewer_seek_preview_secs: None,
@@ -1825,6 +1832,7 @@ impl QuillApp {
         app.demo_setup_calls(demo, window, cx);
         app.demo_setup_privacy_media(demo, window, cx);
         app.demo_setup_payments(demo, window, cx);
+        app.demo_setup_viewer_extras(demo, cx);
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
@@ -1857,6 +1865,20 @@ impl QuillApp {
                     return;
                 }
             }
+            // Viewer playback keys (Space/K/J/L/Enter, tdesktop
+            // `handleKeyPress`). A dialog over the viewer (delete
+            // confirmation) keeps its own Enter and Space.
+            if !capturing && !window.has_active_dialog(cx) {
+                let viewer_handled = menu_app
+                    .update(cx, |this, cx| {
+                        this.handle_viewer_key(&event.keystroke, window, cx)
+                    })
+                    .unwrap_or(false);
+                if viewer_handled {
+                    cx.stop_propagation();
+                    return;
+                }
+            }
             if capturing || event.keystroke.modifiers.modified() {
                 return;
             }
@@ -1870,10 +1892,6 @@ impl QuillApp {
                             || this.close_mention_menu(cx)
                             || this.close_command_menu(cx)
                     })
-                    .unwrap_or(false),
-                // Telegram Desktop: Space plays/pauses the viewer's video.
-                "space" => menu_app
-                    .update(cx, |this, cx| this.toggle_viewer_video_on_space(cx))
                     .unwrap_or(false),
                 "up" => menu_app
                     .update(cx, |this, cx| {

@@ -143,6 +143,7 @@ mod story_composer;
 mod story_viewer;
 mod subsection_tabs;
 mod video_pip;
+mod viewer_demo;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

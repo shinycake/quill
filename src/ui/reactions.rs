@@ -67,23 +67,17 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Space plays/pauses the viewer's video (photos ignore it).
-    pub(super) fn toggle_viewer_video_on_space(&mut self, cx: &mut Context<Self>) -> bool {
-        let is_video = self
-            .media_viewer
-            .current()
-            .is_some_and(|item| item.kind == quill::media_viewer::MediaViewerKind::Video);
-        if !self.media_viewer.is_open() || !is_video {
-            return false;
-        }
-        self.toggle_viewer_video(cx);
-        true
-    }
-
-    /// Escape closes the media viewer (after any menu over it).
+    /// Escape closes the media viewer (after any menu over it); in video
+    /// full screen it only leaves full screen first (tdesktop
+    /// `handleKeyPress`, media_view_overlay_widget.cpp:7384).
     pub(super) fn close_media_viewer_on_escape(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.media_viewer.is_open() {
             return false;
+        }
+        if self.viewer_extra.video_fullscreen {
+            self.viewer_leave_video_fullscreen();
+            cx.notify();
+            return true;
         }
         self.close_media_viewer(cx);
         true

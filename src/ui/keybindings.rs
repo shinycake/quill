@@ -204,12 +204,12 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "viewer-zoom-in",
         label: "Zoom in",
-        defaults: &["="],
+        defaults: &["=", primary!("=")],
     },
     RebindableAction {
         id: "viewer-zoom-out",
         label: "Zoom out",
-        defaults: &["-"],
+        defaults: &["-", primary!("-")],
     },
     RebindableAction {
         id: "viewer-flip-h",
@@ -224,12 +224,12 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "viewer-copy",
         label: "Copy photo",
-        defaults: &["cmd-c"],
+        defaults: &[primary!("c")],
     },
     RebindableAction {
         id: "viewer-save",
         label: "Save media",
-        defaults: &["cmd-s"],
+        defaults: &[primary!("s")],
     },
 ];
 
@@ -724,7 +724,9 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("right", "Next item", "Media viewer", ViewerNext),
         row("0", "Reset zoom", "Media viewer", ViewerZoomReset),
         row("=", "Zoom in", "Media viewer", ViewerZoomIn),
+        row(primary!("="), "Zoom in", "Media viewer", ViewerZoomIn),
         row("-", "Zoom out", "Media viewer", ViewerZoomOut),
+        row(primary!("-"), "Zoom out", "Media viewer", ViewerZoomOut),
         row(
             "h",
             "Flip horizontally",
@@ -732,8 +734,8 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             ViewerFlipHorizontal,
         ),
         row("v", "Flip vertically", "Media viewer", ViewerFlipVertical),
-        row("cmd-c", "Copy photo", "Media viewer", ViewerCopy),
-        row("cmd-s", "Save", "Media viewer", ViewerSave),
+        row(primary!("c"), "Copy photo", "Media viewer", ViewerCopy),
+        row(primary!("s"), "Save", "Media viewer", ViewerSave),
         // M1: composer formatting shortcuts; the handlers no-op unless
         // the composer textarea has focus.
         row(primary!("b"), "Bold", "Composer", FormatBold),
@@ -890,7 +892,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 47);
+        assert_eq!(defaults.len(), 49);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();

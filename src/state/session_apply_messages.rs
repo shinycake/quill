@@ -314,8 +314,34 @@ impl Session {
                 .iter()
                 .map(|message| SharedMediaItem::from_parsed(tab, message))
                 .collect();
-            self.shared_media
-                .accept(chat_id, tab, generation, items, total_count);
+            self.shared_media.accept(
+                chat_id,
+                tab,
+                generation,
+                items,
+                total_count,
+                next_from_message_id,
+            );
+        }
+        if let Some(RequestPurpose::GetSharedMediaMore { tab, generation }) =
+            pending.map(|p| p.purpose)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            for message in &messages {
+                self.remember_files(&message.files);
+            }
+            let items = messages
+                .iter()
+                .map(|message| SharedMediaItem::from_parsed(tab, message))
+                .collect();
+            self.shared_media.accept_more(
+                chat_id,
+                tab,
+                generation,
+                items,
+                total_count,
+                next_from_message_id,
+            );
         }
     }
     #[allow(clippy::too_many_arguments)]
