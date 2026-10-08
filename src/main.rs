@@ -289,6 +289,8 @@ fn ui_main(args: &[String]) {
     });
     application.run(move |cx| {
         cx.set_app_identity("org.shinycake.quill", "Quill");
+        #[cfg(windows)]
+        quill::notify::register_toast_icon("org.shinycake.quill");
         gpui_kit::init(cx);
         // kit Phase 8: the kit defaults to its light theme on init;
         // Quill boots dark (kit dialogs match the app from here on).
@@ -438,6 +440,16 @@ fn install_main_window_tray(
     cx: &mut gpui_kit::App,
     view: &gpui_kit::Entity<ui::QuillApp>,
 ) {
+    #[cfg(windows)]
+    {
+        // The taskbar overlay badge targets this window's taskbar button.
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = HasWindowHandle::window_handle(window)
+            && let RawWindowHandle::Win32(handle) = handle.as_raw()
+        {
+            quill::icon_badge::set_native_window(handle.hwnd.get());
+        }
+    }
     #[cfg(target_os = "macos")]
     window.on_window_should_close(cx, |_, cx| {
         if quill::tray::tray_available() {
@@ -464,8 +476,8 @@ fn install_main_window_tray(
                         quill::tray::sync_tray(this.session());
                         // parity:platform-app-icon-badge — unread
                         // badge on the app/taskbar icon
-                        // (Linux LauncherEntry D-Bus
-                        // signal; no-op elsewhere).
+                        // (Linux LauncherEntry D-Bus signal,
+                        // macOS dock tile, Windows taskbar overlay).
                         quill::icon_badge::sync_icon_badge(this.session())
                     })
                     .is_ok();
@@ -522,7 +534,7 @@ fn install_main_window_tray(
         }
     })
     .detach();
-    view.update(cx, |this, _| quill::tray::sync_tray(this.session()));
+    view.update(cx, |this, _| quill::tray::sync_tray_startup(this.session()));
 }
 
 /// kit Phase 7: window options compatible with kit's `TitleBar` — the title
@@ -1004,6 +1016,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         .with_assets(QuillAssets)
         .run(move |cx| {
             cx.set_app_identity("org.shinycake.quill", "Quill");
+            #[cfg(windows)]
+            quill::notify::register_toast_icon("org.shinycake.quill");
             gpui_kit::init(cx);
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
