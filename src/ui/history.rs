@@ -436,6 +436,29 @@ pub(super) fn album_tile(
     }
 }
 
+/// A service message ("X joined", "pinned a message", timers, screenshots)
+/// as a centered translucent pill, Telegram Desktop style
+/// (`msgServicePadding`, semibold) and matching the day separators.
+pub(super) fn service_pill(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    div().id(id).flex().justify_center().py_1().child(
+        div()
+            .max_w_full()
+            .px_3()
+            .py_0p5()
+            .rounded_xl()
+            .bg(cx.theme().secondary.opacity(0.85))
+            .text_xs()
+            .font_medium()
+            .text_center()
+            .text_color(cx.theme().secondary_foreground)
+            .child(text.into()),
+    )
+}
+
 pub(super) fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
@@ -502,32 +525,16 @@ pub(super) fn session_history_row(
     // schema 1.8.67 line 5387) render as a centered neutral notice — no
     // bubble, no reply/react/edit/delete controls.
     if let MessageContent::Service(text) = &message.content {
-        return div()
-            .id(("service-message", message.id.0 as u64))
-            .flex()
-            .justify_center()
-            .py_1()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(text.clone()),
-            )
+        return service_pill(("service-message", message.id.0 as u64), text.clone(), cx)
             .into_any_element();
     }
     if let MessageContent::ChatTtlChanged { secs } = &message.content {
-        return div()
-            .id(("ttl-service-row", message.id.0 as u64))
-            .flex()
-            .justify_center()
-            .py_1()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(chat_ttl_service_label(*secs, is_secret)),
-            )
-            .into_any_element();
+        return service_pill(
+            ("ttl-service-row", message.id.0 as u64),
+            chat_ttl_service_label(*secs, is_secret),
+            cx,
+        )
+        .into_any_element();
     }
     // Phase S1: `messageScreenshotTaken` service row (schema 1.8.67,
     // line 5375) — centered neutral notice, attributed via
@@ -544,17 +551,7 @@ pub(super) fn session_history_row(
                     .map_or("Someone", |label| label.name.as_str())
             )
         };
-        return div()
-            .id(("screenshot-service-row", message.id.0 as u64))
-            .flex()
-            .justify_center()
-            .py_1()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(text),
-            )
+        return service_pill(("screenshot-service-row", message.id.0 as u64), text, cx)
             .into_any_element();
     }
     // Slice G9: community service rows (`messageChatAddedToCommunity`,
@@ -569,18 +566,7 @@ pub(super) fn session_history_row(
         session.and_then(|s| s.communities.get(&community_id).map(|c| c.name.clone()))
     };
     let community_service_row = |text: String| {
-        div()
-            .id(("community-service-row", message.id.0 as u64))
-            .flex()
-            .justify_center()
-            .py_1()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(text),
-            )
-            .into_any_element()
+        service_pill(("community-service-row", message.id.0 as u64), text, cx).into_any_element()
     };
     if let MessageContent::ChatAddedToCommunity { community_id } = &message.content {
         let text = match community_name(*community_id) {
