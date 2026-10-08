@@ -8,7 +8,7 @@
 #     lib/libntgcalls.so         RUNPATH $ORIGIN
 #     lib/librlottie.so          RUNPATH $ORIGIN
 #     lib/libssl.so.3, libcrypto.so.3   (bundled OpenSSL, see decision doc)
-#     share/applications/quill.desktop, share/icons/hicolor/scalable/apps/quill.svg
+#     share/applications/quill.desktop, share/icons/hicolor/<size>/apps/quill.png
 #     install.sh, README.txt, LICENSE, THIRD_PARTY.md
 #
 # Inputs (env, all optional):
@@ -42,7 +42,7 @@ PKG="$OUT/$NAME"
 TARBALL="$OUT/$NAME-bundle.tar.gz"
 
 rm -rf "$PKG" "$TARBALL" "$TARBALL.sha256"
-mkdir -p "$PKG/lib" "$PKG/share/applications" "$PKG/share/icons/hicolor/scalable/apps"
+mkdir -p "$PKG/lib" "$PKG/share/applications" "$PKG/share/icons/hicolor"
 
 install -m 755 "$BIN" "$PKG/quill"
 # cp -L: rlottie/tdjson installs may be symlink chains; ship the real file under the name the loader opens.
@@ -82,7 +82,10 @@ for lib in "$PKG"/lib/*.so*; do
 done
 
 install -m 644 assets/quill.desktop "$PKG/share/applications/quill.desktop"
-install -m 644 assets/quill.svg "$PKG/share/icons/hicolor/scalable/apps/quill.svg"
+for icon in assets/icons/hicolor/*/apps/quill.png; do
+  size="$(basename "$(dirname "$(dirname "$icon")")")"
+  install -D -m 644 "$icon" "$PKG/share/icons/hicolor/$size/apps/quill.png"
+done
 install -m 755 scripts/linux-install.sh "$PKG/install.sh"
 install -m 644 scripts/linux-package-README.txt "$PKG/README.txt"
 install -m 644 LICENSE THIRD_PARTY.md "$PKG/"

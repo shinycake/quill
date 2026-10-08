@@ -24,6 +24,7 @@ cat > "$DIST/Contents/Info.plist" <<'PLIST'
   <key>CFBundleVersion</key><string>0.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>quill</string>
+  <key>CFBundleIconFile</key><string>Quill</string>
   <key>NSMicrophoneUsageDescription</key><string>Quill uses your microphone for voice and video calls.</string>
   <key>NSCameraUsageDescription</key><string>Quill uses your camera for video calls, video messages, and scanning login QR codes to link devices.</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -32,6 +33,7 @@ cat > "$DIST/Contents/Info.plist" <<'PLIST'
 PLIST
 
 cp "$BIN" "$DIST/Contents/MacOS/quill"
+cp "$ROOT/assets/icons/Quill.icns" "$DIST/Contents/Resources/Quill.icns"
 bash "$ROOT/scripts/build-qr-scanner.sh"
 cp "$ROOT/target/qr-scanner/quill-qr-scanner" "$DIST/Contents/MacOS/quill-qr-scanner"
 
