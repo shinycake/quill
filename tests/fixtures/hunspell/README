@@ -1,0 +1,2 @@
+Minimal Hunspell dictionaries written for Quill's tests (public domain, no
+upstream word lists). Used by src/spell_dict.rs.

@@ -656,6 +656,30 @@ pub fn save_spellcheck_words(paths: &AccountPaths, prefs: &SpellcheckWords) -> s
     save_json_prefs(paths, "spellcheck_words.json", prefs)
 }
 
+/// The spelling dictionaries the user picked (Linux: Hunspell codes such
+/// as `en_US`; tdesktop's "Settings > Advanced > Spell checker" language
+/// list), persisted as `spellcheck_languages.json`. Empty follows the
+/// system locale.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpellcheckLanguages {
+    #[serde(default)]
+    pub languages: Vec<String>,
+}
+
+/// Load the picked spelling languages; missing or corrupt files read as
+/// empty (automatic).
+pub fn load_spellcheck_languages(paths: &AccountPaths) -> SpellcheckLanguages {
+    load_json_prefs(paths, "spellcheck_languages.json")
+}
+
+/// Persist the picked spelling languages; failures are returned.
+pub fn save_spellcheck_languages(
+    paths: &AccountPaths,
+    prefs: &SpellcheckLanguages,
+) -> std::io::Result<()> {
+    save_json_prefs(paths, "spellcheck_languages.json", prefs)
+}
+
 /// Slice parity:settings-language: local-only app language preference,
 /// persisted as JSON next to the account root (`language_prefs.json`).
 /// `system_language_code` is the IETF tag sent in TDLib's

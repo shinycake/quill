@@ -41,6 +41,9 @@ pub mod rich;
 pub mod row_fx;
 pub mod send_button;
 pub mod settings;
+pub mod spell_dict;
+#[cfg(windows)]
+pub mod spell_win;
 pub mod spellcheck;
 pub mod state;
 pub mod sticker_playback;
