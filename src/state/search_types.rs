@@ -382,6 +382,9 @@ pub struct ChatSearchState {
     pub next_from_message_id: MessageId,
     pub selected: Option<usize>,
     pub jump: ChatSearchJump,
+    /// Bumped by every jump request, so the UI can restart its highlight
+    /// fade when the same message is jumped to again.
+    pub jump_serial: u64,
 }
 
 impl Default for ChatSearchState {
@@ -397,6 +400,7 @@ impl Default for ChatSearchState {
             next_from_message_id: MessageId(0),
             selected: None,
             jump: ChatSearchJump::None,
+            jump_serial: 0,
         }
     }
 }

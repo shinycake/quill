@@ -1393,6 +1393,10 @@ impl QuillApp {
             history_rows_key: None,
             history_media_signature: (0, 0),
             last_highlight: None,
+            highlight_fade: None,
+            scroll_date: Default::default(),
+            scroll_probe: Default::default(),
+            scroll_top_probe: Default::default(),
             group_call_composer,
             command_menu_open: false,
             command_menu_selected: 0,
@@ -1968,6 +1972,11 @@ impl QuillApp {
                     break;
                 }
             }
+        })
+        .detach();
+        // The scroller notifies on every scroll: drives the floating date.
+        cx.observe(&app.history_scroller, |this, _, cx| {
+            this.note_history_scroll(cx);
         })
         .detach();
         app

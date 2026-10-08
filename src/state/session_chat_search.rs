@@ -4,6 +4,7 @@ use super::*;
 impl Session {
     /// Resolve a hit: already loaded, tombstoned/deleted, or needs `getChatHistory` around.
     pub fn begin_chat_search_jump(&mut self, message_id: MessageId) -> ChatSearchJumpNeed {
+        self.chat_search.jump_serial += 1;
         let Some(chat_id) = self.chat_search.chat_id.or(self.open_chat) else {
             self.chat_search.jump = ChatSearchJump::Missing { message_id };
             return ChatSearchJumpNeed::Missing;

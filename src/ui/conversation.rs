@@ -1116,6 +1116,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.session();
+        let jump_serial = session.map_or(0, |s| s.chat_search.jump_serial);
         // Phase B4: secret chats word the timer-change service row as
         // "Self-destruct".
         let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
@@ -1444,6 +1445,8 @@ impl QuillApp {
                 // Message ids are chat-local: a stale highlight id in the new
                 // chat must not suppress its search-jump scroll.
                 self.last_highlight = None;
+                self.scroll_date = Default::default();
+                self.scroll_top_probe.set(None);
                 self.history_scroller.update(cx, |state, cx| {
                     state.reset(count, cx);
                 });
@@ -1551,6 +1554,15 @@ impl QuillApp {
             }
         }
         self.history_shared = HistoryShared { media_roots };
+        // A new jump (search hit, reply, pinned message) restarts the
+        // highlight fade, even onto the message highlighted before.
+        match (highlight_id, jump_serial) {
+            (Some(_), serial) if self.highlight_fade.map(|f| f.0) != Some(serial) => {
+                self.highlight_fade = Some((serial, std::time::Instant::now()));
+            }
+            (None, _) => self.highlight_fade = None,
+            _ => {}
+        }
         let count = self.history_rows.len();
         let corner_buttons = self.jump_corner_buttons(
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
@@ -1564,9 +1576,13 @@ impl QuillApp {
         // Inline players for rows that don't render this pass stop.
         self.inline_videos.borrow_mut().begin_render();
         let weak = cx.weak_entity();
+        let date_pill = self.scroll_date_pill(cx);
+        let probe = self.scroll_probe.clone();
+        let top_probe = self.scroll_top_probe.clone();
         super::selectable_text::selection_viewport(
             div()
                 .id(id)
+                .relative()
                 .flex()
                 .flex_col()
                 .flex_1()
@@ -1634,6 +1650,31 @@ impl QuillApp {
                     .size_full()
                     .min_h_0(),
                 )
+                // Paints after the rows: the first row reaching below the
+                // top edge is what the floating date describes.
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, _, _, _| {
+                            let mut rows = probe.borrow_mut();
+                            let top = rows
+                                .iter()
+                                .filter(|(_, row, _)| row.bottom() > bounds.top())
+                                .min_by_key(|(ix, _, _)| *ix)
+                                .map(|(ix, row, has_day)| {
+                                    (*ix, *has_day && row.top() >= bounds.top())
+                                });
+                            rows.clear();
+                            if top.is_some() {
+                                top_probe.set(top);
+                            }
+                        },
+                    )
+                    .absolute()
+                    .inset_0()
+                    .size_full(),
+                )
+                .children(date_pill)
                 // tdesktop's corner "@" / heart buttons.
                 .children(corner_buttons),
         )
@@ -1669,12 +1710,21 @@ impl QuillApp {
             cx.notify();
         }
         let element = self.render_history_row_body(row, cx);
-        if row.day_label().is_none() && !row.unread_divider() {
-            return element;
-        }
+        let has_day = row.day_label().is_some();
+        let probe = self.scroll_probe.clone();
+        // Notes where the row is painted, for the floating date pill.
+        let tracker = canvas(
+            |_, _, _| {},
+            move |bounds, _, _, _| probe.borrow_mut().push((ix, bounds, has_day)),
+        )
+        .absolute()
+        .inset_0()
+        .size_full();
         div()
+            .relative()
             .flex()
             .flex_col()
+            .child(tracker)
             .when_some(row.day_label(), |this, label| {
                 this.child(day_separator(label, cx))
             })
@@ -1793,9 +1843,10 @@ impl QuillApp {
                     // the whole row instead of outlining it: no border or
                     // padding, so the row never shifts as the state flips.
                     .rounded_md()
-                    .when(highlighted, |this| {
-                        this.bg(cx.theme().primary.opacity(0.12))
-                    })
+                    .when_some(
+                        highlighted.then(|| self.jump_highlight_alpha(cx)).flatten(),
+                        |this, alpha| this.bg(cx.theme().primary.opacity(alpha)),
+                    )
                     .when(selected_forward, |this| this.bg(cx.theme().selection))
                     // M1: failed sends stay visibly marked so the retry
                     // affordance is noticed (`updateMessageSendFailed`).
@@ -1938,20 +1989,30 @@ fn unread_divider(count: i32, cx: &App) -> impl IntoElement {
 
 /// Centered local-day pill between history rows ("Today", "12 March").
 fn day_separator(label: &str, cx: &App) -> impl IntoElement {
-    div().w_full().flex().justify_center().pt_3().pb_1().child(
-        div()
-            .id(SharedString::from(format!("day-{label}")))
-            .px_3()
-            .py_0p5()
-            .rounded_full()
-            .bg(cx.theme().secondary)
-            .text_xs()
-            .font_medium()
-            .text_color(cx.theme().secondary_foreground)
-            .role(Role::Heading)
-            .aria_label(SharedString::from(label.to_string()))
-            .child(label.to_string()),
-    )
+    div()
+        .w_full()
+        .flex()
+        .justify_center()
+        .pt_3()
+        .pb_1()
+        .child(pill_label(label, cx))
+}
+
+/// The day pill itself, shared by the inline separators and the floating
+/// date shown while scrolling.
+pub(super) fn pill_label(label: &str, cx: &App) -> Stateful<Div> {
+    div()
+        .id(SharedString::from(format!("day-{label}")))
+        .px_3()
+        .py_0p5()
+        .rounded_full()
+        .bg(cx.theme().secondary)
+        .text_xs()
+        .font_medium()
+        .text_color(cx.theme().secondary_foreground)
+        .role(Role::Heading)
+        .aria_label(SharedString::from(label.to_string()))
+        .child(label.to_string())
 }
 
 impl QuillApp {
