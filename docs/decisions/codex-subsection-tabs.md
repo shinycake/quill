@@ -108,3 +108,13 @@
   Regression test: `opening_topic_reads_it_and_never_resurrects_a_stale_count`.
 - `QUILL_TRACE_TOPICS=1` (temporary) prints every unread-count write with its source:
   `getForumTopics`, `getForumTopic`, `updateForumTopic`, `markRead(local)`.
+- Third live trace: the bogus 16 came straight from `getForumTopics`, for topics with
+  `last_read_inbox_message_id = 0`. TDLib passes the server's `read_inbox_max_id` and
+  `unread_count` through unchanged (`td/telegram/ForumTopic.cpp`). Telegram Desktop never
+  shows that count: `RepliesList::setInboxReadTill` clamps the read position to at least 1,
+  and `RepliesList::displayedUnreadCount()` returns 0 unless the read position is above 1.
+  `Data::ForumTopic::chatListBadgesState()` then shows only a count-less unread mark, for
+  bots and joined channels, when the topic's last message is newer than the whole chat's
+  read position. `Session::topic_badge` copies that rule, and tabs show the count, a dot or
+  nothing. Regression test: `topic_badge_follows_tdesktop_for_unknown_read_position`,
+  using the exact traced values.

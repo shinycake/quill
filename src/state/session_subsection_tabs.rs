@@ -31,6 +31,16 @@ pub(crate) fn settle_topic_unread(topic: &mut ForumTopic) {
     }
 }
 
+/// What a topic tab shows for unread messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopicBadge {
+    None,
+    /// The server's unread count (the topic has a known read position).
+    Count(i32),
+    /// Unread without a trustworthy count: a dot.
+    Dot,
+}
+
 /// The bot-side topic flags of a private chat (`userTypeBot`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BotTopics {
@@ -93,6 +103,42 @@ impl Session {
                 is_channel: false,
             } => chat.is_forum_chat() && self.forum_tabs_supergroups.contains(&supergroup_id),
             _ => false,
+        }
+    }
+
+    /// Telegram Desktop's topic badge rule (`Data::ForumTopic::
+    /// chatListBadgesState` + `RepliesList::displayedUnreadCount`): the
+    /// server's `unread_count` is shown only when the topic has a read
+    /// position (`read_inbox_max_id > 1`; `0` means the topic was never
+    /// read, and the server's count is not meaningful then — TDLib passes
+    /// both through unchanged, `ForumTopic.cpp`). Without one, a bot chat
+    /// or a joined group shows a count-less unread mark when the topic's
+    /// last message is newer than the whole chat's read position, else
+    /// nothing.
+    pub fn topic_badge(&self, chat_id: ChatId, topic: &ForumTopic) -> TopicBadge {
+        if topic.last_read_inbox_message_id > 1 {
+            return if topic.unread_count > 0 {
+                TopicBadge::Count(topic.unread_count)
+            } else {
+                TopicBadge::None
+            };
+        }
+        let Some(chat) = self.chats.get(&chat_id.0) else {
+            return TopicBadge::None;
+        };
+        let member = self.bot_topics(chat_id).is_some()
+            || matches!(
+                chat.my_member_status,
+                Some(
+                    crate::telegram::envelope::ChannelMemberStatus::Creator
+                        | crate::telegram::envelope::ChannelMemberStatus::Administrator
+                        | crate::telegram::envelope::ChannelMemberStatus::Member
+                )
+            );
+        if member && topic.last_message_id > chat.last_read_inbox_message_id.0 {
+            TopicBadge::Dot
+        } else {
+            TopicBadge::None
         }
     }
 

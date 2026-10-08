@@ -22,6 +22,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::state::TopicBadge;
 use quill::subsection_tabs::SubsectionTabsMode;
 use quill::telegram::envelope::ForumTopic;
 
@@ -48,6 +49,8 @@ pub(super) struct TabsSnapshot {
     pub topics: Vec<ForumTopic>,
     /// A bot chat (no close/reopen; delete only when users create topics).
     pub bot: Option<quill::state::BotTopics>,
+    /// Each topic's badge (`Session::topic_badge`), by topic id.
+    pub badges: std::collections::HashMap<i32, TopicBadge>,
 }
 
 /// Which tab a click or menu targets.
@@ -75,6 +78,11 @@ impl QuillApp {
                 .filter(|t| !t.is_hidden)
                 .collect(),
             bot: session.bot_topics(chat_id),
+            badges: session
+                .ordered_forum_topics(chat_id)
+                .iter()
+                .map(|t| (t.forum_topic_id, session.topic_badge(chat_id, t)))
+                .collect(),
         })
     }
 
@@ -236,7 +244,9 @@ impl QuillApp {
             .text_color(text)
             .on_click(cx.listener(move |this, _, _, cx| this.select_subsection_tab(tab, cx)))
             .child(div().whitespace_nowrap().child(label))
-            .when(unread > 0, |this| this.child(count_pill(unread, muted, cx)))
+            .when(unread != TopicBadge::None, |this| {
+                this.child(badge_pill(unread, muted, cx))
+            })
             .when(active, |this| {
                 this.child(
                     div()
@@ -296,15 +306,20 @@ impl QuillApp {
             .aria_label(label.clone())
             .tab_index(0)
             .on_click(cx.listener(move |this, _, _, cx| this.select_subsection_tab(tab, cx)))
-            .child(div().relative().child(icon).when(unread > 0, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top(px(-6.))
-                        .left(px(ICON_SIZE - 12.))
-                        .child(count_pill(unread, muted, cx)),
-                )
-            }))
+            .child(
+                div()
+                    .relative()
+                    .child(icon)
+                    .when(unread != TopicBadge::None, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top(px(-6.))
+                                .left(px(ICON_SIZE - 12.))
+                                .child(badge_pill(unread, muted, cx)),
+                        )
+                    }),
+            )
             .child(
                 div()
                     .w(px(NAME_WIDTH))
@@ -349,7 +364,13 @@ impl QuillApp {
             return element.into_any_element();
         };
         let chat_id = tabs.chat_id;
-        let unread = topic.unread_count > 0 && topic.last_message_id != 0;
+        let unread = topic.last_message_id != 0
+            && tabs
+                .badges
+                .get(&topic_id)
+                .copied()
+                .unwrap_or(TopicBadge::None)
+                != TopicBadge::None;
         let pinned = topic.is_pinned;
         let muted = topic.notification_settings.is_muted();
         let closed = topic.is_closed;
@@ -610,7 +631,7 @@ pub(super) fn apply_ready_bot_topics(
     let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(BOT)));
     let topic = |id: i32, name: &str, color: u32, unread: i32, pinned: bool, last: &str| {
         format!(
-            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":{BOT},"forum_topic_id":{id},"name":"{name}","icon":{{"@type":"forumTopicIcon","color":{color},"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":{BOT}}},"is_general":false,"is_outgoing":true,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":{last},"order":"{order}","is_pinned":{pinned},"unread_count":{unread},"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}"#,
+            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":{BOT},"forum_topic_id":{id},"name":"{name}","icon":{{"@type":"forumTopicIcon","color":{color},"custom_emoji_id":"0"}},"creation_date":1,"creator_id":{{"@type":"messageSenderUser","user_id":{BOT}}},"is_general":false,"is_outgoing":true,"is_closed":false,"is_hidden":false,"is_name_implicit":false}},"last_message":{last},"order":"{order}","is_pinned":{pinned},"unread_count":{unread},"last_read_inbox_message_id":500,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}"#,
             order = 100 - id,
         )
     };
@@ -697,10 +718,10 @@ fn is_active(tabs: &TabsSnapshot, tab: Tab) -> bool {
     }
 }
 
-/// `(label, unread count, muted)` for a tab.
-fn tab_label(tabs: &TabsSnapshot, tab: Tab) -> (String, i32, bool) {
+/// `(label, badge, muted)` for a tab.
+fn tab_label(tabs: &TabsSnapshot, tab: Tab) -> (String, TopicBadge, bool) {
     match tab {
-        Tab::All => ("All".to_string(), 0, false),
+        Tab::All => ("All".to_string(), TopicBadge::None, false),
         Tab::Topic(id) => tabs
             .topics
             .iter()
@@ -711,9 +732,10 @@ fn tab_label(tabs: &TabsSnapshot, tab: Tab) -> (String, i32, bool) {
                 } else {
                     t.name.clone()
                 };
-                (name, t.unread_count, t.notification_settings.is_muted())
+                let badge = tabs.badges.get(&id).copied().unwrap_or(TopicBadge::None);
+                (name, badge, t.notification_settings.is_muted())
             })
-            .unwrap_or_else(|| (format!("Topic {id}"), 0, false)),
+            .unwrap_or_else(|| (format!("Topic {id}"), TopicBadge::None, false)),
     }
 }
 
@@ -721,6 +743,28 @@ fn tab_element_id(prefix: &'static str, tab: Tab) -> ElementId {
     match tab {
         Tab::All => ElementId::from(SharedString::from(format!("{prefix}-all"))),
         Tab::Topic(id) => ElementId::from((prefix, id as u64)),
+    }
+}
+
+/// A tab's unread mark: the counter, or a small dot when the count isn't
+/// known (`TopicBadge::Dot`).
+fn badge_pill(badge: TopicBadge, muted: bool, cx: &App) -> AnyElement {
+    match badge {
+        TopicBadge::Count(count) => count_pill(count, muted, cx).into_any_element(),
+        TopicBadge::Dot => {
+            let bg = if muted {
+                cx.theme().muted_foreground.opacity(0.55)
+            } else {
+                Hsla::from(accent_strong())
+            };
+            div()
+                .flex_none()
+                .size(px(9.))
+                .rounded_full()
+                .bg(bg)
+                .into_any_element()
+        }
+        TopicBadge::None => div().into_any_element(),
     }
 }
 
@@ -802,6 +846,7 @@ mod tests {
             active,
             topics: Vec::new(),
             bot: None,
+            badges: Default::default(),
         }
     }
 

@@ -106,7 +106,7 @@ pub use search_types::*;
 pub use session::*;
 pub(crate) use session_chat_search::history_message;
 pub use session_history_window::MentionSearch;
-pub use session_subsection_tabs::BotTopics;
+pub use session_subsection_tabs::{BotTopics, TopicBadge};
 pub use shared_media_types::*;
 pub use sticker_gif_types::*;
 pub use story_types::*;

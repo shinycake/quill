@@ -264,3 +264,68 @@ fn forum_topic_answer_replaces_unread_count() {
         .unwrap();
     assert_eq!(t2.unread_count, 1);
 }
+
+/// Live trace (Hermesio): TDLib's `getForumTopics` passes the server's
+/// `unread_count` through even when `read_inbox_max_id` is 0 ("never read"),
+/// e.g. 16 for a topic Telegram Desktop shows without a badge. The badge
+/// follows tdesktop: counts only with a read position; otherwise a dot when
+/// the topic's last message is newer than the chat's read position.
+#[test]
+fn topic_badge_follows_tdesktop_for_unknown_read_position() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &bot_user(41, true, true));
+    apply_json(&mut session, &seq, &sink, &private_chat(41));
+    let topic = |id: i32, unread: i32, read: i64, last: i64| {
+        format!(
+            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":{id},"name":"T{id}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":{{"id":{last},"chat_id":41,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}},"order":"{id}","is_pinned":false,"unread_count":{unread},"last_read_inbox_message_id":{read}}}"#
+        )
+    };
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    // The exact values from the live trace.
+    let topics = [
+        topic(482317, 11, 505806848000, 505859276800),
+        topic(477080, 1, 500306018304, 505744982016),
+        topic(481359, 16, 0, 504759320576),
+        topic(479296, 3, 0, 502580379648),
+        topic(470000, 0, 505000000000, 505000000000),
+    ]
+    .join(",");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"forumTopics","@extra":"{}","total_count":5,"topics":[{topics}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+            extra.0
+        ),
+    );
+    let badge = |session: &Session, id: i32| {
+        let topic = session
+            .ordered_forum_topics(ChatId(41))
+            .into_iter()
+            .find(|t| t.forum_topic_id == id)
+            .unwrap();
+        session.topic_badge(ChatId(41), &topic)
+    };
+    // The chat itself is read past both never-read topics' last messages.
+    session
+        .chats
+        .get_mut(&41)
+        .unwrap()
+        .last_read_inbox_message_id = MessageId(505859276800);
+    assert_eq!(badge(&session, 482317), TopicBadge::Count(11));
+    assert_eq!(badge(&session, 477080), TopicBadge::Count(1));
+    assert_eq!(badge(&session, 481359), TopicBadge::None);
+    assert_eq!(badge(&session, 479296), TopicBadge::None);
+    assert_eq!(badge(&session, 470000), TopicBadge::None);
+    // A never-read topic newer than the chat's read position: a dot, never
+    // the server's count.
+    session
+        .chats
+        .get_mut(&41)
+        .unwrap()
+        .last_read_inbox_message_id = MessageId(503000000000);
+    assert_eq!(badge(&session, 481359), TopicBadge::Dot);
+    assert_eq!(badge(&session, 479296), TopicBadge::None);
+}
