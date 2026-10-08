@@ -311,6 +311,13 @@ pub enum ScreenshotDemo {
     /// channel and an imported message; "via @bot"; and the footer's
     /// "edited" / pin / views / "imported" marks.
     ReadyBubbleHeaders,
+    /// The message context menu over every kind of message (injected, no
+    /// live Telegram). `QUILL_DEMO_MENU` picks the scenario: photo,
+    /// document, downloading, video, gif, sticker, audio, audio-save-to,
+    /// voice-private, uploading, group, group-audience, channel,
+    /// protected, report-pick, report-sub, report-text, report-done,
+    /// sticker-set, moderate.
+    ReadyMessageMenu,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting
@@ -664,6 +671,13 @@ pub enum ScreenshotDemo {
     /// reference dialog open over the demo chat list (injected, no live
     /// Telegram).
     ReadyShortcuts,
+    /// Local passcode: the settings dialog with a passcode set (auto-lock,
+    /// Touch ID rows).
+    ReadyPasscodeSettings,
+    /// Local passcode: the create form with a mismatch error.
+    ReadyPasscodeCreate,
+    /// Local passcode: the lock screen after a wrong passcode.
+    ReadyLockScreen,
     /// Avatar click in a group (injected, no live Telegram): a member's
     /// profile open as the modal layer over the group history, as after
     /// clicking the avatar next to their message.

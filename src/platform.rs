@@ -67,6 +67,18 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, account: &AccountKey) -> Result<(), SecretStoreError>;
 }
 
+impl SecretStore for Box<dyn SecretStore> {
+    fn get(&self, account: &AccountKey) -> Result<Option<DatabaseKey>, SecretStoreError> {
+        (**self).get(account)
+    }
+    fn put(&self, account: &AccountKey, key: &DatabaseKey) -> Result<(), SecretStoreError> {
+        (**self).put(account, key)
+    }
+    fn delete(&self, account: &AccountKey) -> Result<(), SecretStoreError> {
+        (**self).delete(account)
+    }
+}
+
 /// In-memory store for unit tests. Not used for live connect on Linux or macOS.
 #[derive(Clone, Default)]
 pub struct MemorySecretStore {
@@ -371,6 +383,21 @@ const ERR_SEC_NOT_AVAILABLE: i32 = -25291;
 /// file store with the key sealed by DPAPI for the current user. Memory is
 /// only for any other host.
 pub fn live_secret_store() -> Box<dyn SecretStore> {
+    let inner = os_secret_store();
+    // A local passcode (`crate::passcode`) keeps the database keys wrapped
+    // in the app data directory instead; without one this is a pass-through.
+    match crate::settings::safe_app_root() {
+        Some(root) => Box::new(crate::passcode::PasscodeStore::new(
+            inner,
+            root,
+            crate::passcode::global_unlock(),
+        )),
+        None => inner,
+    }
+}
+
+/// The platform credential store (Keychain, key file, DPAPI file).
+pub fn os_secret_store() -> Box<dyn SecretStore> {
     #[cfg(target_os = "macos")]
     {
         Box::new(keychain::KeychainSecretStore)

@@ -82,6 +82,7 @@ mod session_forum;
 mod session_forward;
 mod session_history_window;
 mod session_members;
+mod session_message_menu;
 mod session_notifications;
 mod session_reply;
 mod session_requests;
@@ -112,6 +113,10 @@ pub use search_types::*;
 pub use session::*;
 pub(crate) use session_chat_search::history_message;
 pub use session_history_window::MentionSearch;
+pub use session_message_menu::{
+    Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
+    StickerSetViewStage,
+};
 pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,
     thumb_candidates,

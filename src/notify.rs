@@ -55,6 +55,21 @@ pub struct QueuedNotification {
 impl QueuedNotification {
     /// What to actually show: the original body for a single message, a
     /// summary for a burst.
+    /// What to show while the app is locked by a passcode: no sender, no
+    /// text (tdesktop hides the message when the app is locked). The chat id
+    /// stays so a click still lands on the chat after unlocking.
+    pub fn for_locked_display(&self) -> OsNotification {
+        OsNotification {
+            chat_id: self.chat_id,
+            title: "Quill".to_string(),
+            body: if self.count > 1 {
+                format!("{} new messages", self.count)
+            } else {
+                "You have a new message".to_string()
+            },
+        }
+    }
+
     pub fn for_display(&self) -> OsNotification {
         let body = if self.count > 1 {
             format!("{} new messages", self.count)
@@ -501,6 +516,31 @@ mod tests {
         let message = test_message(7, 42, false, "   ");
         let notification = decide_notify(&input(&message, false, None)).expect("notify");
         assert_eq!(notification.body, GENERIC_BODY);
+    }
+
+    #[test]
+    fn locked_notifications_reveal_no_sender_or_text() {
+        let mut queue = Vec::new();
+        coalesce_notification(
+            &mut queue,
+            OsNotification {
+                chat_id: ChatId(7),
+                title: "Ada".into(),
+                body: "my secret".into(),
+            },
+        );
+        let shown = queue[0].for_locked_display();
+        assert_eq!(shown.chat_id, ChatId(7));
+        assert!(!shown.title.contains("Ada") && !shown.body.contains("secret"));
+        coalesce_notification(
+            &mut queue,
+            OsNotification {
+                chat_id: ChatId(7),
+                title: "Ada".into(),
+                body: "more".into(),
+            },
+        );
+        assert_eq!(queue[0].for_locked_display().body, "2 new messages");
     }
 
     #[test]

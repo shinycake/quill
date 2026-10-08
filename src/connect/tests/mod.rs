@@ -16,6 +16,7 @@ mod group_calls;
 mod groups;
 mod history_window;
 mod media_library;
+mod message_menu;
 mod message_ops;
 mod messaging;
 mod payments;
