@@ -45,9 +45,9 @@ mod tests_polls;
 mod tests_stickers;
 #[cfg(test)]
 mod tests_stories;
-mod translate;
 #[cfg(test)]
 mod tests_threads;
+mod translate;
 mod users;
 
 pub use auth::*;
