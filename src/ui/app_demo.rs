@@ -567,6 +567,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — keyboard shortcuts reference (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        // `parity:proxy-settings`: proxy list / editor / link box over the
+        // seeded chat list (`QUILL_DEMO_PROXY=list|edit|link|link-bad`).
+        ScreenshotDemo::ReadyProxy => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — proxy settings (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyJumpDate
         | ScreenshotDemo::ReadySearchFrom
         | ScreenshotDemo::ReadySearchFromHits
@@ -1767,6 +1775,7 @@ impl QuillApp {
             spell_checked_text: String::new(),
             spell_task: None,
             shortcuts_open: false,
+            proxy_ui: Default::default(),
             sticker_settings_open: false,
             data_storage_editor: None,
             storage_confirm: None,
@@ -2021,6 +2030,7 @@ impl QuillApp {
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
+        app.demo_setup_proxy(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);
         }

@@ -152,6 +152,8 @@ impl QuillApp {
                 break;
             }
         }
+        // `parity:proxy-settings`: first `getProxies` + auto-switch.
+        progressed |= live.driver.proxy_tick(quill::state::unix_ms_now());
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.folder_tab

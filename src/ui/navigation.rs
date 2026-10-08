@@ -22,6 +22,7 @@ pub(super) enum NavigationAction {
     Communities,
     ArchivedStickers,
     Storage,
+    Proxy,
     Subscriptions,
     Gift,
     ChatMute,
@@ -122,6 +123,7 @@ impl QuillApp {
             NavigationAction::Storage => {
                 self.open_data_storage(cx);
             }
+            NavigationAction::Proxy => self.open_proxy_list(cx),
             NavigationAction::Subscriptions => {
                 self.open_subscriptions(cx);
             }
@@ -450,6 +452,7 @@ impl QuillApp {
                         ("Privacy and security", NavigationAction::Privacy),
                         ("Devices", NavigationAction::Sessions),
                         ("Data and storage", NavigationAction::Storage),
+                        ("Proxy", NavigationAction::Proxy),
                         ("Star subscriptions", NavigationAction::Subscriptions),
                         ("Contacts", NavigationAction::ContactsSettings),
                         ("Calls", NavigationAction::CallSettings),

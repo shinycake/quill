@@ -675,6 +675,10 @@ pub enum ScreenshotDemo {
     /// reference dialog open over the demo chat list (injected, no live
     /// Telegram).
     ReadyShortcuts,
+    /// `parity:proxy-settings`: proxy list / editor / link confirmation
+    /// (`QUILL_DEMO_PROXY=list|edit|link|link-bad`; injected data, no live
+    /// Telegram, no real proxy).
+    ReadyProxy,
     /// Find in history: the "Jump to date" calendar box.
     ReadyJumpDate,
     /// Find in history: the in-chat "From:" member picker.

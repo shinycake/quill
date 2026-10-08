@@ -156,6 +156,11 @@ pub enum DialogKind {
     /// Slice parity:platform-shortcuts-reference: read-only keyboard
     /// shortcuts reference dialog.
     Shortcuts,
+    /// `parity:proxy-settings`: proxy list, add / edit box, and the
+    /// `tg://proxy` link confirmation.
+    ProxyList,
+    ProxyEdit,
+    ProxyLink,
     /// Find in history: the "Jump to date" calendar box.
     JumpToDate,
     /// Batch 4: terms of service, server service popups and the
@@ -246,6 +251,9 @@ impl QuillShell {
             DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
             DialogKind::CommunityHub => app.community_ui.hub_open,
             DialogKind::Shortcuts => app.shortcuts_open,
+            DialogKind::ProxyList => app.proxy_ui.list_open,
+            DialogKind::ProxyEdit => app.proxy_ui.editor.is_some(),
+            DialogKind::ProxyLink => app.proxy_ui.link.is_some(),
             DialogKind::JumpToDate => app.session().is_some_and(|s| s.history_calendar.is_some()),
             DialogKind::AccountNotice => app.account_notice().is_some(),
             DialogKind::Passcode => app.passcode_ui.open,
@@ -302,6 +310,9 @@ impl QuillShell {
             DialogKind::CommunityCreate => community::build_create_community_dialog,
             DialogKind::CommunityHub => community::build_community_hub_dialog,
             DialogKind::Shortcuts => QuillApp::build_shortcuts_dialog,
+            DialogKind::ProxyList => QuillApp::build_proxy_list_dialog,
+            DialogKind::ProxyEdit => QuillApp::build_proxy_edit_dialog,
+            DialogKind::ProxyLink => QuillApp::build_proxy_link_dialog,
             DialogKind::JumpToDate => QuillApp::build_jump_date_dialog,
             DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
             DialogKind::Passcode => QuillApp::build_passcode_dialog,
@@ -334,6 +345,10 @@ impl QuillShell {
         // low-priority informational dialogs.
         DialogKind::DeepLinkInfo,
         DialogKind::DeepLinkInvite,
+        // The edit / link boxes open over the list, so they rank first.
+        DialogKind::ProxyEdit,
+        DialogKind::ProxyLink,
+        DialogKind::ProxyList,
         DialogKind::OpenLink,
         DialogKind::PaymentForm,
         DialogKind::PaymentReceipt,

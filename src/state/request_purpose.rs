@@ -338,6 +338,23 @@ pub enum RequestPurpose {
     /// `connectedWebsites`; the list is replaced from the authoritative
     /// answer (never optimistic).
     GetConnectedWebsites,
+    /// `parity:proxy-settings`: `getProxies`. Response is `addedProxies`.
+    GetProxies,
+    /// `parity:proxy-settings`: `addProxy` / `editProxy` / `enableProxy`
+    /// / `disableProxy` / `removeProxy`. The answer (`addedProxy` /
+    /// `ok`) only marks the list stale; the authoritative `getProxies`
+    /// refetch replaces it (never optimistic).
+    MutateProxy,
+    /// `parity:proxy-settings`: `pingProxy`. Response is `seconds`; an
+    /// error means the proxy is not available.
+    PingProxy {
+        proxy_id: i32,
+    },
+    /// `parity:proxy-settings`: `setOption("prefer_ipv6")`. Response is
+    /// `ok`; `on` is the value that was requested.
+    SetPreferIpv6 {
+        on: bool,
+    },
     /// Slice A4: `disconnectWebsite`. Response is `ok`; the list is
     /// refetched from the authoritative answer (never optimistic).
     DisconnectWebsite {

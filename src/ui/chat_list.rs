@@ -1326,7 +1326,8 @@ impl QuillApp {
                         mode == PaneMode::Ready && self.passcode_ui.enabled,
                         |this| this.child(self.lock_button(cx)),
                     )
-                    .child(self.list_tabs(cx)),
+                    .child(self.list_tabs(cx))
+                    .children(self.proxy_shield_button(cx)),
             )
             .when_some(
                 (!self.contacts_tab_open && !self.calls_tab_open)
