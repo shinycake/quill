@@ -92,14 +92,14 @@ pub(super) struct SelectableRichText {
 
 /// Highlights and font overrides of a paragraph, as `StyledText` takes them.
 #[derive(Clone)]
-struct BidiSource {
-    highlights: Vec<(Range<usize>, HighlightStyle)>,
-    font_families: Vec<(Range<usize>, SharedString)>,
+pub(super) struct BidiSource {
+    pub(super) highlights: Vec<(Range<usize>, HighlightStyle)>,
+    pub(super) font_families: Vec<(Range<usize>, SharedString)>,
 }
 
 /// Text runs for `text` under `style`: the highlights over the base style, then the
 /// font-family overrides, the way `StyledText` resolves them at layout time.
-fn text_runs(text: &str, style: &TextStyle, source: &BidiSource) -> Vec<TextRun> {
+pub(super) fn text_runs(text: &str, style: &TextStyle, source: &BidiSource) -> Vec<TextRun> {
     let mut runs = Vec::new();
     let mut ix = 0;
     for (range, highlight) in &source.highlights {

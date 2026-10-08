@@ -726,7 +726,11 @@ pub(super) fn session_chat_row(
                                             this.child(row_glyph(icon, cx.theme().muted_foreground))
                                         })
                                         .child(
-                                            div().font_semibold().min_w_0().truncate().child(title),
+                                            div()
+                                                .font_semibold()
+                                                .min_w_0()
+                                                .truncate()
+                                                .child(super::bidi_line::one_line_plain(title)),
                                         )
                                         .when_some(title_badge, |this, badge| {
                                             this.child(title_badge_element(

@@ -5,6 +5,7 @@
 use super::message_text::MONO_FONT;
 use super::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::text::{TextEntity, styled_runs};
 /// The chat-row preview line — optional media icon plus the preview
@@ -54,8 +55,67 @@ pub(crate) fn chat_list_preview_line_layered(
             .text_xs()
             .truncate()
             .text_color(muted)
-            .child(text)
+            .child(super::bidi_line::one_line_plain(text))
             .into_any_element();
+    }
+    // Right-to-left text without pictures to place: one bidi-correct line (typing-order
+    // elision, right-aligned like Telegram Desktop's one-line text).
+    if quill::text::has_rtl_text(&preview) {
+        let runs = styled_runs(&preview, entities);
+        let pictures = runs.iter().any(|run| {
+            run.custom_emoji_id
+                .is_some_and(|id| layered.contains_key(&id) || emoji.contains_key(&id))
+        });
+        if !pictures {
+            let mut text = String::new();
+            let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
+            let mut mono: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
+            if let Some(glyph) = icon {
+                text.push_str(glyph);
+                text.push(' ');
+            }
+            for run in &runs {
+                let start = text.len();
+                text.push_str(&run.text);
+                let range = start..text.len();
+                let style = &run.style;
+                let mut highlight = HighlightStyle::default();
+                if style.bold {
+                    highlight.font_weight = Some(FontWeight::BOLD);
+                }
+                if style.italic {
+                    highlight.font_style = Some(FontStyle::Italic);
+                }
+                if style.underline {
+                    highlight.underline = Some(UnderlineStyle {
+                        thickness: px(1.),
+                        ..Default::default()
+                    });
+                }
+                if style.strikethrough {
+                    highlight.strikethrough = Some(StrikethroughStyle {
+                        thickness: px(1.),
+                        ..Default::default()
+                    });
+                }
+                if style.code || style.pre {
+                    mono.push((range.clone(), MONO_FONT.into()));
+                }
+                if style.spoiler {
+                    highlight.fade_out = Some(1.);
+                    highlight.background_color = Some(fill_muted().into());
+                }
+                if highlight != HighlightStyle::default() {
+                    highlights.push((range, highlight));
+                }
+            }
+            return div()
+                .text_xs()
+                .truncate()
+                .text_color(muted)
+                .child(super::bidi_line::one_line(text, highlights, mono))
+                .into_any_element();
+        }
     }
     let mut parts: Vec<(bool, Div)> = Vec::new();
     if let Some(glyph) = icon {
@@ -116,7 +176,11 @@ pub(crate) fn chat_list_preview_line_layered(
         .text_color(muted)
         .flex()
         .flex_row()
-        .items_center();
+        .items_center()
+        // A right-to-left line rests against the end edge (Telegram Desktop).
+        .when(quill::text::has_rtl_text(&preview), |line| {
+            line.justify_end()
+        });
     for (position, (_, part)) in parts.into_iter().enumerate() {
         line = line.child(if Some(position) == last_text {
             part.min_w_0().flex_shrink(1.).truncate()

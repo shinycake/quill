@@ -569,8 +569,7 @@ impl BidiLine {
         for (fi, f) in self.fragments.iter().enumerate() {
             for local in f.boundaries() {
                 let boundary = f.range.start + local;
-                let stop_trailing =
-                    local > 0 && local == f.len() && self.has_two_stops(boundary);
+                let stop_trailing = local > 0 && local == f.len() && self.has_two_stops(boundary);
                 if (boundary, stop_trailing) == (offset, trailing) {
                     continue;
                 }

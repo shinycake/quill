@@ -1418,11 +1418,11 @@ impl QuillApp {
                                         .child(title),
                                 )
                                 .child(
-                                    div()
-                                        .text_sm()
-                                        .truncate()
-                                        .text_color(text_primary())
-                                        .child(preview),
+                                    div().text_sm().truncate().text_color(text_primary()).child(
+                                        super::bidi_line::one_line_plain(
+                                            super::search_ui::one_line_preview(&preview),
+                                        ),
+                                    ),
                                 ),
                         ),
                 )
@@ -1469,13 +1469,11 @@ impl QuillApp {
                             &now,
                         )),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .truncate()
-                        .text_color(text_primary())
-                        .child(effective_preview(message)),
-                )
+                .child(div().text_sm().truncate().text_color(text_primary()).child(
+                    super::bidi_line::one_line_plain(super::search_ui::one_line_preview(
+                        &effective_preview(message),
+                    )),
+                ))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.jump_to_pinned_message(message_id, cx);
                     this.pinned_cursor.insert(chat_id.0, index);
