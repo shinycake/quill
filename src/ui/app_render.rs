@@ -4,8 +4,9 @@ use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
     FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, NextChat, OpenChatSearch,
     OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, SubmitCode,
-    SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev,
-    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
+    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
+    ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -403,6 +404,34 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &ViewerZoomOut, _, cx| {
                 if this.media_viewer.is_open() {
                     this.viewer_zoom_step(false, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerFlipHorizontal, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.flip_viewer_horizontal(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerFlipVertical, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.flip_viewer_vertical(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerCopy, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.copy_viewer_photo(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerSave, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.save_viewer_media(cx);
                 } else {
                     cx.propagate();
                 }
