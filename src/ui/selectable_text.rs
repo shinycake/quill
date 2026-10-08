@@ -22,6 +22,11 @@ thread_local! {
     /// The message whose text the current selection covers, as last
     /// painted; see [`selected_message_text`].
     static SELECTED_MESSAGE: Cell<Option<(i64, u64)>> = const { Cell::new(None) };
+    /// Custom emoji inside the current selection, by (document order,
+    /// byte offset): their fallback text replaces the placeholders in the
+    /// copied string; see [`selected_message_text`].
+    static SELECTED_EMOJI: std::cell::RefCell<std::collections::BTreeMap<(u64, usize), String>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     static OWNERS: std::cell::RefCell<std::collections::HashMap<EntityId, (i64, u64)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
@@ -38,6 +43,9 @@ pub(super) struct InlineEmoji {
     /// Byte range of the placeholder in the paragraph text.
     pub(super) range: Range<usize>,
     pub(super) visual: InlineEmojiVisual,
+    /// The emoji's own characters (the entity's text), copied in place of
+    /// the placeholder.
+    pub(super) fallback: String,
 }
 
 pub(super) enum InlineEmojiVisual {
@@ -73,9 +81,6 @@ pub(super) struct SelectableRichText {
     layer: Option<super::anim_layer::Layer>,
     /// Custom emoji painted over placeholder glyphs.
     emoji: Vec<InlineEmoji>,
-    /// The paragraph is right-aligned (RTL), so visual lines start
-    /// further right than `position_for_index` reports.
-    align_right: bool,
 }
 
 impl SelectableRichText {
@@ -92,7 +97,6 @@ impl SelectableRichText {
             spoilers: Vec::new(),
             layer: None,
             emoji: Vec::new(),
-            align_right: false,
         }
     }
 
@@ -103,12 +107,6 @@ impl SelectableRichText {
             self.layer = super::anim_layer::current();
         }
         self.emoji = emoji;
-        self
-    }
-
-    /// Lay the paragraph's lines out right-aligned.
-    pub(super) fn align_right(mut self, right: bool) -> Self {
-        self.align_right = right;
         self
     }
 
@@ -161,57 +159,11 @@ impl SelectableRichText {
     }
 }
 
-/// Where a visual line of `layout` starts: `position_for_index`, shifted
-/// for right-aligned paragraphs by the line's slack (GPUI aligns each
-/// wrapped line inside the element's width at paint time).
-fn glyph_origin(
-    layout: &TextLayout,
-    text: &str,
-    index: usize,
-    width: Pixels,
-    align_right: bool,
-) -> Option<Point<Pixels>> {
-    let position = layout.position_for_index(index)?;
-    if !align_right {
-        return Some(position);
-    }
-    let line_start = text[..index].rfind('\n').map_or(0, |at| at + 1);
-    let wrapped = layout.line_layout_for_index(index)?;
-    let within = index - line_start;
-    let mut ends: Vec<usize> = wrapped
-        .wrap_boundaries
-        .iter()
-        .map(|boundary| {
-            wrapped.unwrapped_layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index
-        })
-        .collect();
-    ends.push(wrapped.len());
-    let mut start = 0;
-    for end in ends {
-        if within > end {
-            start = end;
-            continue;
-        }
-        let line_width =
-            wrapped.unwrapped_layout.x_for_index(end) - wrapped.unwrapped_layout.x_for_index(start);
-        return Some(position + point((width - line_width).max(Pixels::ZERO), Pixels::ZERO));
-    }
-    Some(position)
-}
-
 /// The box a custom emoji with the placeholder at `range` is painted in:
 /// the placeholder glyph's box, enlarged a little and centred on the line.
-fn emoji_bounds(
-    layout: &TextLayout,
-    text: &str,
-    range: &Range<usize>,
-    bounds: Bounds<Pixels>,
-    align_right: bool,
-    font: Pixels,
-) -> Option<Bounds<Pixels>> {
-    let width = bounds.size.width;
-    let start = glyph_origin(layout, text, range.start, width, align_right)?;
-    let end = glyph_origin(layout, text, range.end, width, align_right)?;
+fn emoji_bounds(layout: &TextLayout, range: &Range<usize>, font: Pixels) -> Option<Bounds<Pixels>> {
+    let start = layout.position_for_index(range.start)?;
+    let end = layout.position_for_index(range.end)?;
     let line_height = layout.line_height();
     // The glyph's own advance when it sits on one line; at a wrap point
     // `position_for_index` reports the previous line's end for `start`, so
@@ -324,14 +276,7 @@ impl Element for SelectableRichText {
             let layout = self.styled.layout().clone();
             let font = window.text_style().font_size.to_pixels(window.rem_size());
             for item in &self.emoji {
-                let Some(rect) = emoji_bounds(
-                    &layout,
-                    &self.text,
-                    &item.range,
-                    bounds,
-                    self.align_right,
-                    font,
-                ) else {
+                let Some(rect) = emoji_bounds(&layout, &item.range, font) else {
                     continue;
                 };
                 let mut element = match &item.visual {
@@ -425,6 +370,17 @@ impl Element for SelectableRichText {
         }
         if selected_before != TextSelection::selected_text(window, cx) {
             window.refresh();
+        }
+        if !self.emoji.is_empty() || SELECTED_EMOJI.with(|map| !map.borrow().is_empty()) {
+            let order = self.document_order;
+            let selected = selected_fallbacks(&self.emoji, projection.ranges());
+            SELECTED_EMOJI.with(|map| {
+                let mut map = map.borrow_mut();
+                map.retain(|(o, _), _| *o != order);
+                for (at, fallback) in selected {
+                    map.insert((order, at), fallback);
+                }
+            });
         }
         for range in projection.ranges().iter().flatten() {
             if let (Some(start), Some(end)) = (
@@ -521,6 +477,42 @@ impl Element for SelectableRichText {
     }
 }
 
+/// The fallback text of the custom emoji whose placeholder lies within one
+/// of the selected `ranges`, with the placeholder's byte offset.
+fn selected_fallbacks(
+    emoji: &[InlineEmoji],
+    ranges: &[Option<Range<usize>>],
+) -> Vec<(usize, String)> {
+    emoji
+        .iter()
+        .filter(|item| {
+            ranges
+                .iter()
+                .flatten()
+                .any(|r| r.start <= item.range.start && item.range.end <= r.end)
+        })
+        .map(|item| (item.range.start, item.fallback.clone()))
+        .collect()
+}
+
+/// `selected` with its first `fallbacks.len()` placeholders replaced by
+/// the emoji's own text, in order; any further placeholder characters are
+/// the bubble footer's reserved space and are dropped.
+fn with_emoji_fallbacks(selected: &str, fallbacks: &[String]) -> String {
+    let mut out = String::with_capacity(selected.len());
+    let mut next = fallbacks.iter();
+    for ch in selected.chars() {
+        if ch == EMOJI_PLACEHOLDER {
+            if let Some(fallback) = next.next() {
+                out.push_str(fallback);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 /// The window's selected message text and the message it belongs to.
 /// Footer padding (em spaces reserving room for the time) is stripped.
 pub(super) fn selected_message_text(
@@ -530,12 +522,21 @@ pub(super) fn selected_message_text(
     if !TextSelection::has_selection(window, cx) {
         return None;
     }
-    let text = TextSelection::selected_text(window, cx).replace(EMOJI_PLACEHOLDER, "");
+    let selected = TextSelection::selected_text(window, cx);
+    let message = SELECTED_MESSAGE.with(Cell::get)?;
+    let fallbacks: Vec<String> = SELECTED_EMOJI.with(|map| {
+        map.borrow()
+            .iter()
+            .filter(|((order, _), _)| order >> 10 == message.1)
+            .map(|(_, fallback)| fallback.clone())
+            .collect()
+    });
+    let text = with_emoji_fallbacks(&selected, &fallbacks);
     let text = text.trim();
     if text.is_empty() {
         return None;
     }
-    Some((SELECTED_MESSAGE.with(Cell::get)?, text.to_string()))
+    Some((message, text.to_string()))
 }
 
 /// Marks the scrolling region that selectable message text lives in, so a
@@ -611,7 +612,7 @@ impl Element for SelectionViewport {
 
 #[cfg(all(test, feature = "demo-capture"))]
 mod tests {
-    use super::{EMOJI_PLACEHOLDER, SelectableRichText, emoji_bounds};
+    use super::{EMOJI_PLACEHOLDER, SelectableRichText, emoji_bounds, with_emoji_fallbacks};
     use gpui_kit::component::Root;
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
@@ -679,6 +680,20 @@ mod tests {
         lay_out(&with_emoji, |_, lines| assert_eq!(lines, expected));
     }
 
+    /// Copying maps each placeholder back to the emoji's own characters;
+    /// the footer's reserved space (more placeholder characters) is dropped.
+    #[test]
+    fn copy_restores_emoji_text() {
+        let p = EMOJI_PLACEHOLDER;
+        let copied = format!("hi {p} and {p}!{p}{p}");
+        let fallbacks = vec!["\u{1F3A8}".to_string(), "\u{1F680}".to_string()];
+        assert_eq!(
+            with_emoji_fallbacks(&copied, &fallbacks),
+            "hi \u{1F3A8} and \u{1F680}!"
+        );
+        assert_eq!(with_emoji_fallbacks(&format!("a{p}{p}"), &[]), "a");
+    }
+
     /// The emoji box sits on its neighbours' line, inside the column, and
     /// is roughly text sized.
     #[test]
@@ -688,8 +703,7 @@ mod tests {
             assert_eq!(lines, 1);
             let at = text.find(EMOJI_PLACEHOLDER).unwrap();
             let range = at..at + EMOJI_PLACEHOLDER.len_utf8();
-            let rect = emoji_bounds(layout, &text, &range, layout.bounds(), false, px(14.))
-                .expect("laid out");
+            let rect = emoji_bounds(layout, &range, px(14.)).expect("laid out");
             let line = layout.bounds();
             assert!(rect.origin.x >= line.origin.x && rect.right() <= line.right());
             let centre = rect.origin.y + rect.size.height / 2.;

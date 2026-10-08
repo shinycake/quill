@@ -73,6 +73,7 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
         r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"date":1790632300,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Custom emoji: 😀 inline","entities":[{"@type":"textEntity","offset":14,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4242"}}]}}}}"#,
     );
     apply(&mut session, &rich_post_message_json(106));
+    apply(&mut session, &rtl_emoji_message_json(107));
     // The sticker file the custom emoji resolves to (completed download).
     apply(
         &mut session,
@@ -164,6 +165,18 @@ pub(super) fn rich_post_message_json(id: u64) -> String {
     let entities = entities.join(",");
     format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1790632400,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text},"entities":[{entities}]}}}}}}}}"#
+    )
+}
+
+/// A right-to-left message with a custom emoji mid-text, long enough to
+/// wrap: the emoji must stay inline in the right-aligned lines.
+pub(super) fn rtl_emoji_message_json(id: u64) -> String {
+    let before = "שלום עולם, זהו טקסט ארוך שמכיל אימוג'י מובנה ";
+    let after = " ועוד כמה מילים כדי שהשורה תישבר במקום כלשהו באמצע הפסקה הזאת.";
+    let offset = before.encode_utf16().count();
+    let text = serde_json::to_string(&format!("{before}\u{1F3A8}{after}")).unwrap_or_default();
+    format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1790632500,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text},"entities":[{{"@type":"textEntity","offset":{offset},"length":2,"type":{{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4242"}}}}]}}}}}}}}"#
     )
 }
 
