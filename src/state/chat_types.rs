@@ -13,6 +13,35 @@ pub enum OutboxReceipt {
     Read,
 }
 
+/// A chat row's draft line (see [`ChatSummary::draft_preview`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftPreview {
+    /// One line, trimmed; empty for a reply-only draft.
+    pub text: String,
+    pub reply: bool,
+}
+
+/// The chat row's preview line source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidebarLine {
+    Text(String),
+    Draft(DraftPreview),
+}
+
+/// The mark beside a chat row's date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowStatus {
+    None,
+    /// Last outgoing message is still sending: a clock.
+    Sending,
+    /// Last outgoing message failed: a red "!".
+    Failed,
+    /// Delivered, not yet read: one check.
+    Sent,
+    /// Read by the peer: two checks.
+    Read,
+}
+
 /// Slice B2: parse a bot deep link of the form
 /// `t.me/<bot_username>?start=<start_parameter>` (with or without the
 /// `https://` scheme) into `(bot_username, start_parameter)` — the two
@@ -69,6 +98,8 @@ pub struct ChatLastMessage {
     pub is_outgoing: bool,
     /// Who sent it: group previews name the sender ("Dad: …").
     pub sender: Option<MessageSender>,
+    /// `message.sending_state`: drives the row's clock / failed mark.
+    pub send_state: crate::telegram::envelope::MessageSendState,
 }
 
 #[derive(Debug, Clone)]
@@ -533,33 +564,70 @@ impl ChatSummary {
         self.peer_activity().map(|line| line.text)
     }
 
-    pub fn sidebar_preview(&self) -> String {
+    /// The draft the chat row shows in place of the last message, as
+    /// Telegram Desktop decides it (`dialogs_layout.cpp`, `cloudDraft`):
+    /// only when the chat has no unread messages (a newer incoming
+    /// message wins) and is not a forum. A reply-only draft shows too.
+    pub fn draft_preview(&self) -> Option<DraftPreview> {
+        let draft = self.draft.as_ref()?;
+        if self.unread_count > 0 || self.is_marked_as_unread || self.is_forum_chat() {
+            return None;
+        }
+        let text = draft.text.replace('\n', " ").trim().to_string();
+        let reply = draft.reply_to_message_id.is_some();
+        (!text.is_empty() || reply).then_some(DraftPreview { text, reply })
+    }
+
+    /// What the row's preview line shows: a plain string, or a draft
+    /// (drawn with a red "Draft:" prefix).
+    pub fn sidebar_line(&self) -> SidebarLine {
         if let Some(reason) = self.kind.gate_reason() {
-            return reason.to_string();
+            return SidebarLine::Text(reason.to_string());
         }
         if let Some(label) = self.peer_activity_label() {
-            return label;
+            return SidebarLine::Text(label);
         }
-        if let Some(draft) = &self.draft {
-            let text = draft.text.replace('\n', " ");
-            let text = text.trim();
-            if !text.is_empty() {
-                return format!("Draft: {text}");
-            }
-            if draft.reply_to_message_id.is_some() {
-                return "Draft:".into();
-            }
+        if let Some(draft) = self.draft_preview() {
+            return SidebarLine::Draft(draft);
         }
-        if !self.last_preview.is_empty() {
-            return self.last_preview.clone();
+        SidebarLine::Text(if !self.last_preview.is_empty() {
+            self.last_preview.clone()
+        } else if self.unread_count > 0 {
+            format!("{} unread", self.unread_count)
+        } else if matches!(self.kind, ChatKind::Secret { .. }) {
+            "Secret chat".into()
+        } else {
+            "No messages yet".into()
+        })
+    }
+
+    pub fn sidebar_preview(&self) -> String {
+        match self.sidebar_line() {
+            SidebarLine::Text(text) => text,
+            SidebarLine::Draft(draft) if draft.text.is_empty() => "Draft:".into(),
+            SidebarLine::Draft(draft) => format!("Draft: {}", draft.text),
         }
-        if self.unread_count > 0 {
-            return format!("{} unread", self.unread_count);
+    }
+
+    /// The status mark beside the row's date. Telegram Desktop shows one
+    /// only for an outgoing last message and never beside a draft.
+    pub fn row_status(&self) -> RowStatus {
+        use crate::telegram::envelope::MessageSendState;
+        let Some(last) = self.last_message.filter(|last| last.is_outgoing) else {
+            return RowStatus::None;
+        };
+        if self.draft_preview().is_some() {
+            return RowStatus::None;
         }
-        if matches!(self.kind, ChatKind::Secret { .. }) {
-            return "Secret chat".into();
+        match last.send_state {
+            MessageSendState::Pending => RowStatus::Sending,
+            MessageSendState::Failed => RowStatus::Failed,
+            MessageSendState::Sent => match self.last_message_receipt() {
+                OutboxReceipt::Read => RowStatus::Read,
+                OutboxReceipt::Sent => RowStatus::Sent,
+                OutboxReceipt::None => RowStatus::None,
+            },
         }
-        "No messages yet".into()
     }
 
     pub fn outbox_receipt(&self, message: &HistoryMessage) -> OutboxReceipt {

@@ -62,8 +62,7 @@ impl UserStatusKind {
 
 /// Phase 6: `user` subset (TDLib 1.8.67, `schema/td_api.tl:2403`) kept for
 /// the contacts list and the user info panel. Dropped (documented, not
-/// forgotten): accent/background color ids, emoji status, verification
-/// status, premium/support flags, restriction info, active story state,
+/// forgotten): accent/background color ids, support flag, restriction info, active story state,
 /// new-chat restrictions, paid-message star count, access flags, chat
 /// language, attachment-menu flag.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -119,6 +118,14 @@ pub struct ParsedUser {
     /// 2403) — whether the user has Telegram Premium (gates
     /// `premiumFeatureRichMessages`, "The ability to send rich messages").
     pub is_premium: bool,
+    /// Chat-row title badge: `user.verification_status` (schema line 2403,
+    /// `verificationStatus` line 860). Older payloads carried top-level
+    /// `is_verified` / `is_scam` / `is_fake`; those are read as a fallback.
+    pub verification: crate::peer_badge::VerificationStatus,
+    /// `user.emoji_status.type` custom emoji id (schema line 2343), 0 when
+    /// there is no status or it is not a custom emoji. TDLib sends
+    /// `updateUser` when a status expires, so the expiry is not tracked.
+    pub emoji_status_id: i64,
 }
 
 impl ParsedUser {
@@ -303,6 +310,25 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .get("is_premium")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let flag = |name: &str| {
+        value
+            .get("verification_status")
+            .and_then(|v| v.get(name))
+            .or_else(|| value.get(name))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    let verification = crate::peer_badge::VerificationStatus {
+        is_verified: flag("is_verified"),
+        is_scam: flag("is_scam"),
+        is_fake: flag("is_fake"),
+    };
+    let emoji_status_id = value
+        .get("emoji_status")
+        .and_then(|s| s.get("type"))
+        .and_then(|t| t.get("custom_emoji_id"))
+        .and_then(|id| int64(Some(id)))
+        .unwrap_or(0);
     Some(ParsedUser {
         id,
         first_name,
@@ -323,6 +349,8 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         profile_accent_color_id,
         profile_background_custom_emoji_id,
         is_premium,
+        verification,
+        emoji_status_id,
     })
 }
 

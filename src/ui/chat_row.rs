@@ -15,7 +15,9 @@ use gpui_kit::*;
 use quill::chatlist_style::ChatListRowStyle;
 use quill::ids::ChatId;
 use quill::local_path::sandboxed_display_path;
-use quill::state::{ChatSummary, Session};
+use quill::peer_badge::TitleBadge;
+use quill::row_fx::RowFx;
+use quill::state::{ChatSummary, RowStatus, Session, SidebarLine};
 use quill::telegram::envelope::{
     ChatKind, EphemeralMessageContent, MessageContent, effective_content,
 };
@@ -359,6 +361,32 @@ impl QuillApp {
                 if chat.peer_activity().is_some() {
                     self.request_animation_tick(12, cx);
                 }
+                let saved = self.session().is_some_and(|s| s.is_saved_messages(chat.id));
+                let online = !saved && self.session().is_some_and(|s| s.chat_peer_online(chat));
+                // Online dot and new-badge animations: 150 ms, only while
+                // the window is active (inactive windows snap).
+                let active = self.window_active.get();
+                let fx = self.row_fx.borrow_mut().observe(
+                    chat.id.0,
+                    online,
+                    chat_unread_indicator(chat).is_some(),
+                    active,
+                    std::time::Instant::now(),
+                );
+                if fx.animating {
+                    self.request_animation_tick(60, cx);
+                }
+                let title_badge = if saved {
+                    None
+                } else {
+                    self.session().and_then(|s| s.chat_title_badge(chat))
+                };
+                // Status emoji: the still image (never animated in the
+                // list, so many Premium rows keep the window idle).
+                let badge_emoji = match title_badge {
+                    Some(TitleBadge::EmojiStatus(id)) => self.custom_emoji_still(id),
+                    _ => None,
+                };
                 session_chat_row(
                     chat,
                     selected,
@@ -369,14 +397,16 @@ impl QuillApp {
                     archived,
                     selecting,
                     checked,
-                    self.session().is_some_and(|s| s.chat_peer_online(chat)),
+                    fx,
+                    title_badge,
+                    badge_emoji,
                     // Slice chatlist-list-style: Settings → Appearance.
                     ChatListRowStyle::new(
                         self.appearance.preview_lines,
                         self.appearance.chat_list_media_icons,
                         self.appearance.chat_list_rich_preview,
                     ),
-                    self.session().is_some_and(|s| s.is_saved_messages(chat.id)),
+                    saved,
                     self.session().and_then(|s| s.chat_preview_sender(chat)),
                     self.preview_emoji_images(chat, cx),
                     match chat.kind {
@@ -489,8 +519,13 @@ pub(super) fn session_chat_row(
     // of opening the chat, and shows the check circle.
     selecting: bool,
     checked: bool,
-    // A private chat whose user is online: a dot on the avatar.
-    online: bool,
+    // Animated progress for this frame: the online dot on the avatar of
+    // a private chat whose user is online, and a newly shown unread badge.
+    fx: RowFx,
+    // Verified / Premium / SCAM mark after the title.
+    title_badge: Option<TitleBadge>,
+    // Still image for a Premium emoji status, once downloaded.
+    badge_emoji: Option<std::path::PathBuf>,
     // Slice chatlist-list-style: preview line count, media icons, and
     // formatted preview (Settings → Appearance → Chat list rows).
     row_style: ChatListRowStyle,
@@ -514,17 +549,21 @@ pub(super) fn session_chat_row(
     } else {
         chat.title.clone()
     };
-    let online = online && !saved;
     // Slice CL2: cloned for the pin-drag ghost (the row itself moves
     // `title` below).
     let drag_title = title.clone();
-    let preview = chat.sidebar_preview();
+    // A draft leads with a red "Draft:" (and a reply mark); anything else
+    // is the plain preview line.
+    let (preview, draft): (String, Option<bool>) = match chat.sidebar_line() {
+        SidebarLine::Text(text) => (text, None),
+        SidebarLine::Draft(draft) => (draft.text, Some(draft.reply)),
+    };
     let activity = chat.peer_activity();
     // Slice chatlist-list-style: the icon/entities describe
     // `last_preview` only — draft/typing/activity lines render unstyled.
     // (When the shown text equals `last_preview` the entities describe
     // it even if the text arrived via the draft path.)
-    let from_last = preview == chat.last_preview;
+    let from_last = draft.is_none() && preview == chat.last_preview;
     let icon: Option<&str> = if row_style.media_icons && from_last {
         chat.last_preview_style.icon
     } else {
@@ -556,18 +595,14 @@ pub(super) fn session_chat_row(
     // kit Phase 4: the unread indicator is a kit `Badge` overlaying the
     // avatar — `(count, is_dot)`.
     let has_mentions = chat.unread_mention_count > 0;
-    let unread_indicator = if chat.unread_count == 0 && chat.is_marked_as_unread {
-        Some((0, true))
-    } else if has_mentions && chat.unread_count == 1 {
-        None
-    } else if chat.unread_count > 0 {
-        Some((chat.unread_count, false))
-    } else {
-        None
-    };
+    let unread_indicator = chat_unread_indicator(chat);
     let has_reactions = chat.unread_reaction_count > 0;
     // kit Phase 7: screen-reader label for the row.
-    let row_label = format!("{title} — {preview}");
+    let row_label = if draft.is_some() {
+        format!("{title} — Draft: {preview}")
+    } else {
+        format!("{title} — {preview}")
+    };
     // kit Phase 3: tag chips via the shared helper — the row height
     // (declared to the `VirtualList`) is derived from the same list.
     let tags = chat_row_tags(chat, folders, show_tags);
@@ -661,13 +696,13 @@ pub(super) fn session_chat_row(
                 // Slice CL3: the select-mode check circle precedes the
                 // avatar while multi-select is active.
                 .when(selecting, |this| this.child(select_check(id, checked)))
-                .child(with_presence_dot(
+                .child(with_presence_dot_scaled(
                     if saved {
                         saved_messages_avatar(CHAT_ROW_AVATAR)
                     } else {
                         chat_avatar(&title, photo_path, CHAT_ROW_AVATAR).into_any_element()
                     },
-                    online,
+                    fx.online,
                     13.,
                     cx,
                 ))
@@ -706,6 +741,13 @@ pub(super) fn session_chat_row(
                                         .child(
                                             div().font_semibold().min_w_0().truncate().child(title),
                                         )
+                                        .when_some(title_badge, |this, badge| {
+                                            this.child(title_badge_element(
+                                                badge,
+                                                badge_emoji.clone(),
+                                                cx,
+                                            ))
+                                        })
                                         .when(chat.is_muted(), |this| {
                                             this.child(row_glyph(
                                                 IconName::BellOff,
@@ -716,7 +758,7 @@ pub(super) fn session_chat_row(
                                             this.child(forum_badge(id, cx))
                                         }),
                                 )
-                                .when_some(row_stamp(chat), |this, (receipt, stamp)| {
+                                .when_some(row_stamp(chat), |this, (status, stamp)| {
                                     this.child(
                                         div()
                                             .flex()
@@ -725,15 +767,8 @@ pub(super) fn session_chat_row(
                                             .gap_0p5()
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
-                                            .when_some(receipt, |this, read| {
-                                                this.child(row_glyph(
-                                                    if read {
-                                                        IconName::CheckCheck
-                                                    } else {
-                                                        IconName::Check
-                                                    },
-                                                    accent().into(),
-                                                ))
+                                            .when(status != RowStatus::None, |this| {
+                                                this.child(row_status_mark(status, cx))
                                             })
                                             .child(stamp),
                                     )
@@ -767,6 +802,12 @@ pub(super) fn session_chat_row(
                                         .flex()
                                         .min_w_0()
                                         .items_center()
+                                        .when_some(
+                                            draft.filter(|_| activity.is_none()),
+                                            |this, reply| {
+                                                this.child(draft_prefix(reply, preview.is_empty()))
+                                            },
+                                        )
                                         .when_some(
                                             preview_sender
                                                 .filter(|_| from_last && topic_line.is_none()),
@@ -861,6 +902,7 @@ pub(super) fn session_chat_row(
                                                 count,
                                                 dot,
                                                 chat.is_muted(),
+                                                fx.badge,
                                                 cx,
                                             )),
                                             None if pinned_here(chat, archived)
@@ -954,21 +996,49 @@ pub(super) fn with_presence_dot(
     dot: f32,
     cx: &App,
 ) -> impl IntoElement {
+    with_presence_dot_scaled(avatar, if online { 1. } else { 0. }, dot, cx)
+}
+
+/// [`with_presence_dot`] with the dot at `scale` (0 hidden, 1 full): the
+/// 150 ms grow / shrink Telegram Desktop plays when a user goes online or
+/// offline. The dot scales about its centre inside a fixed box, so the
+/// avatar's layout never moves.
+pub(super) fn with_presence_dot_scaled(
+    avatar: impl IntoElement,
+    scale: f32,
+    dot: f32,
+    cx: &App,
+) -> impl IntoElement {
+    const RING: f32 = 2.;
     div()
         .relative()
         .flex_none()
         .child(avatar)
-        .when(online, |this| {
+        .when(scale > 0., |this| {
             this.child(
                 div()
                     .absolute()
                     .right(px(0.))
                     .bottom(px(1.))
                     .size(px(dot))
-                    .rounded_full()
-                    .border_2()
-                    .border_color(cx.theme().sidebar)
-                    .bg(cx.theme().success),
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .size(px(dot * scale))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .bg(cx.theme().sidebar)
+                            .child(
+                                div()
+                                    .size(px((dot - 2. * RING) * scale))
+                                    .rounded_full()
+                                    .bg(cx.theme().success),
+                            ),
+                    ),
             )
         })
 }
@@ -991,23 +1061,144 @@ fn pinned_here(chat: &ChatSummary, archived: bool) -> bool {
     }
 }
 
-/// Trailing title-line stamp: `(Some(read) for an outgoing last message,
-/// local time/day label)`, or `None` for an empty chat.
-fn row_stamp(chat: &ChatSummary) -> Option<(Option<bool>, String)> {
+/// Trailing title-line stamp: `(status mark for an outgoing last
+/// message, local time/day label)`, or `None` for an empty chat.
+fn row_stamp(chat: &ChatSummary) -> Option<(RowStatus, String)> {
     let last = chat.last_message.filter(|last| last.date > 0)?;
-    let receipt = match chat.last_message_receipt() {
-        quill::state::OutboxReceipt::Read => Some(true),
-        quill::state::OutboxReceipt::Sent => Some(false),
-        quill::state::OutboxReceipt::None => None,
-    };
     let now = quill::local_time::civil_local(quill::local_time::now_unix());
     let date = quill::local_time::civil_local(i64::from(last.date));
-    Some((receipt, quill::local_time::chat_list_stamp(&date, &now)))
+    Some((
+        chat.row_status(),
+        quill::local_time::chat_list_stamp(&date, &now),
+    ))
+}
+
+/// The mark beside the date: a clock while sending, a red "!" when the
+/// send failed, one check when delivered, two when read.
+fn row_status_mark(status: RowStatus, cx: &App) -> AnyElement {
+    match status {
+        RowStatus::None => div().into_any_element(),
+        RowStatus::Sending => {
+            row_glyph(IconName::Clock, cx.theme().muted_foreground).into_any_element()
+        }
+        RowStatus::Failed => div()
+            .id("row-send-failed")
+            .flex_none()
+            .size(px(14.))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(cx.theme().danger)
+            .text_color(text_on_fill())
+            .text_size(px(10.))
+            .line_height(px(14.))
+            .font_bold()
+            .aria_label("Failed to send")
+            .child("!")
+            .into_any_element(),
+        RowStatus::Sent => row_glyph(IconName::Check, accent().into()).into_any_element(),
+        RowStatus::Read => row_glyph(IconName::CheckCheck, accent().into()).into_any_element(),
+    }
+}
+
+/// `(count, is_dot)` for a row's unread badge, or `None` when it shows
+/// none: a marked-as-unread chat shows a dot even with zero unread; the
+/// count wins when there are unread messages; with mentions and a single
+/// unread message the @ badge carries it (TGX `setCounter`).
+pub(super) fn chat_unread_indicator(chat: &ChatSummary) -> Option<(i32, bool)> {
+    if chat.unread_count == 0 && chat.is_marked_as_unread {
+        Some((0, true))
+    } else if chat.unread_mention_count > 0 && chat.unread_count == 1 {
+        None
+    } else if chat.unread_count > 0 {
+        Some((chat.unread_count, false))
+    } else {
+        None
+    }
+}
+
+/// The red "Draft:" lead of a draft preview, with Telegram Desktop's
+/// reply mark before it when the draft replies to a message
+/// (`dialogsDraftFg`).
+fn draft_prefix(reply: bool, bare: bool) -> impl IntoElement {
+    let tone = Hsla::from(danger());
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap_0p5()
+        .text_xs()
+        .text_color(tone)
+        .when(reply, |this| {
+            this.child(
+                Icon::new(IconName::Reply)
+                    .size(px(12.))
+                    .flex_none()
+                    .text_color(tone),
+            )
+        })
+        .child(if bare { "Draft:" } else { "Draft: " })
+}
+
+/// The mark after a row title: verified check, Premium star or status
+/// emoji, or a bordered SCAM / FAKE label (`Ui::PeerBadge`).
+fn title_badge_element(
+    badge: TitleBadge,
+    emoji: Option<std::path::PathBuf>,
+    cx: &App,
+) -> AnyElement {
+    if let Some(label) = badge.label() {
+        let tone = cx.theme().danger;
+        // `dialogsScamFont` 9px semibold, 2px padding, 2px radius.
+        return div()
+            .flex_none()
+            .px(px(2.))
+            .rounded(px(2.))
+            .border_1()
+            .border_color(tone)
+            .text_color(tone)
+            .text_size(px(9.))
+            .line_height(px(11.))
+            .font_semibold()
+            .child(label)
+            .into_any_element();
+    }
+    match badge {
+        TitleBadge::Verified => Icon::new(IconName::BadgeCheck)
+            .size(px(14.))
+            .flex_none()
+            .text_color(Hsla::from(accent_strong()))
+            .into_any_element(),
+        TitleBadge::EmojiStatus(_) if emoji.is_some() => img(emoji.unwrap_or_default())
+            .size(px(14.))
+            .aspect_square()
+            .flex_none()
+            .object_fit(ObjectFit::Contain)
+            .into_any_element(),
+        // A status that has not downloaded yet shows the star.
+        TitleBadge::EmojiStatus(_) | TitleBadge::PremiumStar => div()
+            .flex_none()
+            .text_size(px(13.))
+            .line_height(px(14.))
+            .text_color(Hsla::from(accent_strong()))
+            .child("\u{2605}")
+            .into_any_element(),
+        TitleBadge::Scam | TitleBadge::Fake => div().into_any_element(),
+    }
 }
 
 /// Unread counter at the row's trailing edge: accent for active chats,
 /// neutral for muted ones; a bare dot for marked-as-unread.
-fn unread_pill(chat_id: ChatId, count: i32, dot: bool, muted: bool, cx: &App) -> AnyElement {
+fn unread_pill(
+    chat_id: ChatId,
+    count: i32,
+    dot: bool,
+    muted: bool,
+    // 0..1 scale-in progress (1 = settled); see `quill::row_fx`.
+    scale: f32,
+    cx: &App,
+) -> AnyElement {
     let bg = if muted {
         cx.theme().muted_foreground.opacity(0.55)
     } else {
@@ -1018,12 +1209,24 @@ fn unread_pill(chat_id: ChatId, count: i32, dot: bool, muted: bool, cx: &App) ->
     } else {
         count.to_string()
     };
+    // Appearing badges grow from 60% and fade in; a settled one is the
+    // plain pill, with no extra styling.
+    let animating = scale < 1.;
+    let k = 0.6 + 0.4 * scale;
     div()
         .id(("unread-pill", chat_id.0 as u64))
         .flex_none()
         .h(px(20.))
         .min_w(px(20.))
         .when(dot, |this| this.w(px(12.)).h(px(12.)).min_w(px(12.)))
+        .when(animating, |this| {
+            let edge = if dot { 12. } else { 20. } * k;
+            this.h(px(edge))
+                .min_w(px(edge))
+                .when(dot, |this| this.w(px(edge)))
+                .opacity(scale)
+                .text_size(px(12. * k))
+        })
         .px(if dot { px(0.) } else { px(6.) })
         .rounded_full()
         .flex()

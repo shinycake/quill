@@ -411,6 +411,7 @@ mod tests {
             auto_delete: None,
             scheduling_state: None,
             can_retry: false,
+            send_state: Default::default(),
         }
     }
 

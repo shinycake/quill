@@ -1087,8 +1087,20 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         }),
         "updateSupergroup" => {
             let supergroup = value.get("supergroup").ok_or(ParseError::MissingField)?;
+            let verification_flag = |name: &str| {
+                supergroup
+                    .get("verification_status")
+                    .and_then(|v| v.get(name))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            };
             Ok(EnvelopePayload::UpdateSupergroup {
                 supergroup_id: int53(supergroup.get("id"))?,
+                verification: crate::peer_badge::VerificationStatus {
+                    is_verified: verification_flag("is_verified"),
+                    is_scam: verification_flag("is_scam"),
+                    is_fake: verification_flag("is_fake"),
+                },
                 member_count: int53(supergroup.get("member_count")).unwrap_or(0) as i32,
                 is_forum: supergroup
                     .get("is_forum")

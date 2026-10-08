@@ -339,6 +339,8 @@ pub struct QuillApp {
     /// Highest frame rate animated content asked for since the last
     /// clock tick (0: nothing animated rendered); see `frame_clock`.
     pub(super) animation_demand: std::cell::Cell<u32>,
+    /// Chat-row online-dot and unread-badge animation state.
+    pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
     /// Whether the main window is active this frame: like tdesktop
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.

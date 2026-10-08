@@ -87,7 +87,8 @@ gpui_kit::assets::icon_assets!(
         MicOff,
         PanelTop,
         VideoOff,
-        ScreenShare
+        ScreenShare,
+        BadgeCheck
     ]
 );
 
@@ -433,6 +434,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-chat-list-search" => ScreenshotDemo::ReadyChatListSearch,
                 "ready-shared-media" => ScreenshotDemo::ReadySharedMedia,
                 "ready-typing" => ScreenshotDemo::ReadyTyping,
+                "ready-chat-rows" => ScreenshotDemo::ReadyChatRows,
                 "ready-stickers" => ScreenshotDemo::ReadyStickers,
                 "ready-sticker-playback" => ScreenshotDemo::ReadyStickerPlayback,
                 "ready-voice" => ScreenshotDemo::ReadyVoice,
@@ -666,6 +668,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyChatListSearch => ".quill-ready-ready-chat-list-search",
         ScreenshotDemo::ReadySharedMedia => ".quill-ready-ready-shared-media",
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
+        ScreenshotDemo::ReadyChatRows => ".quill-ready-ready-chat-rows",
         ScreenshotDemo::ReadyStickers => ".quill-ready-ready-stickers",
         ScreenshotDemo::ReadyStickerPlayback => ".quill-ready-ready-sticker-playback",
         ScreenshotDemo::ReadyVoice => ".quill-ready-ready-voice",

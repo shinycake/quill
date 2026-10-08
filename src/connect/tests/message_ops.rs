@@ -1171,6 +1171,7 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
         author_signature: None,
         scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
         can_retry: false,
+        send_state: Default::default(),
         content: MessageContent::Text(TextContent::plain("scheduled draft")),
         files: Vec::new(),
         reply_to: None,

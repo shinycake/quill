@@ -79,6 +79,19 @@ pub(crate) fn parse_message_scheduling_state(
     }
 }
 
+/// `message.sending_state` (schema line 3034): the chat list shows a clock
+/// while a message is sending and a red mark when it failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MessageSendState {
+    /// No sending state: delivered (or incoming).
+    #[default]
+    Sent,
+    /// `messageSendingStatePending`.
+    Pending,
+    /// `messageSendingStateFailed`.
+    Failed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedMessage {
     pub sender: Option<MessageSender>,
@@ -114,6 +127,8 @@ pub struct ParsedMessage {
     /// the reducer gates the retry affordance on this instead of offering
     /// it on every `updateMessageSendFailed`.
     pub can_retry: bool,
+    /// `message.sending_state` kind; see [`MessageSendState`].
+    pub send_state: MessageSendState,
     pub content: MessageContent,
     /// M2: `message.ephemeral_content` (TDLib 1.8.67, `schema/td_api.tl`
     /// lines 3161/3165) — visible only to the current user; renders
@@ -410,6 +425,15 @@ pub(crate) fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> 
         scheduling_state: parse_message_scheduling_state(value.get("scheduling_state")),
         // M1 fix-up: `can_retry` lives on `messageSendingStateFailed`
         // only (schema 1.8.67 line 5896); absent everywhere else.
+        send_state: match value
+            .get("sending_state")
+            .and_then(|s| s.get("@type"))
+            .and_then(Value::as_str)
+        {
+            Some("messageSendingStatePending") => MessageSendState::Pending,
+            Some("messageSendingStateFailed") => MessageSendState::Failed,
+            _ => MessageSendState::Sent,
+        },
         can_retry: value
             .get("sending_state")
             .filter(|s| s.get("@type").and_then(Value::as_str) == Some("messageSendingStateFailed"))

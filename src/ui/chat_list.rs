@@ -299,6 +299,95 @@ pub(super) fn apply_ready_chat_list(
     });
 }
 
+/// Chat-row polish fixture: drafts (with and without a reply), a sending
+/// and a failed outgoing message, delivered / read ticks, an online user
+/// with Premium, and verified / Premium / SCAM / FAKE titles. All injected
+/// through the normal reducer, no live Telegram.
+pub(super) fn apply_ready_chat_rows(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let now = quill::local_time::now_unix() - 600;
+    let user = |id: i64, first: &str, last: &str, status: &str, extra: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":{status},"profile_photo":null,"is_contact":true,"type":{{"@type":"userTypeRegular"}}{extra}}}}}"#
+        )
+    };
+    let verified = r#","verification_status":{"@type":"verificationStatus","is_verified":true,"is_scam":false,"is_fake":false}"#;
+    let scam = r#","verification_status":{"@type":"verificationStatus","is_verified":false,"is_scam":true,"is_fake":false}"#;
+    let fake = r#","verification_status":{"@type":"verificationStatus","is_verified":false,"is_scam":false,"is_fake":true}"#;
+    let premium = r#","is_premium":true"#;
+    let offline = r#"{"@type":"userStatusRecently"}"#;
+    let online = r#"{"@type":"userStatusOnline","expires":4102444800}"#;
+    let draft = |text: &str, reply: bool| {
+        let reply_to = if reply {
+            r#"{"@type":"inputMessageReplyToMessage","message_id":5,"quote":null,"checklist_task_id":0,"poll_option_id":""}"#
+        } else {
+            "null"
+        };
+        format!(
+            r#","draft_message":{{"@type":"draftMessage","reply_to":{reply_to},"date":{now},"content":{{"@type":"draftMessageContentText","text":{{"@type":"formattedText","text":"{text}","entities":[]}},"link_preview_options":null}},"effect_id":"0","suggested_post_info":null}}"#
+        )
+    };
+    let new_chat = |id: i64, title: &str, kind: &str, unread: i32, extra: &str| {
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{kind},"unread_count":{unread}{extra}}}}}"#
+        )
+    };
+    let private = |id: i64| format!(r#"{{"@type":"chatTypePrivate","user_id":{id}}}"#);
+    let last = |chat: i64, id: i64, outgoing: bool, state: &str, text: &str, order: i64| {
+        format!(
+            r#"{{"@type":"updateChatLastMessage","chat_id":{chat},"last_message":{{"id":{id},"chat_id":{chat},"date":{now},"is_outgoing":{outgoing},{state}"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}]}}"#
+        )
+    };
+    let pending = r#""sending_state":{"@type":"messageSendingStatePending","sending_id":0},"#;
+    let failed = r#""sending_state":{"@type":"messageSendingStateFailed","can_retry":true},"#;
+    let step = 1_048_576_i64;
+    let jsons = [
+        user(21, "Mira", "Cohen", offline, premium),
+        new_chat(21, "Mira Cohen", &private(21), 0, &draft("see you at six, bring the notes", false)),
+        last(21, 3 * step, false, "", "Are we still on for tonight?", 960),
+        user(22, "Noam", "Katz", offline, verified),
+        new_chat(22, "Noam Katz", &private(22), 0, ""),
+        last(22, -1, true, pending, "On my way, two minutes", 950),
+        user(23, "Dana", "Levi", offline, ""),
+        new_chat(23, "Dana Levi", &private(23), 0, ""),
+        last(23, -2, true, failed, "Did the files arrive?", 940),
+        user(24, "Omar", "Haddad", online, premium),
+        new_chat(24, "Omar Haddad", &private(24), 0, &draft("", true)),
+        last(24, 4 * step, false, "", "Sounds good", 930),
+        new_chat(
+            124,
+            "Quill News",
+            r#"{"@type":"chatTypeSupergroup","supergroup_id":124,"is_channel":true}"#,
+            3,
+            "",
+        ),
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":124,"is_channel":true,"verification_status":{"@type":"verificationStatus","is_verified":true,"is_scam":false,"is_fake":false}}}"#.to_string(),
+        last(124, 5 * step, false, "", "Release notes for this week are out", 920),
+        user(25, "Quick", "Crypto Profit", offline, scam),
+        new_chat(25, "Quick Crypto Profit", &private(25), 1, ""),
+        last(25, 6 * step, false, "", "Double your coins in 24 hours", 910),
+        user(26, "Support", "Desk", offline, fake),
+        new_chat(26, "Support Desk", &private(26), 0, ""),
+        last(26, 7 * step, false, "", "Please confirm your account", 900),
+        user(27, "Yael", "Barak", offline, ""),
+        new_chat(27, "Yael Barak", &private(27), 0, ""),
+        last(27, 8 * step, true, "", "Delivered, not read yet", 890),
+        user(28, "Eli", "Mor", offline, ""),
+        new_chat(28, "Eli Mor", &private(28), 0, ""),
+        last(28, 9 * step, true, "", "Read by Eli", 880),
+        r#"{"@type":"updateChatReadOutbox","chat_id":28,"last_read_outbox_message_id":9437184}"#.to_string(),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
 pub(super) fn apply_ready_pin(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let extra = session.request(RequestPurpose::PinChatMessage, Some(ChatId(11)));

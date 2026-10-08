@@ -85,6 +85,10 @@ pub enum ScreenshotDemo {
     ReadySharedMedia,
     /// Peer `chatActionTyping` in the open-chat header and sidebar row.
     ReadyTyping,
+    /// Chat-row polish: Draft prefix, sending / failed marks, verified /
+    /// Premium / SCAM / FAKE title badges, online dot (injected, no live
+    /// Telegram).
+    ReadyChatRows,
     /// Sticker panel + sticker in history (injected, no live Telegram).
     ReadyStickers,
     ReadyStickerPlayback,

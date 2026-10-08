@@ -266,6 +266,8 @@ mod tests {
             profile_accent_color_id: -1,
             profile_background_custom_emoji_id: 0,
             is_premium: false,
+            verification: Default::default(),
+            emoji_status_id: 0,
         }
     }
 

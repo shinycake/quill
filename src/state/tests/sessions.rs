@@ -622,6 +622,8 @@ fn my_is_premium_follows_own_user_record() {
         ParsedUser {
             id: 31,
             is_premium: true,
+            verification: Default::default(),
+            emoji_status_id: 0,
             ..Default::default()
         },
     );

@@ -262,6 +262,7 @@ fn update_supergroup_parses_forum_flag() {
     match env.payload {
         EnvelopePayload::UpdateSupergroup {
             supergroup_id,
+            verification: _,
             member_count: _,
             is_forum,
             has_forum_tabs: _,
@@ -308,6 +309,7 @@ fn update_supergroup_parses_username() {
     match env.payload {
         EnvelopePayload::UpdateSupergroup {
             supergroup_id,
+            verification: _,
             member_count: _,
             is_forum,
             has_forum_tabs: _,

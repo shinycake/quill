@@ -361,6 +361,12 @@ impl Session {
                     _ => None,
                 },
             ));
+            // Premium emoji statuses after row titles.
+            if let Some(crate::peer_badge::TitleBadge::EmojiStatus(id)) =
+                self.chat_title_badge(chat)
+            {
+                ids.push(id);
+            }
         }
         if let Some(options) = &self.message_reaction_options {
             ids.extend(options.all().into_iter().filter_map(|choice| match choice {

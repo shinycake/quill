@@ -15,8 +15,8 @@ use super::calls::{
 use super::chat::apply_ready_slow_mode;
 use super::chat_list::{
     apply_ready_chat_avatars, apply_ready_chat_list, apply_ready_chat_list_3,
-    apply_ready_chat_list_menu, apply_ready_chat_preview, apply_ready_mute_archive,
-    apply_ready_pin,
+    apply_ready_chat_list_menu, apply_ready_chat_preview, apply_ready_chat_rows,
+    apply_ready_mute_archive, apply_ready_pin,
 };
 use super::chat_row::ChatPreviewState;
 use super::composer::apply_ready_reply;
@@ -376,6 +376,13 @@ impl QuillApp {
             self.notif_sound_picker_open = true;
             self.status_note =
                 "screenshot demo — notification sounds · per-chat panel · scope defaults".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatRows)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_chat_rows(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note = "screenshot demo — chat rows".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyTyping)) {
             if let Some(session) = self.demo_session.as_mut() {
