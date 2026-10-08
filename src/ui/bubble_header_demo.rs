@@ -66,14 +66,7 @@ fn forwarded(origin: &str) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn message(
-    id: i64,
-    sender: i64,
-    outgoing: bool,
-    date: i64,
-    content: &str,
-    extra: &str,
-) -> String {
+fn message(id: i64, sender: i64, outgoing: bool, date: i64, content: &str, extra: &str) -> String {
     format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{GROUP},"sender_id":{{"@type":"messageSenderUser","user_id":{sender}}},"is_outgoing":{outgoing},"date":{date},"content":{content}{extra}}}}}"#
     )
@@ -112,149 +105,205 @@ pub(super) fn apply_ready_bubble_headers(
             r#"{"@type":"chatTypePrivate","user_id":51}"#,
         ),
     ] {
-        apply(session, format!(
-            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{kind},"unread_count":0}}}}"#
-        ));
-        apply(session, format!(
-            r#"{{"@type":"updateChatPosition","chat_id":{id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{}","is_pinned":false}}}}"#,
-            3000 + id.abs() % 100
-        ));
+        apply(
+            session,
+            format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{kind},"unread_count":0}}}}"#
+            ),
+        );
+        apply(
+            session,
+            format!(
+                r#"{{"@type":"updateChatPosition","chat_id":{id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{}","is_pinned":false}}}}"#,
+                3000 + id.abs() % 100
+            ),
+        );
     }
 
     // Replies.
-    apply(session, message(
-        101,
-        51,
-        false,
-        now,
-        &text_content("Anyone up for the ridge trail on Saturday? Starting 7:30 at the trailhead."),
-        r#","edit_date":1790633500"#,
-    ));
-    apply(session, message(
-        102,
-        52,
-        false,
-        now + 60,
-        &text_content("I'm in, bringing the good thermos."),
-        &reply(GROUP, 101, None),
-    ));
-    apply(session, message(
-        103,
-        0,
-        true,
-        now + 120,
-        &text_content("Same. Is 7:30 sharp or flexible?"),
-        &reply(GROUP, 101, Some("Starting 7:30 at the trailhead")),
-    ));
-    apply(session, message(
-        104,
-        53,
-        false,
-        now + 180,
-        &photo_content("Sunset from the summit last week"),
-        "",
-    ));
-    apply(session, message(
-        105,
-        52,
-        false,
-        now + 240,
-        &text_content("Wow, that colour. Is it edited?"),
-        &reply(GROUP, 104, None),
-    ));
+    apply(
+        session,
+        message(
+            101,
+            51,
+            false,
+            now,
+            &text_content(
+                "Anyone up for the ridge trail on Saturday? Starting 7:30 at the trailhead.",
+            ),
+            r#","edit_date":1790633500"#,
+        ),
+    );
+    apply(
+        session,
+        message(
+            102,
+            52,
+            false,
+            now + 60,
+            &text_content("I'm in, bringing the good thermos."),
+            &reply(GROUP, 101, None),
+        ),
+    );
+    apply(
+        session,
+        message(
+            103,
+            0,
+            true,
+            now + 120,
+            &text_content("Same. Is 7:30 sharp or flexible?"),
+            &reply(GROUP, 101, Some("Starting 7:30 at the trailhead")),
+        ),
+    );
+    apply(
+        session,
+        message(
+            104,
+            53,
+            false,
+            now + 180,
+            &photo_content("Sunset from the summit last week"),
+            "",
+        ),
+    );
+    apply(
+        session,
+        message(
+            105,
+            52,
+            false,
+            now + 240,
+            &text_content("Wow, that colour. Is it edited?"),
+            &reply(GROUP, 104, None),
+        ),
+    );
     // A reply to a message that was deleted.
-    apply(session, message(99, 53, false, now - 60, &text_content("(deleted)"), ""));
-    apply(session, format!(
-        r#"{{"@type":"updateDeleteMessages","chat_id":{GROUP},"message_ids":[99],"is_permanent":true,"from_cache":false}}"#
-    ));
-    apply(session, message(
-        106,
-        51,
-        false,
-        now + 300,
-        &text_content("Oops, scratch what I asked above."),
-        &reply(GROUP, 99, None),
-    ));
+    apply(
+        session,
+        message(99, 53, false, now - 60, &text_content("(deleted)"), ""),
+    );
+    apply(
+        session,
+        format!(
+            r#"{{"@type":"updateDeleteMessages","chat_id":{GROUP},"message_ids":[99],"is_permanent":true,"from_cache":false}}"#
+        ),
+    );
+    apply(
+        session,
+        message(
+            106,
+            51,
+            false,
+            now + 300,
+            &text_content("Oops, scratch what I asked above."),
+            &reply(GROUP, 99, None),
+        ),
+    );
     // A reply to a message far outside the window, answered by
     // `getRepliedMessage`.
-    apply(session, message(
-        107,
-        53,
-        false,
-        now + 330,
-        &text_content("Answering the permit question from March."),
-        &reply(GROUP, 12, None),
-    ));
-    // A reply from another chat: TDLib sends origin and media.
-    apply(session, message(
-        108,
-        52,
-        false,
-        now + 360,
-        &text_content("Forwarding Maya's route note into this chat."),
-        &format!(
-            r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{PRIVATE},"message_id":9,"quote":null,"checklist_task_id":0,"poll_option_id":"","origin":{{"@type":"messageOriginUser","sender_user_id":51}},"origin_send_date":1790000000,"content":null}}"#
+    apply(
+        session,
+        message(
+            107,
+            53,
+            false,
+            now + 330,
+            &text_content("Answering the permit question from March."),
+            &reply(GROUP, 12, None),
         ),
-    ));
+    );
+    // A reply from another chat: TDLib sends origin and media.
+    apply(
+        session,
+        message(
+            108,
+            52,
+            false,
+            now + 360,
+            &text_content("Forwarding Maya's route note into this chat."),
+            &format!(
+                r#","reply_to":{{"@type":"messageReplyToMessage","chat_id":{PRIVATE},"message_id":9,"quote":null,"checklist_task_id":0,"poll_option_id":"","origin":{{"@type":"messageOriginUser","sender_user_id":51}},"origin_send_date":1790000000,"content":null}}"#
+            ),
+        ),
+    );
 
     // Forwards.
-    apply(session, message(
-        109,
-        52,
-        false,
-        now + 420,
-        &text_content("Trail conditions look good."),
-        &forwarded(r#"{"@type":"messageOriginUser","sender_user_id":53}"#),
-    ));
-    apply(session, message(
-        110,
-        52,
-        false,
-        now + 450,
-        &text_content("Hidden accounts cannot be opened."),
-        &forwarded(r#"{"@type":"messageOriginHiddenUser","sender_name":"Grace Hopper"}"#),
-    ));
-    apply(session, message(
-        111,
-        53,
-        false,
-        now + 480,
-        &text_content("Trail closed above 2,000 m until further notice."),
-        &format!(
-            r#"{},"interaction_info":{{"@type":"messageInteractionInfo","view_count":12400,"forward_count":8,"reply_info":null,"reactions":null}},"is_pinned":true"#,
-            forwarded(&format!(
-                r#"{{"@type":"messageOriginChannel","chat_id":{CHANNEL},"message_id":77,"author_signature":"Ana"}}"#
-            ))
+    apply(
+        session,
+        message(
+            109,
+            52,
+            false,
+            now + 420,
+            &text_content("Trail conditions look good."),
+            &forwarded(r#"{"@type":"messageOriginUser","sender_user_id":53}"#),
         ),
-    ));
-    apply(session, message(
-        112,
-        51,
-        false,
-        now + 540,
-        &text_content("Welcome back to the group, everyone."),
-        r#","import_info":{"@type":"messageImportInfo","sender_name":"Noa","date":1600000000}"#,
-    ));
-    apply(session, message(
-        113,
-        51,
-        false,
-        now + 600,
-        &text_content("Summit selfie coming up."),
-        r#","via_bot_user_id":54"#,
-    ));
-    apply(session, message(
-        114,
-        0,
-        true,
-        now + 660,
-        &text_content("Forwarded and replied: see you at the trailhead."),
-        &format!(
-            "{}{}",
-            forwarded(r#"{"@type":"messageOriginUser","sender_user_id":51}"#),
-            reply(GROUP, 102, None)
+    );
+    apply(
+        session,
+        message(
+            110,
+            52,
+            false,
+            now + 450,
+            &text_content("Hidden accounts cannot be opened."),
+            &forwarded(r#"{"@type":"messageOriginHiddenUser","sender_name":"Grace Hopper"}"#),
         ),
-    ));
+    );
+    apply(
+        session,
+        message(
+            111,
+            53,
+            false,
+            now + 480,
+            &text_content("Trail closed above 2,000 m until further notice."),
+            &format!(
+                r#"{},"interaction_info":{{"@type":"messageInteractionInfo","view_count":12400,"forward_count":8,"reply_info":null,"reactions":null}},"is_pinned":true"#,
+                forwarded(&format!(
+                    r#"{{"@type":"messageOriginChannel","chat_id":{CHANNEL},"message_id":77,"author_signature":"Ana"}}"#
+                ))
+            ),
+        ),
+    );
+    apply(
+        session,
+        message(
+            112,
+            51,
+            false,
+            now + 540,
+            &text_content("Welcome back to the group, everyone."),
+            r#","import_info":{"@type":"messageImportInfo","sender_name":"Noa","date":1600000000}"#,
+        ),
+    );
+    apply(
+        session,
+        message(
+            113,
+            51,
+            false,
+            now + 600,
+            &text_content("Summit selfie coming up."),
+            r#","via_bot_user_id":54"#,
+        ),
+    );
+    apply(
+        session,
+        message(
+            114,
+            0,
+            true,
+            now + 660,
+            &text_content("Forwarded and replied: see you at the trailhead."),
+            &format!(
+                "{}{}",
+                forwarded(r#"{"@type":"messageOriginUser","sender_user_id":51}"#),
+                reply(GROUP, 102, None)
+            ),
+        ),
+    );
 
     // Answers to the fetches the driver would send.
     let fetched = [
@@ -279,11 +328,14 @@ pub(super) fn apply_ready_bubble_headers(
             },
             Some(ChatId(GROUP)),
         );
-        apply(session, format!(
-            r#"{{"@type":"message","@extra":"{}"{head},"chat_id":{chat},"is_outgoing":false,"date":{},"content":{content}}}"#,
-            extra.0,
-            now - 200_000
-        ));
+        apply(
+            session,
+            format!(
+                r#"{{"@type":"message","@extra":"{}"{head},"chat_id":{chat},"is_outgoing":false,"date":{},"content":{content}}}"#,
+                extra.0,
+                now - 200_000
+            ),
+        );
     }
     session.open_chat(ChatId(GROUP));
 }

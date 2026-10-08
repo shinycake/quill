@@ -123,9 +123,7 @@ pub fn thumb_candidates(content: &MessageContent) -> Vec<FileId> {
         MessageContent::Video(video) if !video.is_secret && !video.has_spoiler => {
             ids.extend(video.thumb_file_id());
         }
-        MessageContent::Animation(animation)
-            if !animation.is_secret && !animation.has_spoiler =>
-        {
+        MessageContent::Animation(animation) if !animation.is_secret && !animation.has_spoiler => {
             ids.extend(animation.thumb_file_id());
         }
         MessageContent::VideoNote(note) if !note.is_secret => {
@@ -167,9 +165,10 @@ impl Session {
             MessageOrigin::User { user_id } => {
                 self.sender_name_and_accent(Some(MessageSender::User { user_id: user_id.0 }))
             }
-            MessageOrigin::HiddenUser { sender_name } => {
-                ((!sender_name.trim().is_empty()).then(|| sender_name.clone()), None)
-            }
+            MessageOrigin::HiddenUser { sender_name } => (
+                (!sender_name.trim().is_empty()).then(|| sender_name.clone()),
+                None,
+            ),
             MessageOrigin::Chat { chat_id, .. } | MessageOrigin::Channel { chat_id, .. } => {
                 self.sender_name_and_accent(Some(MessageSender::Chat { chat_id: chat_id.0 }))
             }
@@ -242,10 +241,14 @@ impl Session {
                 .unwrap_or_default()
         };
         let external_chat = external
-            .then(|| self.chats.get(&target_chat.0).map(|chat| chat.title.clone()))
+            .then(|| {
+                self.chats
+                    .get(&target_chat.0)
+                    .map(|chat| chat.title.clone())
+            })
             .flatten();
-        let clickable = state == ReplyState::Ready
-            && (!external || self.chats.contains_key(&target_chat.0));
+        let clickable =
+            state == ReplyState::Ready && (!external || self.chats.contains_key(&target_chat.0));
         Some(ReplyHeader {
             target_chat,
             target_id: reply.message_id,
@@ -315,7 +318,11 @@ impl Session {
                 Some(name) => (name, signature, link),
                 None => (signature.unwrap_or_default(), None, ForwardLink::None),
             };
-            let link = if name.is_empty() { ForwardLink::None } else { link };
+            let link = if name.is_empty() {
+                ForwardLink::None
+            } else {
+                link
+            };
             return Some(ForwardHeader {
                 name,
                 signature,
@@ -434,10 +441,7 @@ impl Session {
                 )));
             }
         }
-        if let Some(history) = self
-            .open_chat
-            .and_then(|chat| self.histories.get(&chat.0))
-        {
+        if let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) {
             for message in history.messages.values() {
                 if let Some(content) = message
                     .reply_to
@@ -479,9 +483,7 @@ pub fn footer_tooltip(
         text.push_str(&format!("\nOriginal: {}", format_date(i64::from(original))));
     }
     if message.extras.import_info.is_some() {
-        text = format!(
-            "This message was imported from another app. It may not be real.\n\n{text}"
-        );
+        text = format!("This message was imported from another app. It may not be real.\n\n{text}");
     }
     Some(text)
 }

@@ -5,9 +5,9 @@ use crate::settings::InstantViewMode;
 use crate::state::{ComposerLinkPreview, RequestPurpose, UnreadJumpKind};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
-    get_replied_message,
-    get_web_page_instant_view, pin_chat_message, read_all_chat_markers, remove_message_reaction,
-    search_chat_messages, search_messages_filter_json, unpin_all_chat_messages, unpin_chat_message,
+    get_replied_message, get_web_page_instant_view, pin_chat_message, read_all_chat_markers,
+    remove_message_reaction, search_chat_messages, search_messages_filter_json,
+    unpin_all_chat_messages, unpin_chat_message,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -34,9 +34,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
-            self.session
-                .reply_targets
-                .insert((chat_id.0, message_id.0), crate::state::ReplyTarget::Loading);
+            self.session.reply_targets.insert(
+                (chat_id.0, message_id.0),
+                crate::state::ReplyTarget::Loading,
+            );
         }
         Ok(())
     }

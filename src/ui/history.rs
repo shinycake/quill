@@ -1,10 +1,8 @@
 //! message history: loading, rows, albums, skeletons.
 
 use super::app::{PaneMode, QuillApp};
+use super::bubble_header::{forward_header_line, reply_header_strip, via_bot_line};
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
-use super::bubble_header::{
-    forward_header_line, reply_header_strip, via_bot_line,
-};
 use super::message_games::game_card;
 use super::message_media::{
     MediaCorners, file_is_downloading, media_frame, photo_display_path, spoiler_cover,
@@ -704,8 +702,12 @@ pub(super) fn session_history_row(
     });
     let has_forward = forward_header.is_some();
     let forward_strip = forward_header.map(|header| {
-        let original = (header.original_date > 0 && message.forward_info.is_some())
-            .then(|| format!("Original: {}", super::message_text::format_unix_date_time(header.original_date.into())));
+        let original = (header.original_date > 0 && message.forward_info.is_some()).then(|| {
+            format!(
+                "Original: {}",
+                super::message_text::format_unix_date_time(header.original_date.into())
+            )
+        });
         forward_header_line(message.id, header, via_bot.clone(), original, on_fill, cx)
     });
     let via_strip = via_bot
@@ -1222,7 +1224,8 @@ pub(super) fn session_history_row(
                 // Captions don't resolve custom emoji in this slice (text fallback).
                 &HashMap::new(),
                 &HashMap::new(),
-                (below && reserve_footer).then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
+                (below && reserve_footer)
+                    .then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
                 cx,
             )
         });

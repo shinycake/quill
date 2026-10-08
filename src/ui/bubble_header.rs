@@ -37,7 +37,10 @@ pub(super) fn reply_header_strip(
             .unwrap_or_else(|| accent().into())
     };
     let (body, muted): (Hsla, Hsla) = if on_fill {
-        (text_on_fill().into(), Hsla::from(text_on_fill()).opacity(0.75))
+        (
+            text_on_fill().into(),
+            Hsla::from(text_on_fill()).opacity(0.75),
+        )
     } else {
         (text_primary().into(), text_muted().into())
     };
@@ -129,7 +132,11 @@ pub(super) fn reply_header_strip(
                     div()
                         .text_xs()
                         .truncate()
-                        .text_color(if state == ReplyState::Ready { body } else { muted })
+                        .text_color(if state == ReplyState::Ready {
+                            body
+                        } else {
+                            muted
+                        })
                         .when(state != ReplyState::Ready, |this| this.italic())
                         .child(super::bidi_line::one_line_plain(text)),
                 ),
@@ -229,11 +236,7 @@ pub(super) fn forward_header_line(
         })
         .child(name_el)
         .when_some(via_bot, |this, bot| {
-            this.child(
-                div()
-                    .text_color(muted)
-                    .child(format!("via {bot}")),
-            )
+            this.child(div().text_color(muted).child(format!("via {bot}")))
         })
         .into_any_element()
 }

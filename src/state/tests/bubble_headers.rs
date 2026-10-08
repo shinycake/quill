@@ -36,7 +36,12 @@ fn message(session: &Session, id: i64) -> HistoryMessage {
 #[test]
 fn reply_header_names_the_original_sender_in_their_color() {
     let (mut session, sink, seq) = seeded();
-    apply_json(&mut session, &seq, &sink, &text_message(10, 31, "original words", ""));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &text_message(10, 31, "original words", ""),
+    );
     apply_json(
         &mut session,
         &seq,
@@ -63,7 +68,12 @@ fn reply_header_names_the_original_sender_in_their_color() {
 #[test]
 fn reply_header_shows_the_quote_instead_of_the_message() {
     let (mut session, sink, seq) = seeded();
-    apply_json(&mut session, &seq, &sink, &text_message(10, 31, "one two three", ""));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &text_message(10, 31, "one two three", ""),
+    );
     apply_json(
         &mut session,
         &seq,
@@ -309,7 +319,12 @@ fn imported_messages_read_as_forwards_with_a_notice() {
     assert_eq!(header.name, "Mallory");
     assert!(header.imported);
     assert_eq!(header.link, ForwardLink::Imported);
-    assert!(header.tooltip().unwrap().contains("imported from another app"));
+    assert!(
+        header
+            .tooltip()
+            .unwrap()
+            .contains("imported from another app")
+    );
     let tip = footer_tooltip(&msg, |unix| format!("@{unix}")).unwrap();
     assert!(tip.starts_with("This message was imported"));
     assert!(tip.contains("Original: @1600000000"));
@@ -322,14 +337,24 @@ fn via_bot_and_edit_date_are_parsed_and_kept_current() {
         &mut session,
         &seq,
         &sink,
-        &text_message(26, 31, "via a bot", r#","via_bot_user_id":77,"edit_date":1700000500"#),
+        &text_message(
+            26,
+            31,
+            "via a bot",
+            r#","via_bot_user_id":77,"edit_date":1700000500"#,
+        ),
     );
     let msg = message(&session, 26);
     assert_eq!(msg.extras.via_bot_user_id, 77);
     assert_eq!(msg.extras.edit_date, 1700000500);
     assert_eq!(session.via_bot_label(&msg).as_deref(), Some("@gifbot"));
 
-    apply_json(&mut session, &seq, &sink, &text_message(27, 31, "plain", ""));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &text_message(27, 31, "plain", ""),
+    );
     let plain = message(&session, 27);
     assert_eq!(plain.extras.edit_date, 0);
     assert_eq!(session.via_bot_label(&plain), None);
@@ -357,8 +382,16 @@ fn footer_tooltip_lists_sent_edited_and_original_dates() {
         ),
     );
     let tip = footer_tooltip(&message(&session, 28), |unix| format!("@{unix}")).unwrap();
-    assert_eq!(tip, "@1700000000\nEdited: @1700000900\nOriginal: @1650000000");
-    apply_json(&mut session, &seq, &sink, &text_message(29, 31, "plain", ""));
+    assert_eq!(
+        tip,
+        "@1700000000\nEdited: @1700000900\nOriginal: @1650000000"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &text_message(29, 31, "plain", ""),
+    );
     assert_eq!(
         footer_tooltip(&message(&session, 29), |unix| format!("@{unix}")).as_deref(),
         Some("@1700000000")
