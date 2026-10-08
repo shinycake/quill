@@ -113,21 +113,14 @@ pub fn parse_deep_link_action(entities: &[TextEntity]) -> Option<DeepLinkAction>
     deep_link_tg_url(entities).and_then(parse_tg_url)
 }
 
-/// First CLI arg that looks like a Telegram deep link. Flags (`--*`)
-/// are skipped; matches `tg://`, `t.me` and `telegram.me` http(s) links.
-/// Used by `main.rs` to stash the launch link on the app.
+/// First CLI arg that is a Telegram deep link. Flags (`--*`) are skipped;
+/// validation is `deep_link_inbox::sanitize_link` (the same gate applied to
+/// links forwarded by a second launch or handed over by the OS).
 pub fn detect_deep_link_arg(args: &[String]) -> Option<String> {
     args.iter()
         .skip(1)
-        .find(|arg| {
-            !arg.starts_with("--")
-                && (arg.starts_with("tg://")
-                    || arg.starts_with("https://t.me/")
-                    || arg.starts_with("http://t.me/")
-                    || arg.starts_with("https://telegram.me/")
-                    || arg.starts_with("http://telegram.me/"))
-        })
-        .cloned()
+        .filter(|arg| !arg.starts_with("--"))
+        .find_map(|arg| crate::deep_link_inbox::sanitize_link(arg))
 }
 
 impl<S: JsonSender> ConnectDriver<S> {

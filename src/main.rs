@@ -259,6 +259,14 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    // Single instance (tdesktop `Core::Sandbox`): a second launch hands its
+    // links to the running Quill and exits before touching the account
+    // database or the media caches.
+    if forwarded_to_running_instance(args) {
+        return;
+    }
+    quill::scheme_registration::register_url_scheme();
+
     // Demo windows can run beside the live app without touching its private caches.
     quill::local_path::sweep_media_caches();
 
@@ -270,60 +278,158 @@ fn ui_main(args: &[String]) {
     let credentials = quill::credentials::load();
     let start_in_tray = args.iter().any(|arg| arg == "--start-minimized")
         || ui::QuillApp::load_appearance().start_in_tray;
-    gpui_kit::application()
-        .with_assets(QuillAssets)
-        .run(move |cx| {
-            cx.set_app_identity("org.shinycake.quill", "Quill");
-            gpui_kit::init(cx);
-            // kit Phase 8: the kit defaults to its light theme on init;
-            // Quill boots dark (kit dialogs match the app from here on).
-            ui::set_theme_mode(startup_theme_mode(), None, cx);
-            // stories-high-contrast: screenshot demos can opt into the
-            // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
-            ui::set_high_contrast(
-                std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
-            );
-            // kit Phase 9: honor the OS reduce-motion preference.
-            cx.set_reduce_motion(os_prefers_reduced_motion());
-            ui::bind_keys(cx);
-            // kit Phase 7: File / Edit / View / Window / Help — native on
-            // macOS, kit `AppMenuBar` data on Linux/Windows.
-            ui::setup_app_menus(cx);
-            let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
-            cx.spawn(async move |cx| {
-                cx.open_window(
-                    WindowOptions {
-                        window_bounds: Some(window_bounds),
-                        app_id: Some("org.shinycake.quill".into()),
-                        show: !start_in_tray,
-                        focus: !start_in_tray,
-                        ..quill_window_options("Quill")
-                    },
-                    move |window, cx| {
-                        let view = cx.new(|cx| {
-                            let mut app = ui::QuillApp::new(window, cx, credentials.clone());
-                            app.pending_deep_link = pending_deep_link.clone();
-                            app
-                        });
-                        install_main_window_tray(window, cx, &view);
-                        if window.focused(cx).is_none() {
-                            window.focus(&view.focus_handle(cx), cx);
+    let application = gpui_kit::application().with_assets(QuillAssets);
+    // macOS delivers `tg:` / `t.me` URLs (Info.plist CFBundleURLTypes) here,
+    // both on cold launch and to the running app; Linux/Windows pass them
+    // as argv instead (handled above and via the single-instance socket).
+    application.on_open_urls(|urls| {
+        for url in urls {
+            quill::deep_link_inbox::push_external_link(&url);
+        }
+    });
+    application.run(move |cx| {
+        cx.set_app_identity("org.shinycake.quill", "Quill");
+        gpui_kit::init(cx);
+        // kit Phase 8: the kit defaults to its light theme on init;
+        // Quill boots dark (kit dialogs match the app from here on).
+        ui::set_theme_mode(startup_theme_mode(), None, cx);
+        // stories-high-contrast: screenshot demos can opt into the
+        // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
+        ui::set_high_contrast(std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"));
+        // kit Phase 9: honor the OS reduce-motion preference.
+        cx.set_reduce_motion(os_prefers_reduced_motion());
+        ui::bind_keys(cx);
+        // kit Phase 7: File / Edit / View / Window / Help — native on
+        // macOS, kit `AppMenuBar` data on Linux/Windows.
+        ui::setup_app_menus(cx);
+        let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
+        cx.spawn(async move |cx| {
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(window_bounds),
+                    app_id: Some("org.shinycake.quill".into()),
+                    show: !start_in_tray,
+                    focus: !start_in_tray,
+                    ..quill_window_options("Quill")
+                },
+                move |window, cx| {
+                    let view = cx.new(|cx| {
+                        let mut app = ui::QuillApp::new(window, cx, credentials.clone());
+                        app.pending_deep_link = pending_deep_link.clone();
+                        app
+                    });
+                    install_main_window_tray(window, cx, &view);
+                    install_link_inbox(window, cx, &view);
+                    if window.focused(cx).is_none() {
+                        window.focus(&view.focus_handle(cx), cx);
+                    }
+                    if start_in_tray && !quill::tray::tray_available() {
+                        // No tray host must never leave the only window inaccessible.
+                        cx.activate(true);
+                        window.activate_window();
+                    }
+                    // The shell adds Quill's dialog hit-test barrier; Root
+                    // hosts the kit dialog and notification layers.
+                    let shell = cx.new(|_cx| ui::QuillShell::new(view));
+                    cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
+                },
+            )
+            .expect("failed to open window");
+        })
+        .detach();
+    });
+}
+
+/// Returns `true` when this launch was handed to an already-running
+/// instance (or must not start because that instance is stuck). Falls back
+/// to running normally if the socket cannot be set up.
+#[cfg(feature = "ui")]
+fn forwarded_to_running_instance(args: &[String]) -> bool {
+    use quill::single_instance::{Acquired, Endpoint, acquire};
+    let Some(root) = quill::settings::safe_app_root() else {
+        return false;
+    };
+    let forwarded: Vec<String> = args
+        .iter()
+        .skip(1)
+        .filter_map(|arg| quill::deep_link_inbox::sanitize_link(arg))
+        .chain(
+            args.iter()
+                .any(|arg| arg == "--start-minimized")
+                .then(|| "--start-minimized".to_string()),
+        )
+        .collect();
+    match acquire(&Endpoint::for_root(&root), &forwarded, |args| {
+        quill::deep_link_inbox::handle_forwarded_launch(&args)
+    }) {
+        Ok(Acquired::Forwarded) => true,
+        Ok(Acquired::Primary) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+            eprintln!("quill: {error}; not starting a second instance.");
+            true
+        }
+        Err(error) => {
+            eprintln!("quill: single-instance check unavailable ({error}); continuing.");
+            false
+        }
+    }
+}
+
+/// Drains links that arrived from the OS or a second launch: raises the
+/// window and hands the next link to the deep-link pump (one flow at a time).
+#[cfg(feature = "ui")]
+fn install_link_inbox(
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::App,
+    view: &gpui_kit::Entity<ui::QuillApp>,
+) {
+    cx.spawn({
+        let view = view.downgrade();
+        let window_handle = window.window_handle();
+        async move |cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(250))
+                    .await;
+                let alive = view
+                    .update(cx, |this, _| {
+                        if this.pending_deep_link.is_none() {
+                            this.pending_deep_link = quill::deep_link_inbox::pop_link();
                         }
-                        if start_in_tray && !quill::tray::tray_available() {
-                            // No tray host must never leave the only window inaccessible.
-                            cx.activate(true);
-                            window.activate_window();
-                        }
-                        // The shell adds Quill's dialog hit-test barrier; Root
-                        // hosts the kit dialog and notification layers.
-                        let shell = cx.new(|_cx| ui::QuillShell::new(view));
-                        cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
-                    },
-                )
-                .expect("failed to open window");
-            })
-            .detach();
-        });
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+                if quill::deep_link_inbox::take_activation() {
+                    let _ = window_handle.update(cx, |_, window, cx| raise_main_window(window, cx));
+                }
+            }
+        }
+    })
+    .detach();
+}
+
+/// Brings the main window to the front, restoring it from the tray, the
+/// Dock (minimized) or a hidden app.
+#[cfg(feature = "ui")]
+fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSView;
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = HasWindowHandle::window_handle(window)
+            && let RawWindowHandle::AppKit(handle) = handle.as_raw()
+        {
+            // GPUI retains this native view while the window lives.
+            let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+            if let Some(native) = view.window() {
+                native.deminiaturize(None);
+            }
+        }
+    }
+    cx.activate(true);
+    window.activate_window();
 }
 
 #[cfg(feature = "ui")]
@@ -886,262 +992,261 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         })
         .unwrap_or((1200.0, 740.0));
 
-    gpui_kit::application()
-        .with_assets(QuillAssets)
-        .run(move |cx| {
-            cx.set_app_identity("org.shinycake.quill", "Quill");
-            gpui_kit::init(cx);
-            // kit Phase 8: the kit defaults to its light theme on init;
-            // Quill boots dark (kit dialogs match the app from here on).
-            ui::set_theme_mode(startup_theme_mode(), None, cx);
-            // stories-high-contrast: screenshot demos can opt into the
-            // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
-            ui::set_high_contrast(
-                std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"),
-            );
-            // kit Phase 9: honor the OS reduce-motion preference.
-            cx.set_reduce_motion(os_prefers_reduced_motion());
-            ui::bind_keys(cx);
-            ui::setup_app_menus(cx);
-            cx.spawn(async move |cx| {
-                let demo_window = cx
-                    .open_window(
-                        WindowOptions {
-                            window_bounds: Some(WindowBounds::Windowed(Bounds {
-                                origin: point(px(20.), px(20.)),
-                                size: size(px(demo_w), px(demo_h)),
-                            })),
-                            app_id: Some("org.shinycake.quill".into()),
-                            ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
-                                "Quill — Call audio devices"
-                            } else {
-                                "Quill"
-                            })
-                        },
-                        move |window, cx| {
-                            let view = cx.new(|cx| {
-                                ui::QuillApp::new_with_demo(window, cx, None, Some(kind))
-                            });
-                            if kind == ScreenshotDemo::ReadyTrayBehavior {
-                                install_main_window_tray(window, cx, &view);
-                            }
-                            if window.focused(cx).is_none() {
-                                window.focus(&view.focus_handle(cx), cx);
-                            }
-                            // The shell adds Quill's dialog hit-test barrier; Root
-                            // hosts the kit dialog and notification layers.
-                            let shell = cx.new(|_cx| ui::QuillShell::new(view));
-                            cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
-                        },
-                    )
-                    .expect("failed to open screenshot demo window");
-
-                // `QUILL_DEMO_BACKGROUND=1`: leave the window behind the
-                // frontmost app (inactive), to measure the inactive path.
-                if std::env::var_os("QUILL_DEMO_BACKGROUND").is_none() {
-                    let _ = demo_window.update(cx, |_, window, cx| {
-                        cx.activate(true);
-                        window.activate_window();
-                    });
-                }
-
-                // Allow a couple of frames to paint, then signal the capture script.
-                cx.background_executor()
-                    .timer(Duration::from_millis(
-                        if kind == ScreenshotDemo::ReadyStickerPlayback {
-                            400
+    let application = gpui_kit::application().with_assets(QuillAssets);
+    // macOS delivers `tg:` / `t.me` URLs (Info.plist CFBundleURLTypes) here,
+    // both on cold launch and to the running app; Linux/Windows pass them
+    // as argv instead (handled above and via the single-instance socket).
+    application.on_open_urls(|urls| {
+        for url in urls {
+            quill::deep_link_inbox::push_external_link(&url);
+        }
+    });
+    application.run(move |cx| {
+        cx.set_app_identity("org.shinycake.quill", "Quill");
+        gpui_kit::init(cx);
+        // kit Phase 8: the kit defaults to its light theme on init;
+        // Quill boots dark (kit dialogs match the app from here on).
+        ui::set_theme_mode(startup_theme_mode(), None, cx);
+        // stories-high-contrast: screenshot demos can opt into the
+        // high-contrast palette with `QUILL_DEMO_THEME=high-contrast`.
+        ui::set_high_contrast(std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast"));
+        // kit Phase 9: honor the OS reduce-motion preference.
+        cx.set_reduce_motion(os_prefers_reduced_motion());
+        ui::bind_keys(cx);
+        ui::setup_app_menus(cx);
+        cx.spawn(async move |cx| {
+            let demo_window = cx
+                .open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds {
+                            origin: point(px(20.), px(20.)),
+                            size: size(px(demo_w), px(demo_h)),
+                        })),
+                        app_id: Some("org.shinycake.quill".into()),
+                        ..quill_window_options(if kind == ScreenshotDemo::ReadyCallDevices {
+                            "Quill — Call audio devices"
                         } else {
-                            1500
-                        },
-                    ))
-                    .await;
-                // `QUILL_DEMO_CLICK=x,y[;x,y…]` (demo-capture only): left-click
-                // at window points before the capture, to verify click paths.
-                #[cfg(feature = "demo-capture")]
-                if let Ok(clicks) = std::env::var("QUILL_DEMO_CLICK") {
-                    // Through the untyped handle: the typed one leases the
-                    // root view while the event dispatches, and a handler
-                    // reading it (a kit button) panicked.
-                    use gpui_kit::gpui::AnyWindowHandle;
-                    for point in clicks.split(';') {
-                        // `s:x,y,dy` scrolls by `dy` px at the point instead.
-                        if let Some(scroll) = point.strip_prefix("s:") {
-                            let parts: Vec<f32> = scroll
-                                .split(',')
-                                .filter_map(|v| v.trim().parse().ok())
-                                .collect();
-                            if let [x, y, dy] = parts[..] {
-                                let _ = AnyWindowHandle::from(demo_window).update(
-                                    cx,
-                                    |_, window, cx| {
-                                        use gpui_kit::gpui::{
-                                            Modifiers, PlatformInput, ScrollDelta,
-                                            ScrollWheelEvent, TouchPhase, point, px,
-                                        };
-                                        window.dispatch_event(
-                                            PlatformInput::ScrollWheel(ScrollWheelEvent {
-                                                position: point(px(x), px(y)),
-                                                delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
-                                                modifiers: Modifiers::default(),
-                                                touch_phase: TouchPhase::Moved,
-                                            }),
-                                            cx,
-                                        );
-                                    },
-                                );
-                            }
-                            cx.background_executor()
-                                .timer(Duration::from_millis(400))
-                                .await;
-                            continue;
+                            "Quill"
+                        })
+                    },
+                    move |window, cx| {
+                        let view =
+                            cx.new(|cx| ui::QuillApp::new_with_demo(window, cx, None, Some(kind)));
+                        if kind == ScreenshotDemo::ReadyTrayBehavior {
+                            install_main_window_tray(window, cx, &view);
+                            install_link_inbox(window, cx, &view);
                         }
-                        let Some((x, y)) = point.split_once(',') else {
-                            continue;
-                        };
-                        let (Ok(x), Ok(y)) = (x.trim().parse::<f32>(), y.trim().parse::<f32>())
-                        else {
-                            continue;
-                        };
-                        let position =
-                            gpui_kit::gpui::point(gpui_kit::gpui::px(x), gpui_kit::gpui::px(y));
-                        let _ = AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
-                            use gpui_kit::gpui::{
-                                Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
-                                PlatformInput,
-                            };
-                            window.dispatch_event(
-                                PlatformInput::MouseMove(MouseMoveEvent {
-                                    position,
-                                    pressed_button: None,
-                                    modifiers: Modifiers::default(),
-                                }),
-                                cx,
-                            );
-                            window.dispatch_event(
-                                PlatformInput::MouseDown(MouseDownEvent {
-                                    button: MouseButton::Left,
-                                    position,
-                                    modifiers: Modifiers::default(),
-                                    click_count: 1,
-                                    first_mouse: false,
-                                }),
-                                cx,
-                            );
-                            window.refresh();
-                        });
-                        // A real click spans frames: let one render between
-                        // press and release.
-                        cx.background_executor()
-                            .timer(Duration::from_millis(120))
-                            .await;
-                        let _ = AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
-                            use gpui_kit::gpui::{
-                                Modifiers, MouseButton, MouseUpEvent, PlatformInput,
-                            };
-                            window.dispatch_event(
-                                PlatformInput::MouseUp(MouseUpEvent {
-                                    button: MouseButton::Left,
-                                    position,
-                                    modifiers: Modifiers::default(),
-                                    click_count: 1,
-                                }),
-                                cx,
-                            );
-                        });
+                        if window.focused(cx).is_none() {
+                            window.focus(&view.focus_handle(cx), cx);
+                        }
+                        // The shell adds Quill's dialog hit-test barrier; Root
+                        // hosts the kit dialog and notification layers.
+                        let shell = cx.new(|_cx| ui::QuillShell::new(view));
+                        cx.new(|cx| gpui_kit::component::Root::new(shell, window, cx))
+                    },
+                )
+                .expect("failed to open screenshot demo window");
+
+            // `QUILL_DEMO_BACKGROUND=1`: leave the window behind the
+            // frontmost app (inactive), to measure the inactive path.
+            if std::env::var_os("QUILL_DEMO_BACKGROUND").is_none() {
+                let _ = demo_window.update(cx, |_, window, cx| {
+                    cx.activate(true);
+                    window.activate_window();
+                });
+            }
+
+            // Allow a couple of frames to paint, then signal the capture script.
+            cx.background_executor()
+                .timer(Duration::from_millis(
+                    if kind == ScreenshotDemo::ReadyStickerPlayback {
+                        400
+                    } else {
+                        1500
+                    },
+                ))
+                .await;
+            // `QUILL_DEMO_CLICK=x,y[;x,y…]` (demo-capture only): left-click
+            // at window points before the capture, to verify click paths.
+            #[cfg(feature = "demo-capture")]
+            if let Ok(clicks) = std::env::var("QUILL_DEMO_CLICK") {
+                // Through the untyped handle: the typed one leases the
+                // root view while the event dispatches, and a handler
+                // reading it (a kit button) panicked.
+                use gpui_kit::gpui::AnyWindowHandle;
+                for point in clicks.split(';') {
+                    // `s:x,y,dy` scrolls by `dy` px at the point instead.
+                    if let Some(scroll) = point.strip_prefix("s:") {
+                        let parts: Vec<f32> = scroll
+                            .split(',')
+                            .filter_map(|v| v.trim().parse().ok())
+                            .collect();
+                        if let [x, y, dy] = parts[..] {
+                            let _ =
+                                AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
+                                    use gpui_kit::gpui::{
+                                        Modifiers, PlatformInput, ScrollDelta, ScrollWheelEvent,
+                                        TouchPhase, point, px,
+                                    };
+                                    window.dispatch_event(
+                                        PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                            position: point(px(x), px(y)),
+                                            delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                                            modifiers: Modifiers::default(),
+                                            touch_phase: TouchPhase::Moved,
+                                        }),
+                                        cx,
+                                    );
+                                });
+                        }
                         cx.background_executor()
                             .timer(Duration::from_millis(400))
                             .await;
+                        continue;
                     }
-                }
-                #[cfg(feature = "demo-capture")]
-                if let Some(path) = std::env::var_os("QUILL_DEMO_CAPTURE") {
-                    let captured = demo_window
-                        .update(cx, |_, window, _| window.render_to_image())
-                        .map_err(|err| err.to_string())
-                        .and_then(|image| image.map_err(|err| err.to_string()))
-                        .and_then(|image| image.save(&path).map_err(|err| err.to_string()));
-                    if let Err(err) = captured {
-                        eprintln!("quill screenshot-demo: capture failed: {err}");
-                    }
-                }
-                let _ = std::fs::write(&marker_for_spawn, b"ready\n");
-                // `QUILL_DEMO_DEACTIVATE=1`: once ready, a second (blank)
-                // window takes key status, so the demo window goes from
-                // active to inactive, as when another app comes forward.
-                if std::env::var_os("QUILL_DEMO_DEACTIVATE").is_some() {
-                    cx.update(|cx| {
-                        if let Ok(other) = cx.open_window(
-                            WindowOptions {
-                                window_bounds: Some(WindowBounds::Windowed(Bounds {
-                                    origin: point(px(40.), px(40.)),
-                                    size: size(px(200.), px(120.)),
-                                })),
-                                ..Default::default()
-                            },
-                            |_, cx| cx.new(|_| EmptyView),
-                        ) {
-                            let _ = other.update(cx, |_, window, _| window.activate_window());
-                        }
+                    let Some((x, y)) = point.split_once(',') else {
+                        continue;
+                    };
+                    let (Ok(x), Ok(y)) = (x.trim().parse::<f32>(), y.trim().parse::<f32>()) else {
+                        continue;
+                    };
+                    let position =
+                        gpui_kit::gpui::point(gpui_kit::gpui::px(x), gpui_kit::gpui::px(y));
+                    let _ = AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
+                        use gpui_kit::gpui::{
+                            Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, PlatformInput,
+                        };
+                        window.dispatch_event(
+                            PlatformInput::MouseMove(MouseMoveEvent {
+                                position,
+                                pressed_button: None,
+                                modifiers: Modifiers::default(),
+                            }),
+                            cx,
+                        );
+                        window.dispatch_event(
+                            PlatformInput::MouseDown(MouseDownEvent {
+                                button: MouseButton::Left,
+                                position,
+                                modifiers: Modifiers::default(),
+                                click_count: 1,
+                                first_mouse: false,
+                            }),
+                            cx,
+                        );
+                        window.refresh();
                     });
+                    // A real click spans frames: let one render between
+                    // press and release.
+                    cx.background_executor()
+                        .timer(Duration::from_millis(120))
+                        .await;
+                    let _ = AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
+                        use gpui_kit::gpui::{Modifiers, MouseButton, MouseUpEvent, PlatformInput};
+                        window.dispatch_event(
+                            PlatformInput::MouseUp(MouseUpEvent {
+                                button: MouseButton::Left,
+                                position,
+                                modifiers: Modifiers::default(),
+                                click_count: 1,
+                            }),
+                            cx,
+                        );
+                    });
+                    cx.background_executor()
+                        .timer(Duration::from_millis(400))
+                        .await;
                 }
-                // Performance fixture:
-                // `QUILL_DEMO_AUTOSCROLL=<x>,<y>[,<dy>[,<steps>]]` scrolls
-                // whatever sits under that window point with synthetic wheel
-                // events (~60/s, `dy` px each, turning around every `steps`),
-                // to profile scrolling.
-                if let Some((x, y, step_dy, turn)) =
-                    std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
-                        let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
-                        let x = parts.next()??;
-                        let y = parts.next()??;
-                        let dy = parts.next().flatten().unwrap_or(24.);
-                        let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
-                        Some((x, y, dy, turn))
-                    })
-                {
-                    cx.spawn(async move |cx| {
-                        for step in 0_u32.. {
-                            cx.background_executor()
-                                .timer(Duration::from_millis(16))
-                                .await;
-                            let dy = if (step / turn) % 2 == 0 {
-                                -step_dy
-                            } else {
-                                step_dy
-                            };
-                            let scrolled = demo_window.update(cx, |_, window, cx| {
-                                window.dispatch_event(
-                                    PlatformInput::ScrollWheel(ScrollWheelEvent {
-                                        position: point(px(x), px(y)),
-                                        delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
-                                        modifiers: Modifiers::default(),
-                                        touch_phase: TouchPhase::Moved,
-                                    }),
-                                    cx,
-                                );
-                            });
-                            if scrolled.is_err() {
-                                break;
-                            }
+            }
+            #[cfg(feature = "demo-capture")]
+            if let Some(path) = std::env::var_os("QUILL_DEMO_CAPTURE") {
+                let captured = demo_window
+                    .update(cx, |_, window, _| window.render_to_image())
+                    .map_err(|err| err.to_string())
+                    .and_then(|image| image.map_err(|err| err.to_string()))
+                    .and_then(|image| image.save(&path).map_err(|err| err.to_string()));
+                if let Err(err) = captured {
+                    eprintln!("quill screenshot-demo: capture failed: {err}");
+                }
+            }
+            let _ = std::fs::write(&marker_for_spawn, b"ready\n");
+            // `QUILL_DEMO_DEACTIVATE=1`: once ready, a second (blank)
+            // window takes key status, so the demo window goes from
+            // active to inactive, as when another app comes forward.
+            if std::env::var_os("QUILL_DEMO_DEACTIVATE").is_some() {
+                cx.update(|cx| {
+                    if let Ok(other) = cx.open_window(
+                        WindowOptions {
+                            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                                origin: point(px(40.), px(40.)),
+                                size: size(px(200.), px(120.)),
+                            })),
+                            ..Default::default()
+                        },
+                        |_, cx| cx.new(|_| EmptyView),
+                    ) {
+                        let _ = other.update(cx, |_, window, _| window.activate_window());
+                    }
+                });
+            }
+            // Performance fixture:
+            // `QUILL_DEMO_AUTOSCROLL=<x>,<y>[,<dy>[,<steps>]]` scrolls
+            // whatever sits under that window point with synthetic wheel
+            // events (~60/s, `dy` px each, turning around every `steps`),
+            // to profile scrolling.
+            if let Some((x, y, step_dy, turn)) =
+                std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
+                    let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
+                    let x = parts.next()??;
+                    let y = parts.next()??;
+                    let dy = parts.next().flatten().unwrap_or(24.);
+                    let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
+                    Some((x, y, dy, turn))
+                })
+            {
+                cx.spawn(async move |cx| {
+                    for step in 0_u32.. {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(16))
+                            .await;
+                        let dy = if (step / turn) % 2 == 0 {
+                            -step_dy
+                        } else {
+                            step_dy
+                        };
+                        let scrolled = demo_window.update(cx, |_, window, cx| {
+                            window.dispatch_event(
+                                PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                    position: point(px(x), px(y)),
+                                    delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                                    modifiers: Modifiers::default(),
+                                    touch_phase: TouchPhase::Moved,
+                                }),
+                                cx,
+                            );
+                        });
+                        if scrolled.is_err() {
+                            break;
                         }
-                    })
-                    .detach();
-                }
-                cx.background_executor()
-                    .timer(Duration::from_millis(
-                        std::env::var("QUILL_DEMO_LINGER_MS")
-                            .ok()
-                            .and_then(|v| v.parse::<u64>().ok())
-                            .unwrap_or(if kind == ScreenshotDemo::ReadyStickerPlayback {
-                                7500
-                            } else {
-                                3500
-                            })
-                            .clamp(3500, 600000),
-                    ))
-                    .await;
-                cx.update(|cx| cx.quit());
-            })
-            .detach();
-        });
+                    }
+                })
+                .detach();
+            }
+            cx.background_executor()
+                .timer(Duration::from_millis(
+                    std::env::var("QUILL_DEMO_LINGER_MS")
+                        .ok()
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .unwrap_or(if kind == ScreenshotDemo::ReadyStickerPlayback {
+                            7500
+                        } else {
+                            3500
+                        })
+                        .clamp(3500, 600000),
+                ))
+                .await;
+            cx.update(|cx| cx.quit());
+        })
+        .detach();
+    });
 }
