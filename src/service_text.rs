@@ -221,7 +221,7 @@ fn group_digits(value: i64) -> String {
     let digits = value.abs().to_string();
     let mut out = String::new();
     for (index, ch) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index) % 3 == 0 {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
             out.push(',');
         }
         out.push(ch);
