@@ -61,9 +61,10 @@ CONFIG=(
 case "$OS" in
   linux) CONFIG+=(--enable-pic --enable-pthreads) ;;
   macos) CONFIG+=(--enable-pthreads) ;;
-  # Native Windows threads and a static libgcc: the DLLs import only the
-  # system (UCRT/KERNEL32/bcrypt), no MinGW runtime DLLs.
-  windows) CONFIG+=(--target-os=mingw32 --disable-pthreads --enable-w32threads --extra-ldflags=-static-libgcc) ;;
+  # Native Windows threads, and the MinGW runtime (libgcc, and winpthread,
+  # which still backs clock_gettime/nanosleep) linked statically: the DLLs
+  # import only the system (UCRT/KERNEL32/bcrypt) — check-bundle-pe.ps1.
+  windows) CONFIG+=(--target-os=mingw32 --disable-pthreads --enable-w32threads "--extra-ldflags=-static-libgcc -static") ;;
 esac
 if [[ "$OS" != macos ]] && ! command -v nasm >/dev/null; then
   echo "error: nasm is required for FFmpeg's x86 assembly (apt install nasm / pacman -S nasm)" >&2
@@ -95,7 +96,7 @@ case "$OS" in
       -install_name @rpath/libquillvideo.dylib -o "$PREFIX/lib/libquillvideo.dylib"
     ;;
   windows)
-    gcc -O2 -shared -Wall -Wextra -Werror -static-libgcc \
+    gcc -O2 -shared -Wall -Wextra -Werror -static-libgcc -static \
       -I"$PREFIX/include" "$SHIM" -L"$PREFIX/lib" "${LIBS[@]}" -o "$PREFIX/bin/quillvideo.dll"
     ;;
 esac
