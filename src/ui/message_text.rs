@@ -420,7 +420,11 @@ pub(super) fn kit_avatar_element(
         return Avatar::new()
             .name(name)
             .with_size(size)
-            .src(path.to_path_buf())
+            // Decoded at the drawn size, not the file's (`image_budget`).
+            .src(super::image_budget::sized_image(
+                super::image_budget::SizedSource::Path(std::sync::Arc::from(path)),
+                size,
+            ))
             .into_any_element();
     }
     initials_circle(name, size)
@@ -1051,6 +1055,7 @@ fn inline_paragraph(
         ));
     }
     let full: SharedString = text.clone().into();
+    let bidi_source = (highlights.clone(), mono.clone());
     let styled = StyledText::new(text)
         .with_highlights(highlights)
         .with_font_family_overrides(mono);
@@ -1060,6 +1065,7 @@ fn inline_paragraph(
         full,
         styled,
     )
+    .bidi(bidi_source.0, bidi_source.1)
     .selection_color(accent().opacity(0.35).into())
     .message(msg_key)
     // Messages read top to bottom by id; paragraphs within one in order.

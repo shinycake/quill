@@ -166,11 +166,56 @@ fn speck_coverage(px: f32, py: f32, cx: f32, cy: f32, w: f32, h: f32) -> f32 {
     (0.5 - distance).clamp(0., 1.)
 }
 
+/// The media tile while media spoilers show (16 MB decoded, and as much
+/// in the atlas): built on first use, released once nothing painted it for
+/// `TILE_UNUSED` and no cached frame can still show it.
+struct MediaTile {
+    image: Arc<RenderImage>,
+    painted: Instant,
+    stamp: super::image_budget::PaintStamp,
+}
+
+thread_local! {
+    static TILE: std::cell::RefCell<Option<MediaTile>> = const { std::cell::RefCell::new(None) };
+}
+
+const TILE_UNUSED: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The media tile, built if needed; marks it painted now.
+fn image_tile() -> Arc<RenderImage> {
+    TILE.with(|tile| {
+        let mut tile = tile.borrow_mut();
+        let tile = tile.get_or_insert_with(|| MediaTile {
+            image: build_image_tile(),
+            painted: Instant::now(),
+            stamp: super::image_budget::paint_stamp(),
+        });
+        tile.painted = Instant::now();
+        tile.stamp = super::image_budget::paint_stamp();
+        tile.image.clone()
+    })
+}
+
+/// Drop the media tile (and its atlas copy) once media spoilers have been
+/// off screen for a while. `window`: the window being drawn, if any.
+pub(super) fn release_media_tile(window: Option<&mut Window>, cx: &mut App) {
+    let unused = TILE.with(|tile| {
+        let mut tile = tile.borrow_mut();
+        let idle = tile.as_ref().is_some_and(|tile| {
+            tile.painted.elapsed() >= TILE_UNUSED
+                && !super::image_budget::may_still_show(tile.stamp)
+        });
+        if idle { tile.take() } else { None }
+    });
+    if let Some(tile) = unused {
+        cx.drop_image(tile.image, window);
+    }
+}
+
 /// The media tile: `FRAMES` frames of white specks on transparent, each
 /// `CANVAS × TILE_SCALE` pixels square, seamless when repeated.
-fn image_tile() -> Arc<RenderImage> {
-    static TILE: OnceLock<Arc<RenderImage>> = OnceLock::new();
-    TILE.get_or_init(|| {
+fn build_image_tile() -> Arc<RenderImage> {
+    {
         let side = (CANVAS * TILE_SCALE) as u32;
         let frames: smallvec::SmallVec<[image::Frame; 1]> = (0..FRAMES)
             .map(|frame| {
@@ -211,8 +256,7 @@ fn image_tile() -> Arc<RenderImage> {
             })
             .collect();
         Arc::new(RenderImage::new(frames))
-    })
-    .clone()
+    }
 }
 
 /// Paint the media spoiler's specks over `bounds` (tiles anchored at its

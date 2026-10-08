@@ -101,6 +101,16 @@ pub(super) fn connect() -> Vec<f32> {
     finish(out)
 }
 
+/// Message notification: one soft two-note "ding" (the default tone for
+/// notification sounds, ~0.45 s). TDLib ships no default sound file, so the
+/// client's own is synthesized like the call tones.
+pub(super) fn notification() -> Vec<f32> {
+    let mut out = vec![0.0; frames(0.45)];
+    mix(&mut out, 0.0, &chime(880.0, 0.3, 0.1, 0.5));
+    mix(&mut out, 0.09, &chime(1318.5, 0.36, 0.12, 0.5));
+    finish(out)
+}
+
 /// Call ended: a short falling two-note chime.
 pub(super) fn end() -> Vec<f32> {
     let mut out = vec![0.0; frames(0.55)];
@@ -141,7 +151,7 @@ pub(super) fn unmute() -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SAMPLE_RATE, busy, connect, end, incoming, mute, ringback, unmute};
+    use super::{SAMPLE_RATE, busy, connect, end, incoming, mute, notification, ringback, unmute};
 
     fn all() -> Vec<(&'static str, Vec<f32>)> {
         vec![
@@ -152,6 +162,7 @@ mod tests {
             ("busy", busy()),
             ("mute", mute()),
             ("unmute", unmute()),
+            ("notification", notification()),
         ]
     }
 

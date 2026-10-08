@@ -179,3 +179,11 @@ mod tests {
         output.stdout
     }
 }
+
+/// The bidi geometry of the vendored input engine (`third_party/gpui-base`,
+/// docs/decisions/codex-rtl-composer.md) is pure and has its own unit tests;
+/// compiling the module here runs them with the rest of `cargo test`.
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../third_party/gpui-base/src/input/editor/display_map/bidi.rs"]
+mod vendored_input_bidi;

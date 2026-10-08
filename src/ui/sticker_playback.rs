@@ -20,6 +20,8 @@ pub(super) struct StickerClip {
     /// the current one (`frame_clock`), instead of GPUI animating a
     /// multi-frame image at the display's refresh rate.
     frames: Arc<[Arc<RenderImage>]>,
+    /// Decoded size of all frames (the cache's byte budget).
+    bytes: usize,
     fps: f64,
     started: Instant,
     duration: Duration,
@@ -31,9 +33,10 @@ pub(super) struct StickerJob {
     cancel: Arc<AtomicBool>,
     child: Arc<Mutex<Option<std::process::Child>>>,
 }
-/// Which playback cache. Stickers decode at 128 px (16 clips). Custom emoji
-/// are small and many — every visible one animates, as in Telegram
-/// Desktop — so 56 px, at most 36 frames, 160 clips (~70 MB at worst).
+/// Which playback cache. Stickers decode at 128 px (at most 16 clips,
+/// 48 MB). Custom emoji are small and many — every visible one animates,
+/// as in Telegram Desktop — so 56 px, at most 36 frames, 160 clips and
+/// 32 MB. Both play at most 30 fps (`MAX_PLAYBACK_FPS`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PlaybackSize {
     Sticker,
@@ -52,6 +55,14 @@ impl PlaybackSize {
         match self {
             Self::Sticker => 16,
             Self::Emoji => 160,
+        }
+    }
+
+    /// Decoded frames kept, in bytes.
+    fn budget_bytes(self) -> usize {
+        match self {
+            Self::Sticker => 48 * 1024 * 1024,
+            Self::Emoji => 32 * 1024 * 1024,
         }
     }
 
@@ -153,6 +164,28 @@ impl QuillApp {
         }
     }
 
+    /// Evict least recently shown clips until one more of `bytes` fits
+    /// the cache's count and byte budget. False when the rest were all
+    /// shown just now.
+    fn make_room(&mut self, size: PlaybackSize, bytes: usize) -> bool {
+        loop {
+            let cache = self.playback_cache(size);
+            let held: usize = cache.clips.values().map(|clip| clip.bytes).sum();
+            if !over_budget(
+                cache.clips.len(),
+                held,
+                bytes,
+                size.capacity(),
+                size.budget_bytes(),
+            ) {
+                return true;
+            }
+            if !self.evict_oldest_clip(size) {
+                return false;
+            }
+        }
+    }
+
     fn ensure_sticker_playback(
         &mut self,
         id: FileId,
@@ -191,8 +224,7 @@ impl QuillApp {
         };
         let epoch = cache.epoch;
         // Full of clips on screen: this one stays a still.
-        if self.playback_cache(size).clips.len() >= size.capacity() && !self.evict_oldest_clip(size)
-        {
+        if !self.make_room(size, 0) {
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
@@ -219,6 +251,7 @@ impl QuillApp {
                                     &path,
                                     edge as usize,
                                     max_frames,
+                                    quill::sticker_playback::MAX_PLAYBACK_FPS,
                                     &cancel,
                                 )?;
                                 let frames = decoded
@@ -291,7 +324,14 @@ impl QuillApp {
                             })
                             .collect::<Vec<_>>()
                             .into();
-                        Ok((frames, fps, duration))
+                        let bytes = frames
+                            .iter()
+                            .map(|frame| {
+                                let size = frame.size(0);
+                                size.width.0.max(0) as usize * size.height.0.max(0) as usize * 4
+                            })
+                            .sum();
+                        Ok((frames, bytes, fps, duration))
                     })();
                     let _ = std::fs::remove_dir_all(dir);
                     result
@@ -304,20 +344,19 @@ impl QuillApp {
                     }
                     this.playback_cache_mut(size).jobs.remove(&id.0);
                     let duration = match result {
-                        Ok((frames, fps, duration)) => {
+                        Ok((frames, bytes, fps, duration)) => {
                             let clip = StickerClip {
                                 frames,
+                                bytes,
                                 fps,
                                 used: Rc::new(Cell::new(Instant::now())),
                                 started: Instant::now(),
                                 duration,
                             };
-                            if this.playback_cache(size).clips.len() >= size.capacity() {
-                                // A clip shown meanwhile may keep its place:
-                                // the cache then runs one over until the
-                                // next decode finds room.
-                                let _ = this.evict_oldest_clip(size);
-                            }
+                            // Clips shown meanwhile keep their place: the
+                            // cache then runs over until the next decode
+                            // finds room.
+                            let _ = this.make_room(size, bytes);
                             this.playback_cache_mut(size).clips.insert(id.0, clip);
                             Some(duration)
                         }
@@ -599,8 +638,8 @@ impl QuillApp {
             clip.frames.get(index).cloned()
         });
         if animating && app.window_active.get() {
-            // Stickers are drawn large and play at their own rate (Lottie
-            // runs at 60); small emoji look the same at 30.
+            // Clips play at their decoded rate, at most 30 fps
+            // (`MAX_PLAYBACK_FPS`; Lottie files are usually 60).
             let fps = match size {
                 PlaybackSize::Sticker => 60,
                 PlaybackSize::Emoji => 30,
@@ -620,5 +659,30 @@ impl QuillApp {
             });
         }
         image
+    }
+}
+
+/// Whether `clips` clips holding `held` bytes leave no room for one more
+/// of `adding` bytes (at least one clip always fits an empty cache).
+fn over_budget(clips: usize, held: usize, adding: usize, capacity: usize, budget: usize) -> bool {
+    clips > 0 && (clips >= capacity || held + adding > budget)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::over_budget;
+
+    #[test]
+    fn clip_cache_is_bounded_by_count_and_bytes() {
+        const MB: usize = 1024 * 1024;
+        assert!(
+            !over_budget(0, 0, 100 * MB, 16, 48 * MB),
+            "one clip always fits"
+        );
+        assert!(!over_budget(3, 20 * MB, 6 * MB, 16, 48 * MB));
+        assert!(over_budget(8, 44 * MB, 6 * MB, 16, 48 * MB), "bytes");
+        assert!(over_budget(16, MB, 0, 16, 48 * MB), "count");
+        // Checking room before a decode (size unknown yet).
+        assert!(over_budget(7, 48 * MB + 1, 0, 16, 48 * MB));
     }
 }

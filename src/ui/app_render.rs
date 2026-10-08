@@ -28,10 +28,12 @@ impl Render for QuillApp {
         // show any more leave the atlas (`image_budget`).
         super::image_budget::begin_frame();
         super::image_budget::sweep(window, cx);
+        super::spoiler_fx::release_media_tile(Some(window), cx);
         let image_cache = self.slices.image_cache();
         if let Some(cache) = &image_cache {
             cache.update(cx, |cache, cx| cache.trim(window, cx));
         }
+        self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
         // Rows the history list painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
@@ -812,9 +814,7 @@ impl Render for QuillApp {
                 this.child(overlay)
             });
         match image_cache {
-            Some(cache) => {
-                super::image_budget::CacheScope::new(cache.into(), root).into_any_element()
-            }
+            Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),
         }
     }

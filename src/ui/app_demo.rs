@@ -572,6 +572,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — expandable block quotes".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyRtlComposer => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — RTL composer draft".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyPoll => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1421,6 +1427,7 @@ impl QuillApp {
 
         let pending_attachments = demo_pending_attachments(demo);
 
+        let audio_output = super::audio::SharedOutput::default();
         let (spellchecker, spell_info) = Self::new_spellchecker(true);
         let mut app = Self {
             update_state: if demo.is_none() {
@@ -1675,7 +1682,6 @@ impl QuillApp {
             defaults_sound_picker: None,
             defaults_exceptions_scope: None,
             notifications_confirm: None,
-            notify_sound_inflight: Arc::new(AtomicUsize::new(0)),
             voice_capture: None,
             video_note_capture: None,
             record_locked: false,
@@ -1695,13 +1701,14 @@ impl QuillApp {
             call_window_raised: false,
             call_window_closed_by_user: None,
             call_ended_at: None,
-            call_sounds: Default::default(),
+            call_sounds: super::call_sounds::CallSounds::new(audio_output.clone()),
             call_sound_marks: Default::default(),
             playing_voice: None,
             playing_audio: None,
             pending_audio_play: None,
             pending_voice_play: None,
-            voice_player: None,
+            audio: super::audio::AudioEngine::new(audio_output.clone()),
+            notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
             playback_clock: None,
             playback_path: None,
             seek_slider: None,
@@ -1758,7 +1765,7 @@ impl QuillApp {
             viewer_video: None,
             pip_window: None,
             viewer_video_path: None,
-            viewer_player: None,
+            viewer_audio: super::audio::AudioEngine::new(audio_output.clone()),
             viewer_clock: None,
             capture_blocked: false,
             capture_notice_dismissed: false,

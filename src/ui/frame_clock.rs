@@ -233,7 +233,7 @@ fn trace_count(what: &'static str, key: String) {
     });
 }
 
-fn trace_ticks() -> bool {
+pub(super) fn trace_ticks() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_TICKS").is_some())
 }

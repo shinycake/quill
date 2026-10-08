@@ -787,7 +787,7 @@ impl QuillApp {
                 apply_ready_voice(session, &self.demo_sink, &self.demo_seq);
                 apply_ready_audio(session, &self.demo_sink, &self.demo_seq);
             }
-            // Fake an in-progress playback without spawning ffplay: voice
+            // Fake an in-progress playback without starting audio: voice
             // note 90 (12 s) playing from 5.0 s — the tick advances it —
             // and the music track 801 (214 s) paused with a remembered
             // 1:27 position, so both rows show seek bars.
@@ -1628,6 +1628,89 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — expandable block quotes".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRtlComposer)) {
+            let text = match std::env::var("QUILL_DEMO_RTL").as_deref() {
+                Ok("mixed") => "היי, ההזמנה 12345 מוכנה ב-Telegram Desktop",
+                Ok("lines") => "שלום עולם, מה קורה?\nHello world, how are you?\n123",
+                Ok("empty") => "",
+                _ => "שלום עולם, מה שלומך היום",
+            };
+            // `QUILL_DEMO_RTL_SELECT=<start>..<end>` (byte offsets) focuses the
+            // composer with that range selected, `QUILL_DEMO_RTL_CARET=<at>`
+            // with the caret there.
+            let select = std::env::var("QUILL_DEMO_RTL_SELECT").ok().and_then(|v| {
+                let (a, b) = v.split_once("..")?;
+                Some(a.parse::<usize>().ok()?..b.parse::<usize>().ok()?)
+            });
+            // Right-to-left bubbles beside the composer: an incoming Hebrew
+            // message (wraps) and an outgoing mixed one.
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                    self.demo_sink.clone();
+                let chat = session.open_chat.unwrap_or(ChatId(11));
+                for (id, outgoing, body) in [
+                    (
+                        901_i64,
+                        false,
+                        "שלום עולם, מה שלומך היום? זו הודעה ארוכה יותר כדי לראות את הטקסט נשבר לשורות בתוך הבועה.",
+                    ),
+                    (902, true, "היי, ההזמנה 12345 מוכנה ב-Telegram Desktop"),
+                    (904, false, "מחכה לעוד עדכונים ממנה"),
+                    (
+                        903,
+                        false,
+                        "קישור https://example.com/he בתוך הודעה ארוכה עם מילה מודגשת וקוד לשורות נוספות בבועה",
+                    ),
+                ] {
+                    // Entities by needle: a link, a bold word and inline code.
+                    let entity = |needle: &str, kind: &str| -> Option<String> {
+                        let start = body.find(needle)?;
+                        let from = quill::text::utf8_to_utf16_offset(body, start).ok()?;
+                        let to =
+                            quill::text::utf8_to_utf16_offset(body, start + needle.len()).ok()?;
+                        Some(format!(
+                            r#"{{"@type":"textEntity","offset":{from},"length":{},"type":{{"@type":"{kind}"}}}}"#,
+                            to - from
+                        ))
+                    };
+                    let entities = if id == 903 {
+                        [
+                            entity("https://example.com/he", "textEntityTypeUrl"),
+                            entity("מודגשת", "textEntityTypeBold"),
+                            entity("וקוד", "textEntityTypeCode"),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(",")
+                    } else {
+                        String::new()
+                    };
+                    let body = serde_json::to_string(body).unwrap_or_default();
+                    let json = format!(
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[{entities}]}}}}}}}}"#,
+                        chat.0
+                    );
+                    if let Some(owned) =
+                        quill::telegram::client::copy_and_parse(&json, &self.demo_seq, &dyn_sink)
+                    {
+                        session.apply(owned);
+                    }
+                }
+            }
+            let caret = std::env::var("QUILL_DEMO_RTL_CARET")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok());
+            self.composer.update(cx, |input, cx| {
+                input.set_value(text, window, cx);
+                if let Some(range) = select.clone().or(caret.map(|at| at..at)) {
+                    input.focus(window, cx);
+                    input.set_selected_range(range, cx);
+                }
+            });
+            self.status_note = "screenshot demo — RTL composer".into();
+        }
     }
 
     /// Screenshot-demo fixture setup (payments): applies the `payments` demo
@@ -1689,8 +1772,8 @@ impl QuillApp {
             // playback, not faked: the clock keeps ticking and the 125 ms
             // refresh shows the frame for the current clock position.
             // `viewer_demo_sync_frames` suppresses the async extraction that
-            // `open_media_viewer` would otherwise start. The ffplay
-            // subprocess is skipped (demo), like the audio slice.
+            // `open_media_viewer` would otherwise start. The audio
+            // engine is skipped (demo), like the audio slice.
             self.viewer_demo_sync_frames = true;
             self.open_media_viewer(ChatId(11), MessageId(204), cx);
             if let Some(item) = self.media_viewer.current().cloned()
