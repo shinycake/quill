@@ -678,6 +678,18 @@ pub struct QuillApp {
     /// `parity:platform-deep-links`: resolved chat + action waiting for
     /// render (which owns the `Window`) to open it.
     pub(super) pending_deep_link_open: Option<(ChatId, quill::state::DeepLinkAction)>,
+    /// A clicked message entity (mention, hashtag, link…) waiting for
+    /// render to act on it (`entity_links`).
+    pub(super) pending_link: Option<super::entity_links::PendingLink>,
+    /// The link under the latest right-press, and where it was pressed.
+    pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
+    /// The link the open message menu was opened over.
+    pub(super) message_menu_link: Option<quill::text::LinkTarget>,
+    pub(super) link_tooltip: Option<super::entity_links::LinkTooltip>,
+    /// The "Open this link?" box (`DialogKind::OpenLink`).
+    pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
+    /// The copy menu of a phone number, card number or date.
+    pub(super) link_popup: Option<super::entity_links::LinkPopup>,
     /// B1: one-time custom keyboards the user already tapped
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
@@ -786,6 +798,9 @@ pub struct QuillApp {
     pub(super) viewer_rotated: Option<(PathBuf, u8, Arc<RenderImage>)>,
     /// Counts viewer opens; keys the 200 ms fade-in so each open animates.
     pub(super) viewer_open_gen: u64,
+    /// A media-timestamp link opened this message's video; the viewer
+    /// starts it at the given second once the clip is ready.
+    pub(super) pending_viewer_seek: Option<(MessageId, f64)>,
     /// Last mouse movement over the viewer (controls auto-hide clock).
     pub(super) viewer_last_activity: std::time::Instant,
     /// Toolbar, arrows and caption are faded out (after the idle wait).

@@ -106,6 +106,8 @@ pub enum DialogKind {
     /// `parity:platform-deep-links`: TDLib's deep-link info / error text.
     DeepLinkInfo,
     DeepLinkInvite,
+    /// "Open this link?" for a hidden or look-alike message link.
+    OpenLink,
     PollVoters,
     ArchiveSettings,
     ArchivedStickers,
@@ -188,6 +190,7 @@ impl QuillShell {
             DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
             DialogKind::DeepLinkInfo => app.deep_link_dialog.is_some(),
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
+            DialogKind::OpenLink => app.open_link_confirm.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
             DialogKind::ArchivedStickers => app.sticker_settings_open,
             DialogKind::EmojiSets => app.session().is_some_and(|s| s.emoji.open),
@@ -237,6 +240,7 @@ impl QuillShell {
             DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
             DialogKind::DeepLinkInfo => QuillApp::build_deep_link_dialog,
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
+            DialogKind::OpenLink => QuillApp::build_open_link_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
             DialogKind::ArchiveSettings => QuillApp::build_archive_settings_dialog,
             DialogKind::ArchivedStickers => QuillApp::build_archived_stickers_dialog,
@@ -297,6 +301,7 @@ impl QuillShell {
         // low-priority informational dialogs.
         DialogKind::DeepLinkInfo,
         DialogKind::DeepLinkInvite,
+        DialogKind::OpenLink,
         DialogKind::PaymentForm,
         DialogKind::PaymentReceipt,
         DialogKind::Subscriptions,

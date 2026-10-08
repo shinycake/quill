@@ -38,7 +38,7 @@ fn replay_text_entities_mixed_nested_unknown_and_malformed() {
             r#"{"@type":"textEntityTypePreCode","language":"rust"}"#,
         ),
         // Unknown types are ignored, never crash the parse.
-        ent("Bold", r#"{"@type":"textEntityTypeMention"}"#),
+        ent("Bold", r#"{"@type":"textEntityTypeFutureThing"}"#),
         // textEntityTypeBlockQuote is parsed (kept) since the blockquote slice.
         ent("Bold", r#"{"@type":"textEntityTypeBlockQuote"}"#),
         ent(

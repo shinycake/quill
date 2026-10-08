@@ -29,6 +29,7 @@ pub mod key_fingerprint;
 pub mod layout;
 pub mod lifecycle;
 pub mod link_handler;
+pub mod link_policy;
 pub mod local_path;
 pub mod local_time;
 pub mod marketplace;
