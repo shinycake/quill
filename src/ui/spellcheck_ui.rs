@@ -165,7 +165,7 @@ impl QuillApp {
     fn build_composer_menu(owner: &WeakEntity<Self>, cx: &App) -> NativeMenu {
         let menu = NativeMenu::new();
         let Some(app) = owner.upgrade() else {
-            return edit_menu_items(menu, false);
+            return edit_menu_items(menu, false, false);
         };
         let app = app.read(cx);
         let input = app.composer.read(cx);
@@ -176,7 +176,10 @@ impl QuillApp {
             let text = input.value().to_string();
             menu = spelling_menu_items(menu, &app.spellchecker, &text, selection);
         }
-        edit_menu_items(menu, has_selection)
+        // Cut / Copy / Paste / Paste as Plain Text / Select All, then the
+        // Formatting submenu with its shortcuts (tdesktop's field menu).
+        let menu = edit_menu_items(menu, has_selection, true);
+        Self::formatting_menu_items(menu.separator(), has_selection)
     }
 
     pub(super) fn on_spelling_replace(
@@ -335,12 +338,17 @@ fn spelling_menu_items(
 }
 
 /// The kit's default input menu items (a custom builder replaces them).
-fn edit_menu_items(menu: NativeMenu, has_selection: bool) -> NativeMenu {
-    menu.menu_with_disabled("Cut", !has_selection, Box::new(Cut))
+fn edit_menu_items(menu: NativeMenu, has_selection: bool, plain_paste: bool) -> NativeMenu {
+    let menu = menu
+        .menu_with_disabled("Cut", !has_selection, Box::new(Cut))
         .menu_with_disabled("Copy", !has_selection, Box::new(Copy))
-        .menu("Paste", Box::new(Paste))
-        .separator()
-        .menu("Select All", Box::new(SelectAll))
+        .menu("Paste", Box::new(Paste));
+    let menu = if plain_paste {
+        QuillApp::paste_plain_menu_item(menu)
+    } else {
+        menu
+    };
+    menu.separator().menu("Select All", Box::new(SelectAll))
 }
 
 /// One underline per visual line a word occupies (a word longer than the

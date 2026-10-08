@@ -1,5 +1,9 @@
 //! composer submit/send/edit/reply/scheduling, command menu state, drafts consumption.
 
+use super::actions::{
+    FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler,
+    FormatStrikethrough, FormatUnderline,
+};
 use super::app::{PaneMode, QuillApp};
 use super::demo::demo_media_allowlist;
 use super::message_text::rich_block_element;
@@ -767,32 +771,70 @@ impl QuillApp {
                 }
             })
             .dropdown_menu(move |mut menu, _, _| {
-                for (name, action) in [
-                    ("Bold", FormatAction::Bold),
-                    ("Italic", FormatAction::Italic),
-                    ("Underline", FormatAction::Underline),
-                    ("Strikethrough", FormatAction::Strikethrough),
-                    ("Inline code", FormatAction::Code),
-                    ("Code block", FormatAction::Pre),
-                    ("Spoiler", FormatAction::Spoiler),
-                    ("Block quote", FormatAction::BlockQuote),
-                    ("Insert link", FormatAction::Link(String::new())),
-                ] {
+                // The shortcut is shown next to each item through its
+                // action's key binding; the click handler applies the
+                // format directly because focus is on the menu, not the
+                // composer, when it fires.
+                let entries: [(&str, FormatAction, Option<Box<dyn Action>>); 9] = [
+                    ("Bold", FormatAction::Bold, Some(Box::new(FormatBold))),
+                    ("Italic", FormatAction::Italic, Some(Box::new(FormatItalic))),
+                    (
+                        "Underline",
+                        FormatAction::Underline,
+                        Some(Box::new(FormatUnderline)),
+                    ),
+                    (
+                        "Strikethrough",
+                        FormatAction::Strikethrough,
+                        Some(Box::new(FormatStrikethrough)),
+                    ),
+                    (
+                        "Inline code",
+                        FormatAction::Code,
+                        Some(Box::new(FormatMonospace)),
+                    ),
+                    ("Code block", FormatAction::Pre, None),
+                    (
+                        "Spoiler",
+                        FormatAction::Spoiler,
+                        Some(Box::new(FormatSpoiler)),
+                    ),
+                    (
+                        "Block quote",
+                        FormatAction::BlockQuote,
+                        Some(Box::new(FormatBlockQuote)),
+                    ),
+                    ("Insert link", FormatAction::Link(String::new()), None),
+                ];
+                for (name, action, shortcut) in entries {
                     let owner = owner.clone();
-                    menu = menu.item(PopupMenuItem::new(name).on_click(move |_, window, cx| {
+                    let mut item = PopupMenuItem::new(name).on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| {
+                            if matches!(action, FormatAction::Link(_))
+                                && !this.composer.read(cx).selected_range().is_empty()
+                            {
+                                // With selected text, ask for the address
+                                // (Cmd/Ctrl+K); without, insert `[]()`.
+                                this.open_composer_link_dialog(window, cx);
+                                return;
+                            }
                             this.apply_composer_format(action.clone(), window, cx)
                         });
-                    }));
+                    });
+                    if let Some(shortcut) = shortcut {
+                        item = item.action(shortcut);
+                    }
+                    menu = menu.item(item);
                 }
                 let owner = owner.clone();
-                menu.separator()
-                    .item(
-                        PopupMenuItem::new("Clear formatting").on_click(move |_, window, cx| {
+                menu.separator().item(
+                    PopupMenuItem::new("Clear formatting")
+                        .action(Box::new(FormatClear))
+                        .on_click(move |_, window, cx| {
                             let _ =
                                 owner.update(cx, |this, cx| this.clear_composer_format(window, cx));
                         }),
-                    )
+                )
             })
     }
 

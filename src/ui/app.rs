@@ -349,6 +349,10 @@ pub struct QuillApp {
     /// one by one, and it touches the file system).
     pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
+    /// The composer's link dialog (Cmd/Ctrl+K on a selection).
+    pub(super) composer_link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
+    /// Cross-fade timeline of the round Send / Record / Save button.
+    pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
     /// Smooth reveal of a bot's streaming reply (`bot_stream`).
     pub(super) stream_reveal: std::cell::RefCell<super::bot_stream::StreamReveal>,
     /// Deleted messages still dissolving (`vanish`).

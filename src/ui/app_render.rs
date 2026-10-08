@@ -1,12 +1,14 @@
 //! impl Render for QuillApp (root view composition).
 
 use super::actions::{
-    CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, FocusComposer, FocusSidebar,
-    FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, NextChat, OpenChatSearch,
-    OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, SpellingIgnore,
-    SpellingLearn, SpellingReplace, SpellingUnlearn, SubmitCode, SubmitPassword, SubmitPhone,
-    ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical,
-    ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
+    ComposerPastePlain, FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear,
+    FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, LoadOlder,
+    MinimizeWindow, NextChat, OpenChatSearch, OpenHelp, OpenSearch, OpenSettings, OpenShortcuts,
+    PrevChat, QuitApp, SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn, SubmitCode,
+    SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
+    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
+    ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -16,7 +18,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, view_for};
-use quill::composer::FormatAction;
+use quill::composer::ComposerShortcut;
 use quill::ids::ChatId;
 use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, StoryPostOutcome, connection_indicator};
@@ -462,19 +464,34 @@ impl Render for QuillApp {
                 this.on_spelling_ignore(action, cx);
             }))
             .on_action(cx.listener(|this, _: &FormatBold, window, cx| {
-                if this.composer.read(cx).focus_handle(cx).is_focused(window) {
-                    this.apply_composer_format(FormatAction::Bold, window, cx);
-                }
+                this.run_composer_shortcut(ComposerShortcut::Bold, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FormatItalic, window, cx| {
-                if this.composer.read(cx).focus_handle(cx).is_focused(window) {
-                    this.apply_composer_format(FormatAction::Italic, window, cx);
-                }
+                this.run_composer_shortcut(ComposerShortcut::Italic, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FormatUnderline, window, cx| {
-                if this.composer.read(cx).focus_handle(cx).is_focused(window) {
-                    this.apply_composer_format(FormatAction::Underline, window, cx);
-                }
+                this.run_composer_shortcut(ComposerShortcut::Underline, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatStrikethrough, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Strikethrough, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatMonospace, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Monospace, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatBlockQuote, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::BlockQuote, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatSpoiler, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::Spoiler, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FormatClear, window, cx| {
+                this.run_composer_shortcut(ComposerShortcut::ClearFormatting, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ComposerEditLink, window, cx| {
+                this.composer_link_chord(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ComposerPastePlain, window, cx| {
+                this.paste_plain_text(window, cx);
             }))
             // kit Phase 7: in-window menu bar on Linux/Windows (macOS uses
             // the native menu bar installed by `setup_app_menus`).

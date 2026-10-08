@@ -1600,6 +1600,8 @@ impl QuillApp {
             window_active: std::cell::Cell::new(true),
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
+            composer_link_dialog: None,
+            send_morph: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),
             group_call_title_dialog: None,

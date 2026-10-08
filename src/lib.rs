@@ -39,6 +39,7 @@ pub mod poll;
 pub mod privacy;
 pub mod rich;
 pub mod row_fx;
+pub mod send_button;
 pub mod settings;
 pub mod spellcheck;
 pub mod state;
