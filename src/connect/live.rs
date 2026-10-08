@@ -136,6 +136,7 @@ pub fn start_prepared_live_connect(
     // are loaded once here; the UI saves them back on toggle.
     let mut session = session;
     session.call_prefs = load_call_prefs(&prepared.paths);
+    session.proxy.prefs = crate::settings::load_proxy_prefs(&prepared.paths);
     // MED1: local media prefs (remember-media-grouping) load the same way.
     session.media_prefs = load_media_prefs(&prepared.paths);
     // Slice A6: local contacts prefs (sync toggle) load the same way.

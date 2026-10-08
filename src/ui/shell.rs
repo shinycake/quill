@@ -147,6 +147,11 @@ pub enum DialogKind {
     /// Slice parity:platform-shortcuts-reference: read-only keyboard
     /// shortcuts reference dialog.
     Shortcuts,
+    /// `parity:proxy-settings`: proxy list, add / edit box, and the
+    /// `tg://proxy` link confirmation.
+    ProxyList,
+    ProxyEdit,
+    ProxyLink,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -222,6 +227,9 @@ impl QuillShell {
             DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
             DialogKind::CommunityHub => app.community_ui.hub_open,
             DialogKind::Shortcuts => app.shortcuts_open,
+            DialogKind::ProxyList => app.proxy_ui.list_open,
+            DialogKind::ProxyEdit => app.proxy_ui.editor.is_some(),
+            DialogKind::ProxyLink => app.proxy_ui.link.is_some(),
         }
     }
 
@@ -271,6 +279,9 @@ impl QuillShell {
             DialogKind::CommunityCreate => community::build_create_community_dialog,
             DialogKind::CommunityHub => community::build_community_hub_dialog,
             DialogKind::Shortcuts => QuillApp::build_shortcuts_dialog,
+            DialogKind::ProxyList => QuillApp::build_proxy_list_dialog,
+            DialogKind::ProxyEdit => QuillApp::build_proxy_edit_dialog,
+            DialogKind::ProxyLink => QuillApp::build_proxy_link_dialog,
         }
     }
 
@@ -297,6 +308,10 @@ impl QuillShell {
         // low-priority informational dialogs.
         DialogKind::DeepLinkInfo,
         DialogKind::DeepLinkInvite,
+        // The edit / link boxes open over the list, so they rank first.
+        DialogKind::ProxyEdit,
+        DialogKind::ProxyLink,
+        DialogKind::ProxyList,
         DialogKind::PaymentForm,
         DialogKind::PaymentReceipt,
         DialogKind::Subscriptions,

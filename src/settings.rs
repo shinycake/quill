@@ -200,6 +200,19 @@ pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Resu
     save_json_prefs(paths, "call_prefs.json", prefs)
 }
 
+/// `parity:proxy-settings`: client-side auto-switch preferences
+/// (`proxy_prefs.json`); the proxy list itself lives in TDLib.
+pub fn load_proxy_prefs(paths: &AccountPaths) -> crate::proxy::ProxyPrefs {
+    load_json_prefs(paths, "proxy_prefs.json")
+}
+
+pub fn save_proxy_prefs(
+    paths: &AccountPaths,
+    prefs: &crate::proxy::ProxyPrefs,
+) -> std::io::Result<()> {
+    save_json_prefs(paths, "proxy_prefs.json", prefs)
+}
+
 /// MED3: auto-download bitflags per media type, mirroring TGX
 /// `TdlibFilesManager` (`settings_autodownload` key, per-chat-type shifts):
 /// PHOTO=0x01, VOICE=0x02, VIDEO=0x04, FILE=0x08, MUSIC=0x10, GIF=0x20,

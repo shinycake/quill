@@ -42,6 +42,7 @@ pub mod platform;
 pub mod playback;
 pub mod poll;
 pub mod privacy;
+pub mod proxy;
 pub mod rich;
 pub mod row_fx;
 pub mod send_button;

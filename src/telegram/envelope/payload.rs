@@ -645,6 +645,16 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        // `parity:proxy-settings`: schema 1.8.67 :10118 / :10121 / :10077.
+        "addedProxies" => Ok(EnvelopePayload::AddedProxies {
+            proxies: crate::proxy::parse_added_proxies(&value),
+        }),
+        "addedProxy" => Ok(EnvelopePayload::AddedProxy {
+            proxy: crate::proxy::parse_added_proxy(&value),
+        }),
+        "seconds" => Ok(EnvelopePayload::Seconds {
+            seconds: value.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
+        }),
         // A5: `checkChatUsernameResult*` (schema 1.8.67, lines 8583–8598).
         "checkChatUsernameResultOk" => Ok(EnvelopePayload::CheckChatUsernameResult(
             UsernameCheckResult::Available,

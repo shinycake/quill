@@ -433,6 +433,8 @@ pub struct QuillApp {
     /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
     /// reference dialog is on screen.
     pub(super) shortcuts_open: bool,
+    /// `parity:proxy-settings`: proxy list / editor / link-confirm state.
+    pub(super) proxy_ui: super::proxy::ProxyUi,
     pub(super) sticker_settings_open: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only

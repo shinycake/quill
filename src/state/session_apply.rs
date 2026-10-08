@@ -61,6 +61,11 @@ impl Session {
                 {
                     self.my_user_id = Some(*id);
                 }
+                if name == "prefer_ipv6"
+                    && let OptionValue::Boolean(on) = &value
+                {
+                    self.proxy.prefer_ipv6 = *on;
+                }
                 if name == "is_premium" {
                     self.premium_option = match &value {
                         OptionValue::Boolean(on) => Some(*on),
@@ -2332,6 +2337,11 @@ impl Session {
                     }
                 }
             }
+            EnvelopePayload::AddedProxies { proxies } => {
+                self.apply_added_proxies(pending, proxies);
+            }
+            EnvelopePayload::AddedProxy { .. } => self.apply_added_proxy(pending),
+            EnvelopePayload::Seconds { seconds } => self.apply_proxy_ping(pending, seconds),
             EnvelopePayload::Sessions { sessions } => {
                 // Slice A3: `getActiveSessions` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).

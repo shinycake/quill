@@ -882,6 +882,19 @@ pub enum EnvelopePayload {
     Sessions {
         sessions: Vec<ParsedSession>,
     },
+    /// `parity:proxy-settings`: `addedProxies` — `getProxies` answer.
+    AddedProxies {
+        proxies: Vec<crate::proxy::ProxyEntry>,
+    },
+    /// `parity:proxy-settings`: `addedProxy` — `addProxy` / `editProxy`
+    /// answer (`None`: an unknown proxy type).
+    AddedProxy {
+        proxy: Option<crate::proxy::ProxyEntry>,
+    },
+    /// `parity:proxy-settings`: `seconds` — `pingProxy` answer.
+    Seconds {
+        seconds: f64,
+    },
     /// Slice A7: `accountTtl` — `getAccountTtl` response (schema 1.8.67,
     /// line 9053). Stored in `Session::account_ttl_days` when the
     /// pending purpose is `GetAccountTtl`.

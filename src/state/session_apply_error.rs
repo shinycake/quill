@@ -973,6 +973,12 @@ impl Session {
                 self.sessions_mutating = false;
                 self.sessions_error = Some(sessions_error_line("link the device", &err));
             }
+            Some(
+                purpose @ (RequestPurpose::GetProxies
+                | RequestPurpose::MutateProxy
+                | RequestPurpose::PingProxy { .. }
+                | RequestPurpose::SetPreferIpv6 { .. }),
+            ) => self.apply_proxy_error(purpose, &err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;
                 self.sessions_stale = false;
