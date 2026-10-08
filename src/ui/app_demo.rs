@@ -2008,10 +2008,8 @@ impl QuillApp {
         .detach();
         let notification_app = cx.weak_entity();
         cx.on_system_notification_response(move |response, cx| {
-            let Some((account, chat)) = response.tag.rsplit_once(":chat:") else {
-                return;
-            };
-            let Ok(chat_id) = chat.parse::<i64>() else {
+            let Some((account, chat_id)) = quill::notify::parse_notification_tag(&response.tag)
+            else {
                 return;
             };
             let _ = notification_app.update(cx, |this, cx| {
@@ -2022,10 +2020,17 @@ impl QuillApp {
                     return;
                 }
                 if let Ok(mut clicks) = this.notify_clicks.lock() {
-                    clicks.push(quill::ids::ChatId(chat_id));
+                    clicks.push(chat_id);
                 }
                 cx.notify();
             });
+            // A hidden (close-to-tray) or minimized window may never render
+            // again on its own: bring the app forward from the click itself
+            // so `flush_notifications` runs and opens the chat.
+            cx.activate(true);
+            for window in cx.windows() {
+                let _ = window.update(cx, |_, window, _| window.activate_window());
+            }
         });
         if demo.is_none() {
             app.start_connection(cx);

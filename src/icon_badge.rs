@@ -1,12 +1,18 @@
 //! Unread badge on the app/taskbar icon (parity:platform-app-icon-badge).
 //!
-//! Linux only: the Unity `com.canonical.Unity.LauncherEntry` `Update`
-//! signal — the de-facto standard Telegram Desktop uses on Linux, honored
-//! by Ubuntu Dock, Dash-to-Dock, and KDE's task manager. The signal is
-//! emitted through `dbus-send`, which ships with the base D-Bus install:
-//! no new dependency and no hand-rolled D-Bus wire protocol. It is a
-//! silent no-op when `dbus-send` or the session bus is absent (same
-//! convention as the tray module).
+//! Per platform, matching Telegram Desktop (`platform/*/main_window_*`):
+//! - Linux: the Unity `com.canonical.Unity.LauncherEntry` `Update`
+//!   signal, the de-facto standard Telegram Desktop uses on Linux, honored
+//!   by Ubuntu Dock, Dash-to-Dock, and KDE's task manager. The signal is
+//!   emitted through `dbus-send`, which ships with the base D-Bus install:
+//!   no new dependency and no hand-rolled D-Bus wire protocol. It is a
+//!   silent no-op when `dbus-send` or the session bus is absent (same
+//!   convention as the tray module).
+//! - macOS: `NSApplication.dockTile.badgeLabel` (the count text, capped
+//!   "99+"; cleared at zero). Main-thread only, which the UI timer is.
+//! - Windows: `ITaskbarList3::SetOverlayIcon` on the main window's taskbar
+//!   button with the rendered count pill (`tray::render_overlay_icon`).
+//!   The window handle is registered once by `set_native_window`.
 //!
 //! The count is [`tray::badge_count`] — the same `BadgePrefs`-governed
 //! total as the system tray badge (muted chats included by default,
@@ -23,23 +29,37 @@
 //! [`APP_URI`] names the `quill.desktop` id a future install will satisfy.
 
 use crate::state::Session;
-#[cfg(target_os = "linux")]
 use crate::tray;
 
 /// App URI carried by the LauncherEntry signal: `application://` +
 /// the desktop-file id docks match against.
 pub const APP_URI: &str = "application://quill.desktop";
 
-#[cfg(target_os = "linux")]
 thread_local! {
-    /// Last count pushed to the dock. Starts unset so the first tick
-    /// always emits (clearing a stale badge when unread is 0).
+    /// Last count pushed to the OS. Starts unset so the first tick always
+    /// applies (clearing a stale badge when unread is 0). Only updated after
+    /// a successful push, so a failure retries on the next tick.
     static LAST_SENT: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
 }
 
+/// Text for the macOS dock tile: the count capped at "99+", `None` (clear
+/// the badge) when nothing is unread.
+#[cfg(any(all(target_os = "macos", feature = "ui"), test))]
+fn dock_badge_label(unread: u32) -> Option<String> {
+    (unread > 0).then(|| tray::badge_text(unread))
+}
+
+/// Accessible description of the Windows overlay icon.
+#[cfg(any(windows, test))]
+fn overlay_description(unread: u32) -> String {
+    match unread {
+        0 => String::new(),
+        n => format!("{} unread", tray::badge_text(n)),
+    }
+}
+
 /// Sync the taskbar/dock app-icon badge with the session's unread count.
-/// Linux-only; a no-op on every other OS.
-#[cfg(target_os = "linux")]
+/// Call from the UI thread (the 1s tray timer); emits only on change.
 pub fn sync_icon_badge(session: Option<&Session>) {
     let unread = session
         .map(|s| tray::badge_count(s, &s.badge_prefs))
@@ -48,14 +68,146 @@ pub fn sync_icon_badge(session: Option<&Session>) {
         if last.get() == Some(unread) {
             return;
         }
-        last.set(Some(unread));
-        emit_launcher_entry(unread);
+        if push_badge(unread) {
+            last.set(Some(unread));
+        }
     });
 }
 
-/// Non-Linux stub: Windows/macOS badge APIs are out of scope for this slice.
-#[cfg(not(target_os = "linux"))]
-pub fn sync_icon_badge(_session: Option<&Session>) {}
+#[cfg(target_os = "linux")]
+fn push_badge(unread: u32) -> bool {
+    emit_launcher_entry(unread);
+    true
+}
+
+#[cfg(all(target_os = "macos", feature = "ui"))]
+fn push_badge(unread: u32) -> bool {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::NSString;
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    let label = dock_badge_label(unread).map(|text| NSString::from_str(&text));
+    NSApplication::sharedApplication(mtm)
+        .dockTile()
+        .setBadgeLabel(label.as_deref());
+    true
+}
+
+#[cfg(windows)]
+fn push_badge(unread: u32) -> bool {
+    windows_overlay::set(unread)
+}
+
+/// Core-only builds (no AppKit) and other targets have no app-icon badge.
+#[cfg(not(any(target_os = "linux", all(target_os = "macos", feature = "ui"), windows)))]
+fn push_badge(_unread: u32) -> bool {
+    true
+}
+
+/// Windows: remember the main window so the overlay can target its taskbar
+/// button. Called once after the window exists; the raw value is the HWND.
+#[cfg(windows)]
+pub fn set_native_window(hwnd: isize) {
+    windows_overlay::set_window(hwnd);
+}
+
+#[cfg(windows)]
+mod windows_overlay {
+    use super::{overlay_description, tray};
+    use std::cell::{Cell, RefCell};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+    use windows::Win32::UI::Shell::{ITaskbarList3, TaskbarList};
+    use windows::Win32::UI::WindowsAndMessaging::{CreateIcon, DestroyIcon, HICON};
+    use windows::core::PCWSTR;
+
+    thread_local! {
+        static WINDOW: Cell<isize> = const { Cell::new(0) };
+        static TASKBAR: RefCell<Option<ITaskbarList3>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn set_window(hwnd: isize) {
+        WINDOW.with(|w| w.set(hwnd));
+    }
+
+    /// Build an `HICON` from straight RGBA: BGRA XOR bits (32 bpp keeps the
+    /// per-pixel alpha) with an all-opaque AND mask.
+    fn icon_from_rgba(rgba: &[u8], width: u32, height: u32) -> windows::core::Result<HICON> {
+        let mut bgra = rgba.to_vec();
+        for px in bgra.as_chunks_mut::<4>().0.iter_mut() {
+            px.swap(0, 2);
+        }
+        let and_mask = vec![0u8; (width.div_ceil(16) * 2 * height) as usize];
+        // SAFETY: both buffers outlive the call and have the sizes
+        // CreateIcon reads for a width x height, 1-plane, 32 bpp icon.
+        unsafe {
+            CreateIcon(
+                None,
+                width as i32,
+                height as i32,
+                1,
+                32,
+                and_mask.as_ptr(),
+                bgra.as_ptr(),
+            )
+        }
+    }
+
+    /// Returns false when the taskbar button is not ready yet (window not
+    /// registered, or the shell has not created the button), so the caller
+    /// retries on the next tick.
+    pub(super) fn set(unread: u32) -> bool {
+        let hwnd = WINDOW.with(|w| w.get());
+        if hwnd == 0 {
+            return false;
+        }
+        let hwnd = HWND(hwnd as *mut _);
+        TASKBAR.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_none() {
+                // SAFETY: plain COM activation on the UI thread, where GPUI
+                // has already initialized COM.
+                let list: windows::core::Result<ITaskbarList3> =
+                    unsafe { CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER) };
+                let Ok(list) = list else {
+                    return false;
+                };
+                // SAFETY: freshly created, valid interface.
+                if unsafe { list.HrInit() }.is_err() {
+                    return false;
+                }
+                *slot = Some(list);
+            }
+            let Some(list) = slot.as_ref() else {
+                return false;
+            };
+            let description: Vec<u16> = overlay_description(unread)
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            if unread == 0 {
+                // SAFETY: a null icon removes the overlay.
+                return unsafe {
+                    list.SetOverlayIcon(hwnd, HICON::default(), PCWSTR(description.as_ptr()))
+                }
+                .is_ok();
+            }
+            let (rgba, w, h) = tray::render_overlay_icon(unread);
+            let Ok(icon) = icon_from_rgba(&rgba, w, h) else {
+                return false;
+            };
+            // SAFETY: `icon` and `description` are valid for the call; the
+            // taskbar copies the icon, so it is destroyed right after.
+            let ok =
+                unsafe { list.SetOverlayIcon(hwnd, icon, PCWSTR(description.as_ptr())) }.is_ok();
+            // SAFETY: `icon` was created above and is no longer referenced.
+            let _ = unsafe { DestroyIcon(icon) };
+            ok
+        })
+    }
+}
 
 /// `dbus-send` argv for the broadcast `Update` signal:
 /// `(string app_uri, dict<string, variant> {count: int64, count-visible: bool})`.
@@ -115,5 +267,21 @@ mod tests {
         let body = launcher_entry_args(0)[5].clone();
         assert!(body.contains("\"count\",int64:0"), "{body}");
         assert!(body.contains("\"count-visible\",boolean:false"), "{body}");
+    }
+
+    #[test]
+    fn dock_label_clears_at_zero_and_caps_at_99_plus() {
+        assert_eq!(dock_badge_label(0), None);
+        assert_eq!(dock_badge_label(7).as_deref(), Some("7"));
+        assert_eq!(dock_badge_label(99).as_deref(), Some("99"));
+        assert_eq!(dock_badge_label(100).as_deref(), Some("99+"));
+        assert_eq!(dock_badge_label(u32::MAX).as_deref(), Some("99+"));
+    }
+
+    #[test]
+    fn overlay_description_follows_the_badge_text() {
+        assert_eq!(overlay_description(0), "");
+        assert_eq!(overlay_description(3), "3 unread");
+        assert_eq!(overlay_description(250), "99+ unread");
     }
 }

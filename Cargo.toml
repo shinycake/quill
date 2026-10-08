@@ -14,7 +14,7 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio"]
+ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio"]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
@@ -40,7 +40,6 @@ ureq = { version = "3.4", default-features = false, features = ["rustls"], optio
 sha2 = "0.10"
 smallvec = { version = "1", optional = true }
 thiserror = "2"
-tray-icon = { version = "0.21", optional = true, default-features = false }
 unicode-segmentation = "1.13"
 spellbook = "0.4"
 encoding_rs = "0.8"
@@ -52,9 +51,18 @@ optional = true
 default-features = false
 features = ["component", "assets"]
 
+# tray-icon is GTK/libappindicator on Linux and needs gtk::init plus a GTK main
+# loop, neither of which a GPUI process has; Linux uses ksni (pure-Rust
+# StatusNotifierItem over D-Bus, same zbus/async-io stack as GPUI) instead.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = { version = "0.21", optional = true, default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", optional = true, default-features = false, features = ["async-io", "blocking"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSMenu", "NSView", "NSWindow", "NSPasteboard", "NSPasteboardItem", "NSImage", "NSFont", "NSStringDrawing", "NSAttributedString", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSSpellChecker"], optional = true }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSMenu", "NSView", "NSWindow", "NSPasteboard", "NSPasteboardItem", "NSImage", "NSFont", "NSStringDrawing", "NSAttributedString", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSSpellChecker", "NSApplication", "NSDockTile"], optional = true }
 # Native video playback (AVPlayer → CVPixelBuffer → GPUI surface).
 objc2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSValue", "NSObject", "NSError", "NSArray", "NSData", "NSGeometry", "NSAttributedString", "NSRange", "NSLocale"] }
@@ -98,6 +106,6 @@ embed-resource = "3"
 
 [target.'cfg(windows)'.dependencies]
 # Local time zone offsets; secret chats kept out of screen capture.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
