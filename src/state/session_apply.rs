@@ -134,11 +134,13 @@ impl Session {
                 unread_mention_count,
                 unread_reaction_count,
                 can_be_reported,
+                action_bar,
                 blocked,
                 positions,
                 last_message,
             } => {
                 self.set_chat_protected(chat_id.0, has_protected_content);
+                self.set_chat_action_bar(chat_id.0, action_bar);
                 self.apply_update_new_chat(
                     chat_id,
                     title,
@@ -637,11 +639,23 @@ impl Session {
             EnvelopePayload::UpdateChatPendingJoinRequests {
                 chat_id,
                 total_count,
-                ..
+                user_ids,
             } => {
                 self.pending_join_request_counts
                     .insert(chat_id, total_count);
+                // Batch 8: the (up to three) newest requesters back the
+                // requests bar's avatars.
+                if user_ids.is_empty() {
+                    self.pending_join_request_users.remove(&chat_id);
+                } else {
+                    self.pending_join_request_users.insert(chat_id, user_ids);
+                }
             }
+            // Batch 8: `updateChatActionBar` (schema 1.8.67, line 10526).
+            EnvelopePayload::UpdateChatActionBar {
+                chat_id,
+                action_bar,
+            } => self.set_chat_action_bar(chat_id.0, action_bar),
             EnvelopePayload::UpdateChatNotificationSettings {
                 chat_id,
                 notification_settings,

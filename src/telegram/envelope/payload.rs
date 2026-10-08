@@ -522,6 +522,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             chat_id: ChatId(int53(value.get("chat_id"))?),
             blocked: is_block_list_main(value.get("block_list")),
         }),
+        // Batch 8: `updateChatActionBar` (schema 1.8.67, line 10526).
+        "updateChatActionBar" => Ok(EnvelopePayload::UpdateChatActionBar {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            action_bar: parse_chat_action_bar(value.get("action_bar")),
+        }),
         // Slice CL3: `reportChat` result (schema 1.8.67, lines
         // 9210–9219) — collapsed to Ok vs "more info required".
         "reportChatResultOk" => Ok(EnvelopePayload::ReportChatResult(ReportChatOutcome::Ok)),

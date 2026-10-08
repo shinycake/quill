@@ -532,6 +532,16 @@ impl Session {
                 self.chat_action_error =
                     Some(format!("could not report the chat (error {})", err.code));
             }
+            Some(RequestPurpose::RemoveChatActionBar) => {
+                self.chat_action_error =
+                    Some(format!("could not hide the bar (error {})", err.code));
+            }
+            Some(RequestPurpose::SharePhoneNumber) => {
+                self.chat_action_error = Some(format!(
+                    "could not share your phone number (error {})",
+                    err.code
+                ));
+            }
             Some(RequestPurpose::SetMessageSenderBlockList { .. }) => {
                 self.chat_action_error = Some(format!(
                     "could not change the block state (error {})",

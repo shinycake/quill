@@ -1375,3 +1375,55 @@ fn archive_list_is_loaded_after_the_main_list() {
     assert_eq!(load_chats(&recorder).len(), 3);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn driver_dismisses_and_shares_through_the_action_bar() {
+    // Batch 8: close sends `removeChatActionBar` and drops the bar; Share
+    // my phone number sends `sharePhoneNumber` for the peer user.
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":501,"title":"Stranger","type":{"@type":"chatTypePrivate","user_id":501},"action_bar":{"@type":"chatActionBarSharePhoneNumber"}}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    assert!(driver.session.chat_action_bar(ChatId(501)).is_some());
+    driver.share_phone_number(ChatId(501), 501).unwrap();
+    assert!(driver.session.chat_action_bar(ChatId(501)).is_none());
+    assert!(
+        recorder
+            .snapshot()
+            .iter()
+            .any(|j| j.contains("\"sharePhoneNumber\"") && j.contains("\"user_id\":501"))
+    );
+
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateChatActionBar","chat_id":501,"action_bar":{"@type":"chatActionBarAddContact"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver.dismiss_chat_action_bar(ChatId(501)).unwrap();
+    assert!(driver.session.chat_action_bar(ChatId(501)).is_none());
+    assert!(
+        recorder
+            .snapshot()
+            .iter()
+            .any(|j| j.contains("\"removeChatActionBar\"") && j.contains("\"chat_id\":501"))
+    );
+    // Nothing to dismiss now: no second request.
+    assert_eq!(driver.dismiss_chat_action_bar(ChatId(501)), Ok(None));
+}

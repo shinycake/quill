@@ -738,6 +738,12 @@ pub struct Session {
     /// (schema 1.8.67, line 10555). The full request list still needs
     /// `getChatJoinRequests`; this is only the badge count.
     pub pending_join_request_counts: HashMap<i64, i32>,
+    /// Batch 8: `chatJoinRequestsInfo.user_ids` (the newest requesters)
+    /// from the same update, for the requests bar's avatars.
+    pub pending_join_request_users: HashMap<i64, Vec<i64>>,
+    /// Batch 8: `chat.action_bar` / `updateChatActionBar` per chat — the
+    /// Add contact / Block / Report spam / Share phone strip.
+    pub chat_action_bars: HashMap<i64, ChatActionBar>,
     /// Phase D3c: `getChatEventLog` fetch state, keyed by chat id.
     pub event_logs: HashMap<i64, ChatEventLogFetch>,
     /// Slice G2: per-chat event-log filters (`chatEventLogFilters`,
@@ -1227,6 +1233,8 @@ impl Session {
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),
             pending_join_request_counts: HashMap::new(),
+            pending_join_request_users: HashMap::new(),
+            chat_action_bars: HashMap::new(),
             event_logs: HashMap::new(),
             event_log_filters: HashMap::new(),
             event_log_queries: HashMap::new(),

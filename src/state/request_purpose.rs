@@ -828,6 +828,12 @@ pub enum RequestPurpose {
     /// `ReportChatResult`; `Ok` reports the chat, any other variant
     /// surfaces as "more info required" (never success).
     ReportChat,
+    /// Batch 8: `removeChatActionBar` (the bar's close button). Response
+    /// is `ok`; the bar is dropped optimistically.
+    RemoveChatActionBar,
+    /// Batch 8: `sharePhoneNumber` (the bar's "Share my phone number").
+    /// Response is `ok`; TDLib then clears the bar.
+    SharePhoneNumber,
     /// Slice CL3: `setMessageSenderBlockList` (schema 1.8.67, line
     /// 14492). Response is `ok`; the new state arrives via
     /// `updateChatBlockList`. Slice A6: carries the requested `block`

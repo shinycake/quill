@@ -1,9 +1,10 @@
 use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
-/// Phase 6: add-contact dialog opened from the user info panel. The phone
-/// number is required — `addContact` needs an `importedContact` and Quill
-/// does not offer adding by bare user id.
+/// Phase 6: add-contact dialog opened from the user info panel or the chat
+/// action bar. A first name or a phone number is required — `addContact`
+/// needs an `importedContact`; the phone may stay empty for a known user
+/// whose number is hidden (a stranger from the action bar).
 pub struct AddContactDialog {
     pub(crate) user_id: i64,
     pub(crate) phone_input: Entity<TextareaState>,
@@ -59,16 +60,18 @@ impl AddContactDialog {
         }
     }
 
-    /// `None` when the phone field is empty (the Add button no-ops then).
+    /// `None` when both the phone and the first name are empty (the Add
+    /// button no-ops then).
     pub(crate) fn draft(&self, cx: &App) -> Option<(i64, String, String, String)> {
         let phone = self.phone_input.read(cx).value().to_string();
-        if phone.trim().is_empty() {
+        let first = self.first_name_input.read(cx).value().to_string();
+        if phone.trim().is_empty() && first.trim().is_empty() {
             return None;
         }
         Some((
             self.user_id,
             phone,
-            self.first_name_input.read(cx).value().to_string(),
+            first,
             self.last_name_input.read(cx).value().to_string(),
         ))
     }

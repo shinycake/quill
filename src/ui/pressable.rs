@@ -13,9 +13,13 @@ pub(super) trait PressableDiv {
 }
 
 impl PressableDiv for gpui_kit::Stateful<Div> {
+    /// tdesktop's neutral over/pressed fills (`windowBgOver` /
+    /// `windowBgRipple`): a light gray over the background in the day
+    /// theme and a light lift in the night theme, not an accent tint.
     fn pressable(self, theme: &Theme) -> Self {
-        self.hover(|s| s.bg(theme.accent.opacity(0.10)))
-            .active(|s| s.bg(theme.accent.opacity(0.22)))
+        let fg = theme.foreground;
+        self.hover(move |s| s.bg(fg.opacity(0.06)))
+            .active(move |s| s.bg(fg.opacity(0.11)))
     }
 }
 
