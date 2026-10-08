@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn text_has_no_media_target() {
-        assert!(media_target(&MessageContent::Service("x".into())).is_none());
+        assert!(media_target(&MessageContent::ScreenshotTaken).is_none());
     }
 
     #[test]
@@ -598,7 +598,7 @@ mod tests {
     #[test]
     fn audience_labels_follow_telegram_desktop() {
         assert_eq!(
-            seen_label(seen_kind(&MessageContent::Service("".into())), 3),
+            seen_label(seen_kind(&MessageContent::ScreenshotTaken), 3),
             "3 Seen"
         );
         assert_eq!(
