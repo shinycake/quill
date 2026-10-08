@@ -26,9 +26,11 @@ use quill::composer::draft_text_to_store;
 use quill::connect::{ChatSearchQueryOutcome, SEARCH_DEBOUNCE, SearchQueryOutcome};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::state::{ChatSearchJump, RequestPurpose, SearchStatus, Session};
+use quill::search_filters::{SearchChatType, SearchDateRange, SearchMediaKind};
+use quill::state::{ChatSearchJump, FromPicker, RequestPurpose, SearchStatus, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatDraft;
+use quill::telegram::envelope::MessageSender;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 /// One search hit: avatar, title with the date (message hits), and the
@@ -559,6 +561,17 @@ impl QuillApp {
         if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
             return;
         }
+        // While choosing a "From:" member the field filters the members.
+        if self
+            .session()
+            .is_some_and(|s| s.chat_search.from_picker.is_some())
+        {
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.search_from_members(query.trim());
+            }
+            cx.notify();
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             match live.driver.set_chat_search_query(query) {
                 Ok(ChatSearchQueryOutcome::Sent(_)) => {
@@ -667,6 +680,186 @@ impl QuillApp {
         cx.notify();
     }
 
+    pub(super) fn chat_search_pick_sender(
+        &mut self,
+        sender: Option<MessageSender>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.set_chat_search_sender(sender).is_err() {
+                self.status_note = "could not search in chat".into();
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.chat_search.sender = sender;
+            session.close_from_picker();
+        }
+        // The field's text was the member filter while choosing: start the
+        // message query from scratch.
+        self.chat_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.chat_search_input
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    pub(super) fn chat_search_pick_media(
+        &mut self,
+        media: SearchMediaKind,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.set_chat_search_media(media).is_err() {
+                self.status_note = "could not search in chat".into();
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.chat_search.media = media;
+        }
+        cx.notify();
+    }
+
+    pub(super) fn toggle_chat_search_picker(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self
+            .session()
+            .is_some_and(|s| s.chat_search.from_picker.is_some());
+        if open {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.close_from_picker();
+            } else if let Some(session) = self.demo_session.as_mut() {
+                session.close_from_picker();
+            }
+        } else if let Some(live) = self.live.as_mut() {
+            if live.driver.open_chat_search_from_picker().is_err() {
+                self.status_note = "members are not available here".into();
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.open_from_picker();
+        }
+        // The field now filters members (or messages again): start empty.
+        self.chat_search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.chat_search_input
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    pub(super) fn set_search_filters(
+        &mut self,
+        filters: quill::search_filters::GlobalSearchFilters,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.set_search_filters(filters) {
+                self.status_note = format!("could not apply search filters: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.search.filters = filters;
+        }
+        cx.notify();
+    }
+
+    /// Small quiet toggle used by the search filter rows.
+    fn filter_chip(
+        id: impl Into<ElementId>,
+        label: &str,
+        selected: bool,
+        on_click: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        Button::new(id)
+            .label(label.to_string())
+            .ghost()
+            .xsmall()
+            .selected(selected)
+            .toggled(selected)
+            .on_click(cx.listener(move |this, _, window, cx| on_click(this, window, cx)))
+    }
+
+    /// The members list that replaces the hits while a "From:" is chosen.
+    fn chat_search_picker(&self, picker: &FromPicker, cx: &mut Context<Self>) -> impl IntoElement {
+        let session = self.session();
+        let mut list = div()
+            .id("chat-search-from-list")
+            .flex()
+            .flex_col()
+            .gap_0p5();
+        let rows: Vec<(MessageSender, String)> = picker
+            .members
+            .iter()
+            .map(|m| {
+                (
+                    *m,
+                    session.map_or_else(|| "member".into(), |s| s.sender_label(*m)),
+                )
+            })
+            .collect();
+        if rows.is_empty() {
+            let text = if picker.request.is_some() {
+                "Loading members…"
+            } else {
+                "No members found."
+            };
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text),
+            );
+        }
+        for (sender, name) in rows {
+            let photo = match sender {
+                MessageSender::User { user_id } => self.chat_photo_for_row(ChatId(user_id)),
+                MessageSender::Chat { chat_id } => self.chat_photo_for_row(ChatId(chat_id)),
+            };
+            let key = match sender {
+                MessageSender::User { user_id } => user_id as u64,
+                MessageSender::Chat { chat_id } => chat_id as u64 ^ (1 << 62),
+            };
+            list = list.child(
+                div()
+                    .id(("chat-search-from", key))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Search messages from {name}"))
+                    .tab_index(0)
+                    .cursor_pointer()
+                    .pressable(cx.theme())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.chat_search_pick_sender(Some(sender), window, cx);
+                    }))
+                    .child(super::chat_row::chat_avatar(&name, photo.as_deref(), 28.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .child(super::bidi_line::one_line_plain(name)),
+                    ),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .child("Search messages from"),
+            )
+            .child(list.max_h(px(240.)).overflow_y_scroll())
+    }
+
     pub(super) fn chat_search_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let status = session
@@ -679,6 +872,11 @@ impl QuillApp {
             .map(|s| s.chat_search.position_label())
             .unwrap_or_default();
         let jump_note = session.map(chat_search_jump_note).unwrap_or_default();
+        let can_pick = session.is_some_and(|s| s.chat_search_can_pick_sender());
+        let sender_label =
+            session.and_then(|s| s.chat_search.sender.map(|sender| s.sender_label(sender)));
+        let media = session.map(|s| s.chat_search.media).unwrap_or_default();
+        let picker = session.and_then(|s| s.chat_search.from_picker.clone());
         let hits: Vec<(MessageId, String, i32, bool)> = session
             .map(|s| {
                 s.chat_search
@@ -696,20 +894,41 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
+        let subject = if !query.is_empty() {
+            format!("“{query}”")
+        } else if let Some(name) = &sender_label {
+            format!("messages from {name}")
+        } else {
+            media.label().to_lowercase()
+        };
         let caption = match status {
             SearchStatus::Idle => "Type to search this chat.".to_string(),
-            SearchStatus::Searching => format!("Searching “{query}”…"),
+            SearchStatus::Searching => format!("Searching {subject}…"),
             SearchStatus::Ready => {
                 if jump_note.is_empty() {
-                    format!("Results for “{query}”")
+                    format!("Results for {subject}")
                 } else {
-                    format!("Results for “{query}” · {jump_note}")
+                    format!("Results for {subject} · {jump_note}")
                 }
             }
-            SearchStatus::Empty => format!("No messages match “{query}”."),
+            SearchStatus::Empty => format!("No messages match {subject}."),
             SearchStatus::Failed => "Search in chat failed.".to_string(),
             SearchStatus::Closed => String::new(),
         };
+        let picker_open = picker.is_some();
+        let mut media_chips = Vec::new();
+        for kind in SearchMediaKind::ALL {
+            media_chips.push(
+                Self::filter_chip(
+                    ("chat-search-media", kind as u64),
+                    kind.label(),
+                    media == kind,
+                    move |this, _, cx| this.chat_search_pick_media(kind, cx),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
         div()
             .id("chat-search")
             .px_3()
@@ -720,7 +939,7 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .child(
-                // One row: field, position, older/newer, close.
+                // One row: field, position, older/newer, calendar, close.
                 div()
                     .flex()
                     .items_center()
@@ -728,11 +947,15 @@ impl QuillApp {
                     .child(
                         div().id("chat-search-field").flex_1().child(
                             Textarea::new(&self.chat_search_input)
-                                .aria_label("Search this conversation")
+                                .aria_label(if picker_open {
+                                    "Search members"
+                                } else {
+                                    "Search this conversation"
+                                })
                                 .h(px(36.)),
                         ),
                     )
-                    .when(!position.is_empty(), |this| {
+                    .when(!position.is_empty() && !picker_open, |this| {
                         this.child(
                             div()
                                 .px_1()
@@ -762,6 +985,16 @@ impl QuillApp {
                             })),
                     )
                     .child(
+                        Button::new("chat-search-calendar")
+                            .icon(gpui_kit::assets::IconName::Calendar)
+                            .ghost()
+                            .tooltip("Jump to date")
+                            .accessibility_label("Jump to date")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_jump_date_ui(cx);
+                            })),
+                    )
+                    .child(
                         Button::new("chat-search-close")
                             .icon(gpui_kit::assets::IconName::X)
                             .tooltip("Close search")
@@ -773,12 +1006,46 @@ impl QuillApp {
                     ),
             )
             .child(
+                // Filters: who wrote it, what kind of message.
+                div()
+                    .id("chat-search-filters")
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_1()
+                    .when(can_pick, |this| {
+                        let label = sender_label
+                            .as_ref()
+                            .map_or_else(|| "From…".to_string(), |name| format!("From: {name}"));
+                        this.child(Self::filter_chip(
+                            "chat-search-from",
+                            &label,
+                            sender_label.is_some() || picker_open,
+                            |this, window, cx| {
+                                if this
+                                    .session()
+                                    .is_some_and(|s| s.chat_search.sender.is_some())
+                                {
+                                    this.chat_search_pick_sender(None, window, cx);
+                                } else {
+                                    this.toggle_chat_search_picker(window, cx);
+                                }
+                            },
+                            cx,
+                        ))
+                    })
+                    .children(media_chips),
+            )
+            .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(caption),
+                    .child(if picker_open { String::new() } else { caption }),
             )
-            .when(!hits.is_empty(), |this| {
+            .when_some(picker, |this, picker| {
+                this.child(self.chat_search_picker(&picker, cx))
+            })
+            .when(!hits.is_empty() && !picker_open, |this| {
                 let mut list = div().id("chat-search-hits").flex().flex_col().gap_1();
                 for (message_id, preview, date, selected) in hits {
                     list = list.child(chat_search_hit_row(
@@ -1041,6 +1308,104 @@ impl QuillApp {
         Some(chips.into_any_element())
     }
 
+    /// Global search narrowing, shown once there is a query: chat type
+    /// (tdesktop `lng_search_filter_*`), content tab and date window.
+    pub(super) fn search_filter_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if session.search.query.trim().is_empty() {
+            return None;
+        }
+        let filters = session.search.filters;
+        let mut types = Vec::new();
+        for kind in SearchChatType::ALL {
+            types.push(
+                Self::filter_chip(
+                    ("search-filter-type", kind as u64),
+                    kind.label(),
+                    filters.chat_type == kind,
+                    move |this, _, cx| {
+                        let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                        next.chat_type = kind;
+                        this.set_search_filters(next, cx);
+                    },
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        let mut media = Vec::new();
+        for kind in SearchMediaKind::ALL {
+            media.push(
+                Self::filter_chip(
+                    ("search-filter-media", kind as u64),
+                    kind.label(),
+                    filters.media == kind,
+                    move |this, _, cx| {
+                        let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                        next.media = kind;
+                        this.set_search_filters(next, cx);
+                    },
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        let mut dates = Vec::new();
+        for range in SearchDateRange::ALL {
+            dates.push(
+                Self::filter_chip(
+                    ("search-filter-date", range as u64),
+                    range.label(),
+                    filters.date == range,
+                    move |this, _, cx| {
+                        let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                        next.date = range;
+                        this.set_search_filters(next, cx);
+                    },
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        let muted = cx.theme().muted_foreground;
+        let group = |label: &'static str, chips: Vec<AnyElement>| {
+            div()
+                .flex()
+                .items_start()
+                .gap_1()
+                .child(
+                    div()
+                        .w(px(56.))
+                        .flex_none()
+                        .py_1()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_1()
+                        .children(chips),
+                )
+        };
+        Some(
+            div()
+                .id("search-filters")
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(group("Chats", types))
+                .child(group("Content", media))
+                .child(group("Date", dates))
+                .into_any_element(),
+        )
+    }
+
     pub(super) fn search_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let status = session
@@ -1122,6 +1487,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
+            .when_some(self.search_filter_bar(cx), |this, bar| this.child(bar))
             .when_some(self.search_community_filter_chips(cx), |this, chips| {
                 this.child(chips)
             })

@@ -81,6 +81,18 @@ pub enum RequestPurpose {
     SearchPublicChats,
     AddRecentlyFoundChat,
     SearchChatMessages,
+    /// The next older page of the open in-chat search (appended to the
+    /// hits; carries the search generation).
+    SearchChatMessagesMore,
+    /// `searchChatMembers` behind the in-chat "From:" picker.
+    SearchFromMembers,
+    /// `getChatMessageByDate` of a jump to date.
+    GetChatMessageByDate,
+    /// `getChatMessageCalendar` page of the calendar box (the box's
+    /// generation drops late answers).
+    GetChatMessageCalendar {
+        generation: u64,
+    },
     /// The open chat's pinned messages: `searchChatMessages` with
     /// `searchMessagesFilterPinned` (schema 1.8.67, line 6316), newest
     /// first. Feeds the pinned bar (Telegram Desktop's pinned tracker).
@@ -326,6 +338,23 @@ pub enum RequestPurpose {
     /// `connectedWebsites`; the list is replaced from the authoritative
     /// answer (never optimistic).
     GetConnectedWebsites,
+    /// `parity:proxy-settings`: `getProxies`. Response is `addedProxies`.
+    GetProxies,
+    /// `parity:proxy-settings`: `addProxy` / `editProxy` / `enableProxy`
+    /// / `disableProxy` / `removeProxy`. The answer (`addedProxy` /
+    /// `ok`) only marks the list stale; the authoritative `getProxies`
+    /// refetch replaces it (never optimistic).
+    MutateProxy,
+    /// `parity:proxy-settings`: `pingProxy`. Response is `seconds`; an
+    /// error means the proxy is not available.
+    PingProxy {
+        proxy_id: i32,
+    },
+    /// `parity:proxy-settings`: `setOption("prefer_ipv6")`. Response is
+    /// `ok`; `on` is the value that was requested.
+    SetPreferIpv6 {
+        on: bool,
+    },
     /// Slice A4: `disconnectWebsite`. Response is `ok`; the list is
     /// refetched from the authoritative answer (never optimistic).
     DisconnectWebsite {
@@ -774,10 +803,17 @@ pub enum RequestPurpose {
     GetForumTopic {
         forum_topic_id: i32,
     },
-    /// Slice G2: `getMessageThreadHistory` (schema 1.8.67, line 11839)
-    /// — the channel-comments viewer. Response is `messages`;
-    /// `message_id` identifies the channel post, correlated to the chat
-    /// via `PendingRequest::chat_id`.
+    /// `getMessageThread` (schema 1.8.67, line 11566) — resolves the
+    /// comment / reply thread of `message_id`. Response is
+    /// `messageThreadInfo`; correlated to the origin chat via
+    /// `PendingRequest::chat_id`.
+    GetMessageThread {
+        message_id: i64,
+    },
+    /// `getMessageThreadHistory` (schema 1.8.67, line 11839) — one page of
+    /// the open thread. Response is `messages`; `message_id` identifies the
+    /// thread's origin message, correlated to the chat via
+    /// `PendingRequest::chat_id`.
     GetMessageThreadHistory {
         message_id: i64,
     },

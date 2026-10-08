@@ -144,6 +144,8 @@ package = "gpui-pre-sum-tree"
 [dependencies.tracing]
 version = "0.1.41"
 
+# unicode-bidi and unicode-bidi-mirroring were added by the Quill project
+# (see QUILL-CHANGES.md).
 [dependencies.unicode-bidi]
 version = "0.3.18"
 

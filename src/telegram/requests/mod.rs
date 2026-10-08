@@ -17,6 +17,7 @@ mod misc;
 mod payments;
 mod polls;
 mod privacy;
+mod proxy;
 mod secret_chats;
 mod stickers;
 mod stories;
@@ -45,6 +46,8 @@ mod tests_stickers;
 #[cfg(test)]
 mod tests_stories;
 mod translate;
+#[cfg(test)]
+mod tests_threads;
 mod users;
 
 pub use auth::*;
@@ -66,6 +69,7 @@ pub use misc::*;
 pub use payments::*;
 pub use polls::*;
 pub use privacy::*;
+pub use proxy::*;
 pub use secret_chats::*;
 pub use stickers::*;
 pub use stories::*;

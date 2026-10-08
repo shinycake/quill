@@ -77,4 +77,17 @@ After `authorizationStateReady`, the live client pages `loadChats` for the main 
 
 Optional later (not required for personal Mac runs): Apple Developer ID, notarization credentials, a dedicated test chat with a second account. There is **no** App Store / notarization / distribution pipeline; ad-hoc Apple Developer signing only if needed on Idan's personal Mac.
 
-Quill still will not enable channels/bots until sponsored-content handling exists.
+## Release builds
+
+Release packages do not contain an `api_id` / `api_hash`. Nothing in the build
+or packaging scripts embeds one, and CI never sees one. A packaged Quill
+therefore needs the same `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` environment
+variables (or a `quill.local.env` / `.env` file in the working directory) to
+connect. Telegram's API terms require each app to use its own `api_id`
+(https://core.telegram.org/api/terms, section 2.1), so the maintainer must
+decide how official builds get one before publishing them; see
+`docs/decisions/codex-legal-compliance.md`.
+
+Channels and bots are enabled. Sponsored messages in channels are fetched
+(`getChatSponsoredMessages`) but not yet shown in live chats; that gap is
+tracked in `docs/decisions/codex-legal-compliance.md`.

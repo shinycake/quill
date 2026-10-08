@@ -58,6 +58,7 @@ mod account_notices;
 mod call_types;
 mod chat_activity;
 mod chat_types;
+mod history_calendar;
 mod history_types;
 mod info_types;
 mod media_library;
@@ -77,6 +78,7 @@ mod session_calls;
 mod session_chat_caps;
 mod session_chat_search;
 mod session_chatlist;
+mod session_date_jump;
 mod session_files;
 mod session_forum;
 mod session_forward;
@@ -84,6 +86,7 @@ mod session_history_window;
 mod session_members;
 mod session_message_menu;
 mod session_notifications;
+mod session_proxy;
 mod session_reply;
 mod session_requests;
 mod session_search;
@@ -93,15 +96,18 @@ mod session_stickers;
 mod session_stories;
 mod session_subsection_tabs;
 mod session_translate;
+mod session_thread;
 mod session_updates;
 mod shared_media_types;
 mod sticker_gif_types;
 mod story_types;
+mod thread_types;
 
 pub use account_notices::*;
 pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;
+pub use history_calendar::*;
 pub use history_types::*;
 pub use info_types::*;
 pub use media_library::{MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, ReactionChoice};
@@ -116,6 +122,7 @@ pub use session_message_menu::{
     Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
     StickerSetViewStage,
 };
+pub use session_proxy::LINK_PING_ID;
 pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,
     thumb_candidates,
@@ -125,6 +132,7 @@ pub use session_translate::*;
 pub use shared_media_types::*;
 pub use sticker_gif_types::*;
 pub use story_types::*;
+pub use thread_types::*;
 
 #[cfg(test)]
 mod tests;

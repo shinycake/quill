@@ -45,6 +45,8 @@ PLIST
 
 cp "$BIN" "$DIST/Contents/MacOS/quill"
 cp "$ROOT/assets/icons/Quill.icns" "$DIST/Contents/Resources/Quill.icns"
+# LICENSE, third-party notices and license texts (Settings → Open-source licenses).
+bash "$ROOT/scripts/stage-licenses.sh" "$DIST/Contents/Resources"
 bash "$ROOT/scripts/build-qr-scanner.sh"
 cp "$ROOT/target/qr-scanner/quill-qr-scanner" "$DIST/Contents/MacOS/quill-qr-scanner"
 
@@ -65,10 +67,6 @@ RLOTTIE="${QUILL_RLOTTIE_PATH:-$ROOT/vendor/rlottie/prefix/lib/librlottie.dylib}
 if [[ -f "$RLOTTIE" ]]; then
   cp -L "$RLOTTIE" "$DIST/Contents/Frameworks/librlottie.dylib"
   install_name_tool -id @rpath/librlottie.dylib "$DIST/Contents/Frameworks/librlottie.dylib"
-  if [[ -d "$ROOT/vendor/rlottie/source/licenses" ]]; then
-    mkdir -p "$DIST/Contents/Resources/rlottie-licenses"
-    cp "$ROOT/vendor/rlottie/source/COPYING" "$ROOT/vendor/rlottie/source/licenses/"* "$DIST/Contents/Resources/rlottie-licenses/"
-  fi
 fi
 
 # Bundle every non-system dylib the bundled libraries link (OpenSSL for tdjson,

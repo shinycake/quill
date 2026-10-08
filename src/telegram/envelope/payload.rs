@@ -683,6 +683,16 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        // `parity:proxy-settings`: schema 1.8.67 :10118 / :10121 / :10077.
+        "addedProxies" => Ok(EnvelopePayload::AddedProxies {
+            proxies: crate::proxy::parse_added_proxies(&value),
+        }),
+        "addedProxy" => Ok(EnvelopePayload::AddedProxy {
+            proxy: crate::proxy::parse_added_proxy(&value),
+        }),
+        "seconds" => Ok(EnvelopePayload::Seconds {
+            seconds: value.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
+        }),
         // A5: `checkChatUsernameResult*` (schema 1.8.67, lines 8583–8598).
         "checkChatUsernameResultOk" => Ok(EnvelopePayload::CheckChatUsernameResult(
             UsernameCheckResult::Available,
@@ -1018,6 +1028,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .collect();
             Ok(EnvelopePayload::Messages(parsed))
         }
+        // `getMessageThread` answer (schema 1.8.67, line 3897).
+        "messageThreadInfo" => Ok(EnvelopePayload::MessageThreadInfo(Box::new(
+            parse_message_thread_info(&value)?,
+        ))),
         "chats" => Ok(EnvelopePayload::Chats {
             total_count: value
                 .get("total_count")
@@ -1115,6 +1129,37 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .filter_map(|s| s.get("user_id"))
                     .filter_map(Value::as_i64)
                     .collect(),
+            })
+        }
+        "messageCalendar" => {
+            let days = value
+                .get("days")
+                .and_then(Value::as_array)
+                .map(|days| {
+                    days.iter()
+                        .filter_map(|day| {
+                            let message = day.get("message")?;
+                            let message_id = int53_or_zero(message.get("id"));
+                            let date = message.get("date").and_then(Value::as_i64)? as i32;
+                            (message_id > 0).then(|| CalendarDay {
+                                total_count: day
+                                    .get("total_count")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(0)
+                                    as i32,
+                                message_id: MessageId(message_id),
+                                date,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(EnvelopePayload::MessageCalendar {
+                total_count: value
+                    .get("total_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                days,
             })
         }
         "foundChatMessages" => {

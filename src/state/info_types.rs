@@ -280,16 +280,6 @@ pub enum WelcomeMessagesFetch {
     Failed(String),
 }
 
-/// Slice G2: the channel-comments viewer result — the latest
-/// `getMessageThreadHistory` answer for one channel post.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CommentThreadFetch {
-    pub chat_id: ChatId,
-    pub message_id: MessageId,
-    pub messages: Vec<ParsedMessage>,
-    pub failed: Option<String>,
-}
-
 /// Slice CL: the chat-list peek preview result — the latest
 /// `getChatHistory` answer for one unopened chat.
 #[derive(Debug, Clone, PartialEq)]

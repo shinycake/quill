@@ -567,6 +567,23 @@ pub(super) fn demo_seed_for(
             "screenshot demo — keyboard shortcuts reference (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        // `parity:proxy-settings`: proxy list / editor / link box over the
+        // seeded chat list (`QUILL_DEMO_PROXY=list|edit|link|link-bad`).
+        ScreenshotDemo::ReadyProxy => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — proxy settings (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyJumpDate
+        | ScreenshotDemo::ReadySearchFrom
+        | ScreenshotDemo::ReadySearchFromHits
+        | ScreenshotDemo::ReadySearchFilters => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — find in history (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBotCommandMenu => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -622,6 +639,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — service messages".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyThreads => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — comments and threads".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBubbleHeaders => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -632,6 +655,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — translation".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyShowcase => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — showcase".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyPoll => (
@@ -1563,6 +1592,7 @@ impl QuillApp {
             history_window_active: false,
             history_shared: HistoryShared::default(),
             history_key: None,
+            thread_root_jump: false,
             history_ends: None,
             history_window_epoch: 0,
             history_anchor_pending: false,
@@ -1728,7 +1758,6 @@ impl QuillApp {
             pending_inline_bot_alert: None,
             inline_bot_alert_shown: false,
             forum_manage_dialog: None,
-            comment_thread_dialog: None,
             poll_voters_dialog: None,
             welcome_dialog: None,
             event_log_search: None,
@@ -1753,6 +1782,7 @@ impl QuillApp {
             spell_checked_text: String::new(),
             spell_task: None,
             shortcuts_open: false,
+            proxy_ui: Default::default(),
             sticker_settings_open: false,
             data_storage_editor: None,
             storage_confirm: None,
@@ -2007,6 +2037,7 @@ impl QuillApp {
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
+        app.demo_setup_proxy(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);
         }

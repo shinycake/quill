@@ -412,6 +412,19 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.select_chat_with(chat_id, false, window, cx);
+    }
+
+    /// Open `chat_id` as the conversation. `thread_switch` moves a resolved
+    /// comment thread into its discussion group (the driver keeps the
+    /// thread) instead of selecting the chat from scratch.
+    pub(super) fn select_chat_with(
+        &mut self,
+        chat_id: ChatId,
+        thread_switch: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.flush_leaving_draft(cx);
         // Phase B4: the TTL picker belongs to the previous chat.
         self.ttl_picker_open = false;
@@ -477,12 +490,12 @@ impl QuillApp {
             }
         }
         if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .select_chat(chat_id);
+            let driver = &mut self.live.as_mut().expect("live").driver;
+            let result = if thread_switch {
+                driver.switch_to_thread_chat()
+            } else {
+                driver.select_chat(chat_id)
+            };
             self.status_note = match result {
                 Ok(_) => "".into(),
                 Err(_) => "could not open chat".into(),
@@ -1313,7 +1326,8 @@ impl QuillApp {
                         mode == PaneMode::Ready && self.passcode_ui.enabled,
                         |this| this.child(self.lock_button(cx)),
                     )
-                    .child(self.list_tabs(cx)),
+                    .child(self.list_tabs(cx))
+                    .children(self.proxy_shield_button(cx)),
             )
             .when_some(
                 (!self.contacts_tab_open && !self.calls_tab_open)

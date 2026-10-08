@@ -1042,6 +1042,12 @@ impl Session {
                 self.sessions_mutating = false;
                 self.sessions_error = Some(sessions_error_line("link the device", &err));
             }
+            Some(
+                purpose @ (RequestPurpose::GetProxies
+                | RequestPurpose::MutateProxy
+                | RequestPurpose::PingProxy { .. }
+                | RequestPurpose::SetPreferIpv6 { .. }),
+            ) => self.apply_proxy_error(purpose, &err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;
                 self.sessions_stale = false;
@@ -1240,6 +1246,24 @@ impl Session {
             }
         }
         if self.chat_search.matches_generation(pending)
+            && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
+        {
+            self.chat_search.loading_more = false;
+            self.chat_search.next_from_message_id = MessageId(0);
+        }
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::GetChatMessageByDate) => self.fail_date_jump(err.code == 404),
+            Some(RequestPurpose::GetChatMessageCalendar { .. }) => {
+                self.fail_message_calendar(pending)
+            }
+            Some(RequestPurpose::SearchFromMembers) => {
+                if let Some(picker) = self.chat_search.from_picker.as_mut() {
+                    picker.request = None;
+                }
+            }
+            _ => {}
+        }
+        if self.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
             self.chat_search
@@ -1292,19 +1316,11 @@ impl Session {
                 )),
             );
         }
-        // Slice G2: failed thread-history fetch — mark the comment
-        // viewer so it shows an error.
-        if let Some(RequestPurpose::GetMessageThreadHistory { message_id }) =
-            pending.map(|p| p.purpose)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-        {
-            self.comment_thread = Some(CommentThreadFetch {
-                chat_id,
-                message_id: MessageId(message_id),
-                messages: Vec::new(),
-                failed: Some(call_request_error_line(&err, "Could not load comments")),
-            });
-        }
+        // A failed thread request marks the open thread view.
+        self.fail_thread(
+            pending,
+            call_request_error_line(&err, "Could not load comments"),
+        );
         // Slice CL: failed preview-history fetch — mark the peek
         // preview so it shows an error instead of a spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatPreview)

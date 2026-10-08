@@ -641,6 +641,14 @@ pub struct Session {
     /// The oldest unread mention/reaction found for the corner buttons;
     /// the driver takes it and jumps (`ConnectDriver::ingest`).
     pub(crate) unread_jump: Option<MessageId>,
+    /// The calendar box ("Jump to date"), when open.
+    pub history_calendar: Option<HistoryCalendar>,
+    /// A resolved date jump the driver has not started yet.
+    pub(crate) date_jump: Option<(MessageId, DateJumpMode)>,
+    /// A started date jump waiting for its window to load.
+    pub(crate) date_jump_pending: Option<(MessageId, DateJumpMode)>,
+    /// One-shot note for a date jump that found nothing.
+    pub date_jump_note: Option<String>,
     /// Slice media-shared-gallery: per-chat shared-media gallery state
     /// (Media / Files / Music / Links / Voice / GIFs tabs).
     pub shared_media: SharedMediaState,
@@ -820,7 +828,7 @@ pub struct Session {
     pub boost_intent: Option<i64>,
     /// Slice G2: channel-comments viewer — the latest
     /// `getMessageThreadHistory` result (channel post → comment thread).
-    pub comment_thread: Option<CommentThreadFetch>,
+    pub thread: Option<ThreadView>,
     /// Slice CL: chat-list peek preview — the latest `getChatHistory`
     /// result for one unopened chat (`parity:chatlist-chat-preview`).
     pub chat_preview_fetch: Option<PreviewHistoryFetch>,
@@ -876,6 +884,9 @@ pub struct Session {
     pub deep_link: Option<DeepLinkState>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
+    /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
+    /// auto-switch / IPv6 preferences.
+    pub proxy: crate::proxy::ProxyState,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -1219,6 +1230,10 @@ impl Session {
             chat_search: ChatSearchState::default(),
             pinned_messages: HashMap::new(),
             unread_jump: None,
+            history_calendar: None,
+            date_jump: None,
+            date_jump_pending: None,
+            date_jump_note: None,
             chat_media_counts: HashMap::new(),
             shared_media: SharedMediaState::default(),
             stickers: StickerPanel::default(),
@@ -1276,7 +1291,7 @@ impl Session {
             chat_boost_status: HashMap::new(),
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
-            comment_thread: None,
+            thread: None,
             chat_preview_fetch: None,
             chat_export: None,
             account_export: None,
@@ -1291,6 +1306,7 @@ impl Session {
             inline_bot_resolve_seq: 0,
             deep_link: None,
             deep_link_seq: 0,
+            proxy: Default::default(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),

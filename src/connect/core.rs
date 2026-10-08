@@ -218,10 +218,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 | EnvelopePayload::UpdateFile(_)
                 | EnvelopePayload::File(_)
         );
+        // Only the first page jumps to its first hit; "older" pages append.
         let chat_search_hits = matches!(
             owned.envelope.payload,
             EnvelopePayload::FoundChatMessages { .. }
-        );
+        ) && view_purpose != Some(RequestPurpose::SearchChatMessagesMore);
         // M2: capture the `getFullRichMessage` answer before `apply`
         // takes the pending request; the full blocks replace the
         // partial message's blocks in history after apply.
@@ -662,6 +663,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` `ok`
         // marks the websites list stale in the reducer; same pattern.
         let _ = self.refresh_connected_websites_if_stale();
+        // `parity:proxy-settings`: a proxy mutation marks the list stale.
+        let _ = self.refresh_proxies_if_stale();
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` `ok` marks the
         // subscriptions list stale in the reducer; same pattern.
@@ -683,6 +686,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // search found. A failed jump (closed chat) just drops it.
         if let Some(message_id) = self.session.unread_jump.take() {
             let _ = self.jump_to_chat_search_message(message_id);
+        }
+        // Jump to date: `getChatMessageByDate` resolved (or 404'd) a target.
+        if let Some((message_id, mode)) = self.session.date_jump.take() {
+            let _ = self.jump_to_message_with(message_id, mode);
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {

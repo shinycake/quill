@@ -5,46 +5,69 @@
 ![TDLib 1.8.67](https://img.shields.io/badge/TDLib-1.8.67-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-An independent, keyboard-first **Telegram desktop client** written in Rust — a GPU-accelerated [GPUI](https://www.gpui.rs) interface on top of the official [TDLib](https://core.telegram.org/tdlib) client library. Your real Telegram account, chats, and contacts, in a native app built to be faster and more delightful than the official clients.
+Quill is an independent, unofficial Telegram desktop client written in Rust. It uses Telegram's official [TDLib](https://core.telegram.org/tdlib) library for everything that talks to Telegram, and draws its interface with [GPUI](https://www.gpui.rs).
 
-> **Status:** under active development · [live progress dashboard](https://shinycake.github.io/quill-dashboard)
+> [!WARNING]
+> Quill is not affiliated with, endorsed by, or sponsored by Telegram (Telegram FZ-LLC or Telegram Messenger Inc.). "Telegram" is a trademark of its owner, and Quill uses the name only to say which service it works with.
+>
+> Quill is early, experimental software. Use it at your own risk. It comes with no warranty, as the [MIT license](LICENSE) states, and the maintainers are not responsible for lost data, account restrictions or bans, missed messages, or any other damage. Keep an official Telegram app installed and back up anything you can't afford to lose.
+
+Quill is under active development. The [progress dashboard](https://shinycake.github.io/quill-dashboard) shows where it stands.
 
 ## Screenshots
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/ready-chats.png" alt="Quill main window: chat list and conversation"/><br/><sub>Chat list &amp; conversation</sub></td>
-    <td><img src="docs/screenshots/ready-appearance.png" alt="Appearance settings in the dark theme"/><br/><sub>Appearance settings · dark theme</sub></td>
-    <td><img src="docs/screenshots/ready-rich-message.png" alt="Rich message blocks from a bot"/><br/><sub>Rich message blocks</sub></td>
+    <td><img src="docs/screenshots/readme-chat-dark.png" alt="Group chat in the dark theme: chat list with stories, archive row and badges; voice note, link preview and replies"/><br/><sub>Group chat · dark</sub></td>
+    <td><img src="docs/screenshots/readme-chat-light.png" alt="Group chat in the light theme with reactions, replies and colored sender names"/><br/><sub>Group chat · light</sub></td>
+    <td><img src="docs/screenshots/readme-media-viewer.png" alt="Fullscreen media viewer with zoom, forward and download actions"/><br/><sub>Media viewer</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/ready-channel-stats.png" alt="Channel statistics panel with growth sparklines"/><br/><sub>Channel statistics</sub></td>
-    <td><img src="docs/screenshots/ready-voice.png" alt="Voice message recording bar"/><br/><sub>Voice messages</sub></td>
-    <td><img src="docs/screenshots/ready-call-screenshare-receive.png" alt="Call with incoming screen share"/><br/><sub>Calls &amp; screen sharing</sub></td>
+    <td><img src="docs/screenshots/readme-reactions-menu.png" alt="Reaction picker over the message context menu"/><br/><sub>Reactions &amp; message menu</sub></td>
+    <td><img src="docs/screenshots/readme-polls.png" alt="Polls and a closed quiz with explanation"/><br/><sub>Polls &amp; quizzes</sub></td>
+    <td><img src="docs/screenshots/readme-player-bar.png" alt="Audio player bar above a private chat with music, a photo and reactions"/><br/><sub>Audio player bar</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/readme-channel-photos.png" alt="Channel with photo posts, reactions and view counts"/><br/><sub>Channels</sub></td>
+    <td><img src="docs/screenshots/readme-appearance-dark.png" alt="Appearance settings: themes, accent colors, wallpapers"/><br/><sub>Appearance settings</sub></td>
+    <td><img src="docs/screenshots/readme-accent-light.png" alt="Private chat in the light theme with a purple accent color"/><br/><sub>Accent colors</sub></td>
   </tr>
 </table>
 
-Captured from a real GPUI window using demo fixtures (no live Telegram). The [full gallery](docs/screenshots/README.md) has 120+ captures covering auth, chats, media, calls, bots, settings, and more.
+Captured from a real GPUI window using demo fixtures (no live Telegram). The [full gallery](docs/screenshots/README.md) has 130+ captures covering auth, chats, media, calls, bots, settings, and more.
 
 ## What is Quill?
 
-Quill is a from-scratch Telegram client for **macOS, Windows, and Linux**. Instead of reimplementing the protocol, it talks to Telegram through the official TDLib library — so you get your real account, chats, and contacts — while the entire interface is a native Rust/GPUI app designed around speed and keyboard flow.
+Quill is a Telegram client for macOS, Windows and Linux, written from scratch. It does not implement the Telegram protocol itself. TDLib handles the connection, so you sign in to your real account and see your real chats and contacts. The interface is a native Rust app built on GPUI.
 
-The goal isn't to clone Telegram Desktop. It's to build the client Telegram *should* have: instant, reliable, and a little bit delightful in every interaction.
+It is not a clone of Telegram Desktop. The aim is an app that feels fast, behaves reliably and can be driven from the keyboard. Nobody has measured its speed against the official apps yet.
 
 ## Highlights
 
-- **Complete auth** — phone/code login, QR login, 2FA with recovery, multi-account switching, active-session management
-- **Full messaging** — rich-text composer (bold, italic, code, spoilers, quotes, links), replies & quote-replies, forwarding, scheduled & silent sends, cloud drafts, in-chat search, reactions, polls
-- **Media** — photos, videos, albums, GIFs, stickers, voice/video notes with transcription, link previews, downloads manager
-- **Calls** — 1:1 and group audio/video with screen sharing
-- **Groups & channels** — admin tools, invite links, join requests, statistics with growth sparklines, bots with keyboards and games
-- **Appearance** — light/dark themes, auto-night, accent colors, chat wallpapers, text size, bubble/plain chat styles
-- **Privacy** — secret chats, per-session toggles, granular notification and archive controls
+- Sign in with a phone code, a QR code or a two-step verification password, with password recovery by email. Switch between several accounts and manage your active sessions.
+- Write messages with bold, italic, code, spoilers, quotes and links. Reply or quote-reply, forward, schedule or send silently, keep drafts in the cloud, search inside a chat, react, and vote in polls.
+- Photos, videos, albums, GIFs and stickers. Voice and video messages are recorded inside the app and can be transcribed. There is an audio player bar, a fullscreen media viewer, link previews and a downloads list.
+- One-to-one audio and video calls with screen sharing, and group voice chats. Live video and screen sharing inside group calls are not verified yet (see the Calls checklist below).
+- Group and channel admin tools: invite links, join requests, and statistics with growth charts. Bots with keyboards and games.
+- Light and dark themes, automatic night mode, accent colors, chat wallpapers, adjustable text size, and bubble or plain message layout.
+- Secret chats, per-session switches for accepting secret chats and calls, and detailed notification and archive settings.
+- `tg://` and `t.me` deep links, a tray menu with switches for notifications, unread badges, and packages for macOS, Windows and Linux.
 
-## Build
+## Download
 
-See [docs/build.md](docs/build.md). Short version:
+Release packages are published on the [GitHub Releases page](https://github.com/shinycake/quill/releases). No release has been published yet, so for now you need to build from source.
+
+The packages target:
+
+- macOS 14 or later on Apple Silicon
+- Linux on x86_64 (glibc), as a relocatable tarball with an `install.sh`
+- Windows 10 or later on x86_64, as a zip you unpack and run
+
+The packages do not include a Telegram API ID. To sign in you need your own, as described in the next section.
+
+## Build from source
+
+[docs/build.md](docs/build.md) covers each platform and the packaging scripts. The short version:
 
 ```bash
 cargo test --no-default-features
@@ -52,9 +75,11 @@ cargo run --features ui          # live connect with your Telegram credentials +
 cargo run --no-default-features -- --connect-smoke   # headless WaitPhoneNumber gate
 ```
 
-To connect a real account, set `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (from [my.telegram.org](https://my.telegram.org)) in the environment or a local `.env` file — see [docs/credentials.md](docs/credentials.md).
+Without credentials, `cargo run --features ui` opens a synthetic demo chat. To sign in to a real account, get your own API ID and hash from [my.telegram.org](https://my.telegram.org) and build TDLib with `scripts/build-tdlib.sh`. Then set `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in the environment or in a gitignored `quill.local.env` file, and point `QUILL_TDJSON_PATH` at the library. [docs/credentials.md](docs/credentials.md) has the details. Don't reuse another app's API ID: Telegram's [API terms](https://core.telegram.org/api/terms) require every app to have its own.
 
-Toolchain: Rust **1.92**. UI: **gpui-kit 0.6.1**. TDLib schema: **1.8.67**.
+On Linux, building the UI also needs the GTK 3 and ALSA development packages (`libgtk-3-dev` and `libasound2-dev` on Debian and Ubuntu).
+
+Toolchain: Rust 1.98.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.0. TDLib: 1.8.67.
 
 ## Status
 
@@ -627,6 +652,18 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
 - [x] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
 
-Decisions, pins, and blockers: [DECISIONS.md](DECISIONS.md).  
-What credentials are needed next: [docs/credentials.md](docs/credentials.md).  
-Phase 0 UI proof (real window, not a generated still): [docs/screenshots](docs/screenshots).
+## License
+
+Quill is released under the [MIT License](LICENSE). The packages also contain third-party components under their own licenses, among them TDLib (BSL-1.0), OpenSSL (Apache-2.0), FFmpeg (LGPL-2.1 or later, Linux and Windows only), the ntgcalls call engine (LGPL-3.0) and rlottie (MIT). [THIRD_PARTY.md](THIRD_PARTY.md) lists every component. The license texts are in [licenses/](licenses), and the licenses of the Rust crates are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). In the app, Settings → Appearance → About Quill → Open-source licenses opens the same list.
+
+## Contributing
+
+Pull requests are welcome. Before you open one, run the checks from the Linux CI job:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --no-default-features --all-targets -- -D warnings
+cargo test --no-default-features
+```
+
+Feature PRs don't edit `README.md` or `DECISIONS.md`. List the checklist items you finished in `parity-fragments/<slice-id>.txt` and write your notes in `docs/decisions/<slice-id>.md`; the merge pipeline updates the checklist after the merge. Older decisions, pins and blockers are archived in [DECISIONS.md](DECISIONS.md), and [docs/screenshots](docs/screenshots) has captures of the UI. Never commit API credentials.

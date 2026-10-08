@@ -199,6 +199,18 @@ impl QuillApp {
         if has_form {
             card = card.child(form);
         }
+        // Telegram API terms 2.2: say in the intro that this is a third-party
+        // app built on the Telegram API.
+        card = card.child(
+            div()
+                .id("auth-unofficial-notice")
+                .role(Role::Label)
+                .aria_label(quill::about::INTRO_NOTICE)
+                .text_xs()
+                .text_center()
+                .text_color(cx.theme().muted_foreground)
+                .child(quill::about::INTRO_NOTICE),
+        );
         div()
             .id("onboarding")
             .size_full()

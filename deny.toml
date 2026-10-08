@@ -1,0 +1,46 @@
+# cargo-deny configuration. CI runs only the license check:
+#   cargo deny check licenses
+# A crate whose license is not on this list fails the `licenses` job. Before
+# adding a license here, check that it is compatible with shipping Quill under
+# MIT and record the decision in docs/decisions/codex-legal-compliance.md.
+
+[graph]
+# The targets Quill ships on (README "Platforms"). Crates that only build for
+# other targets are not checked.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+# Permissive licenses, plus MPL-2.0 (file-level copyleft; Quill uses those
+# crates unmodified) and the data licenses of webpki-roots (CDLA-Permissive-2.0)
+# and the ICU crates (Unicode-3.0). No GPL, AGPL, LGPL or SSPL: a crate offering
+# one of those only as an alternative (e.g. "Apache-2.0 OR GPL-2.0-only") passes
+# because the permissive option is taken.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "bzip2-1.0.6",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+
+[licenses.private]
+# Quill's own crates (quill, ntgcalls-sys) are MIT and unpublished.
+ignore = true

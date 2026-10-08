@@ -22,6 +22,7 @@ pub(super) enum NavigationAction {
     Communities,
     ArchivedStickers,
     Storage,
+    Proxy,
     Subscriptions,
     Gift,
     ChatMute,
@@ -122,6 +123,7 @@ impl QuillApp {
             NavigationAction::Storage => {
                 self.open_data_storage(cx);
             }
+            NavigationAction::Proxy => self.open_proxy_list(cx),
             NavigationAction::Subscriptions => {
                 self.open_subscriptions(cx);
             }
@@ -240,6 +242,12 @@ impl QuillApp {
         let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
         let ttl_ready = is_secret && chat.is_some_and(|c| c.can_post());
         let discussion = chat_id.and_then(|id| self.session()?.discussion_chat_id(id));
+        // tdesktop hides "Export chat history" for chats with protected content.
+        let exportable = live
+            && chat_id.is_some_and(|id| {
+                self.session()
+                    .is_some_and(|s| !s.chat_has_protected_content(id))
+            });
         Button::new("chat-more-menu")
             .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
@@ -274,7 +282,11 @@ impl QuillApp {
                     ),
                     ("Add to folder", NavigationAction::ChatFolders, true),
                     ("Shared media", NavigationAction::SharedMedia, live),
-                    ("Export chat history", NavigationAction::ExportChat, live),
+                    (
+                        "Export chat history",
+                        NavigationAction::ExportChat,
+                        exportable,
+                    ),
                     ("Send collectible gift", NavigationAction::Gift, true),
                 ] {
                     if !visible {
@@ -440,6 +452,7 @@ impl QuillApp {
                         ("Privacy and security", NavigationAction::Privacy),
                         ("Devices", NavigationAction::Sessions),
                         ("Data and storage", NavigationAction::Storage),
+                        ("Proxy", NavigationAction::Proxy),
                         ("Star subscriptions", NavigationAction::Subscriptions),
                         ("Contacts", NavigationAction::ContactsSettings),
                         ("Calls", NavigationAction::CallSettings),
