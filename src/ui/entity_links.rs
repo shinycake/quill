@@ -272,7 +272,9 @@ impl QuillApp {
                     (voice.file_id, voice.is_listened, f64::from(voice.duration));
                 self.playback_positions
                     .insert(target_id, secs.min(duration.max(0.)));
-                if self.playing_voice == Some(target_id) {
+                if self.playing_voice == Some(target_id)
+                    && self.player.chat.is_none_or(|c| c == chat_id)
+                {
                     self.seek_active_to(secs, cx);
                 } else {
                     self.toggle_voice_playback(chat_id, target_id, file_id, listened, duration, cx);
@@ -282,10 +284,12 @@ impl QuillApp {
                 let (file_id, duration) = (audio.file_id, f64::from(audio.duration));
                 self.playback_positions
                     .insert(target_id, secs.min(duration.max(0.)));
-                if self.playing_audio == Some(target_id) {
+                if self.playing_audio == Some(target_id)
+                    && self.player.chat.is_none_or(|c| c == chat_id)
+                {
                     self.seek_active_to(secs, cx);
                 } else {
-                    self.toggle_audio_playback(target_id, file_id, duration, cx);
+                    self.toggle_audio_playback(chat_id, target_id, file_id, duration, cx);
                 }
             }
             MessageContent::Video(_) => {

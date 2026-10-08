@@ -104,6 +104,7 @@ impl QuillApp {
         self.playback_clock = None;
         self.playback_path = None;
         self.seek_slider = None;
+        self.player.slider = None;
         self.seek_scrubbing = false;
         self.seek_preview_secs = None;
     }
@@ -130,6 +131,7 @@ impl QuillApp {
     pub(super) fn begin_track_playback(
         &mut self,
         kind: PlaybackKind,
+        chat_id: ChatId,
         message_id: MessageId,
         duration_secs: f64,
         offset_secs: f64,
@@ -162,6 +164,7 @@ impl QuillApp {
         self.seek_slider = Some(slider);
         self.seek_scrubbing = false;
         self.seek_preview_secs = None;
+        self.note_track_started(kind, chat_id, message_id, cx);
         self.spawn_playback_tick(cx);
     }
 
@@ -288,6 +291,13 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         let active = this.active_playback_id().is_some();
                         if !active {
+                            quill::media_session::publish(None);
+                            return false;
+                        }
+                        // Media keys and the OS Now Playing widget.
+                        this.drain_media_commands(cx);
+                        if this.active_playback_id().is_none() {
+                            quill::media_session::publish(None);
                             return false;
                         }
                         // The sound is the authority on where the track
@@ -307,13 +317,21 @@ impl QuillApp {
                             // (now end-of-track) position via clear_playback_state,
                             // then reset to 0.0 so replay-after-finish starts at the top.
                             let finished_id = this.active_playback_id();
+                            // What the playlist continues with (voice note
+                            // chain, next song, repeat) is decided while
+                            // the finished track is still the active one.
+                            let next = this.next_after_finish();
                             this.stop_voice_playback();
                             this.stop_audio_playback();
                             if let Some(id) = finished_id {
                                 this.playback_positions.insert(id, 0.0);
                             }
                             this.status_note = "playback finished".into();
+                            if let Some((chat, id)) = next {
+                                this.play_message(chat, id, cx);
+                            }
                         }
+                        this.publish_now_playing();
                         cx.notify();
                         true
                     })
@@ -350,12 +368,28 @@ impl QuillApp {
                     state.set_value(value, window, cx);
                 });
             }
+            // The player bar's own slider follows the same clock.
+            if let Some(bar) = self.player.slider.as_ref()
+                && bar.read(cx).value() != SliderValue::Single(value)
+            {
+                bar.update(cx, |state, cx| {
+                    state.set_value(value, window, cx);
+                });
+            }
         }
     }
 
     /// View model for one audio/voice row's seek bar.
-    pub(super) fn seek_bar_view(&self, message_id: MessageId, duration_secs: f64) -> SeekBarView {
-        let active = self.active_playback_id() == Some(message_id);
+    pub(super) fn seek_bar_view(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        duration_secs: f64,
+    ) -> SeekBarView {
+        // Playback continues across chats, and message ids repeat between
+        // them: a row is the active one only in the track's own chat.
+        let active = self.active_playback_id() == Some(message_id)
+            && self.player.chat.is_none_or(|chat| chat == chat_id);
         if active {
             let display = self.seek_preview_secs.or_else(|| {
                 self.playback_clock
@@ -401,7 +435,9 @@ impl QuillApp {
         duration_secs: f64,
         cx: &mut Context<Self>,
     ) {
-        if self.playing_voice == Some(message_id) {
+        if self.playing_voice == Some(message_id)
+            && self.player.chat.is_none_or(|chat| chat == chat_id)
+        {
             // Active row: pause ↔ resume (the row stays active so the seek
             // bar keeps working and Play resumes from the frozen position).
             let playing = self
@@ -444,7 +480,14 @@ impl QuillApp {
             .get(&message_id)
             .copied()
             .unwrap_or(0.0);
-        self.begin_track_playback(PlaybackKind::Voice, message_id, duration_secs, offset, cx);
+        self.begin_track_playback(
+            PlaybackKind::Voice,
+            chat_id,
+            message_id,
+            duration_secs,
+            offset,
+            cx,
+        );
         self.playback_path = Some(safe.clone().into());
         if !listened {
             self.mark_voice_opened(chat_id, message_id);
@@ -460,12 +503,15 @@ impl QuillApp {
 
     pub(super) fn toggle_audio_playback(
         &mut self,
+        chat_id: ChatId,
         message_id: MessageId,
         file_id: FileId,
         duration_secs: f64,
         cx: &mut Context<Self>,
     ) {
-        if self.playing_audio == Some(message_id) {
+        if self.playing_audio == Some(message_id)
+            && self.player.chat.is_none_or(|chat| chat == chat_id)
+        {
             // Active row: pause ↔ resume (see voice toggle).
             let playing = self
                 .playback_clock
@@ -490,7 +536,7 @@ impl QuillApp {
         });
         let Some(path) = path else {
             self.pending_voice_play = None;
-            self.pending_audio_play = Some((message_id, file_id, duration_secs));
+            self.pending_audio_play = Some((chat_id, message_id, file_id, duration_secs));
             self.request_media_download(file_id, None, cx);
             return;
         };
@@ -508,7 +554,14 @@ impl QuillApp {
             .get(&message_id)
             .copied()
             .unwrap_or(0.0);
-        self.begin_track_playback(PlaybackKind::Audio, message_id, duration_secs, offset, cx);
+        self.begin_track_playback(
+            PlaybackKind::Audio,
+            chat_id,
+            message_id,
+            duration_secs,
+            offset,
+            cx,
+        );
         self.playback_path = Some(safe.clone().into());
         let playing = self.start_player(&safe, offset);
         self.status_note = if playing {
@@ -535,7 +588,7 @@ impl QuillApp {
     }
 
     pub(super) fn resume_pending_audio(&mut self, cx: &mut Context<Self>) {
-        let Some((message_id, file_id, duration_secs)) = self.pending_audio_play else {
+        let Some((chat_id, message_id, file_id, duration_secs)) = self.pending_audio_play else {
             return;
         };
         let ready = self.session().is_some_and(|session| {
@@ -546,7 +599,7 @@ impl QuillApp {
                 .is_some()
         });
         if ready {
-            self.toggle_audio_playback(message_id, file_id, duration_secs, cx);
+            self.toggle_audio_playback(chat_id, message_id, file_id, duration_secs, cx);
         }
     }
 

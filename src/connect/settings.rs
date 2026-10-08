@@ -1236,6 +1236,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         save_preferences(&self.paths, &prefs)
     }
 
+    /// Persist the desktop-notifications switch (tdesktop `desktopNotify`).
+    pub fn save_desktop_notifications(&mut self) -> std::io::Result<()> {
+        let mut prefs = load_preferences(&self.paths);
+        prefs.desktop_notifications = self.session.desktop_notifications;
+        save_preferences(&self.paths, &prefs)
+    }
+
     /// Parity slice (platform-custom-keybindings): load the user's shortcut
     /// overrides (`prefs.json`).
     pub fn load_custom_keybindings(&self) -> Vec<crate::settings::CustomKeybinding> {

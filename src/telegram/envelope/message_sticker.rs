@@ -24,6 +24,9 @@ pub struct StickerContent {
     pub thumb_height: i32,
     pub is_premium: bool,
     pub requires_premium: bool,
+    /// `sticker.set_id` (0 when the sticker belongs to no set): feeds the
+    /// message menu's "View Sticker Set" / "Add Stickers".
+    pub set_id: i64,
 }
 
 impl StickerContent {
@@ -96,6 +99,7 @@ pub(crate) fn parse_message_sticker(value: &Value) -> (MessageContent, Vec<Parse
             thumb_width: item.thumb_width,
             thumb_height: item.thumb_height,
             requires_premium: item.requires_premium,
+            set_id: item.set_id,
             is_premium: value
                 .get("is_premium")
                 .and_then(Value::as_bool)
@@ -251,6 +255,10 @@ pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        is_installed: value
+            .get("is_installed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         stickers,
         files,
     }

@@ -150,7 +150,9 @@ pub fn start_prepared_live_connect(
     session.badge_prefs = load_badge_prefs(&prepared.paths);
     // Parity slice: in-app notification sounds toggle (tdesktop "Play
     // sounds") loads the same way.
-    session.inapp_sounds_enabled = load_preferences(&prepared.paths).inapp_sounds_enabled;
+    let prefs = load_preferences(&prepared.paths);
+    session.inapp_sounds_enabled = prefs.inapp_sounds_enabled;
+    session.desktop_notifications = prefs.desktop_notifications;
     // Slice parity:settings-language: the app language tag load the same
     // way (defaults to "en" when unset).
     session.language_prefs = load_language_prefs(&prepared.paths);

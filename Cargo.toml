@@ -14,7 +14,7 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus"]
+ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:zbus", "dep:objc2-media-player", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus"]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
@@ -70,6 +70,8 @@ tray-icon = { version = "0.21", optional = true, default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", optional = true, default-features = false, features = ["async-io", "blocking"] }
+# MPRIS (org.mpris.MediaPlayer2) on the session bus; same zbus GPUI and ksni already link.
+zbus = { version = "5", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
@@ -85,6 +87,8 @@ core-video = { version = "0.5.2", optional = true }
 core-foundation = { version = "0.10.1", optional = true }
 # Badge authorization (the Dock draws badges only for apps allowed to badge).
 objc2-user-notifications = { version = "0.3", optional = true }
+# Lock-screen / media-key Now Playing (MPNowPlayingInfoCenter, MPRemoteCommandCenter).
+objc2-media-player = { version = "0.3.2", optional = true, default-features = false, features = ["std", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPMediaItem", "MPRemoteCommandEvent", "block2"] }
 
 [dev-dependencies]
 pretty_assertions = "1"
@@ -122,7 +126,7 @@ embed-resource = "3"
 # Local time zone offsets; secret chats kept out of screen capture.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Media", "Media_Playback", "Foundation"] }
 
 # Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
 # 0.7.0 with a bidi-aware input engine. The commit that adds third_party/gpui-base is
