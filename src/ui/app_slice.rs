@@ -138,7 +138,7 @@ impl QuillApp {
     pub(super) fn notify_sidebar(&self, cx: &mut Context<Self>) {
         match &self.slices.sidebar {
             Some(slice) => {
-                let id = slice.entity_id();
+                let id = slice.slice.entity_id();
                 let app: &mut App = cx;
                 app.notify(id);
             }
