@@ -16,7 +16,9 @@
 //! close/minimize-to-tray switches stay hidden. Registration is retried
 //! every [`RETRY_EVERY`], so a desktop that finishes starting later wins.
 
-use crate::tray::{TrayAction, render_tray_icon, rgba_to_argb32, tray_tooltip};
+use crate::tray::{
+    TrayAction, notifications_label, render_tray_icon, rgba_to_argb32, sounds_label, tray_tooltip,
+};
 use ksni::blocking::{Handle, TrayMethods};
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, channel};
@@ -48,6 +50,8 @@ pub fn take_actions() -> Vec<TrayAction> {
 /// The StatusNotifierItem model ksni publishes over D-Bus.
 struct SniTray {
     unread: u32,
+    /// (desktop notifications on, notification sounds on) — menu labels.
+    toggles: (bool, bool),
 }
 
 impl SniTray {
@@ -96,6 +100,18 @@ impl ksni::Tray for SniTray {
             }
             .into(),
             StandardItem {
+                label: notifications_label(self.toggles.0).into(),
+                activate: Box::new(|_| push_action(TrayAction::ToggleNotifications)),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: sounds_label(self.toggles.1).into(),
+                activate: Box::new(|_| push_action(TrayAction::ToggleSounds)),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
                 label: "Lock Quill".into(),
                 activate: Box::new(|_| push_action(TrayAction::Lock)),
                 ..Default::default()
@@ -123,7 +139,10 @@ enum Phase {
     /// A worker is registering with the watcher.
     Connecting(Receiver<Option<Handle<SniTray>>>),
     /// Registered and showing.
-    Ready { handle: Handle<SniTray>, shown: u32 },
+    Ready {
+        handle: Handle<SniTray>,
+        shown: (u32, (bool, bool)),
+    },
 }
 
 /// Tray lifecycle owned by the UI thread (see `tray::sync_tray`).
@@ -147,15 +166,15 @@ impl TrayState {
     /// `--start-minimized` can tell "no tray host" (reveal the window) from
     /// "tray still registering". A healthy or tray-less desktop answers in
     /// milliseconds; a hung bus falls back to the polled `Connecting` phase.
-    pub fn poll_startup(&mut self, unread: u32, wait: Duration) {
+    pub fn poll_startup(&mut self, unread: u32, toggles: (bool, bool), wait: Duration) {
         if !matches!(self.phase, Phase::Idle(_)) {
-            return self.poll(unread);
+            return self.poll(unread, toggles);
         }
-        let result = start_registration(unread);
+        let result = start_registration(unread, toggles);
         self.phase = match result.recv_timeout(wait) {
             Ok(Some(handle)) => Phase::Ready {
                 handle,
-                shown: unread,
+                shown: (unread, toggles),
             },
             Ok(None) | Err(RecvTimeoutError::Disconnected) => {
                 Phase::Idle(Instant::now() + RETRY_EVERY)
@@ -165,18 +184,18 @@ impl TrayState {
     }
 
     /// Advance the lifecycle and publish `unread`.
-    pub fn poll(&mut self, unread: u32) {
+    pub fn poll(&mut self, unread: u32, toggles: (bool, bool)) {
         match &mut self.phase {
             Phase::Idle(not_before) => {
                 if Instant::now() >= *not_before {
-                    self.phase = Phase::Connecting(start_registration(unread));
+                    self.phase = Phase::Connecting(start_registration(unread, toggles));
                 }
             }
             Phase::Connecting(result) => match result.try_recv() {
                 Ok(Some(handle)) => {
                     self.phase = Phase::Ready {
                         handle,
-                        shown: unread,
+                        shown: (unread, toggles),
                     }
                 }
                 Ok(None) | Err(TryRecvError::Disconnected) => {
@@ -188,8 +207,15 @@ impl TrayState {
                 if handle.is_closed() {
                     // The watcher went away (shell restart): register again.
                     self.phase = Phase::Idle(Instant::now());
-                } else if *shown != unread && handle.update(|tray| tray.unread = unread).is_some() {
-                    *shown = unread;
+                } else if *shown != (unread, toggles)
+                    && handle
+                        .update(|tray| {
+                            tray.unread = unread;
+                            tray.toggles = toggles;
+                        })
+                        .is_some()
+                {
+                    *shown = (unread, toggles);
                 }
             }
         }
@@ -202,14 +228,14 @@ impl Default for TrayState {
     }
 }
 
-fn start_registration(unread: u32) -> Receiver<Option<Handle<SniTray>>> {
+fn start_registration(unread: u32, toggles: (bool, bool)) -> Receiver<Option<Handle<SniTray>>> {
     let (sender, receiver) = channel();
     // If the thread cannot spawn, `sender` is dropped with the closure and
     // the receiver reports `Disconnected`, which schedules a retry.
     let _ = std::thread::Builder::new()
         .name("quill-tray-sni".to_string())
         .spawn(move || {
-            let handle = SniTray { unread }
+            let handle = SniTray { unread, toggles }
                 .disable_dbus_name(sandboxed())
                 .spawn()
                 .ok();

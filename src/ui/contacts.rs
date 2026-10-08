@@ -553,7 +553,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|dialog| dialog.draft(cx));
         let Some((user_id, phone, first, last)) = draft else {
-            self.status_note = "Enter a phone number to add the contact.".into();
+            self.status_note = "Enter a name or phone number to add the contact.".into();
             cx.notify();
             return;
         };

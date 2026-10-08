@@ -18,6 +18,10 @@ pub struct Preferences {
     /// Client-side (no TDLib setting exists; `in-app-sounds` is only a
     /// `SettingsSection` deep-link name, schema line 9322).
     pub inapp_sounds_enabled: bool,
+    /// tdesktop `desktopNotify` ("Desktop notifications" / the tray's
+    /// "Disable notifications"): when off, no OS notification is shown.
+    #[serde(default = "default_true")]
+    pub desktop_notifications: bool,
     /// Parity slice (platform-custom-keybindings): user-overridden shortcuts,
     /// one per rebindable action id.
     #[serde(default)]
@@ -40,6 +44,7 @@ impl Default for Preferences {
             account: AccountKey::primary(),
             hide_notification_previews: true,
             inapp_sounds_enabled: true,
+            desktop_notifications: true,
             custom_keybindings: Vec::new(),
         }
     }
