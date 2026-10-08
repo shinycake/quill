@@ -295,6 +295,9 @@ pub enum ScreenshotDemo {
     /// multi-line Hebrew bubbles with their time footers, a Hebrew reply and a
     /// pinned message. `QUILL_DEMO_RTL_VIEW=chat|search` (default `chat`).
     ReadyRtlPolish,
+    /// Service-message tour in a group: members, pins with excerpt,
+    /// photo change, calls, gifts, giveaways, topics, timers, boosts.
+    ReadyServiceMessages,
     /// Bubble headers and footer (injected, no live Telegram): replies with
     /// a colored sender name, a quote, a media thumbnail, a reply from another
     /// chat and a deleted original; forwards from a user, a hidden account, a

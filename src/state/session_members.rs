@@ -16,6 +16,9 @@ impl Session {
     /// "You: hi"), as Telegram Desktop shows them. `None` for private
     /// chats and channels, which show the text alone.
     pub fn chat_preview_sender(&self, chat: &ChatSummary) -> Option<String> {
+        if chat.last_preview_style.service {
+            return None;
+        }
         let group = matches!(
             chat.kind,
             ChatKind::BasicGroup { .. }
