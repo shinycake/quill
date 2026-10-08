@@ -14,7 +14,7 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio"]
+ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:cpal", "dep:ogg", "dep:rusty-opus"]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
@@ -36,6 +36,11 @@ serde_json = "1"
 semver = "1"
 # Call sounds: in-process playback (CoreAudio / WASAPI / ALSA via cpal).
 rodio = { version = "0.22", optional = true, default-features = false, features = ["playback"] }
+# Voice-note capture: microphone via cpal (same backend rodio plays through),
+# pure-Rust Opus encoder (no libopus) and Ogg muxer. No external binary.
+cpal = { version = "0.17", optional = true, default-features = false }
+ogg = { version = "0.9", optional = true }
+rusty-opus = { version = "1", optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 sha2 = "0.10"
 smallvec = { version = "1", optional = true }

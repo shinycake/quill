@@ -689,19 +689,21 @@ pub struct VideoNoteCapture {
 impl VideoNoteCapture {
     /// Start recording. Fails when there is no camera or ffmpeg is missing.
     pub fn start(hq: bool) -> Result<Self, String> {
-        let input = crate::media_tools::capture_input(true)?;
+        if !crate::media_tools::is_installed("ffmpeg") {
+            return Err(crate::media_tools::ffmpeg_missing_message("Video messages"));
+        }
+        let input = crate::media_tools::capture_input()?;
         let path = crate::voice::capture_path("video-note", "mp4");
         let log = path.with_extension("log");
         let log_file = std::fs::File::create(&log).map_err(|err| err.to_string())?;
         let size = round_video_size(hq);
         let preview = ROUND_PREVIEW_SIDE;
-        let mut child = crate::media_tools::command("ffmpeg")
-            .args(round_capture_args(&input, size, &path))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(log_file)
-            .spawn()
-            .map_err(|err| format!("Video messages need ffmpeg ({err})."))?;
+        let mut child = crate::media_tools::spawn_capture(
+            &round_capture_args(&input, size, &path),
+            Stdio::piped(),
+            Stdio::from(log_file),
+        )
+        .map_err(|err| format!("Couldn't start ffmpeg ({err})."))?;
         let frames: PreviewFrame = Arc::default();
         if let Some(mut stdout) = child.stdout.take() {
             let frames = frames.clone();
@@ -811,9 +813,15 @@ fn round_capture_args(
          [pv]scale={preview}:{preview},format=bgra[preview]",
         video = input.video,
     );
-    let mut args: Vec<String> = ["-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-t"]
+    let mut args: Vec<String> = ["-y", "-hide_banner", "-loglevel", "error"]
         .map(String::from)
         .to_vec();
+    // Windows stops a capture by writing `q` to ffmpeg's stdin; elsewhere
+    // stdin is closed and SIGINT stops it.
+    if !cfg!(windows) {
+        args.push("-nostdin".into());
+    }
+    args.push("-t".into());
     args.push(ROUND_MAX_SECS.to_string());
     args.extend(input.args.iter().cloned());
     for arg in [

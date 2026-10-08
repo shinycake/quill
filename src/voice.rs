@@ -4,14 +4,12 @@
 //! `documentWaveformDecode` (5-bit samples, MSB first). TDLib 1.8.67
 //! `voiceNote.waveform` and `inputVoiceNote.waveform` are that byte string.
 //!
-//! Capture shells out to `ffmpeg` (libopus, mono OGG) when it is installed,
-//! recording the default microphone (AVFoundation on macOS, PulseAudio on
-//! Linux).
-//! Quill does not vendor libopus. A missing encoder is an error, not a fake file.
+//! Capture runs in-process on every platform: cpal reads the default
+//! microphone ([`crate::voice_input`]) and a pure-Rust Opus encoder writes
+//! the OGG ([`crate::voice_opus`]). No ffmpeg, no libopus.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -88,11 +86,6 @@ impl VoiceDraft {
 /// tdesktop `Player::kWaveformSamplesCount`: bars in a sent waveform.
 pub const WAVEFORM_SAMPLES: usize = 100;
 
-/// Levels are measured on 8 kHz mono, one peak per 10 ms (tdesktop
-/// `waveformEach = kCaptureFrequency / 100`).
-const LEVEL_RATE: usize = 8000;
-const LEVEL_EACH: usize = LEVEL_RATE / 100;
-
 /// tdesktop `CollectWaveform`: per-10 ms peaks (`peak / 256`) squeezed to
 /// `count` bars, scaled against 1.8× their mean (at least 2500) so a quiet
 /// recording still fills the bubble. Fewer levels than bars keep one bar
@@ -125,41 +118,6 @@ pub fn collect_waveform(levels: &[u8], count: usize) -> Vec<u8> {
         .collect()
 }
 
-/// Read 16-bit mono PCM from ffmpeg and keep one peak (`/ 256`) per 10 ms.
-fn spawn_level_reader(mut pcm: impl std::io::Read + Send + 'static, levels: Arc<Mutex<Vec<u8>>>) {
-    std::thread::spawn(move || {
-        let mut buffer = [0u8; 4096];
-        let (mut peak, mut counted) = (0u16, 0usize);
-        let mut odd: Option<u8> = None;
-        while let Ok(read) = pcm.read(&mut buffer) {
-            if read == 0 {
-                break;
-            }
-            let mut fresh = Vec::new();
-            let mut bytes = buffer[..read].iter().copied();
-            while let Some(low) = odd.take().or_else(|| bytes.next()) {
-                let Some(high) = bytes.next() else {
-                    odd = Some(low);
-                    break;
-                };
-                let sample = i16::from_le_bytes([low, high]);
-                peak = peak.max(sample.unsigned_abs());
-                counted += 1;
-                if counted == LEVEL_EACH {
-                    fresh.push((peak / 256) as u8);
-                    peak = 0;
-                    counted = 0;
-                }
-            }
-            if !fresh.is_empty()
-                && let Ok(mut levels) = levels.lock()
-            {
-                levels.extend(fresh);
-            }
-        }
-    });
-}
-
 /// Recordings: `{media_cache_base}/captures`, created 0700. A sent voice
 /// or video message keeps pointing at its recording, so it plays from here.
 pub fn capture_root() -> PathBuf {
@@ -188,13 +146,30 @@ pub(crate) fn capture_path(kind: &str, ext: &str) -> PathBuf {
     ))
 }
 
-/// In-progress microphone capture (tdesktop `VoiceRecordBar`): ffmpeg
-/// encodes Opus OGG and streams 8 kHz PCM back for the levels.
+/// A running microphone capture: the cpal stream, the encoder thread it
+/// feeds, and how many samples have been encoded.
+#[cfg(feature = "ui")]
+struct Live {
+    mic: crate::voice_input::MicStream,
+    worker: std::thread::JoinHandle<Result<u64, String>>,
+    samples: Arc<std::sync::atomic::AtomicU64>,
+}
+
+#[cfg(not(feature = "ui"))]
+struct Live;
+
+/// Seconds without a single sample before the microphone counts as dead
+/// (a refused permission can deliver nothing instead of an error).
+#[cfg(feature = "ui")]
+const NO_AUDIO_SECS: u64 = 3;
+
+/// In-progress microphone capture (tdesktop `VoiceRecordBar`): the default
+/// input is encoded to Opus OGG in-process while 10 ms levels feed the
+/// live waveform.
 pub struct VoiceCapture {
     pub path: PathBuf,
-    log: PathBuf,
     started: Instant,
-    child: Option<Child>,
+    live: Option<Live>,
     /// Bars shown while recording (the waveform so far).
     pub bars: Vec<u8>,
     levels: Arc<Mutex<Vec<u8>>>,
@@ -204,34 +179,53 @@ pub struct VoiceCapture {
 }
 
 impl VoiceCapture {
-    /// Start recording the default microphone. Fails when ffmpeg is missing.
+    /// Start recording the default microphone.
+    #[cfg(feature = "ui")]
     pub fn start() -> Result<Self, String> {
-        let input = crate::media_tools::capture_input(false)?;
+        use std::io::BufWriter;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
         let path = capture_path("voice", "ogg");
-        let log = path.with_extension("log");
-        let log_file = fs::File::create(&log).map_err(|err| err.to_string())?;
-        let mut child = crate::media_tools::command("ffmpeg")
-            .args(["-y", "-hide_banner", "-loglevel", "error", "-nostdin"])
-            .args(&input.args)
-            .args(["-map", input.audio, "-ac", "1", "-ar", "48000"])
-            .args(["-c:a", "libopus", "-b:a", "32k", "-application", "voip"])
-            .arg(&path)
-            .args(["-map", input.audio, "-ac", "1", "-ar", "8000"])
-            .args(["-f", "s16le", "pipe:1"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(log_file)
-            .spawn()
-            .map_err(|err| format!("Voice messages need ffmpeg ({err})."))?;
+        let file = fs::File::create(&path).map_err(|err| err.to_string())?;
+        let mut encoder = crate::voice_opus::VoiceEncoder::new(BufWriter::new(file))?;
+        let (sender, receiver) = std::sync::mpsc::channel::<Vec<f32>>();
+        let mic = match crate::voice_input::open_default(sender) {
+            Ok(mic) => mic,
+            Err(err) => {
+                let _ = fs::remove_file(&path);
+                return Err(err);
+            }
+        };
         let levels = Arc::new(Mutex::new(Vec::new()));
-        if let Some(stdout) = child.stdout.take() {
-            spawn_level_reader(stdout, levels.clone());
-        }
+        let samples = Arc::new(AtomicU64::new(0));
+        let worker = {
+            let (levels, samples) = (levels.clone(), samples.clone());
+            std::thread::spawn(move || {
+                let mut sent = 0;
+                // Ends when the stream (the only sender) is dropped.
+                while let Ok(chunk) = receiver.recv() {
+                    encoder.push(&chunk)?;
+                    samples.store(encoder.samples() as u64, Ordering::Relaxed);
+                    if encoder.levels().len() > sent
+                        && let Ok(mut shared) = levels.lock()
+                    {
+                        shared.extend_from_slice(&encoder.levels()[sent..]);
+                        sent = encoder.levels().len();
+                    }
+                }
+                let total = encoder.samples() as u64;
+                encoder.finish()?;
+                Ok(total)
+            })
+        };
         Ok(Self {
             path,
-            log,
             started: Instant::now(),
-            child: Some(child),
+            live: Some(Live {
+                mic,
+                worker,
+                samples,
+            }),
             bars: Vec::new(),
             levels,
             fixed_seconds: None,
@@ -239,13 +233,17 @@ impl VoiceCapture {
         })
     }
 
+    #[cfg(not(feature = "ui"))]
+    pub fn start() -> Result<Self, String> {
+        Err("Recording needs the full Quill build.".into())
+    }
+
     /// Screenshot / fixture bar. Does not open a microphone.
     pub fn preview(path: PathBuf, seconds: i32, bars: Vec<u8>) -> Self {
         Self {
-            log: path.with_extension("log"),
             path,
             started: Instant::now(),
-            child: None,
+            live: None,
             bars,
             levels: Arc::default(),
             fixed_seconds: Some(seconds.max(0)),
@@ -273,38 +271,62 @@ impl VoiceCapture {
         }
     }
 
-    /// The reason recording stopped on its own (no microphone access, no
-    /// device), once ffmpeg has exited.
+    /// The reason recording stopped on its own (device unplugged, no
+    /// microphone access), if it did.
+    #[cfg(feature = "ui")]
     pub fn failure(&mut self) -> Option<String> {
-        let child = self.child.as_mut()?;
-        child.try_wait().ok().flatten()?;
-        self.child = None;
-        Some(crate::media_tools::capture_failure(&self.log, false))
+        use std::sync::atomic::Ordering;
+        let live = self.live.as_ref()?;
+        let error = live.mic.error.lock().ok().and_then(|mut e| e.take());
+        let reason = error.or_else(|| {
+            let idle = self.started.elapsed().as_secs() >= NO_AUDIO_SECS
+                && live.samples.load(Ordering::Relaxed) == 0;
+            idle.then(|| crate::media_tools::no_audio_message(false))
+        })?;
+        self.stop_live(false);
+        Some(reason)
+    }
+
+    #[cfg(not(feature = "ui"))]
+    pub fn failure(&mut self) -> Option<String> {
+        None
     }
 
     pub fn discard(mut self) {
-        self.stop_child(false);
+        self.stop_live(false);
         if !self.keep_file {
             let _ = fs::remove_file(&self.path);
         }
     }
 
-    /// Stop the encoder and keep the file when it is non-empty.
+    /// Stop the encoder and keep the file when it holds audio.
     pub fn finish(mut self) -> Result<VoiceDraft, String> {
-        let duration = self.started.elapsed();
-        self.stop_child(true);
+        let wall = self.started.elapsed();
+        let samples = self.stop_live(true);
         let len = fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
-        if len == 0 || !self.path.is_file() {
-            let reason = crate::media_tools::capture_failure(&self.log, false);
+        let encoded = match samples {
+            Some(Err(ref reason)) => Err(reason.clone()),
+            Some(Ok(0)) => Err(crate::media_tools::no_audio_message(false)),
+            _ if self.keep_file => Ok(()),
+            _ if len == 0 || !self.path.is_file() => {
+                Err(crate::media_tools::no_audio_message(false))
+            }
+            _ => Ok(()),
+        };
+        if let Err(reason) = encoded {
             if !self.keep_file {
                 let _ = fs::remove_file(&self.path);
             }
             return Err(reason);
         }
-        let duration_secs = self
-            .fixed_seconds
-            .unwrap_or(duration.as_secs_f64().round() as i32)
-            .max(1);
+        // The encoded sample count is exact; the wall clock only stands in
+        // for fixtures.
+        let duration_secs = match (self.fixed_seconds, samples) {
+            (Some(fixed), _) => fixed,
+            (None, Some(Ok(total))) => (total as f64 / 48_000.0).round() as i32,
+            _ => wall.as_secs_f64().round() as i32,
+        }
+        .max(1);
         let levels = self.levels.lock().map(|l| l.clone()).unwrap_or_default();
         let mut bars = collect_waveform(&levels, WAVEFORM_SAMPLES);
         if bars.is_empty() {
@@ -320,20 +342,30 @@ impl VoiceCapture {
         })
     }
 
-    fn stop_child(&mut self, graceful: bool) {
-        if let Some(mut child) = self.child.take() {
-            crate::media_tools::stop_capture(&mut child, graceful);
-        }
-        if !self.keep_file {
-            let _ = fs::remove_file(&self.log);
-        }
+    /// Close the microphone and join the encoder. `Some(result)` only when
+    /// `graceful`; otherwise everything is just dropped.
+    #[cfg(feature = "ui")]
+    fn stop_live(&mut self, graceful: bool) -> Option<Result<u64, String>> {
+        let live = self.live.take()?;
+        drop(live.mic); // the stream's sender drops and the worker finishes
+        let result = live
+            .worker
+            .join()
+            .unwrap_or_else(|_| Err("The voice encoder crashed.".into()));
+        graceful.then_some(result)
+    }
+
+    #[cfg(not(feature = "ui"))]
+    fn stop_live(&mut self, _graceful: bool) -> Option<Result<u64, String>> {
+        self.live = None;
+        None
     }
 }
 
 impl Drop for VoiceCapture {
     fn drop(&mut self) {
-        if self.child.is_some() {
-            self.stop_child(false);
+        if self.live.is_some() {
+            self.stop_live(false);
         }
     }
 }
