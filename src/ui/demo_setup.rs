@@ -2361,7 +2361,6 @@ impl QuillApp {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_sponsored(session, &self.demo_sink, &self.demo_seq);
             }
-            self.sponsored_demo = true;
             self.status_note = "screenshot demo — sponsored messages".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyChannels)) {

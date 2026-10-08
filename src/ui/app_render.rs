@@ -38,6 +38,7 @@ impl Render for QuillApp {
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(window.is_window_active() && !self.passcode_ui.locked, cx);
+        self.report_visible_sponsored(window.is_window_active() && !self.passcode_ui.locked);
         // A conversation replayed from its cache (`app_slice`) still shows
         // its clips: only a conversation that rendered (or a frame without
         // one) and swept no player orphans them.

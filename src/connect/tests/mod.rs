@@ -24,6 +24,7 @@ mod payments;
 mod registration;
 mod search;
 mod settings;
+mod sponsored;
 mod sticker_tabs;
 mod stories;
 mod subsection_tabs;

@@ -467,6 +467,10 @@ pub enum RequestPurpose {
     ReportChatSponsoredMessage,
     /// `viewSponsoredChat`. Response is `ok`.
     ViewSponsoredChat,
+    /// `viewMessages` carrying a sponsored message id (TDLib 1.8.67 has no
+    /// `viewSponsoredMessage`; the schema says sponsored messages are marked
+    /// viewed through `viewMessages`). Response is `ok`; fire-and-forget.
+    ViewSponsoredMessages,
     /// `clickChatSponsoredMessage`. Response is `ok`; fire-and-forget.
     ClickChatSponsoredMessage,
     /// `getMe`. Response is `user`; only the id is kept.

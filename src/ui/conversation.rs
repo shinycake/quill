@@ -954,13 +954,7 @@ impl QuillApp {
             .child(super::subsection_tabs::with_left_column(
                 tabs_left,
                 if let Some(reason) = gate {
-                    if self.sponsored_demo {
-                        // Fixture/proof surface only: the demo channel renders its
-                        // sponsored rows. The live path renders history normally.
-                        self.sponsored_rows_pane(cx).into_any_element()
-                    } else {
-                        pane_placeholder("Unsupported chat", reason, cx).into_any_element()
-                    }
+                    pane_placeholder("Unsupported chat", reason, cx).into_any_element()
                 } else if open.is_none() {
                     pane_placeholder(
                         "Select a chat",
@@ -1038,7 +1032,23 @@ impl QuillApp {
                         cx,
                     );
                     self.history_rows_key = main_key;
-                    list
+                    // Channels end with their sponsored message (Telegram API
+                    // terms: clients must show it), but only while the
+                    // history is scrolled to the bottom.
+                    let scrolled_up = self.history_scroller.read(cx).is_scrolled_up();
+                    match self.sponsored_footer(scrolled_up, cx) {
+                        Some(footer) => div()
+                            .id("history-with-sponsored")
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_h_0()
+                            .min_w_0()
+                            .child(list)
+                            .child(footer)
+                            .into_any_element(),
+                        None => list,
+                    }
                 },
             ))
     }

@@ -8,6 +8,7 @@ use super::message_media::{
 use super::message_text::message_text_block;
 use super::*;
 use gpui_kit::component::button::*;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -23,7 +24,8 @@ use synthetic::BubbleLook;
 /// `ReadySponsored` fixture: open the demo channel (id 13, now ungated) and
 /// inject a `sponsoredMessages` response through the same reducer the live
 /// `getChatSponsoredMessages` path uses — one Sponsored row, one Recommended.
-/// The fixture still swaps the history pane for the sponsored rows pane.
+/// The demo channel then renders its normal history with the live-path
+/// sponsored footer (the first row) below it.
 pub(super) fn apply_ready_sponsored(
     session: &mut Session,
     sink: &Arc<MemorySink>,
@@ -31,10 +33,22 @@ pub(super) fn apply_ready_sponsored(
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     session.open_chat(ChatId(13));
+    for (id, text) in [
+        (201, "Welcome to the channel. New posts land here."),
+        (202, "Tonight's release notes are out - read them below."),
+        (203, "Poll results: dark mode wins by a mile."),
+    ] {
+        let post = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":13,"sender_id":{{"@type":"messageSenderChat","chat_id":13}},"is_outgoing":false,"is_channel_post":true,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#
+        );
+        if let Some(owned) = copy_and_parse(&post, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
     let extra = session.request(RequestPurpose::GetChatSponsoredMessages, Some(ChatId(13)));
     let thumb = demo_file_json(61, &demo_thumb_png_path(), true);
     let json = format!(
-        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":3,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Sponsored demo row — tap Report to open the option picker.","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/promo","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Example Ads"}},"title":"Summer sale","button_text":"Shop now","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":"Ad by Example"}},{{"@type":"sponsoredMessage","message_id":9002,"is_recommended":true,"can_be_reported":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Recommended demo photo row.","entities":[]}},"has_spoiler":false,"is_secret":false}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/pick","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Curated"}},"title":"Editors' pick","button_text":"Learn more","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":3,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Sponsored demo ad — open the menu for About, Report and Hide.","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/promo","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Example Ads"}},"title":"Summer sale","button_text":"Shop now","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":"Ad by Example"}},{{"@type":"sponsoredMessage","message_id":9002,"is_recommended":true,"can_be_reported":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Recommended demo photo row.","entities":[]}},"has_spoiler":false,"is_secret":false}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com/pick","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":"Curated"}},"title":"Editors' pick","button_text":"Learn more","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
         extra.0,
     );
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
@@ -59,6 +73,9 @@ pub(super) fn sponsored_message_row(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message.message_id as u64;
+    let can_report = message.can_be_reported;
+    let owner = cx.entity().downgrade();
+    let menu_id = message.message_id;
     let header = div()
         .id(("sponsored-row-header", row_id))
         .flex()
@@ -73,9 +90,49 @@ pub(super) fn sponsored_message_row(
                 .rounded_md()
                 .bg(accent_strong())
                 .text_color(text_on_fill())
-                .child(message.kind_label()),
+                .child(message.badge_label()),
         )
-        .child(div().font_semibold().text_sm().child(message.title.clone()));
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .font_semibold()
+                .text_sm()
+                .child(message.title.clone()),
+        )
+        // tdesktop's "Ad" menu: About this ad / Report ad / Hide ads.
+        .child(
+            Button::new(format!("sponsored-menu-{row_id}"))
+                .icon(IconName::Ellipsis)
+                .ghost()
+                .tooltip("About this ad")
+                .accessibility_label("Ad options")
+                .dropdown_menu(move |menu, _, _| {
+                    let about = owner.clone();
+                    let report = owner.clone();
+                    let hide = owner.clone();
+                    let mut menu = menu.item(PopupMenuItem::new("About this ad").on_click(
+                        move |_, _, cx| {
+                            let _ = about.update(cx, |this, cx| this.toggle_sponsored_about(cx));
+                        },
+                    ));
+                    if can_report {
+                        menu =
+                            menu.item(PopupMenuItem::new("Report ad").on_click(move |_, _, cx| {
+                                let _ = report.update(cx, |this, cx| {
+                                    this.report_sponsored_message_ui(chat_id, menu_id, cx);
+                                });
+                            }));
+                    }
+                    menu.item(
+                        PopupMenuItem::new("Hide ads (Premium)").on_click(move |_, _, cx| {
+                            let _ = hide.update(cx, |this, cx| {
+                                this.hide_sponsored_messages_ui(chat_id, menu_id, cx);
+                            });
+                        }),
+                    )
+                }),
+        );
     let content: Option<AnyElement> = match &message.content {
         MessageContent::Text(text) => Some(message_text_block(
             (chat_id.0, row_id),
@@ -206,17 +263,6 @@ pub(super) fn sponsored_message_row(
                 })),
         );
     }
-    if message.can_be_reported {
-        let id = message.message_id;
-        row = row.child(
-            Button::new(format!("sponsored-report-{row_id}"))
-                .label("Report")
-                .ghost()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.report_sponsored_message_ui(chat_id, id, cx);
-                })),
-        );
-    }
     row.into_any_element()
 }
 
@@ -242,35 +288,47 @@ impl QuillApp {
         let _ = cx;
     }
 
-    /// Fixture/proof surface for `ReadySponsored`: the demo channel renders
-    /// its `getChatSponsoredMessages` rows with Sponsored / Recommended labels
-    /// instead of history.
-    pub(super) fn sponsored_rows_pane(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // Settings → Appearance: font size + bubble/plain style.
+    /// The sponsored message tdesktop shows after the last message of a
+    /// channel, only while the history is scrolled to the bottom: the ad card
+    /// (Ad label, "About this ad / Report ad / Hide ads" menu, sponsor
+    /// button) plus the report picker and outcome banner. The ids it paints
+    /// are recorded so `report_visible_sponsored` can send the TDLib view
+    /// once they are actually on screen.
+    pub(super) fn sponsored_footer(
+        &self,
+        scrolled_up: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if scrolled_up {
+            return None;
+        }
+        let session = self.session()?;
+        let chat_id = session.open_chat?;
+        let ad = session.open_sponsored_tail().cloned();
+        let report = session
+            .sponsored_report
+            .clone()
+            .filter(|flight| flight.chat_id == chat_id);
+        let outcome = session
+            .last_sponsored_report
+            .clone()
+            .filter(|outcome| outcome.chat_id == chat_id);
+        if ad.is_none() && report.is_none() && outcome.is_none() {
+            return None;
+        }
         let look = self.bubble_look(cx);
-        let session = self.session();
-        let open = session.and_then(|s| s.open_chat);
-        let rows: Vec<SponsoredMessage> = session
-            .map(|s| s.open_sponsored_rows().into_iter().cloned().collect())
-            .unwrap_or_default();
-        let files: HashMap<i32, ParsedFile> = session.map(|s| s.files.clone()).unwrap_or_default();
-        let downloading: std::collections::HashSet<i32> =
-            session.map(|s| s.downloading.clone()).unwrap_or_default();
-        let failed: std::collections::HashSet<i32> = session
-            .map(|s| s.failed_downloads.clone())
-            .unwrap_or_default();
+        let files: HashMap<i32, ParsedFile> = session.files.clone();
+        let downloading = session.downloading.clone();
+        let failed = session.failed_downloads.clone();
         let media_roots = self.media_display_roots();
-        let report = session.and_then(|s| s.sponsored_report.clone());
-        let outcome = session.and_then(|s| s.last_sponsored_report.clone());
-        let chat_id = open.unwrap_or(ChatId(0));
         let mut list = div()
-            .id("sponsored-rows")
+            .id("sponsored-footer")
             .flex()
             .flex_col()
-            .flex_1()
-            .min_h_0()
+            .flex_none()
+            .min_w_0()
             .px_3()
-            .pt_2()
+            .py_2()
             .gap_2();
         if let Some(outcome) = outcome {
             let message = outcome.user_message().to_string();
@@ -300,36 +358,125 @@ impl QuillApp {
         if let Some(flight) = report {
             list = list.child(self.sponsored_report_panel(&flight, cx));
         }
-        if rows.is_empty() {
-            list = list.child(
-                div()
-                    .id("sponsored-empty")
-                    .text_sm()
-                    .child("No sponsored messages for this chat."),
-            );
-        }
-        for message in &rows {
+        if let Some(ad) = ad {
+            self.rendered_sponsored.borrow_mut().push(ad.message_id);
+            if self.sponsored_about_open {
+                list = list.child(self.sponsored_about_panel(cx));
+            }
             list = list.child(sponsored_message_row(
                 chat_id,
-                message,
+                &ad,
                 &files,
                 &downloading,
                 &failed,
                 &media_roots,
                 &self.spoiler_revealed,
-                // Settings → Appearance: font size + bubble/plain style.
                 look,
                 cx,
             ));
         }
+        Some(list.into_any_element())
+    }
+
+    /// tdesktop's "About These Ads" sheet (`lng_sponsored_revenued_*`).
+    fn sponsored_about_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
+        let point = |title: &'static str, text: &'static str| {
+            div()
+                .flex()
+                .flex_col()
+                .child(div().text_sm().font_semibold().child(title))
+                .child(div().text_xs().text_color(muted).child(text))
+        };
         div()
-            .id("sponsored-pane")
+            .id("sponsored-about")
             .flex()
             .flex_col()
-            .flex_1()
-            .min_h_0()
-            .min_w_0()
-            .child(list)
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar)
+            .child(div().font_semibold().child("About These Ads"))
+            .child(div().text_xs().text_color(muted).child(
+                "Telegram Ads are very different from ads on other platforms. \
+                 Ads such as this one:",
+            ))
+            .child(point(
+                "Respect Your Privacy",
+                "Ads on Telegram do not use your personal information and are based \
+                 on the channel in which you see them.",
+            ))
+            .child(point(
+                "Help the Channel Creator",
+                "50% of the revenue from Telegram Ads goes to the owner of the \
+                 channel where they are displayed.",
+            ))
+            .child(point(
+                "Can Be Removed",
+                "You can turn off ads by subscribing to Telegram Premium.",
+            ))
+            .child(
+                Button::new("sponsored-about-close")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_sponsored_about(cx))),
+            )
+    }
+
+    pub(super) fn toggle_sponsored_about(&mut self, cx: &mut Context<Self>) {
+        self.sponsored_about_open = !self.sponsored_about_open;
+        cx.notify();
+    }
+
+    /// Frame-start hook (next to `report_visible_history`): the ad cards the
+    /// last frame painted are on screen, so tell TDLib. The session counts
+    /// each ad once, so this is cheap to call every frame.
+    pub(super) fn report_visible_sponsored(&mut self, window_active: bool) {
+        let shown = std::mem::take(&mut *self.rendered_sponsored.borrow_mut());
+        if !window_active || shown.is_empty() {
+            return;
+        }
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.view_sponsored_messages(chat_id, &shown);
+        }
+    }
+
+    /// Premium "hide ads" (tdesktop `HideSponsoredClickHandler`). Live: the
+    /// driver reports option `-1`. Demo: resolve through the same reducer.
+    pub(super) fn hide_sponsored_messages_ui(
+        &mut self,
+        chat_id: ChatId,
+        message_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.hide_sponsored_messages(chat_id, message_id) {
+                Ok(Some(_)) => "hiding ads…".into(),
+                Ok(None) => "ad is no longer available".into(),
+                Err(_) => "could not hide ads".into(),
+            };
+        } else if let Some(session) = self.demo_session.as_mut()
+            && session.begin_sponsored_hide(chat_id, message_id)
+        {
+            let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+            let kind = if session.my_is_premium() {
+                "reportSponsoredResultAdsHidden"
+            } else {
+                "reportSponsoredResultPremiumRequired"
+            };
+            let json = format!(r#"{{"@type":"{kind}","@extra":"{}"}}"#, extra.0);
+            let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+            if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+                session.apply(owned);
+            }
+        }
+        cx.notify();
     }
 
     /// `reportSponsoredResultOptionRequired` picker.
