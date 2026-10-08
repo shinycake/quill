@@ -76,13 +76,49 @@ pub fn search_messages(
     limit: i32,
     community_filter: Option<i64>,
 ) -> String {
-    let chat_type_filter = match community_filter {
-        Some(id) => json!({
+    search_messages_filtered(
+        extra,
+        query,
+        limit,
+        &SearchMessagesFilters {
+            community_id: community_filter,
+            ..SearchMessagesFilters::default()
+        },
+    )
+}
+
+/// The narrowing arguments of a global `searchMessages`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SearchMessagesFilters {
+    /// `searchMessagesChatTypeFilterCommunity`; wins over `chat_type`
+    /// (TDLib takes one chat-type filter).
+    pub community_id: Option<i64>,
+    pub chat_type: crate::search_filters::SearchChatType,
+    pub media: crate::search_filters::SearchMediaKind,
+    /// `min_date`, 0 = no bound.
+    pub min_date: i32,
+}
+
+/// `searchMessages` (schema 1.8.67, line 11877) with the chat-type, media
+/// and date filters of the global search bar.
+pub fn search_messages_filtered(
+    extra: RequestId,
+    query: &str,
+    limit: i32,
+    filters: &SearchMessagesFilters,
+) -> String {
+    let chat_type_filter = match (filters.community_id, filters.chat_type.constructor()) {
+        (Some(id), _) => json!({
             "@type": "searchMessagesChatTypeFilterCommunity",
             "community_id": id,
         }),
-        None => Value::Null,
+        (None, Some(constructor)) => json!({ "@type": constructor }),
+        (None, None) => Value::Null,
     };
+    let filter = filters
+        .media
+        .constructor()
+        .map_or(Value::Null, search_messages_filter_json);
     json!({
         "@type": "searchMessages",
         "@extra": extra.as_extra(),
@@ -90,9 +126,9 @@ pub fn search_messages(
         "query": query,
         "offset": "",
         "limit": limit,
-        "filter": Value::Null,
+        "filter": filter,
         "chat_type_filter": chat_type_filter,
-        "min_date": 0,
+        "min_date": filters.min_date,
         "max_date": 0,
     })
     .to_string()
@@ -292,17 +328,90 @@ pub fn search_chat_messages(
     limit: i32,
     filter: Option<Value>,
 ) -> String {
+    search_chat_messages_from(
+        extra,
+        chat_id,
+        topic,
+        query,
+        None,
+        from_message_id,
+        offset,
+        limit,
+        filter,
+    )
+}
+
+/// `searchChatMessages` restricted to one sender (`sender_id`, schema line
+/// 11858) — tdesktop's "From: member" search. `None` = any sender.
+#[allow(clippy::too_many_arguments)] // one arg per schema field
+pub fn search_chat_messages_from(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic: &TopicId,
+    query: &str,
+    sender: Option<crate::telegram::envelope::MessageSender>,
+    from_message_id: MessageId,
+    offset: i32,
+    limit: i32,
+    filter: Option<Value>,
+) -> String {
     json!({
         "@type": "searchChatMessages",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": topic_id_json(topic),
         "query": query,
-        "sender_id": Value::Null,
+        "sender_id": sender.map_or(Value::Null, message_sender_json),
         "from_message_id": from_message_id.0,
         "offset": offset,
         "limit": limit,
         "filter": filter.unwrap_or(Value::Null),
+    })
+    .to_string()
+}
+
+/// `MessageSender` as TDLib JSON.
+pub fn message_sender_json(sender: crate::telegram::envelope::MessageSender) -> Value {
+    use crate::telegram::envelope::MessageSender;
+    match sender {
+        MessageSender::User { user_id } => {
+            json!({ "@type": "messageSenderUser", "user_id": user_id })
+        }
+        MessageSender::Chat { chat_id } => {
+            json!({ "@type": "messageSenderChat", "chat_id": chat_id })
+        }
+    }
+}
+
+/// `getChatMessageByDate` (schema line 11964): the last message sent no
+/// later than `date`; a 404 error when there is none. Jump to date.
+pub fn get_chat_message_by_date(extra: RequestId, chat_id: ChatId, date: i32) -> String {
+    json!({
+        "@type": "getChatMessageByDate",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "date": date,
+    })
+    .to_string()
+}
+
+/// `getChatMessageCalendar` (schema line 11982): messages of the filter's
+/// type split by day, newest first, starting at `from_message_id` (0 = the
+/// latest). TDLib rejects `searchMessagesFilterEmpty` here (400 "The
+/// filter is not supported"), so a null `filter` is never sent.
+pub fn get_chat_message_calendar(
+    extra: RequestId,
+    chat_id: ChatId,
+    filter_constructor: &str,
+    from_message_id: MessageId,
+) -> String {
+    json!({
+        "@type": "getChatMessageCalendar",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "topic_id": Value::Null,
+        "filter": search_messages_filter_json(filter_constructor),
+        "from_message_id": from_message_id.0,
     })
     .to_string()
 }

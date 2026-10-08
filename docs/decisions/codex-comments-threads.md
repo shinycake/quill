@@ -1,0 +1,29 @@
+## codex/comments-threads (2026-10-08)
+
+Gap-audit batch 12: channel comments and group reply threads.
+
+### What was verified missing
+- `messageInteractionInfo.reply_info` was not parsed ("`reply_info` stays out of this slice"), so no post or message knew its reply count.
+- The only entry point was a "View Comments" menu item opening a read-only dialog fed by `getMessageThreadHistory` (first 50 raw messages, no sender names, no paging, no composer). No bar under channel posts, no replies counter in groups, no `getMessageThread`, no thread-aware send, typing or read marks.
+
+### Design
+- Parsing (`telegram/envelope`): `MessageReplyInfo` (count, up to three recent repliers, last read inbox/outbox, last message) on `MessageInteractionInfo`; `messageThreadInfo` payload (`getMessageThread` answer); `ParsedMessage.thread_id` from `messageTopicThread`. `updateMessageInteractionInfo` already replaced the whole info, so counters stay live.
+- The thread is a view of the discussion chat, not a dialog. `Session::thread: Option<ThreadView>` (state/thread_types.rs, session_thread.rs) holds origin (chat, message), the chat that holds the replies, `message_thread_id`, counters, root ids, a `TopicHistory`-style message map, paging cursor and a status (Resolving, LoadingHistory, Ready, Failed). While a thread is open `open_chat` is the thread's chat (the linked discussion group for a channel post, the same chat for a group message). That keeps the composer, drafts, replies, reactions, menus, typing and read marks working unchanged, the same way forum topics ride on `open_chat`. `Session::open_chat` drops a thread that lives in another chat; re-selecting the open chat closes it.
+- Open flow: click -> `ConnectDriver::open_thread` sends `getMessageThread(origin chat, message)` -> `messageThreadInfo` fills the view -> the UI (`QuillApp::advance_thread`, run from render where a window exists) saves the composer draft of the chat being left, calls `switch_to_thread_chat` (closeChat/openChat of the discussion group) and the driver requests the newest `getMessageThreadHistory` page; older pages load when the top row shows, until the root is reached. A failure shows an error pane with Retry and Back.
+- Root post: kept out of the list until the replies are loaded down to it (so older pages prepend cleanly to the scroller) and meanwhile pinned in a bar under the header ("Original post: excerpt"); clicking it jumps to the root (loading older replies first when needed).
+- Header: title = channel (or group), subtitle "N comments" / "N replies" (tdesktop `lng_comments_header` / `lng_replies_header`), back button, "View in chat" for comments (leaves the thread and jumps to the root in the discussion group). Back returns to the origin chat and jumps to the post the thread was opened from.
+- Bubble bar (`ui/threads.rs`, `MessageChrome::bottom_bar`): channel posts whose `reply_info` exists show tdesktop's comments button under the footer: top divider, recent-commenter avatars (comment icon when none), semibold "N comments" / "Leave a comment", an unread dot when `last_message_id > last_read_inbox_message_id`, chevron. Group messages with replies show the same bar as "N replies". The bar is not drawn inside the open thread. The footer takes its own row when the bar is present, so it never overlaps.
+- Menu: "View Comments" (channel posts) / "View Thread" (group messages with replies), gated by `messageProperties.can_get_message_thread`, now opens the thread view. The old dialog (`CommentThreadDialog`, `Session::comment_thread`, `fetch_message_thread_history`) is removed.
+- Sending: the driver rewrites a built `sendMessage` / album / poll / game / sticker / animation / `sendChatAction` request with `route_into_thread` when the open thread lives in the target chat: `topic_id = messageTopicThread{message_thread_id}` and, when there is no explicit reply, `reply_to` = the thread root. This keeps the many typed `topic_id: Option<i32>` (forum) request builders untouched. Typing uses the same topic. Closed forum topics are not involved.
+- Read marks: the UI reports the rows on screen as for any chat; while a thread is open the driver sends `viewMessages` with `messageSourceMessageThreadHistory` (instead of chat or forum-topic history) and, until rows are reported, does not fall back to reading the discussion group's newest message. The unread divider uses the thread's `last_read_inbox_message_id` and `unread_message_count`.
+- Live updates: new messages with the thread's topic (or a reply to the root) join the thread rows; pending sends resolve in place on `updateMessageSendSucceeded`/`Failed`; edits and deletes reach the thread rows; `updateMessageInteractionInfo` on the origin post or the root updates the count.
+
+### Not done
+- Forum-topic replies (threads inside a forum topic) and monoforum threads are not opened as threads.
+- The discussion-group composer of a channel the user has not joined is not special-cased (TDLib joins on first comment; error surfaces in the status line).
+- Comment counts are not refreshed when the thread opens from a stale bar beyond what `messageThreadInfo` and interaction updates deliver.
+- The thread opens at its newest page; the viewport does not start at the first unread reply when that lies beyond the first page.
+
+### Verification
+- Recorded-JSON tests: envelope (`reply_info`, `messageThreadInfo`, thread topic), request shapes (`getMessageThread`, `route_into_thread`), reducer (paging, root handling, live routing, edits, deletes, send replace, unread anchor, failure keeps Ready) and driver flows (channel post -> discussion group switch -> first page -> live reply -> send/typing/view requests -> back; group thread with older pages, failure and retry).
+- Demo kind `ready-threads` with `QUILL_DEMO_THREADS_VIEW=posts|thread|group`, captured in light and dark and viewed. No live account was used and nothing was posted.

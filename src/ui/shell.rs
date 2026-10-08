@@ -142,7 +142,6 @@ pub enum DialogKind {
     Restrict,
     GroupConfirm,
     ForumManage,
-    CommentThread,
     Welcome,
     Appearance,
     /// Slice A9: account lifecycle (delete account + self-destruct TTL).
@@ -162,6 +161,8 @@ pub enum DialogKind {
     ProxyList,
     ProxyEdit,
     ProxyLink,
+    /// Find in history: the "Jump to date" calendar box.
+    JumpToDate,
     /// Batch 4: terms of service, server service popups and the
     /// "New Login Prevented" follow-up.
     AccountNotice,
@@ -242,7 +243,6 @@ impl QuillShell {
             DialogKind::Restrict => app.restrict_dialog.is_some(),
             DialogKind::GroupConfirm => app.group_confirm_dialog.is_some(),
             DialogKind::ForumManage => app.forum_manage_dialog.is_some(),
-            DialogKind::CommentThread => app.comment_thread_dialog.is_some(),
             DialogKind::Welcome => app.welcome_dialog.is_some(),
             DialogKind::Appearance => app.appearance_open,
             DialogKind::AccountLifecycle => app.account_lifecycle.open,
@@ -254,6 +254,7 @@ impl QuillShell {
             DialogKind::ProxyList => app.proxy_ui.list_open,
             DialogKind::ProxyEdit => app.proxy_ui.editor.is_some(),
             DialogKind::ProxyLink => app.proxy_ui.link.is_some(),
+            DialogKind::JumpToDate => app.session().is_some_and(|s| s.history_calendar.is_some()),
             DialogKind::AccountNotice => app.account_notice().is_some(),
             DialogKind::Passcode => app.passcode_ui.open,
         }
@@ -301,7 +302,6 @@ impl QuillShell {
             DialogKind::Restrict => QuillApp::build_restrict_dialog,
             DialogKind::GroupConfirm => QuillApp::build_group_confirm_dialog,
             DialogKind::ForumManage => QuillApp::build_forum_manage_dialog,
-            DialogKind::CommentThread => QuillApp::build_comment_thread_dialog,
             DialogKind::Welcome => QuillApp::build_welcome_dialog,
             DialogKind::Appearance => QuillApp::build_appearance_dialog,
             DialogKind::AccountLifecycle => QuillApp::build_account_lifecycle_dialog,
@@ -313,6 +313,7 @@ impl QuillShell {
             DialogKind::ProxyList => QuillApp::build_proxy_list_dialog,
             DialogKind::ProxyEdit => QuillApp::build_proxy_edit_dialog,
             DialogKind::ProxyLink => QuillApp::build_proxy_link_dialog,
+            DialogKind::JumpToDate => QuillApp::build_jump_date_dialog,
             DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
             DialogKind::Passcode => QuillApp::build_passcode_dialog,
         }
@@ -362,7 +363,6 @@ impl QuillShell {
         DialogKind::ArchivedStickers,
         DialogKind::EmojiSets,
         DialogKind::ForumManage,
-        DialogKind::CommentThread,
         DialogKind::PollVoters,
         DialogKind::MessageReport,
         DialogKind::StickerSet,
@@ -382,6 +382,7 @@ impl QuillShell {
         DialogKind::Accounts,
         // Slice parity:platform-shortcuts-reference: informational, lowest
         // priority.
+        DialogKind::JumpToDate,
         DialogKind::Shortcuts,
         DialogKind::Settings,
     ];

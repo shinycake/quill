@@ -394,6 +394,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.open_chat == Some(chat_id) {
+            // Re-selecting the open chat leaves its reply thread.
+            if self.session.thread.is_some() {
+                self.session.close_thread();
+            }
             self.maybe_probe_channel_membership()?;
             self.maybe_fetch_bot_info()?;
             self.maybe_fetch_bot_commands()?;

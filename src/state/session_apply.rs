@@ -502,6 +502,10 @@ impl Session {
                     && pending.purpose == RequestPurpose::SearchMentionMembers
                 {
                     self.apply_mention_members(pending.id, &members);
+                } else if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::SearchFromMembers
+                {
+                    self.apply_from_members(pending.id, &members);
                 } else if let Some(RequestPurpose::GetSupergroupMembers { filter }) =
                     pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -1312,7 +1316,13 @@ impl Session {
                     && let Some(topic_history) =
                         self.topic_histories.get_mut(&(chat_id.0, topic_id))
                 {
-                    topic_history.replace_id(old_message_id, row);
+                    topic_history.replace_id(old_message_id, row.clone());
+                }
+                if let Some(thread) = self.thread.as_mut()
+                    && thread.chat_id == chat_id
+                    && thread.history.messages.contains_key(&old_message_id.0)
+                {
+                    thread.history.replace_id(old_message_id, row);
                 }
                 self.draft_clears.push(chat_id);
             }
@@ -1348,7 +1358,13 @@ impl Session {
                     && let Some(topic_history) =
                         self.topic_histories.get_mut(&(chat_id.0, topic_id))
                 {
-                    topic_history.replace_id(old_message_id, row);
+                    topic_history.replace_id(old_message_id, row.clone());
+                }
+                if let Some(thread) = self.thread.as_mut()
+                    && thread.chat_id == chat_id
+                    && thread.history.messages.contains_key(&old_message_id.0)
+                {
+                    thread.history.replace_id(old_message_id, row);
                 }
             }
             EnvelopePayload::UpdateMessageSendAcknowledged { .. } => {
@@ -1362,6 +1378,13 @@ impl Session {
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.interaction_info = interaction_info.clone();
                 });
+                self.sync_thread_reply_info(
+                    chat_id,
+                    message_id,
+                    interaction_info
+                        .as_ref()
+                        .and_then(|info| info.reply_info.as_ref()),
+                );
             }
             EnvelopePayload::UpdateMessageIsPinned {
                 chat_id,
@@ -1466,6 +1489,7 @@ impl Session {
                         }
                     }
                 }
+                self.thread_remove(chat_id, &message_ids);
             }
             EnvelopePayload::Chats { chat_ids, .. } => {
                 self.apply_chats(chat_ids, pending);
@@ -1585,6 +1609,9 @@ impl Session {
                         .or_default()
                         .insert(filter, count);
                 }
+            }
+            EnvelopePayload::MessageCalendar { days, .. } => {
+                self.apply_message_calendar(days, pending);
             }
             EnvelopePayload::FoundChatMessages {
                 messages,
@@ -1749,7 +1776,14 @@ impl Session {
             EnvelopePayload::Messages(messages) => {
                 self.apply_messages(messages, pending, extra, seq)
             }
+            EnvelopePayload::MessageThreadInfo(info) => {
+                self.apply_message_thread_info(*info, pending);
+            }
             EnvelopePayload::Message(message) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMessageByDate) {
+                    self.accept_date_message(message.id);
+                    return;
+                }
                 if let Some(RequestPurpose::GetRepliedMessage {
                     chat_id,
                     message_id,

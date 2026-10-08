@@ -12,6 +12,7 @@ mod deep_links;
 mod drafts_polls;
 mod email_login;
 mod emoji_sets;
+mod find_in_history;
 mod group_calls;
 mod groups;
 mod history_window;
@@ -28,6 +29,7 @@ mod sticker_tabs;
 mod stories;
 mod subsection_tabs;
 mod support;
+mod threads;
 
 pub(crate) use calls::{READY_CALL_JSON, group_call_test_driver};
 pub(crate) use drafts_polls::{POLL_CLOSED_JSON, POLL_OPEN_JSON};

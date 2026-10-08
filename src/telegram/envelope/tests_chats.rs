@@ -695,3 +695,23 @@ fn parses_unread_count_updates() {
         }
     ));
 }
+
+/// `getChatMessageCalendar` answer: per-day counts with the day's first
+/// message; days without a usable message are skipped.
+#[test]
+fn message_calendar_parses_days() {
+    let env = parse_envelope(
+        r#"{"@type":"messageCalendar","@extra":"9","total_count":5,"days":[{"@type":"messageCalendarDay","total_count":3,"message":{"id":300,"chat_id":14,"date":1790000000,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"a","entities":[]}}}},{"@type":"messageCalendarDay","total_count":2}]}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::MessageCalendar { total_count, days } => {
+            assert_eq!(total_count, 5);
+            assert_eq!(days.len(), 1);
+            assert_eq!(days[0].message_id.0, 300);
+            assert_eq!(days[0].date, 1_790_000_000);
+            assert_eq!(days[0].total_count, 3);
+        }
+        other => panic!("{other:?}"),
+    }
+}

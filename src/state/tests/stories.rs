@@ -16,6 +16,7 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
         is_outgoing: true,
         is_pinned: false,
         topic_id: None,
+        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
@@ -1073,54 +1074,6 @@ fn call_history_pages_accumulate_and_track_offset() {
     assert_eq!(session.recent_calls_offset, "");
     assert_eq!(session.recent_calls[0].id.0, 901);
     assert_eq!(session.recent_calls[1].id.0, 900);
-}
-
-#[test]
-fn g2_thread_history_cached_and_failed() {
-    // Slice G2: `getMessageThreadHistory` success caches the thread;
-    // failure marks it failed (the viewer shows an error, not a
-    // spinner).
-    let (mut session, sink) = session();
-    let seq = AtomicU64::new(0);
-    let extra = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 99 },
-        Some(ChatId(13)),
-    );
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"messages","@extra":"{}","messages":[],"total_count":0}}"#,
-            extra.0
-        ),
-    );
-    let thread = session.comment_thread.as_ref().expect("comment thread");
-    assert_eq!(thread.chat_id, ChatId(13));
-    assert_eq!(thread.message_id, MessageId(99));
-    assert_eq!(thread.failed, None);
-    let extra = session.request(
-        RequestPurpose::GetMessageThreadHistory { message_id: 100 },
-        Some(ChatId(13)),
-    );
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_NOT_MODIFIED"}}"#,
-            extra.0
-        ),
-    );
-    let thread = session.comment_thread.as_ref().expect("comment thread");
-    assert_eq!(thread.message_id, MessageId(100));
-    assert!(
-        thread
-            .failed
-            .as_ref()
-            .unwrap()
-            .contains("Could not load comments")
-    );
 }
 
 #[test]

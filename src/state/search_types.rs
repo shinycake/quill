@@ -106,6 +106,8 @@ pub struct SearchState {
     /// `ConnectDriver::set_search_community_filter`). Kept across re-queries;
     /// cleared on close and query-clear.
     pub community_filter: Option<i64>,
+    /// The filter bar under the field: chat type, media tab, date window.
+    pub filters: crate::search_filters::GlobalSearchFilters,
     /// Empty-query surface: `searchRecentlyFoundChats` (official Recent).
     pub recents: bool,
     pub(crate) chats_done: bool,
@@ -127,6 +129,7 @@ impl Default for SearchState {
             messages: Vec::new(),
             public_chat_ids: Vec::new(),
             community_filter: None,
+            filters: crate::search_filters::GlobalSearchFilters::default(),
             recents: false,
             chats_done: false,
             messages_done: false,
@@ -155,6 +158,7 @@ impl SearchState {
         self.query.clear();
         self.recents = false;
         self.community_filter = None;
+        self.filters = Default::default();
         self.status = SearchStatus::Closed;
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
@@ -164,6 +168,7 @@ impl SearchState {
         self.query.clear();
         self.recents = true;
         self.community_filter = None;
+        self.filters = Default::default();
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
         self.status = if self.open {
@@ -392,6 +397,25 @@ pub struct ChatSearchState {
     /// Bumped by every jump request, so the UI can restart its highlight
     /// fade when the same message is jumped to again.
     pub jump_serial: u64,
+    /// "From: member" (`sender_id` of `searchChatMessages`).
+    pub sender: Option<MessageSender>,
+    /// The media tab (`filter` of `searchChatMessages`).
+    pub media: crate::search_filters::SearchMediaKind,
+    /// The member picker replacing the results while choosing a sender.
+    pub from_picker: Option<FromPicker>,
+    /// An older page is in flight.
+    pub loading_more: bool,
+}
+
+/// The "From:" picker: group members filtered by the field's text
+/// (tdesktop `dialogs_search_from_controllers`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FromPicker {
+    /// The text the members were last searched with.
+    pub query: String,
+    pub members: Vec<MessageSender>,
+    /// The in-flight `searchChatMembers`; other answers are dropped.
+    pub request: Option<RequestId>,
 }
 
 impl Default for ChatSearchState {
@@ -408,11 +432,47 @@ impl Default for ChatSearchState {
             selected: None,
             jump: ChatSearchJump::None,
             jump_serial: 0,
+            sender: None,
+            media: crate::search_filters::SearchMediaKind::All,
+            from_picker: None,
+            loading_more: false,
         }
     }
 }
 
 impl ChatSearchState {
+    /// A search runs for a non-empty query, a chosen sender or a media tab.
+    pub fn has_criteria(&self) -> bool {
+        !self.query.is_empty()
+            || self.sender.is_some()
+            || self.media != crate::search_filters::SearchMediaKind::All
+    }
+
+    /// An older page can be fetched (the results are a partial first page).
+    pub fn can_load_more(&self) -> bool {
+        self.open
+            && !self.loading_more
+            && self.next_from_message_id.0 != 0
+            && (self.hits.len() as i32) < self.total_count
+    }
+
+    /// Append an older page (deduped; `selected` stays on its message).
+    pub(crate) fn append_hits(
+        &mut self,
+        hits: Vec<SearchMessageHit>,
+        total_count: i32,
+        next_from_message_id: MessageId,
+    ) {
+        self.loading_more = false;
+        for hit in hits {
+            if !self.hits.iter().any(|h| h.message_id == hit.message_id) {
+                self.hits.push(hit);
+            }
+        }
+        self.total_count = total_count.max(self.hits.len() as i32);
+        self.next_from_message_id = next_from_message_id;
+    }
+
     pub fn open_for(&mut self, chat_id: ChatId) {
         if self.open && self.chat_id == Some(chat_id) {
             return;
@@ -422,6 +482,9 @@ impl ChatSearchState {
         self.query.clear();
         self.generation = self.generation.saturating_add(1);
         self.status = SearchStatus::Idle;
+        self.sender = None;
+        self.media = crate::search_filters::SearchMediaKind::All;
+        self.from_picker = None;
         self.clear_results();
     }
 
@@ -429,6 +492,9 @@ impl ChatSearchState {
         self.open = false;
         self.chat_id = None;
         self.query.clear();
+        self.sender = None;
+        self.media = crate::search_filters::SearchMediaKind::All;
+        self.from_picker = None;
         self.status = SearchStatus::Closed;
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
@@ -460,6 +526,7 @@ impl ChatSearchState {
         self.next_from_message_id = MessageId(0);
         self.selected = None;
         self.jump = ChatSearchJump::None;
+        self.loading_more = false;
     }
 
     pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
@@ -527,9 +594,13 @@ impl ChatSearchState {
         true
     }
 
+    /// tdesktop `lng_search_messages_n_of_amount`: "N of M" with M the
+    /// server's total, not just the pages loaded so far.
     pub fn position_label(&self) -> String {
         match (self.selected, self.hits.len()) {
-            (Some(i), n) if n > 0 => format!("{} of {n}", i + 1),
+            (Some(i), n) if n > 0 => {
+                format!("{} of {}", i + 1, (self.total_count.max(0) as usize).max(n))
+            }
             _ => String::new(),
         }
     }

@@ -54,6 +54,10 @@ pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
 pub const DRAFT_SAVE_DEBOUNCE: Duration = Duration::from_millis(1_000);
 /// tdesktop `kSearchPerPage` (`api_messages_search.cpp`).
 pub const CHAT_SEARCH_LIMIT: i32 = 50;
+/// Members listed in the in-chat "From:" picker.
+pub const FROM_MEMBERS_LIMIT: i32 = 50;
+/// Fetch the next page of hits when this few remain ahead of the selection.
+pub const CHAT_SEARCH_PREFETCH: usize = 5;
 /// Slice media-shared-gallery: `searchChatMessages.limit` for one gallery-tab
 /// page (`<= 100`, schema/td_api.tl:11862).
 pub const SHARED_MEDIA_PAGE_SIZE: i32 = 50;
