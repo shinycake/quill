@@ -16,6 +16,7 @@ pub mod connect;
 pub mod connect_smoke;
 pub mod credentials;
 pub mod data_settings;
+pub mod deep_link_inbox;
 pub mod diagnostics;
 pub mod emoji;
 pub mod emoji_catalog;
@@ -41,8 +42,10 @@ pub mod poll;
 pub mod privacy;
 pub mod rich;
 pub mod row_fx;
+pub mod scheme_registration;
 pub mod send_button;
 pub mod settings;
+pub mod single_instance;
 pub mod spell_dict;
 #[cfg(windows)]
 pub mod spell_win;

@@ -46,7 +46,11 @@ impl QuillApp {
         if !matches!(live.driver.session.auth, AuthorizationState::Ready) {
             return;
         }
-        if let Some(link) = self.pending_deep_link.take() {
+        // One flow at a time: a link waits until the previous one has been
+        // consumed (an invite preview stays up until the user decides).
+        if live.driver.session.deep_link.is_none()
+            && let Some(link) = self.pending_deep_link.take()
+        {
             let _ = live.driver.request_deep_link_info(&link);
         }
         // Consume terminal states once, retaining the invite preview until a decision.
