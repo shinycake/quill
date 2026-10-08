@@ -496,13 +496,14 @@ pub fn has_rtl_text(text: &str) -> bool {
         })
 }
 
-/// Direction of the last non-empty line of `text` (where a message's time
-/// footer sits).
+/// Direction of the last paragraph of `text` (where a message's time footer
+/// sits). Telegram Desktop (`Ui::Text::String::recountNaturalSize`,
+/// `_endsWithQuoteOrOtherDirection`) puts the footer on its own line when the
+/// *last* paragraph's direction differs from the UI's; a last line with no
+/// strong character has no direction of its own, so it shares the line with the
+/// time even after a Hebrew paragraph.
 pub fn last_line_is_rtl(text: &str) -> bool {
-    text.lines()
-        .rev()
-        .find(|line| line.chars().any(char::is_alphabetic))
-        .is_some_and(is_rtl_text)
+    text.trim_end().lines().next_back().is_some_and(is_rtl_text)
 }
 
 #[cfg(test)]
@@ -948,6 +949,9 @@ mod tests {
         assert!(is_rtl_text("مرحبا"));
         assert!(last_line_is_rtl("hello\nתודה דה\n"));
         assert!(!last_line_is_rtl("שלום\nok"));
+        // A neutral last line has no direction: the time shares it.
+        assert!(!last_line_is_rtl("שלום\n123"));
+        assert!(last_line_is_rtl("hello\n12, תודה"));
     }
 
     #[test]

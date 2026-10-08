@@ -79,11 +79,50 @@ impl InputLine {
         }
     }
 
-    /// One caret step visually left or right of `ix` on a bidi row.
-    pub(crate) fn visual_step(&self, ix: usize, left: bool) -> Option<usize> {
+    /// One caret step visually left or right of the stop `(ix, trailing)` on a bidi row.
+    pub(crate) fn visual_step(
+        &self,
+        ix: usize,
+        trailing: bool,
+        left: bool,
+    ) -> Option<(usize, bool)> {
         match &self.content {
-            Content::Bidi { geo, .. } => geo.visual_step(ix, left),
+            Content::Bidi { geo, .. } => geo.visual_step_stop(ix, trailing, left),
             _ => None,
+        }
+    }
+
+    /// x of the caret at `ix` seen from the character before it (the same as
+    /// [`Self::x_for_index`] unless `ix` is a direction boundary of a bidi row).
+    pub(crate) fn x_for_index_trailing(&self, ix: usize) -> Pixels {
+        match &self.content {
+            Content::Bidi { geo, .. } => px(geo.x_for_index_trailing(ix)),
+            _ => self.x_for_index(ix),
+        }
+    }
+
+    /// The caret stop closest to `x` and whether it hangs on the character before it.
+    pub(crate) fn closest_stop_for_x(&self, x: Pixels) -> (usize, bool) {
+        match &self.content {
+            Content::Bidi { geo, .. } => geo.closest_stop_for_x(x.as_f32()),
+            _ => (self.closest_index_for_x(x), false),
+        }
+    }
+
+    /// The character the caret passes between two x positions of a bidi row.
+    pub(crate) fn char_between(&self, a: Pixels, b: Pixels) -> Option<char> {
+        match &self.content {
+            Content::Bidi { geo, .. } => geo.char_between(a.as_f32(), b.as_f32()),
+            _ => None,
+        }
+    }
+
+    /// The x of stop `(ix, trailing)`.
+    pub(crate) fn stop_x(&self, ix: usize, trailing: bool) -> Pixels {
+        if trailing {
+            self.x_for_index_trailing(ix)
+        } else {
+            self.x_for_index(ix)
         }
     }
 

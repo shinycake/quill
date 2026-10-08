@@ -596,6 +596,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — RTL composer draft".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyRtlPolish => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — RTL polish".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyPoll => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

@@ -90,7 +90,7 @@ fn names_line(summary: &ArchiveRowSummary, cx: &App) -> AnyElement {
         .truncate()
         .text_xs()
         .text_color(muted)
-        .child(StyledText::new(text).with_highlights(highlights))
+        .child(super::bidi_line::one_line(text, highlights, Vec::new()))
         .into_any_element()
 }
 
