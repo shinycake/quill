@@ -147,10 +147,10 @@ pub(super) fn apply_ready_translate(
     };
     if matches!(view, "translated" | "box" | "selection") {
         for index in 0..SCRIPT.len() {
-            session.translate.messages.insert(
-                (CHAT, 1000 + index as i64, "en".to_string()),
-                done(index),
-            );
+            session
+                .translate
+                .messages
+                .insert((CHAT, 1000 + index as i64, "en".to_string()), done(index));
         }
     }
     if view == "translated" {
@@ -175,10 +175,13 @@ pub(super) fn apply_ready_translate(
                 to_language: "en".into(),
             },
         );
-        session.translate.texts.insert(1, Translation::Done {
-            text: "I found a great cafe near the metro".to_string(),
-            entities: Vec::new(),
-        });
+        session.translate.texts.insert(
+            1,
+            Translation::Done {
+                text: "I found a great cafe near the metro".to_string(),
+                entities: Vec::new(),
+            },
+        );
     }
     let _ = MessageId(0);
 }

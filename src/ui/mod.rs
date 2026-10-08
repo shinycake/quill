@@ -55,8 +55,6 @@ mod story_page;
 pub(crate) use story_page::{StoryPage, apply_ready_story_albums};
 
 mod actions;
-mod translate_demo;
-mod translate_ui;
 mod activity_indicator;
 mod app;
 mod app_demo;
@@ -168,6 +166,8 @@ mod story_composer;
 mod story_ring;
 mod story_viewer;
 mod subsection_tabs;
+mod translate_demo;
+mod translate_ui;
 mod video_pip;
 mod viewer_demo;
 

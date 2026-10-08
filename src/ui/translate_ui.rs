@@ -21,9 +21,8 @@ use quill::state::{HistoryMessage, Session, Translation};
 use quill::telegram::envelope::ChatKind;
 use quill::text::TextEntity;
 use quill::translate::{
-    TranslatePrefs, bar_label, choose_translate_to, detect_language, language_name,
-    offer_language, replace_content_text, search_languages,
-    translatable_content,
+    TranslatePrefs, bar_label, choose_translate_to, detect_language, language_name, offer_language,
+    replace_content_text, search_languages, translatable_content,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -156,9 +155,10 @@ impl QuillApp {
 
     fn set_translate_prefs(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut TranslatePrefs)) {
         f(&mut self.translate_ui.prefs);
-        if let Err(err) =
-            quill::settings::save_translate_prefs(&Self::appearance_paths(), &self.translate_ui.prefs)
-        {
+        if let Err(err) = quill::settings::save_translate_prefs(
+            &Self::appearance_paths(),
+            &self.translate_ui.prefs,
+        ) {
             self.status_note = format!("Couldn't save translation settings: {err}");
         }
         cx.notify();
@@ -340,7 +340,12 @@ impl QuillApp {
     }
 
     /// Bar menu → Translate To.
-    fn open_translate_chooser(&mut self, to: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_translate_chooser(
+        &mut self,
+        to: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.new_translate_dialog(TranslateView::ChooseTo, None, to, window, cx);
         if let Some(dialog) = self.translate_ui.dialog.as_mut() {
             dialog.close_after_choose = true;
@@ -489,11 +494,9 @@ impl QuillApp {
                     .label(label)
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        let back_to_box = this
-                            .translate_ui
-                            .dialog
-                            .as_ref()
-                            .is_some_and(|d| d.view == TranslateView::ChooseTo && d.source.is_some());
+                        let back_to_box = this.translate_ui.dialog.as_ref().is_some_and(|d| {
+                            d.view == TranslateView::ChooseTo && d.source.is_some()
+                        });
                         if back_to_box {
                             if let Some(dialog) = this.translate_ui.dialog.as_mut() {
                                 dialog.view = TranslateView::Box;
@@ -581,13 +584,21 @@ impl QuillApp {
         let seen: HashSet<(i64, u64, u64, bool)> = HashSet::new();
         let no_emoji = HashMap::new();
 
-        let mut original_box = div()
-            .id("translate-original")
-            .w_full()
-            .min_w_0()
-            .child(rich_text_line(
-                &original, &entities, (0, 1), false, &seen, font, &no_emoji, cx,
-            ));
+        let mut original_box =
+            div()
+                .id("translate-original")
+                .w_full()
+                .min_w_0()
+                .child(rich_text_line(
+                    &original,
+                    &entities,
+                    (0, 1),
+                    false,
+                    &seen,
+                    font,
+                    &no_emoji,
+                    cx,
+                ));
         if collapsed {
             original_box = original_box
                 .max_h(font * (ORIGINAL_LINES * 1.5))
@@ -651,7 +662,14 @@ impl QuillApp {
                 .w_full()
                 .min_w_0()
                 .child(rich_text_line(
-                    &text, &entities, (0, 2), false, &seen, font, &no_emoji, cx,
+                    &text,
+                    &entities,
+                    (0, 2),
+                    false,
+                    &seen,
+                    font,
+                    &no_emoji,
+                    cx,
                 ))
                 .into_any_element(),
             Some(Translation::Failed(_)) => div()
@@ -673,7 +691,11 @@ impl QuillApp {
                     .children((0..lines).map(|line| {
                         div()
                             .h(px(10.))
-                            .w(relative(if line + 1 == lines && lines > 1 { 0.55 } else { 1. }))
+                            .w(relative(if line + 1 == lines && lines > 1 {
+                                0.55
+                            } else {
+                                1.
+                            }))
                             .rounded_md()
                             .bg(border)
                     }))
@@ -703,56 +725,57 @@ impl QuillApp {
         let current = dialog.to;
         let theme = cx.theme();
         let (row_hover, border) = (theme.accent, theme.border);
-        let rows = search_languages(&query).into_iter().map(|(code, english, native)| {
-            let selected = if multi {
-                skip.contains(&code)
-            } else {
-                code == current
-            };
-            div()
-                .id(SharedString::from(format!("translate-lang-{code}")))
-                .flex()
-                .items_center()
-                .gap_3()
-                .px_3()
-                .py_1p5()
-                .rounded_md()
-                .cursor_pointer()
-                .hover(move |style| style.bg(row_hover))
-                .role(gpui_kit::Role::Button)
-                .aria_label(format!(
-                    "{english}{}",
-                    if selected { ", selected" } else { "" }
-                ))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if multi {
-                        this.toggle_skip_language(code, cx);
-                    } else {
-                        this.choose_translate_language(code, cx);
-                    }
-                }))
-                .child(
-                    div()
-                        .w(px(18.))
-                        .flex_none()
-                        .when(selected, |slot| {
-                            slot.child(
-                                Icon::new(gpui_kit::assets::IconName::Check)
-                                    .size(px(16.))
-                                    .text_color(accent()),
-                            )
-                        }),
-                )
-                .child(div().flex_1().min_w_0().text_sm().child(english))
-                .when(native != english, |row| {
-                    row.child(div().text_xs().text_color(muted_fg(cx)).child(native))
-                })
-        });
+        let rows = search_languages(&query)
+            .into_iter()
+            .map(|(code, english, native)| {
+                let selected = if multi {
+                    skip.contains(&code)
+                } else {
+                    code == current
+                };
+                div()
+                    .id(SharedString::from(format!("translate-lang-{code}")))
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_3()
+                    .py_1p5()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(row_hover))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!(
+                        "{english}{}",
+                        if selected { ", selected" } else { "" }
+                    ))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if multi {
+                            this.toggle_skip_language(code, cx);
+                        } else {
+                            this.choose_translate_language(code, cx);
+                        }
+                    }))
+                    .child(div().w(px(18.)).flex_none().when(selected, |slot| {
+                        slot.child(
+                            Icon::new(gpui_kit::assets::IconName::Check)
+                                .size(px(16.))
+                                .text_color(accent()),
+                        )
+                    }))
+                    .child(div().flex_1().min_w_0().text_sm().child(english))
+                    .when(native != english, |row| {
+                        row.child(div().text_xs().text_color(muted_fg(cx)).child(native))
+                    })
+            });
         div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(Textarea::new(&dialog.search).aria_label("Search languages").h(px(40.)))
+            .child(
+                Textarea::new(&dialog.search)
+                    .aria_label("Search languages")
+                    .h(px(40.)),
+            )
             .when_some(dialog.note.clone(), |column, note| {
                 column.child(div().text_xs().text_color(danger_bright()).child(note))
             })
@@ -834,13 +857,12 @@ impl QuillApp {
                 let chooser = owner.clone();
                 menu = menu
                     .item(
-                        PopupMenuItem::new(format!("Translate To: {}", language_name(to))).on_click(
-                            move |_, window, cx| {
+                        PopupMenuItem::new(format!("Translate To: {}", language_name(to)))
+                            .on_click(move |_, window, cx| {
                                 let _ = chooser.update(cx, |this, cx| {
                                     this.open_translate_chooser(to, window, cx);
                                 });
-                            },
-                        ),
+                            }),
                     )
                     .separator();
                 if let Some(from) = from {
@@ -926,13 +948,7 @@ impl QuillApp {
                 .border_b_1()
                 .border_color(cx.theme().border)
                 .bg(bg_canvas())
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_sm()
-                        .child(toast.text.clone()),
-                )
+                .child(div().flex_1().min_w_0().text_sm().child(toast.text.clone()))
                 .child(
                     Button::new("translate-toast-action")
                         .label(toast.label)
@@ -1003,12 +1019,20 @@ impl QuillApp {
     }
 
     /// Bar menu → Don't translate {language}.
-    fn skip_translating(&mut self, chat_id: ChatId, language: &'static str, cx: &mut Context<Self>) {
+    fn skip_translating(
+        &mut self,
+        chat_id: ChatId,
+        language: &'static str,
+        cx: &mut Context<Self>,
+    ) {
         let ui = self.translate_ui_language();
         self.set_translate_prefs(cx, |prefs| prefs.add_skip(language, &ui));
         self.show_translate_toast(
             chat_id,
-            format!("{} added to the Do Not Translate list.", language_name(language)),
+            format!(
+                "{} added to the Do Not Translate list.",
+                language_name(language)
+            ),
             "Settings",
             ToastAction::OpenSkipList,
             cx,
@@ -1031,7 +1055,13 @@ impl QuillApp {
             _ => "Translation bar is now hidden for this group.",
         };
         self.set_translate_prefs(cx, |prefs| prefs.set_bar_hidden(chat_id.0, true));
-        self.show_translate_toast(chat_id, phrase.to_string(), "Undo", ToastAction::ShowBar, cx);
+        self.show_translate_toast(
+            chat_id,
+            phrase.to_string(),
+            "Undo",
+            ToastAction::ShowBar,
+            cx,
+        );
     }
 
     // ---------------------------------------------------------------------
@@ -1104,7 +1134,8 @@ impl QuillApp {
                 .filter(|m| !m.is_outgoing && !m.pending && m.id.0 > 0)
                 .filter(|m| {
                     translatable_content(&m.content).is_some_and(|(text, _)| {
-                        detect_language(text).is_none_or(|lang| lang != model.to && !skip.contains(&lang))
+                        detect_language(text)
+                            .is_none_or(|lang| lang != model.to && !skip.contains(&lang))
                             && text.chars().any(char::is_alphabetic)
                     })
                 })
@@ -1131,7 +1162,11 @@ impl QuillApp {
     pub(super) fn demo_setup_translate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use super::translate_demo::{CHAT, SCRIPT};
         let view = std::env::var("QUILL_DEMO_TRANSLATE_VIEW").unwrap_or_default();
-        let view = if view.is_empty() { "bar" } else { view.as_str() };
+        let view = if view.is_empty() {
+            "bar"
+        } else {
+            view.as_str()
+        };
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq
                 .store(session.last_seq, std::sync::atomic::Ordering::SeqCst);
@@ -1176,9 +1211,7 @@ impl QuillApp {
                     dialog.job = Some(1);
                 }
             }
-            "chooser" => {
-                self.new_translate_dialog(TranslateView::ChooseTo, None, "en", window, cx)
-            }
+            "chooser" => self.new_translate_dialog(TranslateView::ChooseTo, None, "en", window, cx),
             "skip" => self.open_translate_skip_list(window, cx),
             "settings" => {
                 self.translate_ui.settings_only = true;
@@ -1249,7 +1282,8 @@ impl QuillApp {
                 .accessibility_label("Translate Entire Chats")
                 .on_click(cx.listener(|this, &on, _, cx| {
                     if !this.session().is_some_and(Session::is_premium) {
-                        this.status_note = "Translating entire chats requires Telegram Premium".into();
+                        this.status_note =
+                            "Translating entire chats requires Telegram Premium".into();
                         cx.notify();
                         return;
                     }

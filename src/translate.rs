@@ -309,15 +309,51 @@ const LATIN_WORDS: &[(&str, &[&str])] = &[
     (
         "pl",
         &[
-            "nie", "się", "jest", "to", "na", "że", "jak", "ale", "dla", "tak", "czy", "co",
-            "bardzo", "cześć", "dziękuję", "już", "tylko", "może", "który", "przez",
+            "nie",
+            "się",
+            "jest",
+            "to",
+            "na",
+            "że",
+            "jak",
+            "ale",
+            "dla",
+            "tak",
+            "czy",
+            "co",
+            "bardzo",
+            "cześć",
+            "dziękuję",
+            "już",
+            "tylko",
+            "może",
+            "który",
+            "przez",
         ],
     ),
     (
         "tr",
         &[
-            "bir", "ve", "bu", "için", "ile", "değil", "çok", "ama", "ben", "sen", "var", "daha",
-            "merhaba", "teşekkür", "evet", "hayır", "gibi", "kadar", "olarak", "ne",
+            "bir",
+            "ve",
+            "bu",
+            "için",
+            "ile",
+            "değil",
+            "çok",
+            "ama",
+            "ben",
+            "sen",
+            "var",
+            "daha",
+            "merhaba",
+            "teşekkür",
+            "evet",
+            "hayır",
+            "gibi",
+            "kadar",
+            "olarak",
+            "ne",
         ],
     ),
     (
@@ -330,15 +366,33 @@ const LATIN_WORDS: &[(&str, &[&str])] = &[
     (
         "da",
         &[
-            "og", "at", "det", "som", "er", "ikke", "jeg", "med", "for", "på", "men", "har",
-            "tak", "hej", "af", "til", "vi", "kan", "fra", "også",
+            "og", "at", "det", "som", "er", "ikke", "jeg", "med", "for", "på", "men", "har", "tak",
+            "hej", "af", "til", "vi", "kan", "fra", "også",
         ],
     ),
     (
         "ro",
         &[
-            "și", "este", "nu", "de", "să", "un", "pentru", "cu", "mai", "dar", "foarte", "mulțumesc",
-            "bună", "sunt", "care", "în", "pe", "ce", "am", "acest",
+            "și",
+            "este",
+            "nu",
+            "de",
+            "să",
+            "un",
+            "pentru",
+            "cu",
+            "mai",
+            "dar",
+            "foarte",
+            "mulțumesc",
+            "bună",
+            "sunt",
+            "care",
+            "în",
+            "pe",
+            "ce",
+            "am",
+            "acest",
         ],
     ),
     (
@@ -876,11 +930,16 @@ mod tests {
     fn prefs_round_trip_and_tolerate_missing_fields() {
         let prefs: TranslatePrefs = serde_json::from_str("{}").unwrap();
         assert_eq!(prefs, TranslatePrefs::default());
-        let mut prefs = TranslatePrefs::default();
-        prefs.translate_to = "fr".into();
-        prefs.skip_languages = vec!["en".into(), "he".into()];
+        let prefs = TranslatePrefs {
+            translate_to: "fr".into(),
+            skip_languages: vec!["en".into(), "he".into()],
+            ..TranslatePrefs::default()
+        };
         let json = serde_json::to_string(&prefs).unwrap();
-        assert_eq!(serde_json::from_str::<TranslatePrefs>(&json).unwrap(), prefs);
+        assert_eq!(
+            serde_json::from_str::<TranslatePrefs>(&json).unwrap(),
+            prefs
+        );
     }
 
     #[test]

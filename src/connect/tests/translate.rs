@@ -192,8 +192,7 @@ fn chat_translated_to_toggles_and_bumps_the_revision() {
         .session
         .set_chat_translated_to(ChatId(7), Some("en"));
     assert_eq!(
-        h.driver.session.translate.revision,
-        after,
+        h.driver.session.translate.revision, after,
         "no change, no bump"
     );
     h.driver.session.set_chat_translated_to(ChatId(7), None);

@@ -163,12 +163,13 @@ impl Session {
     /// Show the chat translated into `to`, or back in the original.
     pub fn set_chat_translated_to(&mut self, chat_id: ChatId, to: Option<&str>) {
         let changed = match to {
-            Some(to) => self
-                .translate
-                .chat_to
-                .insert(chat_id.0, to.to_string())
-                .as_deref()
-                != Some(to),
+            Some(to) => {
+                self.translate
+                    .chat_to
+                    .insert(chat_id.0, to.to_string())
+                    .as_deref()
+                    != Some(to)
+            }
             None => self.translate.chat_to.remove(&chat_id.0).is_some(),
         };
         if changed {
