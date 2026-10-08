@@ -8,7 +8,8 @@
 #     quillvideo.dll av{codec,format,util}-N.dll sw{scale,resample}-N.dll   in-process video (FFmpeg, LGPL-2.1+)
 #     licenses/ffmpeg/                   FFmpeg license texts + exact source and configure line
 #     vcruntime140*.dll msvcp140*.dll   (app-local VC++ runtime, see decision doc)
-#     README.txt LICENSE THIRD_PARTY.md
+#     README.txt LICENSE THIRD_PARTY.md THIRD_PARTY_LICENSES.md
+#     licenses/                          native-library license texts and notices
 #
 # Env (all optional): QUILL_BIN, QUILL_TDJSON_DIR, QUILL_NTGCALLS_DLL, QUILL_RLOTTIE_DLL, QUILL_FFMPEG_PREFIX, OUT.
 # Needs an MSVC developer environment (dumpbin.exe, VCToolsRedistDir).
@@ -66,7 +67,13 @@ while ($changed) {
 }
 
 Copy-Item 'scripts/windows-package-README.txt' (Join-Path $pkg 'README.txt')
-Copy-Item 'LICENSE', 'THIRD_PARTY.md' $pkg
+# License and third-party notices (mirrors scripts/stage-licenses.sh).
+Copy-Item 'LICENSE', 'THIRD_PARTY.md', 'THIRD_PARTY_LICENSES.md' $pkg
+$licDir = Join-Path $pkg 'licenses'
+New-Item -ItemType Directory -Force (Join-Path $licDir 'rlottie'), (Join-Path $licDir 'unicode-emoji') | Out-Null
+Copy-Item 'licenses/*.txt' $licDir
+Copy-Item 'licenses/rlottie/*' (Join-Path $licDir 'rlottie')
+Copy-Item 'assets/emoji/LICENSE.txt' (Join-Path $licDir 'unicode-emoji/LICENSE.txt')
 
 & "$PSScriptRoot/check-bundle-pe.ps1" $pkg
 if ($LASTEXITCODE -ne 0) { throw 'check-bundle-pe failed' }

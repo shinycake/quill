@@ -328,6 +328,7 @@ impl QuillApp {
                 body = body.child(this.general_autostart_section(cx));
                 body = body.child(this.general_link_handler_section(cx));
                 body = body.child(this.update_settings_section(cx));
+                body = body.child(this.about_settings_section(cx));
                 // Tray-dependent switches only exist while a tray icon does:
                 // a hidden window with no tray to reopen it from would
                 // strand the user (Linux without a StatusNotifier host).

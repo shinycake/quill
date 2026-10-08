@@ -1,0 +1,15 @@
+Microsoft Visual C++ runtime (Windows package only)
+
+The Windows package contains vcruntime140*.dll and msvcp140*.dll (and any other
+Visual C++ runtime DLL that a bundled library imports), copied unmodified from
+the Visual Studio redistributable directory (%VCToolsRedistDir%) by
+scripts/windows-package.ps1.
+
+These files are Microsoft "Distributable Code". They are redistributed under the
+Microsoft Visual Studio license terms, not under Quill's MIT license, and remain
+the property of Microsoft Corporation. See
+https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files and
+https://visualstudio.microsoft.com/license-terms/.
+
+You may instead install the Visual C++ Redistributable from Microsoft and delete
+the copies in the Quill folder; Windows then loads the system-wide runtime.

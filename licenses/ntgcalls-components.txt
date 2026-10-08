@@ -1,0 +1,45 @@
+Components inside the ntgcalls library (libntgcalls.so / libntgcalls.dylib / ntgcalls.dll)
+
+Quill ships the official prebuilt ntgcalls v3.0.0 shared library unmodified
+(scripts/vendor-ntgcalls.sh, SHA256-pinned). ntgcalls itself is LGPL-3.0
+(ntgcalls-LGPL-3.0.txt). According to its build files at tag v3.0.0
+(CMakeLists.txt, wrtc/CMakeLists.txt, cmake/*.cmake, version.properties), the
+library statically links the components below. Versions are the ones pinned in
+version.properties at that tag.
+
+Component            Version        License (upstream)               Platforms
+WebRTC (libwebrtc)   152.7977.0.3   BSD-3-Clause, plus the licenses   all
+                                    of its bundled third-party code
+FFmpeg (libavcodec,  9.0.1          LGPL-2.1-or-later (the build in   all
+ libavformat,                       pytgcalls/ffmpeg build.sh does not
+ libavutil,                         pass --enable-gpl or
+ libswresample)                     --enable-nonfree)
+Opus                 1.6.1          BSD-3-Clause                      all
+OpenH264             2.6.0          BSD-2-Clause                      all
+Boost (json,         1.92.0         BSL-1.0                           all
+ process)
+GLib/GIO/GObject/    2.89.4         LGPL-2.1-or-later                 Linux
+ GModule
+libffi, expat        (see GLib)     MIT                               Linux
+PCRE2                (see GLib)     BSD-3-Clause WITH PCRE2-exception Linux
+libX11 and X         1.8.13         MIT/X11-style                     Linux
+ extension libs
+Mesa (gbm, drm)      26.2.1         MIT                               Linux
+libva, libvdpau      (FFmpeg deps)  MIT                               Linux
+nv-codec-headers     13.1.15.0      MIT                               Linux, Windows
+
+Sources:
+  ntgcalls        https://github.com/pytgcalls/ntgcalls/tree/v3.0.0
+  WebRTC build    https://github.com/pytgcalls/webrtc-build/releases/tag/m152.7977.0.3
+  FFmpeg build    https://github.com/pytgcalls/ffmpeg (build.sh, libraries.properties)
+  OpenH264 build  https://github.com/pytgcalls/openh264
+  GLib build      https://github.com/pytgcalls/glib
+
+The OpenH264 code in ntgcalls is compiled from source by the ntgcalls project.
+Cisco's OpenH264 patent license covers only binaries that Cisco itself
+distributes, so it does not apply to this library.
+
+The complete corresponding source for the LGPL components (ntgcalls, FFmpeg,
+GLib) is available from the upstream locations above. You may replace the
+ntgcalls library in the Quill package with your own compatible build; Quill
+loads it at runtime and does not link it at build time.
