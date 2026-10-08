@@ -77,6 +77,7 @@ pub mod subsection_tabs;
 pub mod suggest;
 pub mod telegram;
 pub mod text;
+pub mod translate;
 pub mod tray;
 #[cfg(all(target_os = "macos", feature = "ui"))]
 pub mod tray_mac;

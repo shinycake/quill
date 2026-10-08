@@ -793,6 +793,20 @@ pub fn save_language_prefs(paths: &AccountPaths, prefs: &LanguagePrefs) -> std::
     save_json_prefs(paths, "language_prefs.json", prefs)
 }
 
+/// Load the translation prefs (`translate_prefs.json`); missing or corrupt
+/// files fall back to defaults.
+pub fn load_translate_prefs(paths: &AccountPaths) -> crate::translate::TranslatePrefs {
+    load_json_prefs(paths, "translate_prefs.json")
+}
+
+/// Persist the translation prefs; failures are returned to the caller.
+pub fn save_translate_prefs(
+    paths: &AccountPaths,
+    prefs: &crate::translate::TranslatePrefs,
+) -> std::io::Result<()> {
+    save_json_prefs(paths, "translate_prefs.json", prefs)
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountPaths {
     pub root: PathBuf,

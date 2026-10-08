@@ -311,6 +311,11 @@ pub enum ScreenshotDemo {
     /// channel and an imported message; "via @bot"; and the footer's
     /// "edited" / pin / views / "imported" marks.
     ReadyBubbleHeaders,
+    /// Translation demo (injected, no live Telegram): the translate bar,
+    /// translated bubbles, the translate box, the language chooser and the
+    /// settings. `QUILL_DEMO_TRANSLATE_VIEW=bar|translated|box|rtl|selection|chooser|settings|skip`
+    /// (default `bar`).
+    ReadyTranslate,
     /// README showcase scene: a populated account (generated avatars and
     /// photos, a lively group conversation); `QUILL_DEMO_SHOWCASE` picks
     /// the view.

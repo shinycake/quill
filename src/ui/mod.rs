@@ -176,6 +176,8 @@ mod subsection_tabs;
 mod system_unlock;
 mod threads;
 mod threads_demo;
+mod translate_demo;
+mod translate_ui;
 mod video_pip;
 mod viewer_demo;
 

@@ -47,6 +47,7 @@ mod tests_stickers;
 mod tests_stories;
 #[cfg(test)]
 mod tests_threads;
+mod translate;
 mod users;
 
 pub use auth::*;
@@ -72,4 +73,5 @@ pub use proxy::*;
 pub use secret_chats::*;
 pub use stickers::*;
 pub use stories::*;
+pub use translate::*;
 pub use users::*;

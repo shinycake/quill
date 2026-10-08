@@ -166,6 +166,8 @@ pub enum DialogKind {
     /// Batch 4: terms of service, server service popups and the
     /// "New Login Prevented" follow-up.
     AccountNotice,
+    /// Batch 7: the translate box and its language choosers.
+    Translate,
     /// Local passcode settings.
     Passcode,
 }
@@ -256,6 +258,7 @@ impl QuillShell {
             DialogKind::ProxyLink => app.proxy_ui.link.is_some(),
             DialogKind::JumpToDate => app.session().is_some_and(|s| s.history_calendar.is_some()),
             DialogKind::AccountNotice => app.account_notice().is_some(),
+            DialogKind::Translate => app.translate_ui.dialog.is_some(),
             DialogKind::Passcode => app.passcode_ui.open,
         }
     }
@@ -315,6 +318,7 @@ impl QuillShell {
             DialogKind::ProxyLink => QuillApp::build_proxy_link_dialog,
             DialogKind::JumpToDate => QuillApp::build_jump_date_dialog,
             DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
+            DialogKind::Translate => QuillApp::build_translate_dialog,
             DialogKind::Passcode => QuillApp::build_passcode_dialog,
         }
     }
@@ -372,6 +376,9 @@ impl QuillShell {
         DialogKind::AddContact,
         DialogKind::BlockBar,
         DialogKind::JoinRequests,
+        // Opened from the Appearance dialog's translation options: it
+        // takes over and Appearance returns when it closes.
+        DialogKind::Translate,
         DialogKind::Appearance,
         DialogKind::AccountLifecycle,
         // Slice G10: communities dialogs render last (lowest priority).

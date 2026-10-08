@@ -262,6 +262,10 @@ impl QuillApp {
             .into();
             progressed = true;
         }
+        // Batch 7: keep a translated chat's translations coming.
+        if self.pump_translation() {
+            progressed = true;
+        }
         // `parity:platform-deep-links`: drive the launch-link flow —
         // `getDeepLinkInfo` once auth is Ready, then follow-ups / dialog /
         // deferred chat open from each terminal session state.

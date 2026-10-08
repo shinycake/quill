@@ -735,9 +735,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         }),
         // Slice msg-richtext-ai-tools: bare `formattedText` (schema:3046)
         // — the `composeTextWithAi` answer.
-        "formattedText" => Ok(EnvelopePayload::FormattedText {
-            text: parse_formatted_text(Some(&value)),
-        }),
+        "formattedText" => {
+            let text = parse_formatted_text(Some(&value));
+            let entities = parse_text_entities(&text, Some(&value));
+            Ok(EnvelopePayload::FormattedText { text, entities })
+        }
         // MED4: `webPageInstantView` (schema:4377) — same `blocks` /
         // `is_full` shape as `richMessage`, so the M2 parser applies.
         "webPageInstantView" => {
@@ -2000,6 +2002,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             chat_id: int53(value.get("chat_id"))?,
             has_protected_content: value
                 .get("has_protected_content")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        "updateChatIsTranslatable" => Ok(EnvelopePayload::UpdateChatIsTranslatable {
+            chat_id: int53(value.get("chat_id"))?,
+            is_translatable: value
+                .get("is_translatable")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),

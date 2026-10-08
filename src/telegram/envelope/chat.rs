@@ -131,6 +131,11 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("has_protected_content")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // `chat.is_translatable` (schema 1.8.67, line 3599).
+        is_translatable: chat
+            .get("is_translatable")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         // Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67,
         // lines 3600/3627).
         is_marked_as_unread: chat
