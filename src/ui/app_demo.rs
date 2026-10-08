@@ -572,6 +572,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — expandable block quotes".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyRtlComposer => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — RTL composer draft".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyPoll => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

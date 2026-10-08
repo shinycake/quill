@@ -457,44 +457,13 @@ fn edit_menu_items(menu: NativeMenu, has_selection: bool, plain_paste: bool) -> 
 }
 
 /// One underline per visual line a word occupies (a word longer than the
-/// composer is wide wraps mid-word).
-fn word_line_rects(
-    state: &TextareaState,
-    text: &str,
-    range: std::ops::Range<usize>,
-) -> Vec<Bounds<Pixels>> {
-    let (Some(start), Some(end)) = (
-        state.range_to_bounds(&(range.start..range.start)),
-        state.range_to_bounds(&(range.end..range.end)),
-    ) else {
-        return Vec::new();
-    };
-    if start.top() == end.top() {
-        return vec![Bounds::from_corners(start.origin, end.bottom_left())];
-    }
-    // Wrapped: walk the characters and group them by line.
-    let mut rects: Vec<Bounds<Pixels>> = Vec::new();
-    let word = &text[range.clone()];
-    for (ix, c) in word.char_indices() {
-        let from = range.start + ix;
-        let to = from + c.len_utf8();
-        let (Some(a), Some(b)) = (
-            state.range_to_bounds(&(from..from)),
-            state.range_to_bounds(&(to..to)),
-        ) else {
-            continue;
-        };
-        if a.top() != b.top() || b.left() < a.left() {
-            continue;
-        }
-        match rects.last_mut() {
-            Some(last) if last.top() == a.top() => {
-                *last = Bounds::from_corners(last.origin, b.bottom_left());
-            }
-            _ => rects.push(Bounds::from_corners(a.origin, b.bottom_left())),
-        }
-    }
-    rects
+/// composer is wide wraps mid-word), and per visual piece where the word
+/// crosses a direction change: the input engine reports the laid-out
+/// rectangles of the byte range, so a Hebrew or Arabic word is underlined
+/// where it is drawn (right-aligned, caret-side first) and not between its
+/// first and last character positions.
+fn word_line_rects(state: &TextareaState, range: std::ops::Range<usize>) -> Vec<Bounds<Pixels>> {
+    state.range_to_rects(&range)
 }
 
 fn paint_underlines(
@@ -524,7 +493,7 @@ fn paint_underlines(
         if text.get(m.range()) != Some(m.word.as_str()) {
             continue;
         }
-        for rect in word_line_rects(state, &text, m.range()) {
+        for rect in word_line_rects(state, m.range()) {
             let line_height = rect.size.height;
             // Same baseline offset GPUI uses for text underlines.
             let y = rect.top() + (line_height - ascent - descent) / 2. + ascent + descent * 0.618;
