@@ -18,7 +18,7 @@ pub use envelope::{
     AnimationContent, AnimationItem, AuthorizationState, ChatAdminRights, ChatAdministratorEntry,
     ChatDraft, ChatKind, ChatPermissions, ChatPositionUpdate, ConnectionState,
     DEFAULT_EMOJI_REACTIONS, DocumentContent, Envelope, EnvelopePayload, EphemeralMessageContent,
-    LocalFileState, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
+    LocalFileState, MessageContent, MessageExtras, MessageForwardInfo, MessageImportInfo, MessageInteractionInfo, MessageOrigin,
     MessageReaction, MessageReactions, MessageReplyTo, ParsedChatMember, ParsedFile, ParsedMessage,
     PhotoContent, PhotoSizeView, Poll, PollContent, PollOption, PollType,
     PollVoteRestrictionReason, ReactionType, RichMessageContent, StickerContent, StickerFormat,

@@ -263,6 +263,13 @@ impl Session {
                 }
             }
         }
+        // Thumbnails the reply strips draw (fetched originals, other-chat
+        // replies).
+        for file_id in self.reply_thumb_file_ids() {
+            if self.should_download(file_id) {
+                ids.push(file_id);
+            }
+        }
         ids.sort_by_key(|id| id.0);
         ids.dedup();
         ids

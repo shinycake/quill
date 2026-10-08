@@ -451,6 +451,9 @@ pub struct Session {
     /// `getGroupCall` fetch (queued from the `createVideoChat`
     /// `groupCallId` answer). Drained by the driver.
     pub group_call_fetch_queue: Vec<i32>,
+    /// Replied-to messages outside the loaded window, keyed by the
+    /// replying message `(chat_id, message_id)`.
+    pub reply_targets: HashMap<(i64, i64), ReplyTarget>,
     /// stories-live-play: the story viewer's "Join live" asked for this
     /// group call; the driver issues `join_video_chat` once the
     /// `getGroupCall` answer has created the unjoined tracker.
@@ -1113,6 +1116,7 @@ impl Session {
             language_prefs: LanguagePrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
+            reply_targets: HashMap::new(),
             pending_live_story_join: None,
             open_topic: None,
             pending_bot_messages: HashMap::new(),

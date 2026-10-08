@@ -94,6 +94,8 @@ mod drafts;
 mod emoji_sets;
 mod event_log;
 mod folders;
+mod bubble_header;
+mod bubble_header_demo;
 mod forward;
 mod gifs_ui;
 mod group_admin_panels;

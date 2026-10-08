@@ -623,6 +623,19 @@ pub fn read_all_chat_markers(extra: RequestId, chat_id: ChatId, reactions: bool)
 /// `getMessageLink chat_id message_id media_timestamp checklist_task_id
 /// poll_option_id for_album in_message_thread = MessageLink`). Plain
 /// message link: no timestamp / album / thread.
+/// `getRepliedMessage chat_id:int53 message_id:int53 = Message` (TDLib
+/// 1.8.67, `schema/td_api.tl:11542`): the message that `message_id` (a
+/// message of `chat_id`) replies to, including replies to other chats.
+pub fn get_replied_message(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getRepliedMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+    })
+    .to_string()
+}
+
 pub fn get_message_link(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
     json!({
         "@type": "getMessageLink",

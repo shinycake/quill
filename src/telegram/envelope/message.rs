@@ -29,6 +29,26 @@ pub enum MessageOrigin {
     },
 }
 
+/// `message.import_info` (`messageImportInfo`): a message imported from
+/// another messenger, with the original sender's name and send date.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageImportInfo {
+    pub sender_name: String,
+    pub date: i32,
+}
+
+/// Header/footer facts of a message that are not content: when it was
+/// last edited, the inline bot it was sent through and its import origin.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MessageExtras {
+    /// `message.edit_date` (0 when never edited).
+    pub edit_date: i32,
+    /// `message.via_bot_user_id` (0 when not sent through a bot).
+    pub via_bot_user_id: i64,
+    /// `message.import_info`.
+    pub import_info: Option<MessageImportInfo>,
+}
+
 /// Typed `messageForwardInfo`. `source` (Saved Messages / Replies) stays out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageForwardInfo {
@@ -44,6 +64,14 @@ pub struct MessageReplyTo {
     pub message_id: MessageId,
     pub quote_text: Option<String>,
     pub content_preview: Option<String>,
+    /// `messageReplyToMessage.origin`: who wrote the replied message when it
+    /// sits in another chat or topic (null for same-chat replies).
+    pub origin: Option<MessageOrigin>,
+    /// `messageReplyToMessage.origin_send_date` (0 for same-chat replies).
+    pub origin_send_date: i32,
+    /// `messageReplyToMessage.content`: the media of an other-chat reply
+    /// (null for same-chat replies and replies without media).
+    pub content: Option<Box<MessageContent>>,
 }
 
 impl MessageReplyTo {
@@ -137,6 +165,7 @@ pub struct ParsedMessage {
     pub files: Vec<ParsedFile>,
     pub reply_to: Option<MessageReplyTo>,
     pub forward_info: Option<MessageForwardInfo>,
+    pub extras: MessageExtras,
     pub interaction_info: Option<MessageInteractionInfo>,
     /// Schema `message.reply_markup` (TDLib 1.8.67). All `replyMarkup*`
     /// constructors (B1); inline keyboards render as the button grid,
@@ -415,6 +444,7 @@ pub(crate) fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> 
         files,
         reply_to: parse_reply_to(value.get("reply_to")),
         forward_info: parse_forward_info(value.get("forward_info")),
+        extras: parse_message_extras(value),
         interaction_info: parse_interaction_info(value.get("interaction_info")),
         reply_markup: parse_reply_markup(value.get("reply_markup")),
         self_destruct: parse_self_destruct(
@@ -458,6 +488,24 @@ pub(crate) fn parse_message_topic(value: Option<&Value>) -> Option<i32> {
             .and_then(Value::as_i64)
             .map(|id| id as i32),
         _ => None,
+    }
+}
+
+pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
+    MessageExtras {
+        edit_date: value.get("edit_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        via_bot_user_id: int53_or_zero(value.get("via_bot_user_id")),
+        import_info: value
+            .get("import_info")
+            .filter(|info| info.get("@type").and_then(Value::as_str) == Some("messageImportInfo"))
+            .map(|info| MessageImportInfo {
+                sender_name: info
+                    .get("sender_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                date: info.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+            }),
     }
 }
 
@@ -541,11 +589,21 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                     Some(preview)
                 }
             });
+            let reply_content = value
+                .get("content")
+                .filter(|content| !content.is_null())
+                .map(|content| Box::new(parse_content(Some(content)).0));
             Some(MessageReplyTo {
                 chat_id: ChatId(int53_or_zero(value.get("chat_id"))),
                 message_id: MessageId(message_id),
                 quote_text,
                 content_preview,
+                origin: parse_message_origin(value.get("origin")),
+                origin_send_date: value
+                    .get("origin_send_date")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                content: reply_content,
             })
         }
         _ => None,

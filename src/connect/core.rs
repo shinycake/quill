@@ -758,6 +758,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.update_sticker_suggestions(&emoji)?;
         }
+        if view_after {
+            let _ = self.maybe_fetch_replied_messages();
+        }
         if thumbs_after
             || self.session.stickers.open
             || self.session.gifs.open

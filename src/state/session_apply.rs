@@ -1331,14 +1331,16 @@ impl Session {
             EnvelopePayload::UpdateMessageEdited {
                 chat_id,
                 message_id,
+                edit_date,
                 reply_markup,
-                ..
             } => {
                 // Phase 3.2: bots edit inline keyboards via `updateMessageEdited`
                 // (schema 1.8.67 line 10431) — the new `reply_markup` (possibly
                 // None) replaces the message's keyboard.
+                // The same update stamps the edit date shown as "edited".
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.reply_markup = reply_markup.clone();
+                    message.extras.edit_date = edit_date;
                 });
             }
             EnvelopePayload::UpdatePoll { poll } => {
@@ -1691,6 +1693,14 @@ impl Session {
                 self.apply_messages(messages, pending, extra, seq)
             }
             EnvelopePayload::Message(message) => {
+                if let Some(RequestPurpose::GetRepliedMessage {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.accept_replied_message(chat_id, message_id, message);
+                    return;
+                }
                 // M1 fix-up: editing a scheduled send returns the edited
                 // `message` with `scheduling_state` set — refresh the
                 // scheduled-list entry instead of inserting a phantom row

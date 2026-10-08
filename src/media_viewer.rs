@@ -859,6 +859,7 @@ mod tests {
             pending: false,
             reply_to: None,
             forward_info: None,
+            extras: Default::default(),
             interaction_info: None,
             is_pinned: false,
             media_album_id: 0,

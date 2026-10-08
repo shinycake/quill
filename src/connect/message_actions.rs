@@ -5,11 +5,42 @@ use crate::settings::InstantViewMode;
 use crate::state::{ComposerLinkPreview, RequestPurpose, UnreadJumpKind};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
+    get_replied_message,
     get_web_page_instant_view, pin_chat_message, read_all_chat_markers, remove_message_reaction,
     search_chat_messages, search_messages_filter_json, unpin_all_chat_messages, unpin_chat_message,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// Ask TDLib for the replied-to message of every open-chat row whose
+    /// original is outside the loaded window (`getRepliedMessage`, like
+    /// tdesktop `HistoryItem::requestReply`). The answers land in
+    /// `Session::reply_targets` and the strips fill in on the next frame.
+    pub fn maybe_fetch_replied_messages(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        for (chat_id, message_id) in self.session.reply_fetch_candidates() {
+            let extra = self.session.request(
+                RequestPurpose::GetRepliedMessage {
+                    chat_id,
+                    message_id,
+                },
+                Some(chat_id),
+            );
+            if let Err(err) = self
+                .sender
+                .send_json(&get_replied_message(extra, chat_id, message_id))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+            self.session
+                .reply_targets
+                .insert((chat_id.0, message_id.0), crate::state::ReplyTarget::Loading);
+        }
+        Ok(())
+    }
+
     /// Add an emoji reaction (tdesktop InlineList / Unigram ReactionButton).
     /// `is_big: false`, `update_recent_reactions: true` — official picker click.
     pub fn add_message_reaction(

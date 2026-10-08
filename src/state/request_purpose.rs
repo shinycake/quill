@@ -56,6 +56,12 @@ pub enum RequestPurpose {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// `getRepliedMessage` for a bubble's reply strip; the `message`
+    /// answer lands in `Session::reply_targets`, not in the history.
+    GetRepliedMessage {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
     /// `sendMessageAlbum`. Response `messages` are pending until send-succeeded.
     SendMessageAlbum,
     OpenChat,

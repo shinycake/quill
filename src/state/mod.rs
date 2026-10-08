@@ -29,7 +29,7 @@ use crate::telegram::envelope::{
     ConnectionState, EnvelopePayload, EphemeralMessageContent, ErrorClass, ForumTopic,
     GameHighScore, GameInfo, InlineQueryResultSummary, InlineQueryResultsButton,
     InlineQueryResultsPage, InviteGroupCallParticipantResult, LinkPreview, LoginUrlInfo,
-    MessageAutoDelete, MessageContent, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
+    MessageAutoDelete, MessageContent, MessageExtras, MessageForwardInfo, MessageInteractionInfo, MessageOrigin,
     MessageReaction, MessageReplyTo, MessageSelfDestruct, MessageSender, NotificationSettingsScope,
     NotificationSound, OptionValue, ParsedCall, ParsedChatEvent, ParsedChatInviteLink,
     ParsedChatJoinRequest, ParsedChatMember, ParsedCommunity, ParsedCommunityFullInfo, ParsedFile,
@@ -79,6 +79,7 @@ mod session_chatlist;
 mod session_files;
 mod session_forum;
 mod session_forward;
+mod session_reply;
 mod session_history_window;
 mod session_members;
 mod session_notifications;
@@ -104,6 +105,9 @@ pub use request_purpose::*;
 pub use requests::*;
 pub use search_types::*;
 pub use session::*;
+pub use session_reply::{
+    ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip, thumb_candidates,
+};
 pub(crate) use session_chat_search::history_message;
 pub use session_history_window::MentionSearch;
 pub use session_subsection_tabs::{BotTopics, TopicBadge};
