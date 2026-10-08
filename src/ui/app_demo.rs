@@ -609,6 +609,13 @@ pub(super) fn demo_seed_for(
             "screenshot demo — RTL polish".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyMessageMenu => (
+            Some(super::message_menu_demo::seed_ready_message_menu_session
+                as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — message menu".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyServiceMessages => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1872,6 +1879,7 @@ impl QuillApp {
             restrict_dialog: None,
             group_confirm_dialog: None,
             message_menu_selection: None,
+            message_menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             media_viewer: MediaViewer::closed(),
             photo_editor: None,
             viewer_zoom: ViewerZoom::new(),
@@ -1991,6 +1999,9 @@ impl QuillApp {
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
+        if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
+            app.demo_setup_message_menu(window, cx);
+        }
 
         let menu_app = cx.weak_entity();
         cx.intercept_keystrokes(move |event, window, cx| {

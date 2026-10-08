@@ -735,6 +735,8 @@ pub struct QuillApp {
     /// Message text selected when the message menu opened, if the
     /// selection lies in that message (Quote & Reply, Copy Selected Text).
     pub(super) message_menu_selection: Option<String>,
+    /// Page, report and sticker-set dialogs of the message menu's extras.
+    pub(super) message_menu_ui: super::message_menu_ui::MessageMenuUi,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     pub(super) media_viewer: MediaViewer,
     /// Shared Media paging, video full screen and inactive-window state of

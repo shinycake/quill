@@ -187,6 +187,16 @@ impl QuillApp {
                         this.confirm_delete_selection(window, cx);
                     })),
             )
+            .when(self.selection_reportable(chat_id), |bar| {
+                bar.child(
+                    Button::new("selection-report")
+                        .label(format!("Report {count}"))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.report_selection(window, cx);
+                        })),
+                )
+            })
             .child(div().flex_1())
             .child(
                 Button::new("selection-cancel")
@@ -202,6 +212,42 @@ impl QuillApp {
             .child(header)
             .child(bar)
             .into_any_element()
+    }
+
+    /// Whether the selection can be reported: other people's sent
+    /// messages in a chat that is not Saved Messages (Telegram Desktop's
+    /// `suggestReport`).
+    pub(super) fn selection_reportable(&self, chat_id: ChatId) -> bool {
+        let Some(draft) = self.pending_forward.as_ref() else {
+            return false;
+        };
+        let Some(session) = self.session() else {
+            return false;
+        };
+        if draft.from_chat_id != chat_id || session.is_saved_messages(chat_id) {
+            return false;
+        }
+        let Some(history) = session.histories.get(&chat_id.0) else {
+            return false;
+        };
+        !draft.message_ids.is_empty()
+            && draft.message_ids.iter().all(|id| {
+                history
+                    .messages
+                    .get(&id.0)
+                    .is_some_and(|m| !m.is_outgoing && !m.pending && m.id.0 > 0)
+            })
+    }
+
+    /// "Report N": the Report flow for every selected message.
+    pub(super) fn report_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = self.pending_forward.clone() else {
+            return;
+        };
+        let mut ids = draft.message_ids.clone();
+        ids.sort_by_key(|id| id.0);
+        self.clear_forward(window, cx);
+        self.open_message_report(draft.from_chat_id, ids, cx);
     }
 
     /// The selected messages as text, as Telegram Desktop copies them: a
@@ -351,6 +397,19 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_delete_dialog_with(confirm, None, window, cx);
+    }
+
+    /// The delete box, with the admin checkboxes of a group moderator
+    /// (Report Spam, Delete all from the user, Ban the user) when
+    /// `moderation` offers them.
+    pub(super) fn open_delete_dialog_with(
+        &mut self,
+        confirm: quill::composer::DeleteConfirm,
+        moderation: Option<super::message_menu_ui::ModerationOffer>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let label = confirm.can_revoke.then(|| {
             let session = self.session();
             match session
@@ -365,24 +424,85 @@ impl QuillApp {
             }
         });
         let revoke = std::rc::Rc::new(std::cell::Cell::new(confirm.revoke));
+        // Report Spam / Delete all / Ban: unchecked until the admin ticks them.
+        let choice = std::rc::Rc::new(std::cell::Cell::new(
+            quill::connect::ModerationChoice::default(),
+        ));
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, revoke, confirm) = (app.clone(), revoke.clone(), confirm.clone());
             let checkbox_state = revoke.clone();
+            let (moderation_state, moderation_offer) = (choice.clone(), moderation.clone());
+            let on_ok_choice = choice.clone();
+            let on_ok_offer = moderation.clone();
             alert
                 .description("Do you want to delete this message?")
-                .when_some(label.clone(), |alert, label| {
+                .when(label.is_some() || moderation_offer.is_some(), |alert| {
+                    let label = label.clone();
                     alert.content(move |content, _, _| {
                         let state = checkbox_state.clone();
-                        content.child(
-                            gpui_kit::component::checkbox::Checkbox::new("delete-message-revoke")
-                                .label(label.clone())
+                        let mut content = content;
+                        if let Some(label) = label.clone() {
+                            content = content.child(
+                                gpui_kit::component::checkbox::Checkbox::new(
+                                    "delete-message-revoke",
+                                )
+                                .label(label)
                                 .checked(state.get())
-                                .on_click(move |checked, window, _| {
-                                    state.set(*checked);
-                                    window.refresh();
-                                }),
-                        )
+                                .on_click(
+                                    move |checked, window, _| {
+                                        state.set(*checked);
+                                        window.refresh();
+                                    },
+                                ),
+                            );
+                        }
+                        if let Some(offer) = moderation_offer.clone() {
+                            type Get = fn(quill::connect::ModerationChoice) -> bool;
+                            type Set = fn(&mut quill::connect::ModerationChoice, bool);
+                            let rows: [(&'static str, String, bool, Get, Set); 3] = [
+                                (
+                                    "delete-moderate-spam",
+                                    "Report Spam".to_string(),
+                                    offer.report_spam,
+                                    |c| c.report_spam,
+                                    |c, v| c.report_spam = v,
+                                ),
+                                (
+                                    "delete-moderate-all",
+                                    format!("Delete all from {}", offer.user_name),
+                                    offer.delete_all,
+                                    |c| c.delete_all,
+                                    |c, v| c.delete_all = v,
+                                ),
+                                (
+                                    "delete-moderate-ban",
+                                    format!("Ban {}", offer.user_name),
+                                    offer.ban,
+                                    |c| c.ban,
+                                    |c, v| c.ban = v,
+                                ),
+                            ];
+                            for (id, text, available, get, set) in rows {
+                                if !available {
+                                    continue;
+                                }
+                                let state = moderation_state.clone();
+                                let checked = get(state.get());
+                                content = content.child(
+                                    gpui_kit::component::checkbox::Checkbox::new(id)
+                                        .label(text)
+                                        .checked(checked)
+                                        .on_click(move |checked, window, _| {
+                                            let mut now = state.get();
+                                            set(&mut now, *checked);
+                                            state.set(now);
+                                            window.refresh();
+                                        }),
+                                );
+                            }
+                        }
+                        content
                     })
                 })
                 .ok_text("Delete")
@@ -391,7 +511,20 @@ impl QuillApp {
                 .on_ok(move |_, _, cx| {
                     let mut confirm = confirm.clone();
                     confirm.revoke = confirm.can_revoke && revoke.get();
+                    let (picked, offer) = (on_ok_choice.get(), on_ok_offer.clone());
                     let _ = app.update(cx, |this, cx| {
+                        // Reports and "delete all" name the user's
+                        // messages, so they go out before the delete.
+                        if let (true, Some(offer), Some(live)) =
+                            (picked.any(), offer, this.live.as_mut())
+                        {
+                            let _ = live.driver.moderate_message(
+                                offer.chat_id,
+                                &[confirm.message_id],
+                                offer.user_id,
+                                picked,
+                            );
+                        }
                         this.pending_delete = Some(confirm);
                         this.confirm_delete(cx);
                     });
