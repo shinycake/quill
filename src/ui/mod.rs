@@ -9,6 +9,7 @@ mod clipboard_files;
 mod composer_rtl;
 mod composer_thumb;
 mod editor_art;
+mod ffmpeg_video;
 mod force_reply;
 mod frame_clock;
 mod image_budget;

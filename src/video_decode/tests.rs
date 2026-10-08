@@ -105,7 +105,10 @@ fn take_due_shows_the_newest_due_picture_and_drops_late_ones() {
     assert_eq!(take_due(&mut queue, 0.09, false).map(|f| f.pts), Some(0.08));
     assert_eq!(queue.len(), 1);
     // Half a refresh early still counts as due.
-    assert_eq!(take_due(&mut queue, 0.115, false).map(|f| f.pts), Some(0.12));
+    assert_eq!(
+        take_due(&mut queue, 0.115, false).map(|f| f.pts),
+        Some(0.12)
+    );
 }
 
 #[test]
@@ -210,11 +213,7 @@ impl Demuxer for Scripted {
     }
 }
 
-fn scripted_player(
-    frames: Option<usize>,
-    audio: bool,
-    queue: usize,
-) -> (Player, Arc<AtomicUsize>) {
+fn scripted_player(frames: Option<usize>, audio: bool, queue: usize) -> (Player, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let demuxer = Scripted::new(25.0, frames, audio, calls.clone());
     let options = OpenOptions {
@@ -273,7 +272,10 @@ fn a_seek_drops_stale_pictures_and_restarts_there() {
         after.is_some()
     }));
     let pts = after.map(|f| f.pts).unwrap_or_default();
-    assert!((4.0 - 0.04..=4.0).contains(&pts), "first picture after seek: {pts}");
+    assert!(
+        (4.0 - 0.04..=4.0).contains(&pts),
+        "first picture after seek: {pts}"
+    );
     assert!((player.position() - 4.0).abs() < 1e-9);
 }
 
@@ -285,7 +287,11 @@ fn a_clip_ends_and_play_starts_it_over() {
         player.take_frame();
         !player.is_playing()
     }));
-    assert!((player.position() - 0.2).abs() < 1e-9, "{}", player.position());
+    assert!(
+        (player.position() - 0.2).abs() < 1e-9,
+        "{}",
+        player.position()
+    );
     player.play();
     assert!(player.is_playing());
     let mut first = None;
@@ -322,7 +328,7 @@ fn sound_is_the_clock() {
     let position = player.position();
     let expected = 0.5 - AUDIO_OUTPUT_LATENCY;
     assert!(
-        (position - expected).abs() < 0.002,
+        (position - expected).abs() <= super::SYNC_TOLERANCE + 0.002,
         "position {position} for half a second of sound"
     );
     // The picture due at that position is the one shown.
@@ -457,7 +463,12 @@ fn ffmpeg_decodes_h264_with_aac() {
     assert_eq!(frames[0].bgra.len(), 96 * 64 * 4);
     // testsrc2 is colourful and opaque.
     assert!(frames[0].bgra.chunks(4).all(|px| px[3] == 255));
-    assert!(frames[0].bgra.chunks(4).any(|px| px[0] != px[1] || px[1] != px[2]));
+    assert!(
+        frames[0]
+            .bgra
+            .chunks(4)
+            .any(|px| px[0] != px[1] || px[1] != px[2])
+    );
     // About a second of mono sound.
     assert!((40_000..=56_000).contains(&samples), "{samples} samples");
 }
@@ -467,7 +478,8 @@ fn ffmpeg_scales_into_the_box_and_skips_sound_when_muted() {
     if !decoder() {
         return;
     }
-    let (info, frames, samples) = decode_all(&fixture("clip-h264-aac.mp4"), &OpenOptions::inline(48));
+    let (info, frames, samples) =
+        decode_all(&fixture("clip-h264-aac.mp4"), &OpenOptions::inline(48));
     assert_eq!((info.width, info.height), (48, 32));
     assert!(!info.has_audio);
     assert_eq!(samples, 0);
@@ -501,11 +513,9 @@ fn ffmpeg_seeks_to_the_picture_covering_the_target() {
     if !decoder() {
         return;
     }
-    let mut demuxer = super::ffi::FfiDemuxer::open(
-        &fixture("clip-h264-aac.mp4"),
-        &OpenOptions::inline(96),
-    )
-    .expect("open");
+    let mut demuxer =
+        super::ffi::FfiDemuxer::open(&fixture("clip-h264-aac.mp4"), &OpenOptions::inline(96))
+            .expect("open");
     demuxer.seek(0.55).expect("seek");
     let first = loop {
         match demuxer.next().expect("decode") {

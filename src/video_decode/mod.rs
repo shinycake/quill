@@ -61,6 +61,46 @@ pub fn library_name() -> &'static str {
     ffi::library_name()
 }
 
+/// `quill --video-probe <file>`: decode a whole file with the installed
+/// decoder and print what came out. The package smoke tests run it against
+/// the bundled libraries. Returns the process exit code.
+pub fn probe_cli(path: Option<&str>) -> i32 {
+    let Some(path) = path else {
+        eprintln!("usage: quill --video-probe <file>");
+        return 2;
+    };
+    let options = OpenOptions::viewer();
+    let mut demuxer = match ffi::FfiDemuxer::open(Path::new(path), &options) {
+        Ok(demuxer) => demuxer,
+        Err(err) => {
+            eprintln!("video-probe: {err}");
+            return 1;
+        }
+    };
+    let info = demuxer.info();
+    let (mut frames, mut samples) = (0usize, 0usize);
+    let mut size = (0, 0);
+    loop {
+        match demuxer.next() {
+            Ok(Some(Item::Video(frame))) => {
+                frames += 1;
+                size = (frame.width, frame.height);
+            }
+            Ok(Some(Item::Audio(chunk))) => samples += chunk.samples.len(),
+            Ok(None) => break,
+            Err(err) => {
+                eprintln!("video-probe: {err}");
+                return 1;
+            }
+        }
+    }
+    println!(
+        "video={} {}x{} frames={frames} audio={} samples={samples}",
+        info.video_codec, size.0, size.1, info.audio_codec
+    );
+    i32::from(info.has_video && frames == 0)
+}
+
 /// How a clip is opened.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenOptions {
@@ -317,10 +357,7 @@ pub fn synced_position(wall: f64, heard: Option<f64>) -> f64 {
 
 /// Whether the decode thread should decode more now: while pictures are
 /// short, or sound is below its low mark; never past the sound's cap.
-pub fn wants_more(
-    video_queued: Option<(usize, usize)>,
-    audio_buffered_secs: Option<f64>,
-) -> bool {
+pub fn wants_more(video_queued: Option<(usize, usize)>, audio_buffered_secs: Option<f64>) -> bool {
     if audio_buffered_secs.is_some_and(|secs| secs >= AUDIO_HIGH_SECS) {
         return false;
     }
@@ -390,7 +427,9 @@ impl AudioShared {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The clip's sound as a stream of samples for an audio output (the UI
@@ -460,10 +499,12 @@ impl AudioTap {
         let sample = self.chunk[self.at];
         self.at += 1;
         let channels = usize::from(self.channels());
-        if self.at % channels == 0 {
-            let played = self.chunk_pts
-                + (self.at / channels) as f64 / f64::from(self.sample_rate());
-            self.shared.played.store(played.to_bits(), Ordering::Release);
+        if self.at.is_multiple_of(channels) {
+            let played =
+                self.chunk_pts + (self.at / channels) as f64 / f64::from(self.sample_rate());
+            self.shared
+                .played
+                .store(played.to_bits(), Ordering::Release);
             self.shared
                 .played_generation
                 .store(self.generation, Ordering::Release);

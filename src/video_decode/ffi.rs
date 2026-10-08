@@ -48,7 +48,8 @@ struct QvItem {
     samples: i32,
 }
 
-type OpenFn = unsafe extern "C" fn(*const c_char, *const QvOptions, *mut c_char, i32) -> *mut c_void;
+type OpenFn =
+    unsafe extern "C" fn(*const c_char, *const QvOptions, *mut c_char, i32) -> *mut c_void;
 type InfoFn = unsafe extern "C" fn(*mut c_void, *mut QvInfo);
 type NextFn = unsafe extern "C" fn(*mut c_void, *mut QvItem) -> i32;
 type SeekFn = unsafe extern "C" fn(*mut c_void, f64) -> i32;
@@ -291,8 +292,13 @@ impl Demuxer for FfiDemuxer {
                 // SAFETY: the shim hands out `stride * height` bytes that
                 // stay valid until the next call on this context.
                 let rows = unsafe { std::slice::from_raw_parts(item.data, len) };
-                let (bgra, width, height) =
-                    rotate_bgra(rows, w as u32, h as u32, stride as usize, self.info.rotation);
+                let (bgra, width, height) = rotate_bgra(
+                    rows,
+                    w as u32,
+                    h as u32,
+                    stride as usize,
+                    self.info.rotation,
+                );
                 Ok(Some(Item::Video(VideoFrame {
                     pts,
                     width,

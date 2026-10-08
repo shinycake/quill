@@ -1,11 +1,13 @@
 //! Inline autoplay of videos and GIFs in the history, as in Telegram
 //! Desktop: each visible, downloaded clip plays muted and looped on the
-//! native player (`NativeVideo`), drawn straight from its pixel buffers.
+//! native player (`NativeVideo`: AVPlayer on macOS, the bundled FFmpeg on
+//! Linux and Windows).
 //! Players live while their row renders and are dropped a couple of
 //! renders after it scrolls away (or the chat changes). A round video
 //! message plays once with sound when clicked, then loops muted again.
 
 use super::app::QuillApp;
+use super::native_video::{NativeVideo, Purpose, VideoPicture};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use quill::state::HistoryMessage;
@@ -23,8 +25,7 @@ type Key = (i64, i64);
 
 /// A frame for an inline tile, and the clip's remaining time.
 pub(super) struct InlineFrame {
-    #[cfg(target_os = "macos")]
-    pub(super) buffer: core_video::pixel_buffer::CVPixelBuffer,
+    pub(super) picture: VideoPicture,
     pub(super) remaining_secs: Option<f64>,
     /// Playing with sound (a clicked round video message).
     pub(super) sound: bool,
@@ -64,15 +65,16 @@ impl LiveSource {
 
 /// tdesktop `VideoMessageSeek`: the ring shows in 220 ms (ease-out-back),
 /// hides in 150 ms, and the dot grows or shrinks in 150 ms.
-#[cfg(any(target_os = "macos", test))]
 const SEEK_SHOW: f32 = 0.22;
-#[cfg(any(target_os = "macos", test))]
 const SEEK_HIDE: f32 = 0.15;
-#[cfg(any(target_os = "macos", test))]
 const SEEK_GRAB: f32 = 0.15;
 
+/// Pictures of an inline clip are decoded at most this many px on their
+/// longer side (the largest tile, twice for HiDPI); the AVPlayer backend
+/// draws its own buffers and ignores it.
+const INLINE_MAX_EDGE: u32 = 720;
+
 /// `anim::easeOutBack`: overshoots a little, then settles.
-#[cfg(any(target_os = "macos", test))]
 fn ease_out_back(t: f32) -> f32 {
     const S: f32 = 1.70158;
     let t = t - 1.0;
@@ -80,7 +82,6 @@ fn ease_out_back(t: f32) -> f32 {
 }
 
 /// A value that eases between 0 and 1 when its target flips.
-#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy)]
 struct Toggle {
     on: bool,
@@ -88,7 +89,6 @@ struct Toggle {
     from: f32,
 }
 
-#[cfg(any(target_os = "macos", test))]
 impl Toggle {
     fn new() -> Self {
         Self {
@@ -126,21 +126,16 @@ impl Toggle {
 
 #[derive(Default)]
 pub(super) struct InlineVideos {
-    #[cfg(target_os = "macos")]
     players: HashMap<Key, Slot>,
-    #[cfg(not(target_os = "macos"))]
-    players: HashMap<Key, ()>,
     render: u64,
     /// The history rendered (and swept the players) this frame.
     swept: bool,
     /// The window is in the background: muted loops hold still.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     inactive: bool,
 }
 
-#[cfg(target_os = "macos")]
 struct Slot {
-    video: super::native_video::NativeVideo,
+    video: NativeVideo,
     seen: u64,
     sound: bool,
     /// Paused by a click while playing with sound.
@@ -157,11 +152,8 @@ impl InlineVideos {
     pub(super) fn begin_render(&mut self) {
         self.swept = true;
         self.render += 1;
-        #[cfg(target_os = "macos")]
-        {
-            let render = self.render;
-            self.players.retain(|_, slot| slot.seen + 1 >= render);
-        }
+        let render = self.render;
+        self.players.retain(|_, slot| slot.seen + 1 >= render);
     }
 
     /// Called at the start of every app frame: when the last frame
@@ -187,7 +179,6 @@ impl InlineVideos {
     /// on return; a clip playing with sound keeps playing.
     pub(super) fn set_window_active(&mut self, active: bool) {
         self.inactive = !active;
-        #[cfg(target_os = "macos")]
         for slot in self.players.values_mut() {
             if slot.sound || slot.paused {
                 continue;
@@ -198,18 +189,11 @@ impl InlineVideos {
                 slot.video.pause();
             }
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = active;
     }
 
     /// Whether a clip plays with sound (it keeps drawing in the background).
     pub(super) fn sounding(&self) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            self.players.values().any(|slot| slot.sound && !slot.paused)
-        }
-        #[cfg(not(target_os = "macos"))]
-        false
+        self.players.values().any(|slot| slot.sound && !slot.paused)
     }
 
     /// Stop everything (viewer opened, autoplay turned off).
@@ -221,7 +205,6 @@ impl InlineVideos {
     /// muted loop plays once from the start with sound (muting any other),
     /// a sounding one pauses, a paused one resumes. False when it isn't
     /// running.
-    #[cfg(target_os = "macos")]
     pub(super) fn toggle_sound(&mut self, chat_id: i64, message_id: i64) -> bool {
         let key = (chat_id, message_id);
         let Some(slot) = self.players.get_mut(&key) else {
@@ -257,7 +240,6 @@ impl InlineVideos {
     /// Drag along a sounding clip's seek ring to `fraction` of it: the
     /// clip holds still while dragged and resumes on release if it was
     /// playing.
-    #[cfg(target_os = "macos")]
     pub(super) fn seek_to(&mut self, chat_id: i64, message_id: i64, fraction: f32) -> bool {
         let Some(slot) = self.players.get_mut(&(chat_id, message_id)) else {
             return false;
@@ -275,7 +257,6 @@ impl InlineVideos {
         true
     }
 
-    #[cfg(target_os = "macos")]
     pub(super) fn end_seek(&mut self, chat_id: i64, message_id: i64) {
         if let Some(slot) = self.players.get_mut(&(chat_id, message_id))
             && let Some(was_playing) = slot.seeking.take()
@@ -288,48 +269,21 @@ impl InlineVideos {
     }
 
     pub(super) fn is_seeking(&self, chat_id: i64, message_id: i64) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            self.players
-                .get(&(chat_id, message_id))
-                .is_some_and(|slot| slot.seeking.is_some())
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (chat_id, message_id);
-            false
-        }
+        self.players
+            .get(&(chat_id, message_id))
+            .is_some_and(|slot| slot.seeking.is_some())
     }
-
-    #[cfg(not(target_os = "macos"))]
-    pub(super) fn seek_to(&mut self, _chat_id: i64, _message_id: i64, _fraction: f32) -> bool {
-        false
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub(super) fn end_seek(&mut self, _chat_id: i64, _message_id: i64) {}
 
     /// Whether a seek ring is still springing in or out.
     pub(super) fn seek_animating(&self) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            self.players.values().any(|slot| {
-                !slot.seek_shown.settled(SEEK_SHOW, SEEK_HIDE)
-                    || !slot.seek_grabbed.settled(SEEK_GRAB, SEEK_GRAB)
-            })
-        }
-        #[cfg(not(target_os = "macos"))]
-        false
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub(super) fn toggle_sound(&mut self, _chat_id: i64, _message_id: i64) -> bool {
-        false
+        self.players.values().any(|slot| {
+            !slot.seek_shown.settled(SEEK_SHOW, SEEK_HIDE)
+                || !slot.seek_grabbed.settled(SEEK_GRAB, SEEK_GRAB)
+        })
     }
 
     /// The current frame of this message's clip, starting its muted,
     /// looping player on first use (`path` is only resolved then).
-    #[cfg(target_os = "macos")]
     pub(super) fn frame(
         &mut self,
         chat_id: i64,
@@ -341,7 +295,10 @@ impl InlineVideos {
         let slot = match self.players.entry((chat_id, message_id)) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
-                let mut video = super::native_video::NativeVideo::open(&path()?).ok()?;
+                let purpose = Purpose::Inline {
+                    max_edge: INLINE_MAX_EDGE,
+                };
+                let mut video = NativeVideo::open(&path()?, purpose).ok()?;
                 video.set_volume(0.0);
                 // Behind another app a new muted loop waits for activation.
                 if !inactive {
@@ -365,19 +322,12 @@ impl InlineVideos {
     /// The current frame of a running clip, for the history's animation
     /// layer: [`Self::frame`] without starting a player or marking its row
     /// rendered.
-    #[cfg(target_os = "macos")]
     pub(super) fn current(&mut self, chat_id: i64, message_id: i64) -> Option<InlineFrame> {
         let inactive = self.inactive;
         let slot = self.players.get_mut(&(chat_id, message_id))?;
         Self::slot_frame(slot, inactive)
     }
 
-    #[cfg(not(target_os = "macos"))]
-    pub(super) fn current(&mut self, _chat_id: i64, _message_id: i64) -> Option<InlineFrame> {
-        None
-    }
-
-    #[cfg(target_os = "macos")]
     fn slot_frame(slot: &mut Slot, inactive: bool) -> Option<InlineFrame> {
         if slot.video.error().is_some() {
             return None;
@@ -399,7 +349,7 @@ impl InlineVideos {
             .set(slot.sound && held, SEEK_SHOW, SEEK_HIDE, true);
         slot.seek_grabbed
             .set(slot.seeking.is_some(), SEEK_GRAB, SEEK_GRAB, false);
-        let buffer = slot.video.frame()?;
+        let picture = slot.video.frame()?;
         let remaining_secs = slot
             .video
             .duration_secs()
@@ -409,7 +359,7 @@ impl InlineVideos {
             .duration_secs()
             .map(|total| (slot.video.position_secs() / total).clamp(0.0, 1.0) as f32);
         Some(InlineFrame {
-            buffer,
+            picture,
             remaining_secs,
             sound: slot.sound,
             backdrop: gpui_kit::black(),
@@ -418,16 +368,6 @@ impl InlineVideos {
             seek_grabbed: slot.seek_grabbed.value(SEEK_GRAB, SEEK_GRAB, false),
             live: None,
         })
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub(super) fn frame(
-        &mut self,
-        _chat_id: i64,
-        _message_id: i64,
-        _path: impl FnOnce() -> Option<PathBuf>,
-    ) -> Option<InlineFrame> {
-        None
     }
 }
 
@@ -441,7 +381,7 @@ impl QuillApp {
         message: &HistoryMessage,
         cx: &mut Context<Self>,
     ) -> Option<InlineFrame> {
-        if !super::native_video::SUPPORTED
+        if !super::native_video::supported()
             || self.media_viewer.is_open()
             || self.story_viewer.is_open()
         {
@@ -458,7 +398,7 @@ impl QuillApp {
             {
                 video.play_file_id()?
             }
-            // AVFoundation plays Telegram's MP4 GIFs; true `image/gif`
+            // The player takes Telegram's MP4 GIFs; true `image/gif`
             // files keep the frame-extraction path.
             MessageContent::VideoNote(note) if prefs.autoplay_videos && !note.is_secret => {
                 note.play_file_id()?

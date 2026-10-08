@@ -1436,6 +1436,7 @@ impl QuillApp {
         let pending_attachments = demo_pending_attachments(demo);
 
         let audio_output = super::audio::SharedOutput::default();
+        super::audio::share_output_with_video(&audio_output);
         let (spellchecker, spell_info) = Self::new_spellchecker(true);
         let mut app = Self {
             update_state: if demo.is_none() {
