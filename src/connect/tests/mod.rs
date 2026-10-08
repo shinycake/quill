@@ -25,6 +25,7 @@ mod settings;
 mod sticker_tabs;
 mod stories;
 mod subsection_tabs;
+mod threads;
 mod support;
 
 pub(crate) use calls::{READY_CALL_JSON, group_call_test_driver};

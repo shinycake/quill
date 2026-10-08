@@ -474,6 +474,8 @@ pub enum EnvelopePayload {
     CheckChatUsernameResult(UsernameCheckResult),
     Error(TdError),
     Messages(Vec<ParsedMessage>),
+    /// `messageThreadInfo` — the answer to `getMessageThread`.
+    MessageThreadInfo(Box<ParsedMessageThreadInfo>),
     Message(ParsedMessage),
     /// M1: `messageLink` (TDLib 1.8.67, `schema/td_api.tl:9666` —
     /// `messageLink link is_public`) — the `getMessageLink` answer. The

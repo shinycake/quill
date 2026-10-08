@@ -1,4 +1,4 @@
-use super::format_entity_json;
+use super::{format_entity_json, input_message_reply_to_with_quote};
 use crate::composer::parse_format_markup;
 use crate::ids::{ChatId, MessageId, RequestId};
 use serde_json::{Value, json};
@@ -726,6 +726,56 @@ pub fn get_message_thread_history(
         "limit": limit,
     })
     .to_string()
+}
+
+/// `getMessageThread` (TDLib 1.8.67, `schema/td_api.tl:11566`):
+/// `getMessageThread chat_id:int53 message_id:int53 = MessageThreadInfo;`
+/// "Can be used only if messageProperties.can_get_message_thread == true".
+pub fn get_message_thread(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getMessageThread",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+    })
+    .to_string()
+}
+
+/// `messageTopicThread` (TDLib 1.8.67, `schema/td_api.tl:3001`).
+pub fn message_topic_thread_value(message_thread_id: i64) -> Value {
+    json!({
+        "@type": "messageTopicThread",
+        "message_thread_id": message_thread_id,
+    })
+}
+
+/// Address a prebuilt `sendMessage` / `sendMessageAlbum` /
+/// `sendInlineQueryResultMessage` / `sendChatAction` request to the comment
+/// or reply thread `message_thread_id`: `topic_id` becomes
+/// `messageTopicThread` and a send without an explicit reply replies to the
+/// thread root, as Telegram clients do. Requests without a `topic_id` field
+/// pass through unchanged.
+pub fn route_into_thread(json: &str, message_thread_id: i64) -> String {
+    let Ok(mut value) = serde_json::from_str::<Value>(json) else {
+        return json.to_owned();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return json.to_owned();
+    };
+    if !object.contains_key("topic_id") {
+        return json.to_owned();
+    }
+    object.insert(
+        "topic_id".to_owned(),
+        message_topic_thread_value(message_thread_id),
+    );
+    if object.get("reply_to").is_some_and(Value::is_null) {
+        object.insert(
+            "reply_to".to_owned(),
+            input_message_reply_to_with_quote(Some(MessageId(message_thread_id)), None),
+        );
+    }
+    value.to_string()
 }
 
 /// Slice G2: `getChatBoostStatus` (TDLib 1.8.67, `schema/td_api.tl:13917`):

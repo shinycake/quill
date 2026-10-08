@@ -1256,19 +1256,8 @@ impl Session {
                 )),
             );
         }
-        // Slice G2: failed thread-history fetch — mark the comment
-        // viewer so it shows an error.
-        if let Some(RequestPurpose::GetMessageThreadHistory { message_id }) =
-            pending.map(|p| p.purpose)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-        {
-            self.comment_thread = Some(CommentThreadFetch {
-                chat_id,
-                message_id: MessageId(message_id),
-                messages: Vec::new(),
-                failed: Some(call_request_error_line(&err, "Could not load comments")),
-            });
-        }
+        // A failed thread request marks the open thread view.
+        self.fail_thread(pending, call_request_error_line(&err, "Could not load comments"));
         // Slice CL: failed preview-history fetch — mark the peek
         // preview so it shows an error instead of a spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatPreview)

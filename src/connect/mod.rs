@@ -32,6 +32,7 @@ mod settings;
 mod stickers;
 mod stories;
 mod subsection_tabs;
+mod threads;
 mod types;
 mod typing;
 

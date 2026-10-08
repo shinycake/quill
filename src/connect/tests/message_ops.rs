@@ -1166,6 +1166,7 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
         is_outgoing: true,
         is_pinned: false,
         topic_id: None,
+        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,

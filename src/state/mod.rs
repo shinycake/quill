@@ -79,6 +79,7 @@ mod session_chat_search;
 mod session_chatlist;
 mod session_files;
 mod session_forum;
+mod session_thread;
 mod session_forward;
 mod session_history_window;
 mod session_members;
@@ -93,6 +94,7 @@ mod session_stories;
 mod session_subsection_tabs;
 mod session_updates;
 mod shared_media_types;
+mod thread_types;
 mod sticker_gif_types;
 mod story_types;
 
@@ -117,6 +119,7 @@ pub use session_reply::{
 pub use session_subsection_tabs::{BotTopics, TopicBadge};
 pub use shared_media_types::*;
 pub use sticker_gif_types::*;
+pub use thread_types::*;
 pub use story_types::*;
 
 #[cfg(test)]

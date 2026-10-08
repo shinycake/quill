@@ -16,6 +16,7 @@ fn effective_preview_prefers_ephemeral_content() {
         is_outgoing: false,
         is_pinned: false,
         topic_id: None,
+        thread_id: None,
         ephemeral: Some(EphemeralMessageContent {
             content: Box::new(MessageContent::Text("secret flow".into())),
             reply_markup: None,
@@ -78,6 +79,7 @@ fn update_message_content_refreshes_scheduled_entry() {
         is_outgoing: true,
         is_pinned: false,
         topic_id: None,
+        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,

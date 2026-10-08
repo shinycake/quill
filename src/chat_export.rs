@@ -191,6 +191,7 @@ mod tests {
             is_outgoing: false,
             is_pinned: false,
             topic_id: None,
+            thread_id: None,
             media_album_id: 0,
             author_signature: None,
             scheduling_state: None,

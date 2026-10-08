@@ -27,6 +27,7 @@ mod message_poll;
 mod message_reactions;
 mod message_sponsored;
 mod message_sticker;
+mod message_thread;
 mod payload;
 mod payments;
 mod secret_chat;
@@ -80,6 +81,8 @@ mod tests_media;
 mod tests_messages;
 #[cfg(test)]
 mod tests_payments;
+#[cfg(test)]
+mod tests_threads;
 
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 pub use account_notices::*;
@@ -110,6 +113,7 @@ pub use message_media::*;
 pub use message_poll::*;
 pub use message_reactions::*;
 pub use message_sponsored::*;
+pub use message_thread::*;
 pub use message_sticker::*;
 pub(crate) use payload::*;
 pub use payments::*;
