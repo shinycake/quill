@@ -9,6 +9,8 @@ Goal: a clean-machine macOS binary that loads official `tdjson` without Homebrew
 3. Set the library id to `@rpath/libtdjson.dylib` and add `@executable_path/../Frameworks` to the executable.
 4. At runtime, `quill::telegram::ffi` loads that bundled file (or `QUILL_TDJSON_PATH` for developers). Homebrew prefixes are never searched.
 
+5. `scripts/macos-package-smoke.sh` then bundles every non-system dylib that the bundled libraries link (OpenSSL `libssl.3`/`libcrypto.3` for tdjson), rewrites their ids to `@rpath/<name>` and the references to `@loader_path/<name>`, re-signs inside-out (nested dylibs, helper, app; ad-hoc unless `QUILL_CODESIGN_IDENTITY` is set), and runs `scripts/check-bundle-macho.sh`, which fails the step if any Mach-O references a path that is neither the OS nor the bundle.
+
 Static vs dynamic: this experiment uses a **bundled dylib**. Static linking of TDLib is possible later if the dylib + rpath approach fails notarization; it is not universally simpler (OpenSSL/zlib still need a policy).
 
 ## What this agent ran
@@ -33,7 +35,7 @@ otool -L dist/Quill.app/Contents/MacOS/quill
 otool -L dist/Quill.app/Contents/Frameworks/libtdjson.dylib
 ```
 
-Reject the bundle if `otool -L` shows `/opt/homebrew` or `/usr/local/opt` for tdjson.
+The package script already enforces this; run `bash scripts/check-bundle-macho.sh dist/Quill.app` to re-check by hand. See `docs/decisions/codex-bundle-openssl.md` for Linux/Windows status.
 
 Signing/notarization is deferred (no Developer ID in this phase).
 
