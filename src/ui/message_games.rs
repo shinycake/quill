@@ -1,7 +1,7 @@
 //! Bot game cards: `messageGame` rendering, high-score panels, game sends.
 
 use super::app::QuillApp;
-use super::message_media::photo_attachment;
+use super::message_media::{MediaCorners, photo_attachment};
 use super::message_text::rich_text_line;
 use super::*;
 use gpui_kit::component::button::*;
@@ -56,6 +56,7 @@ pub(super) fn game_card(
             media_roots,
             None,
             None,
+            MediaCorners::small(),
             cx,
         )));
     }

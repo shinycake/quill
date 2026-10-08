@@ -3,7 +3,7 @@
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::message_media::{
-    animation_attachment, document_chip, photo_attachment, video_attachment,
+    MediaCorners, animation_attachment, document_chip, photo_attachment, video_attachment,
 };
 use super::message_text::message_text_block;
 use super::*;
@@ -104,6 +104,7 @@ pub(super) fn sponsored_message_row(
                     media_roots,
                     Some((chat_id, message.message_id)),
                     None,
+                    MediaCorners::small(),
                     cx,
                 ))
                 .into_any_element(),
@@ -121,6 +122,7 @@ pub(super) fn sponsored_message_row(
                     None,
                     None,
                     Some((chat_id, message.message_id)),
+                    MediaCorners::small(),
                     cx,
                 ))
                 .into_any_element(),
@@ -139,6 +141,7 @@ pub(super) fn sponsored_message_row(
                     None,
                     Some((chat_id, message.message_id)),
                     None,
+                    MediaCorners::small(),
                     cx,
                 ))
                 .into_any_element(),

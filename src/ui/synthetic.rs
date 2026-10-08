@@ -404,7 +404,7 @@ fn message_bubble_with_quote(
         // cap still applies on narrow panes.
         .max_w(px(560.))
         .line_height(relative(1.4))
-        .when(media_led && !look.plain, |this| this.p_1())
+        .when(media_led && !look.plain, |this| this.p_0())
         .map(|this| match footer {
             Some(footer) if footer_overlay => this.child(
                 div()

@@ -275,6 +275,119 @@ fn download_fraction(file_id: FileId, files: &HashMap<i32, ParsedFile>) -> Optio
         .and_then(ParsedFile::download_progress)
 }
 
+/// Corner radii of a media tile (Telegram Desktop `BubbleRounding`): a
+/// picture that fills a bubble edge takes the bubble's radius there, while a
+/// corner against a caption, a header or a neighbouring album tile takes the
+/// small inner radius. GPUI clips children to rectangles only, so every
+/// image rounds itself and native video surfaces get a mask over them.
+#[derive(Clone, Copy)]
+pub(super) struct MediaCorners {
+    pub(super) tl: Pixels,
+    pub(super) tr: Pixels,
+    pub(super) br: Pixels,
+    pub(super) bl: Pixels,
+    /// What shows behind the tile's corners (the bubble's color), for the
+    /// video mask; `None` uses the history's backdrop.
+    pub(super) behind: Option<Hsla>,
+}
+
+/// The small inner radius (`rounded_md`).
+const MEDIA_SMALL_RADIUS: f32 = 6.;
+
+impl MediaCorners {
+    /// Every corner at the small inner radius.
+    pub(super) fn small() -> Self {
+        Self::edges(px(MEDIA_SMALL_RADIUS), true, true, true, true, None)
+    }
+
+    /// `large` where the tile touches the bubble's edge and the small
+    /// radius elsewhere.
+    pub(super) fn edges(
+        large: Pixels,
+        tl: bool,
+        tr: bool,
+        br: bool,
+        bl: bool,
+        behind: Option<Hsla>,
+    ) -> Self {
+        let small = px(MEDIA_SMALL_RADIUS).min(large);
+        let pick = |on: bool| if on { large } else { small };
+        Self {
+            tl: pick(tl),
+            tr: pick(tr),
+            br: pick(br),
+            bl: pick(bl),
+            behind,
+        }
+    }
+
+    /// Corners for a tile in a message bubble. A `led` tile (photo, video
+    /// or GIF with no header) fills the bubble's width, so its free edges
+    /// take the bubble's radius (the bubble's `radius_2xl` less its 1 px
+    /// border); `top_free`/`bottom_free` say whether the sender name, a
+    /// caption or other rows sit above or below it. Tiles that share the
+    /// bubble with a header, and the plain (bubble-less) look, keep the
+    /// small radius.
+    pub(super) fn in_bubble(
+        cx: &App,
+        outgoing: bool,
+        plain: bool,
+        led: bool,
+        top_free: bool,
+        bottom_free: bool,
+    ) -> Self {
+        if plain {
+            return Self::small();
+        }
+        let behind = Hsla::from(if outgoing {
+            accent_strong()
+        } else {
+            bg_bubble_incoming()
+        });
+        let large = if led {
+            cx.theme().radius_2xl() - px(1.)
+        } else {
+            px(MEDIA_SMALL_RADIUS)
+        };
+        Self::edges(
+            large,
+            top_free,
+            top_free,
+            bottom_free,
+            bottom_free,
+            Some(behind),
+        )
+    }
+
+    /// An album tile's corners: a corner keeps the mosaic's radius only where
+    /// the tile touches that corner of the whole mosaic; against a neighbour
+    /// it takes the small inner radius.
+    pub(super) fn tile(self, left: bool, top: bool, right: bool, bottom: bool) -> Self {
+        let small = px(MEDIA_SMALL_RADIUS).min(self.tl.max(self.tr).max(self.br).max(self.bl));
+        let pick = |own: Pixels, on: bool| if on { own } else { small.min(own) };
+        Self {
+            tl: pick(self.tl, left && top),
+            tr: pick(self.tr, right && top),
+            br: pick(self.br, right && bottom),
+            bl: pick(self.bl, left && bottom),
+            behind: self.behind,
+        }
+    }
+
+    /// The corner radii in whole points, `[tl, tr, br, bl]`.
+    fn radii(self) -> [u32; 4] {
+        [self.tl, self.tr, self.br, self.bl].map(|r| f32::from(r).round().max(0.) as u32)
+    }
+
+    pub(super) fn round<E: Styled>(self, element: E) -> E {
+        element
+            .rounded_tl(self.tl)
+            .rounded_tr(self.tr)
+            .rounded_br(self.br)
+            .rounded_bl(self.bl)
+    }
+}
+
 pub(super) fn photo_attachment(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
@@ -286,6 +399,7 @@ pub(super) fn photo_attachment(
     // fullscreen viewer (history rows only; album tiles and sponsored rows
     // pass `None`).
     viewer: Option<(ChatId, MessageId)>,
+    corners: MediaCorners,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let open_id = photo.open_file_id().unwrap_or(FileId(0));
@@ -303,7 +417,7 @@ pub(super) fn photo_attachment(
             .w(frame_w)
             .h(frame_h)
             .aspect_ratio(frame_w / frame_h)
-            .rounded_md()
+            .map(|this| corners.round(this))
             .object_fit(ObjectFit::Cover)
             .when_some(viewer, |this, (chat_id, message_id)| {
                 this.role(gpui_kit::Role::Button)
@@ -318,7 +432,7 @@ pub(super) fn photo_attachment(
                 div()
                     .w(frame_w)
                     .h(frame_h)
-                    .rounded_md()
+                    .map(|this| corners.round(this))
                     .bg(fill_muted())
                     .flex()
                     .items_center()
@@ -353,6 +467,7 @@ pub(super) fn photo_attachment(
             .absolute()
             .inset_0()
             .size_full()
+            .map(|this| corners.round(this))
             .object_fit(ObjectFit::Cover)
         });
     let has_preview = preview.is_some();
@@ -362,7 +477,7 @@ pub(super) fn photo_attachment(
         .overflow_hidden()
         .w(frame_w)
         .h(frame_h)
-        .rounded_md()
+        .map(|this| corners.round(this))
         .bg(fill_muted())
         .flex()
         .items_center()
@@ -434,6 +549,7 @@ pub(super) fn animation_attachment(
     frame: Option<Arc<RenderImage>>,
     inline: Option<super::inline_video::InlineFrame>,
     sponsored: Option<(ChatId, i64)>,
+    corners: MediaCorners,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
@@ -464,20 +580,20 @@ pub(super) fn animation_attachment(
     let (frame_w, frame_h) = media_frame(animation.width, animation.height);
     let live = inline.is_some();
     let picture = if let Some(inline) = inline {
-        inline_surface(inline, frame_w, frame_h)
+        inline_surface(inline, frame_w, frame_h, corners)
     } else if !blocked && let Some(path) = visual {
         img(path)
             .id(("gif-img", row_id))
             .w(frame_w)
             .h(frame_h)
             .aspect_ratio(frame_w / frame_h)
-            .rounded_md()
+            .map(|this| corners.round(this))
             .object_fit(ObjectFit::Cover)
             .with_fallback(move || {
                 div()
                     .w(frame_w)
                     .h(frame_h)
-                    .rounded_md()
+                    .map(|this| corners.round(this))
                     .bg(accent_strong())
                     .into_any_element()
             })
@@ -487,7 +603,7 @@ pub(super) fn animation_attachment(
             .id(("gif-ph", row_id))
             .w(frame_w)
             .h(frame_h)
-            .rounded_md()
+            .map(|this| corners.round(this))
             .bg(fill_muted())
             .into_any_element()
     };
@@ -577,6 +693,7 @@ pub(super) fn video_attachment(
     // fullscreen viewer (history rows only; sponsored rows pass `None`).
     // Secret/spoiler videos never get the handler.
     viewer: Option<(ChatId, MessageId)>,
+    corners: MediaCorners,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
@@ -613,20 +730,20 @@ pub(super) fn video_attachment(
     let (frame_w, frame_h) = media_frame(video.width, video.height);
     let live = inline.is_some();
     let picture = if let Some(inline) = inline {
-        inline_surface(inline, frame_w, frame_h)
+        inline_surface(inline, frame_w, frame_h, corners)
     } else if !blocked && let Some(path) = visual {
         img(path)
             .id(("video-img", row_id))
             .w(frame_w)
             .h(frame_h)
             .aspect_ratio(frame_w / frame_h)
-            .rounded_md()
+            .map(|this| corners.round(this))
             .object_fit(ObjectFit::Cover)
             .with_fallback(move || {
                 div()
                     .w(frame_w)
                     .h(frame_h)
-                    .rounded_md()
+                    .map(|this| corners.round(this))
                     .bg(success_bg())
                     .into_any_element()
             })
@@ -636,7 +753,7 @@ pub(super) fn video_attachment(
             .id(("video-ph", row_id))
             .w(frame_w)
             .h(frame_h)
-            .rounded_md()
+            .map(|this| corners.round(this))
             .bg(fill_muted())
             .flex()
             .items_center()
@@ -1986,13 +2103,22 @@ fn inline_surface(
     inline: super::inline_video::InlineFrame,
     frame_w: Pixels,
     frame_h: Pixels,
+    corners: MediaCorners,
 ) -> AnyElement {
     #[cfg(target_os = "macos")]
     {
+        // The native surface can't be clipped to rounded corners, so a mask
+        // in the color behind the tile (the bubble's) cuts them out.
+        let mask = super::inline_video::corner_mask(
+            f32::from(frame_w).round() as u32,
+            f32::from(frame_h).round() as u32,
+            corners.radii(),
+            corners.behind.unwrap_or(inline.backdrop),
+        );
         div()
+            .relative()
             .w(frame_w)
             .h(frame_h)
-            .rounded_md()
             .overflow_hidden()
             .child(
                 gpui_kit::surface(inline.buffer)
@@ -2000,11 +2126,18 @@ fn inline_surface(
                     .h(frame_h)
                     .object_fit(ObjectFit::Cover),
             )
+            .child(
+                img(ImageSource::Render(mask))
+                    .absolute()
+                    .inset_0()
+                    .w(frame_w)
+                    .h(frame_h),
+            )
             .into_any_element()
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = inline;
+        let _ = (inline, corners);
         div().w(frame_w).h(frame_h).into_any_element()
     }
 }
@@ -2048,6 +2181,7 @@ pub(super) fn spoiler_cover(
     download: Option<FileId>,
     frame_w: Pixels,
     frame_h: Pixels,
+    corners: MediaCorners,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let key = (chat_id.0, message_id.0 as u64, u64::MAX, false);
@@ -2061,6 +2195,7 @@ pub(super) fn spoiler_cover(
                 .absolute()
                 .inset_0()
                 .size_full()
+                .map(|this| corners.round(this))
                 .object_fit(ObjectFit::Cover)
         });
     // lib_ui `kImageSpoilerDarkenAlpha` (32 / 255) over the preview.
@@ -2081,13 +2216,14 @@ pub(super) fn spoiler_cover(
         .overflow_hidden()
         .w(frame_w)
         .h(frame_h)
-        .rounded_md()
+        .map(|this| corners.round(this))
         .bg(fill_muted())
         .children(preview)
         .child(
             div()
                 .absolute()
                 .inset_0()
+                .map(|this| corners.round(this))
                 .bg(gpui_kit::black().opacity(shade)),
         )
         .child(dust)
