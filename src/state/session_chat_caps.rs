@@ -134,6 +134,32 @@ impl Session {
                 .is_some_and(|user| !user.is_bot && user.status.is_online())
     }
 
+    /// The badge after a chat row's title (`peer_badge::title_badge`):
+    /// users carry verification, Premium and an emoji status; supergroups
+    /// and channels carry verification only; basic groups have none.
+    pub fn chat_title_badge(&self, chat: &ChatSummary) -> Option<crate::peer_badge::TitleBadge> {
+        use crate::telegram::envelope::ChatKind;
+        match chat.kind {
+            ChatKind::Private { user_id } | ChatKind::Secret { user_id, .. } => {
+                let user = self.user(user_id.0)?;
+                crate::peer_badge::title_badge(
+                    user.verification,
+                    user.is_premium,
+                    user.emoji_status_id,
+                )
+            }
+            ChatKind::Supergroup { supergroup_id, .. } => crate::peer_badge::title_badge(
+                self.supergroup_verification
+                    .get(&supergroup_id)
+                    .copied()
+                    .unwrap_or_default(),
+                false,
+                0,
+            ),
+            ChatKind::BasicGroup { .. } | ChatKind::Unknown => None,
+        }
+    }
+
     pub fn user(&self, user_id: i64) -> Option<&ParsedUser> {
         self.users.get(&user_id)
     }

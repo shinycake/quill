@@ -796,6 +796,9 @@ pub struct Session {
     /// object / `updateSupergroup`, schema 1.8.67 line 2746), keyed by
     /// supergroup id. Feeds the channel/supergroup header's @username.
     pub supergroup_usernames: HashMap<i64, String>,
+    /// Chat-row title badge: `supergroup.verification_status` per
+    /// supergroup (`updateSupergroup`), keyed by supergroup id.
+    pub supergroup_verification: HashMap<i64, crate::peer_badge::VerificationStatus>,
     /// Phase A1: the viewer's own `chatMemberStatus*` per supergroup
     /// (`supergroup.status` / `updateSupergroup`, schema 1.8.67 line 2746).
     /// Drives the slow-mode bypass (admins/creators are exempt) and gates
@@ -1227,6 +1230,7 @@ impl Session {
             chat_export: None,
             account_export: None,
             supergroup_usernames: HashMap::new(),
+            supergroup_verification: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
             supergroup_invite_right: HashMap::new(),

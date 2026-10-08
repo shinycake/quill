@@ -574,6 +574,9 @@ pub enum EnvelopePayload {
     },
     UpdateSupergroup {
         supergroup_id: i64,
+        /// `supergroup.verification_status` (schema line 2746): the chat
+        /// row's verified check / SCAM / FAKE label.
+        verification: crate::peer_badge::VerificationStatus,
         is_forum: bool,
         /// Subsection tabs: `supergroup.has_forum_tabs` (schema 1.8.67,
         /// line 2746) — a forum whose topics show as tabs, the way

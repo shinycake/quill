@@ -1200,6 +1200,12 @@ impl Session {
             } => {
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
+                self.note_last_message_send_state(
+                    chat_id,
+                    old_message_id,
+                    message.id,
+                    crate::telegram::envelope::MessageSendState::Sent,
+                );
                 self.remember_files(&message.files);
                 let row = history_message(message, false);
                 self.index_poll(&row);
@@ -1226,6 +1232,12 @@ impl Session {
                 }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
+                self.note_last_message_send_state(
+                    chat_id,
+                    old_message_id,
+                    message.id,
+                    crate::telegram::envelope::MessageSendState::Failed,
+                );
                 self.remember_files(&message.files);
                 // M1: mark the row failed. The retry affordance is gated
                 // separately on `can_retry` (`resendMessages` via
@@ -1510,6 +1522,7 @@ impl Session {
             }
             EnvelopePayload::UpdateSupergroup {
                 supergroup_id,
+                verification,
                 member_count,
                 is_forum,
                 has_forum_tabs,
@@ -1531,6 +1544,8 @@ impl Session {
                     self.supergroup_member_counts
                         .insert(supergroup_id, member_count);
                 }
+                self.supergroup_verification
+                    .insert(supergroup_id, verification);
                 self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
                 self.apply_update_supergroup(
                     supergroup_id,
@@ -2487,6 +2502,27 @@ impl Session {
     /// Set (or clear) a chat's last-message preview fields: preview text,
     /// its style inputs, the 3-line sender name, and the row's
     /// id/date/direction for the timestamp and receipt.
+    /// A send resolved: if it was the chat's last message, the row's
+    /// clock becomes a check (or a failed mark) without waiting for the
+    /// next `updateChatLastMessage`.
+    pub(crate) fn note_last_message_send_state(
+        &mut self,
+        chat_id: ChatId,
+        old_id: MessageId,
+        new_id: MessageId,
+        state: crate::telegram::envelope::MessageSendState,
+    ) {
+        if let Some(last) = self
+            .chats
+            .get_mut(&chat_id.0)
+            .and_then(|chat| chat.last_message.as_mut())
+            .filter(|last| last.id == old_id || last.id == new_id)
+        {
+            last.id = new_id;
+            last.send_state = state;
+        }
+    }
+
     pub(crate) fn set_chat_last_message(
         &mut self,
         chat_id: ChatId,
@@ -2518,6 +2554,7 @@ impl Session {
                 date: message.date,
                 is_outgoing: message.is_outgoing,
                 sender: message.sender,
+                send_state: message.send_state,
             });
         } else {
             chat.last_preview = String::new();

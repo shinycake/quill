@@ -195,6 +195,7 @@ mod tests {
             author_signature: None,
             scheduling_state: None,
             can_retry: false,
+            send_state: Default::default(),
             content: MessageContent::Text(TextContent {
                 text: text.to_string(),
                 entities: Vec::new(),

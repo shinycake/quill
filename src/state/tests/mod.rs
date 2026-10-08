@@ -4,6 +4,7 @@ use super::*;
 mod bots;
 mod calls;
 mod chat_list;
+mod chat_row;
 mod common;
 mod connection_indicator;
 mod downloads;

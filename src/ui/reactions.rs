@@ -171,8 +171,9 @@ impl QuillApp {
         }
     }
 
-    /// A downloaded still for custom emoji `id`, if resolved.
-    fn custom_emoji_still(&self, id: i64) -> Option<std::path::PathBuf> {
+    /// A downloaded still for custom emoji `id`, if resolved. Never animates
+    /// and never asks for frame ticks.
+    pub(super) fn custom_emoji_still(&self, id: i64) -> Option<std::path::PathBuf> {
         let item = self
             .session()?
             .emoji

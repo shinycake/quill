@@ -261,6 +261,12 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyChatRows => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat rows: drafts · send state · title badges".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyTyping => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1590,6 +1596,7 @@ impl QuillApp {
             pinned_list_open: false,
             inline_videos: Default::default(),
             animation_demand: Default::default(),
+            row_fx: Default::default(),
             window_active: std::cell::Cell::new(true),
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
