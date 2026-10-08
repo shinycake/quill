@@ -9,8 +9,10 @@
 use std::num::NonZero;
 use std::time::{Duration, Instant};
 
+use super::audio::SharedOutput;
+
 use rodio::buffer::SamplesBuffer;
-use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
+use rodio::Player;
 
 use super::call_tones;
 
@@ -52,11 +54,8 @@ impl CallSound {
 /// The one call sound playing (a new one cuts the last), and the loop to
 /// keep going.
 pub(super) struct CallSounds {
-    /// The audio output, opened on first use; `None` until then and when
-    /// the machine has no usable output device.
-    output: Option<MixerDeviceSink>,
-    /// When opening the output last failed, to not retry on every tick.
-    open_failed_at: Option<Instant>,
+    /// The app's shared audio output (opened on first use).
+    output: SharedOutput,
     player: Option<Player>,
     looping: Option<CallSound>,
     /// When the current loop's sound may start again.
@@ -65,11 +64,10 @@ pub(super) struct CallSounds {
     enabled: bool,
 }
 
-impl Default for CallSounds {
-    fn default() -> Self {
+impl CallSounds {
+    pub(super) fn new(output: SharedOutput) -> Self {
         Self {
-            output: None,
-            open_failed_at: None,
+            output,
             player: None,
             looping: None,
             again_at: None,
@@ -87,23 +85,6 @@ impl CallSounds {
         self.enabled = enabled;
     }
 
-    fn output(&mut self) -> Option<&MixerDeviceSink> {
-        if self.output.is_none()
-            && self
-                .open_failed_at
-                .is_none_or(|at| at.elapsed() > Duration::from_secs(5))
-        {
-            match DeviceSinkBuilder::open_default_sink() {
-                Ok(mut sink) => {
-                    sink.log_on_drop(false);
-                    self.output = Some(sink);
-                }
-                Err(_) => self.open_failed_at = Some(Instant::now()),
-            }
-        }
-        self.output.as_ref()
-    }
-
     fn spawn(&mut self, sound: CallSound) {
         self.stop_player();
         // Ringing always plays; the "Play sounds" toggle only mutes cues.
@@ -111,10 +92,10 @@ impl CallSounds {
         if !self.enabled && !rings {
             return;
         }
-        let Some(output) = self.output() else {
+        let Some(mixer) = self.output.mixer() else {
             return;
         };
-        let player = Player::connect_new(output.mixer());
+        let player = Player::connect_new(&mixer);
         player.append(SamplesBuffer::new(
             NonZero::<u16>::MIN,
             NonZero::new(call_tones::SAMPLE_RATE).unwrap_or(NonZero::<u32>::MIN),

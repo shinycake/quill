@@ -53,6 +53,7 @@ mod app;
 mod app_demo;
 mod app_render;
 mod archive_row;
+mod audio;
 mod audio_playback;
 mod auth_registration;
 mod auth_ui;

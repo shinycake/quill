@@ -533,7 +533,6 @@ pub struct QuillApp {
     pub(super) notifications_confirm: Option<NotificationsConfirm>,
     /// Parity slice: in-flight notification-sound workers; capped so a
     /// message burst cannot stack players.
-    pub(super) notify_sound_inflight: Arc<AtomicUsize>,
     /// tdesktop `VoiceRecordBar` (click the record button to record in the
     /// current mode; Cancel / Esc asks for confirmation first).
     pub(super) voice_capture: Option<VoiceCapture>,
@@ -583,7 +582,11 @@ pub struct QuillApp {
     /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
     pub(super) pending_audio_play: Option<(MessageId, FileId, f64)>,
     pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
-    pub(super) voice_player: Option<Child>,
+    /// The audio output shared by every sound the app makes.
+    pub(super) audio_output: super::audio::SharedOutput,
+    /// In-process player for the active voice note / audio file.
+    pub(super) audio: super::audio::AudioEngine,
+    pub(super) notification_sounds: super::audio::NotificationSounds,
     /// Active audio/voice track's playback clock (playing or paused-with-offset).
     /// `Some` exactly when `playing_voice` or `playing_audio` is `Some` (Phase 4.6).
     pub(super) playback_clock: Option<PlaybackClock>,
@@ -719,7 +722,8 @@ pub struct QuillApp {
     pub(super) viewer_video_path: Option<PathBuf>,
     /// The viewer's ffplay child (audio-only `-nodisp`; the video frames
     /// render in-viewer). Killed when the viewer closes, steps, or pauses.
-    pub(super) viewer_player: Option<Child>,
+    /// Soundtrack of the viewer clip (the frames are drawn separately).
+    pub(super) viewer_audio: super::audio::AudioEngine,
     /// Playback clock for the viewer's clip (elapsed/total + pause freeze).
     pub(super) viewer_clock: Option<PlaybackClock>,
     /// Whether the main window is currently excluded from screen capture.
