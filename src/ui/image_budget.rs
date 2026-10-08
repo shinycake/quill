@@ -9,7 +9,13 @@
 //! - [`BoundedImageCache`] loads the window's path images (an `ImageCache`
 //!   installed over `QuillApp` by [`CacheScope`]) and, past a byte budget,
 //!   evicts the least recently used images that can no longer be on screen,
-//!   dropping them from the atlas too.
+//!   dropping them from the atlas too. Once nothing new has been shown for
+//!   a moment (`IDLE_AFTER`), it trims to a much smaller idle budget
+//!   ([`BoundedImageCache::idle_trim`]), so the memory of a scroll comes
+//!   back.
+//! - [`sized_image`] loads small pictures (avatars, chat-list thumbnails)
+//!   decoded at the size they are drawn at, times the window's scale
+//!   factor, instead of at file size.
 //! - [`retire_all`] takes `RenderImage`s Quill made itself (sticker frames,
 //!   blurred previews…) once their cache lets go of them; [`sweep`] drops
 //!   them from the atlas when no frame can still show them.
@@ -18,26 +24,72 @@
 //! a slice replays the frame it last rendered, so an image it used is only
 //! gone once that slice rendered again without it. Images used outside any
 //! slice are re-requested by `QuillApp` every frame.
+//!
+//! Atlas textures (1024² and up, on every GPUI backend: Metal, wgpu,
+//! DirectX) are released only once every tile in them is gone. Tiles are
+//! allocated in the newest texture with room, so images loaded together
+//! share textures; evicting oldest-first empties whole textures rather
+//! than punching holes in all of them.
 
 use gpui_kit::*;
+use quill::telegram::envelope::MiniThumbnail;
+use smallvec::SmallVec;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-/// Decoded path images kept beyond what is on screen.
-const IMAGE_BUDGET_BYTES: usize = 128 * 1024 * 1024;
-/// Cache entries kept beyond what is on screen (failed loads weigh 0).
-const IMAGE_BUDGET_ENTRIES: usize = 4096;
+/// What the cache keeps beyond the screen: while the user scrolls (the
+/// next rows are probably the ones just seen), and once idle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Budget {
+    bytes: usize,
+    entries: usize,
+}
+
+/// Decoded images kept beyond what is on screen while things change.
+const ACTIVE_BUDGET: Budget = Budget {
+    bytes: 48 * 1024 * 1024,
+    entries: 2048,
+};
+/// Decoded images kept beyond what is on screen once idle.
+const IDLE_BUDGET: Budget = Budget {
+    bytes: 8 * 1024 * 1024,
+    entries: 256,
+};
+const _: () =
+    assert!(IDLE_BUDGET.bytes < ACTIVE_BUDGET.bytes && IDLE_BUDGET.entries < ACTIVE_BUDGET.entries);
+/// How long nothing new must be shown before the idle trim.
+pub(super) const IDLE_AFTER: Duration = Duration::from_secs(2);
 
 thread_local! {
     /// Window frames drawn so far (`begin_frame`).
     static FRAME: Cell<u64> = const { Cell::new(0) };
-    /// Each slice's last render frame, and the last frame it was shown.
-    static SLICES: RefCell<HashMap<EntityId, (u64, u64)>> = RefCell::new(HashMap::new());
+    /// Each slice's last render frame, the last frame it was shown, and
+    /// the render before the last one.
+    static SLICES: RefCell<HashMap<EntityId, SliceFrames>> = RefCell::new(HashMap::new());
     /// Quill-made images waiting to leave the atlas, with the frame they
     /// were retired in.
     static RETIRED: RefCell<Vec<(Arc<RenderImage>, u64)>> = const { RefCell::new(Vec::new()) };
+    /// When the cache last started showing an image it didn't show just
+    /// before (scrolling, new content), and the activity the last idle
+    /// trim covered.
+    static ACTIVITY: Cell<Option<Instant>> = const { Cell::new(None) };
+    static IDLE_TRIMMED: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// The slice being drawn (`app_slice`), for paint stamps.
+    static SCOPE: RefCell<Option<Rc<Cell<Option<EntityId>>>>> = const { RefCell::new(None) };
+    /// The cache of the `CacheScope` being drawn (display-size loads).
+    static SCOPED: RefCell<Vec<Entity<BoundedImageCache>>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SliceFrames {
+    rendered: u64,
+    shown: u64,
+    previous_render: u64,
 }
 
 /// Start a window frame (`QuillApp::render`, before anything renders).
@@ -56,7 +108,13 @@ fn frame() -> u64 {
 pub(super) fn slice_rendered(id: EntityId) {
     let now = frame();
     SLICES.with(|slices| {
-        slices.borrow_mut().insert(id, (now, now));
+        let mut slices = slices.borrow_mut();
+        let entry = slices.entry(id).or_default();
+        if entry.rendered != now {
+            entry.previous_render = entry.rendered;
+        }
+        entry.rendered = now;
+        entry.shown = now;
     });
 }
 
@@ -64,7 +122,7 @@ pub(super) fn slice_rendered(id: EntityId) {
 pub(super) fn slice_shown(id: EntityId) {
     let now = frame();
     SLICES.with(|slices| {
-        slices.borrow_mut().entry(id).or_insert((0, now)).1 = now;
+        slices.borrow_mut().entry(id).or_default().shown = now;
     });
 }
 
@@ -80,9 +138,59 @@ fn may_be_visible(scope: Option<EntityId>, used: u64) -> bool {
                 .borrow()
                 .get(&id)
                 // A slice that wasn't shown last frame replays nothing.
-                .is_some_and(|(rendered, shown)| shown + 1 >= now && used >= *rendered)
+                .is_some_and(|s| s.shown + 1 >= now && used >= s.rendered)
         }),
     }
+}
+
+/// Where (slice, or `QuillApp`) and in which frame something was painted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PaintStamp {
+    scope: Option<EntityId>,
+    frame: u64,
+}
+
+/// A stamp for content painted now.
+pub(super) fn paint_stamp() -> PaintStamp {
+    PaintStamp {
+        scope: SCOPE.with(|scope| scope.borrow().as_ref().and_then(|scope| scope.get())),
+        frame: frame(),
+    }
+}
+
+/// Whether content painted at `stamp` can still be on screen (a cached
+/// slice may replay it), as of the start of the current frame.
+pub(super) fn may_still_show(stamp: PaintStamp) -> bool {
+    may_be_visible(stamp.scope, stamp.frame)
+}
+
+/// Whether an image used now in `scope`, last used there at `previous`,
+/// wasn't on screen just before (it scrolled in, or is new).
+fn newly_shown(scope: Option<EntityId>, previous: Option<u64>) -> bool {
+    let Some(previous) = previous else {
+        return true;
+    };
+    match scope {
+        None => previous + 1 < frame(),
+        Some(id) => SLICES.with(|slices| {
+            slices
+                .borrow()
+                .get(&id)
+                .is_none_or(|s| previous < s.previous_render)
+        }),
+    }
+}
+
+fn note_activity() {
+    ACTIVITY.with(|activity| activity.set(Some(Instant::now())));
+}
+
+/// When the idle trim is due: `IDLE_AFTER` past the last change of what
+/// is on screen, unless the last idle trim already covered it.
+pub(super) fn idle_trim_due() -> Option<Instant> {
+    let activity = ACTIVITY.with(Cell::get)?;
+    let trimmed = IDLE_TRIMMED.with(Cell::get);
+    (trimmed != Some(activity)).then_some(activity + IDLE_AFTER)
 }
 
 /// The oldest frame a cached slice shown last frame may still replay.
@@ -92,8 +200,8 @@ fn oldest_replayable() -> u64 {
         slices
             .borrow()
             .values()
-            .filter(|(_, shown)| shown + 1 >= now)
-            .map(|(rendered, _)| *rendered)
+            .filter(|s| s.shown + 1 >= now)
+            .map(|s| s.rendered)
             .min()
             .unwrap_or(now)
             // `QuillApp` re-renders each frame, so last frame's images
@@ -137,12 +245,264 @@ pub(super) fn sweep(window: &mut Window, cx: &mut App) {
     }
 }
 
+/// Hand the allocator's free pages back to the system once a trim freed a
+/// lot (decoded images are large, short-lived blocks; without this the
+/// freed space stays resident as allocator free lists).
+/// - macOS: `malloc_zone_pressure_relief` on every zone.
+/// - Linux (glibc): `malloc_trim`.
+/// - Windows and other libcs: nothing; the Windows heap decommits large
+///   free ranges on its own.
+fn release_free_heap() {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
+        }
+        // SAFETY: a null zone means "all zones"; goal 0 means "as much as
+        // possible". The call only releases free pages.
+        unsafe {
+            malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+        }
+    }
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        // SAFETY: glibc's `malloc_trim` only returns free heap memory.
+        unsafe {
+            libc::malloc_trim(0);
+        }
+    }
+}
+
+/// Keys to evict, least recently used first, until `total` fits `budget`.
+/// `candidates` are `(last_used, key, bytes)` of entries that can't be on
+/// screen; `total` is `(bytes, entries)` of the whole cache.
+fn plan_eviction(
+    mut candidates: Vec<(u64, u64, usize)>,
+    total: (usize, usize),
+    budget: Budget,
+) -> Vec<u64> {
+    let (mut bytes, mut entries) = total;
+    if bytes <= budget.bytes && entries <= budget.entries {
+        return Vec::new();
+    }
+    candidates.sort_unstable();
+    let mut out = Vec::new();
+    for (_, key, size) in candidates {
+        if bytes <= budget.bytes && entries <= budget.entries {
+            break;
+        }
+        bytes = bytes.saturating_sub(size);
+        entries = entries.saturating_sub(1);
+        out.push(key);
+    }
+    out
+}
+
+/// What a display-size image is decoded from.
+#[derive(Clone, Debug)]
+pub(super) enum SizedSource {
+    /// An image file (avatars).
+    Path(Arc<Path>),
+    /// An inline JPEG (chat-list photo thumbnails).
+    Mini(Arc<MiniThumbnail>),
+}
+
+impl PartialEq for SizedSource {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Path(a), Self::Path(b)) => a == b,
+            (Self::Mini(a), Self::Mini(b)) => Arc::ptr_eq(a, b) || a.data == b.data,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for SizedSource {}
+
+impl Hash for SizedSource {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Path(path) => {
+                0_u8.hash(state);
+                path.hash(state);
+            }
+            Self::Mini(mini) => {
+                1_u8.hash(state);
+                mini.data.hash(state);
+            }
+        }
+    }
+}
+
+/// A source decoded so its shorter side is at most `edge` device pixels.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct SizedKey {
+    source: SizedSource,
+    edge: u32,
+}
+
+/// An image drawn `size` wide and high (the shorter side, for non-square
+/// ones), decoded at that size in device pixels rather than at file size.
+/// Inside the main window's `CacheScope` it goes through the bounded
+/// cache; elsewhere (other windows) through GPUI's asset cache as before.
+pub(super) fn sized_image(source: SizedSource, size: Pixels) -> ImageSource {
+    ImageSource::Custom(Arc::new(move |window: &mut Window, cx: &mut App| {
+        let key = SizedKey {
+            source: source.clone(),
+            edge: display_edge(size, window.scale_factor()),
+        };
+        match SCOPED.with(|scoped| scoped.borrow().last().cloned()) {
+            Some(cache) => cache.update(cx, |cache, cx| cache.load_sized(&key, window, cx)),
+            None => window.use_asset::<SizedAsset>(&key, cx),
+        }
+    }))
+}
+
+/// Device pixels for a logical size.
+fn display_edge(size: Pixels, scale_factor: f32) -> u32 {
+    ((size / px(1.)) * scale_factor).ceil().clamp(1., 4096.) as u32
+}
+
+/// The decoded size for an image of `size` whose shorter side should be at
+/// most `edge` (aspect kept; never enlarged).
+fn scaled_size((width, height): (u32, u32), edge: u32) -> (u32, u32) {
+    let short = width.min(height);
+    if short <= edge || short == 0 {
+        return (width, height);
+    }
+    let scale = f64::from(edge) / f64::from(short);
+    let fit = |side: u32| ((f64::from(side) * scale).round() as u32).max(1);
+    (fit(width), fit(height))
+}
+
+fn decode_sized(key: &SizedKey) -> Result<Arc<RenderImage>, ImageCacheError> {
+    let read;
+    let bytes: &[u8] = match &key.source {
+        SizedSource::Path(path) => {
+            read = std::fs::read(path).map_err(|err| ImageCacheError::Io(Arc::new(err)))?;
+            &read
+        }
+        SizedSource::Mini(mini) => &mini.data,
+    };
+    let image = image::load_from_memory(bytes)
+        .map_err(|err| ImageCacheError::Image(Arc::new(err)))?
+        .into_rgba8();
+    let (width, height) = scaled_size(image.dimensions(), key.edge);
+    let mut image = if (width, height) == image.dimensions() {
+        image
+    } else {
+        image::imageops::resize(&image, width, height, image::imageops::FilterType::Triangle)
+    };
+    // GPUI's sprites are BGRA.
+    for pixel in image.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    Ok(Arc::new(RenderImage::new(SmallVec::from_buf([
+        image::Frame::new(image),
+    ]))))
+}
+
+/// GPUI asset loader for display-size images outside the bounded cache.
+enum SizedAsset {}
+
+impl Asset for SizedAsset {
+    type Source = SizedKey;
+    type Output = Result<Arc<RenderImage>, ImageCacheError>;
+
+    fn load(
+        source: Self::Source,
+        _: &mut App,
+    ) -> impl std::future::Future<Output = Self::Output> + Send + 'static {
+        async move { decode_sized(&source) }
+    }
+}
+
+type LoadResult = Result<Arc<RenderImage>, ImageCacheError>;
+
+/// A display-size decode on the background executor; views that asked
+/// while it ran are notified when it lands (as GPUI's own image loads).
+struct SizedLoad {
+    state: Rc<RefCell<SizedState>>,
+    _task: Task<()>,
+}
+
+enum SizedState {
+    Loading(SmallVec<[EntityId; 2]>),
+    Loaded(LoadResult),
+}
+
+impl SizedLoad {
+    fn new(key: SizedKey, cx: &mut App) -> Self {
+        let state = Rc::new(RefCell::new(SizedState::Loading(SmallVec::new())));
+        let decode = cx
+            .background_executor()
+            .spawn(async move { decode_sized(&key) });
+        let weak = Rc::downgrade(&state);
+        let task = cx.spawn(async move |cx| {
+            let result = decode.await;
+            let Some(state) = weak.upgrade() else {
+                return;
+            };
+            let previous = std::mem::replace(&mut *state.borrow_mut(), SizedState::Loaded(result));
+            if let SizedState::Loading(views) = previous {
+                cx.update(|cx| {
+                    for view in views {
+                        cx.notify(view);
+                    }
+                });
+            }
+        });
+        Self { state, _task: task }
+    }
+
+    fn get(&self) -> Option<LoadResult> {
+        match &*self.state.borrow() {
+            SizedState::Loading(_) => None,
+            SizedState::Loaded(result) => Some(result.clone()),
+        }
+    }
+
+    fn use_by(&self, view: EntityId) -> Option<LoadResult> {
+        match &mut *self.state.borrow_mut() {
+            SizedState::Loading(views) => {
+                if !views.contains(&view) {
+                    views.push(view);
+                }
+                None
+            }
+            SizedState::Loaded(result) => Some(result.clone()),
+        }
+    }
+}
+
+enum Load {
+    /// GPUI's loader: the file at its own size.
+    Full(ImageCacheItem),
+    Sized(SizedLoad),
+}
+
+impl Load {
+    fn get(&self) -> Option<LoadResult> {
+        match self {
+            Self::Full(item) => item.get(),
+            Self::Sized(load) => load.get(),
+        }
+    }
+
+    fn use_image(&self, window: &Window) -> Option<LoadResult> {
+        match self {
+            Self::Full(item) => item.use_image(window),
+            Self::Sized(load) => load.use_by(window.current_view()),
+        }
+    }
+}
+
 struct Entry {
-    item: ImageCacheItem,
+    load: Load,
     /// Decoded size once loaded (0 for failures).
     bytes: Option<usize>,
     /// The last frame each scope (slice, or `None` for the app) used it.
-    uses: smallvec::SmallVec<[(Option<EntityId>, u64); 2]>,
+    uses: SmallVec<[(Option<EntityId>, u64); 2]>,
 }
 
 impl Entry {
@@ -168,6 +528,7 @@ pub(super) struct BoundedImageCache {
 
 impl BoundedImageCache {
     pub(super) fn new(scope: Rc<Cell<Option<EntityId>>>) -> Self {
+        SCOPE.with(|current| *current.borrow_mut() = Some(scope.clone()));
         Self {
             entries: HashMap::new(),
             bytes: 0,
@@ -175,54 +536,89 @@ impl BoundedImageCache {
         }
     }
 
-    /// Evict down to the budget. Call at the start of a frame, before
-    /// anything renders, so last frame's loads are all counted.
+    /// Evict down to the scrolling budget. Call at the start of a frame,
+    /// before anything renders, so last frame's loads are all counted.
     pub(super) fn trim(&mut self, window: &mut Window, cx: &mut App) {
-        if self.bytes <= IMAGE_BUDGET_BYTES && self.entries.len() <= IMAGE_BUDGET_ENTRIES {
-            return;
+        for image in self.evict(ACTIVE_BUDGET) {
+            cx.drop_image(image, Some(&mut *window));
         }
-        let mut candidates: Vec<(u64, u64)> = self
+    }
+
+    /// Nothing new showed for `IDLE_AFTER`: evict down to the idle budget.
+    /// Runs between frames (no window is being drawn), so the images leave
+    /// every window's atlas.
+    pub(super) fn idle_trim(&mut self, cx: &mut App) {
+        IDLE_TRIMMED.with(|trimmed| trimmed.set(ACTIVITY.with(Cell::get)));
+        let before = (self.bytes, self.entries.len());
+        let images = self.evict(IDLE_BUDGET);
+        let evicted = !images.is_empty();
+        if super::frame_clock::trace_ticks() {
+            eprintln!(
+                "image idle trim: {} images, {:.1} MB -> {} images, {:.1} MB",
+                before.1,
+                before.0 as f64 / 1048576.0,
+                self.entries.len(),
+                self.bytes as f64 / 1048576.0
+            );
+        }
+        for image in images {
+            cx.drop_image(image, None);
+        }
+        if evicted {
+            release_free_heap();
+        }
+    }
+
+    /// Remove entries past `budget`; their loaded images, for the caller
+    /// to drop from the atlas.
+    fn evict(&mut self, budget: Budget) -> Vec<Arc<RenderImage>> {
+        if self.bytes <= budget.bytes && self.entries.len() <= budget.entries {
+            return Vec::new();
+        }
+        let candidates = self
             .entries
             .iter()
             .filter(|(_, entry)| !entry.may_be_visible())
-            .map(|(key, entry)| (entry.last_used(), *key))
+            .map(|(key, entry)| (entry.last_used(), *key, entry.bytes.unwrap_or(0)))
             .collect();
-        candidates.sort_unstable();
-        for (_, key) in candidates {
-            if self.bytes <= IMAGE_BUDGET_BYTES && self.entries.len() <= IMAGE_BUDGET_ENTRIES {
-                break;
-            }
+        let mut images = Vec::new();
+        for key in plan_eviction(candidates, (self.bytes, self.entries.len()), budget) {
             let Some(entry) = self.entries.remove(&key) else {
                 continue;
             };
             self.bytes -= entry.bytes.unwrap_or(0);
-            if let Some(Ok(image)) = entry.item.get() {
-                cx.drop_image(image, Some(window));
+            if let Some(Ok(image)) = entry.load.get() {
+                images.push(image);
             }
         }
+        images
     }
-}
 
-impl ImageCache for BoundedImageCache {
-    fn load(
+    fn load_entry(
         &mut self,
-        resource: &Resource,
+        key: u64,
+        start: impl FnOnce(&mut App) -> Load,
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
-        let key = hash(resource);
+    ) -> Option<LoadResult> {
         let scope = self.scope.get();
         let now = frame();
         let entry = self.entries.entry(key).or_insert_with(|| Entry {
-            item: ImageCacheItem::new(resource, cx),
+            load: start(cx),
             bytes: None,
-            uses: smallvec::SmallVec::new(),
+            uses: SmallVec::new(),
         });
-        match entry.uses.iter_mut().find(|(s, _)| *s == scope) {
-            Some(use_) => use_.1 = now,
-            None => entry.uses.push((scope, now)),
+        let previous = match entry.uses.iter_mut().find(|(s, _)| *s == scope) {
+            Some(use_) => Some(std::mem::replace(&mut use_.1, now)),
+            None => {
+                entry.uses.push((scope, now));
+                None
+            }
+        };
+        if previous != Some(now) && newly_shown(scope, previous) {
+            note_activity();
         }
-        let result = entry.item.use_image(window);
+        let result = entry.load.use_image(window);
         if entry.bytes.is_none()
             && let Some(result) = &result
         {
@@ -240,22 +636,61 @@ impl ImageCache for BoundedImageCache {
         }
         result
     }
+
+    fn load_sized(
+        &mut self,
+        key: &SizedKey,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<LoadResult> {
+        let hash = gpui_kit::hash(&("sized", key));
+        let key = key.clone();
+        self.load_entry(
+            hash,
+            move |cx| Load::Sized(SizedLoad::new(key, cx)),
+            window,
+            cx,
+        )
+    }
 }
 
-/// Installs an image cache over its child for every drawing phase. GPUI's
-/// own `image_cache` element skips prepaint, where virtual lists and
-/// cached views build their content.
+impl ImageCache for BoundedImageCache {
+    fn load(
+        &mut self,
+        resource: &Resource,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<LoadResult> {
+        self.load_entry(
+            hash(resource),
+            |cx| Load::Full(ImageCacheItem::new(resource, cx)),
+            window,
+            cx,
+        )
+    }
+}
+
+/// Installs the bounded image cache over its child for every drawing
+/// phase. GPUI's own `image_cache` element skips prepaint, where virtual
+/// lists and cached views build their content.
 pub(super) struct CacheScope {
-    cache: AnyImageCache,
+    cache: Entity<BoundedImageCache>,
     child: AnyElement,
 }
 
 impl CacheScope {
-    pub(super) fn new(cache: AnyImageCache, child: impl IntoElement) -> Self {
+    pub(super) fn new(cache: Entity<BoundedImageCache>, child: impl IntoElement) -> Self {
         Self {
             cache,
             child: child.into_any_element(),
         }
+    }
+
+    fn enter<R>(&self, window: &mut Window, f: impl FnOnce(&mut Window) -> R) -> R {
+        SCOPED.with(|scoped| scoped.borrow_mut().push(self.cache.clone()));
+        let result = window.with_image_cache(Some(self.cache.clone().into()), f);
+        SCOPED.with(|scoped| scoped.borrow_mut().pop());
+        result
     }
 }
 
@@ -286,10 +721,9 @@ impl Element for CacheScope {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let child = &mut self.child;
-        let layout_id = window.with_image_cache(Some(self.cache.clone()), |window| {
-            child.request_layout(window, cx)
-        });
+        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
+        let layout_id = self.enter(window, |window| child.request_layout(window, cx));
+        self.child = child;
         (layout_id, ())
     }
 
@@ -302,10 +736,9 @@ impl Element for CacheScope {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let child = &mut self.child;
-        window.with_image_cache(Some(self.cache.clone()), |window| {
-            child.prepaint(window, cx)
-        });
+        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
+        self.enter(window, |window| child.prepaint(window, cx));
+        self.child = child;
     }
 
     fn paint(
@@ -318,14 +751,18 @@ impl Element for CacheScope {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let child = &mut self.child;
-        window.with_image_cache(Some(self.cache.clone()), |window| child.paint(window, cx));
+        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
+        self.enter(window, |window| child.paint(window, cx));
+        self.child = child;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{begin_frame, may_be_visible, slice_rendered, slice_shown};
+    use super::{
+        Budget, IDLE_AFTER, begin_frame, idle_trim_due, may_be_visible, newly_shown, note_activity,
+        plan_eviction, scaled_size, slice_rendered, slice_shown,
+    };
     use gpui_kit::EntityId;
 
     #[test]
@@ -363,5 +800,74 @@ mod tests {
         begin_frame();
         begin_frame();
         assert!(!may_be_visible(Some(slice), used));
+    }
+
+    #[test]
+    fn rerendering_the_same_images_is_not_activity() {
+        let slice = EntityId::from((1_u64 << 32) | 11);
+        let first = begin_frame();
+        slice_rendered(slice);
+        assert!(newly_shown(Some(slice), None), "a new image");
+        // Replayed for a while, then rendered again showing it: unchanged.
+        for _ in 0..10 {
+            begin_frame();
+            slice_shown(slice);
+        }
+        let second = begin_frame();
+        slice_rendered(slice);
+        assert!(!newly_shown(Some(slice), Some(first)));
+        // An image last shown two renders ago scrolled back in.
+        begin_frame();
+        slice_rendered(slice);
+        assert!(newly_shown(Some(slice), Some(first)));
+        assert!(!newly_shown(Some(slice), Some(second)));
+        // App-level images: shown last frame, or not.
+        let now = begin_frame();
+        assert!(!newly_shown(None, Some(now - 1)));
+        assert!(newly_shown(None, Some(now - 2)));
+    }
+
+    #[test]
+    fn idle_trim_waits_for_quiet_and_runs_once_per_change() {
+        note_activity();
+        let due = idle_trim_due().expect("activity schedules a trim");
+        assert!(
+            due >= std::time::Instant::now() + IDLE_AFTER - std::time::Duration::from_millis(50)
+        );
+        super::IDLE_TRIMMED.with(|trimmed| trimmed.set(super::ACTIVITY.with(|a| a.get())));
+        assert_eq!(idle_trim_due(), None, "already trimmed");
+        note_activity();
+        assert!(idle_trim_due().is_some());
+    }
+
+    #[test]
+    fn eviction_takes_the_oldest_until_within_budget() {
+        let budget = Budget {
+            bytes: 100,
+            entries: 10,
+        };
+        // (last used, key, bytes)
+        let candidates = vec![(5, 50, 40), (1, 10, 40), (3, 30, 40), (9, 90, 40)];
+        assert_eq!(
+            plan_eviction(candidates.clone(), (180, 6), budget),
+            vec![10, 30]
+        );
+        assert_eq!(
+            plan_eviction(candidates.clone(), (90, 6), budget),
+            Vec::<u64>::new()
+        );
+        // Over the entry count only.
+        assert_eq!(plan_eviction(candidates, (40, 12), budget), vec![10, 30]);
+        // Not enough evictable: everything that can go, goes.
+        assert_eq!(plan_eviction(vec![(1, 1, 10)], (500, 3), budget), vec![1]);
+    }
+
+    #[test]
+    fn sized_decode_keeps_aspect_and_never_enlarges() {
+        assert_eq!(scaled_size((160, 160), 92), (92, 92));
+        assert_eq!(scaled_size((160, 160), 200), (160, 160));
+        assert_eq!(scaled_size((1280, 960), 36), (48, 36));
+        assert_eq!(scaled_size((40, 30), 36), (40, 30));
+        assert_eq!(scaled_size((0, 10), 5), (0, 10));
     }
 }
