@@ -4,10 +4,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist/Quill.app"
-BIN="$ROOT/target/release/quill"
+BIN="${QUILL_BIN:-$ROOT/target/release/quill}"
 
-echo "Building current release binary…"
-cargo build --features ui --release --locked --manifest-path "$ROOT/Cargo.toml"
+if [[ -z "${QUILL_BIN:-}" ]]; then
+  echo "Building current release binary…"
+  cargo build --features ui --release --locked --manifest-path "$ROOT/Cargo.toml"
+fi
 
 rm -rf "$DIST"
 mkdir -p "$DIST/Contents/MacOS" "$DIST/Contents/Frameworks" "$DIST/Contents/Resources"
@@ -56,7 +58,50 @@ if [[ -f "$RLOTTIE" ]]; then
   fi
 fi
 
+# Bundle every non-system dylib the bundled libraries link (OpenSSL for tdjson,
+# and anything else a Homebrew-built library drags in), rewrite their ids to
+# @rpath/<name> and every reference to @loader_path/<name>, so the app depends
+# only on the OS. Runs to a fixed point because copied libs may have deps too.
+is_os_ref() { [[ "$1" == /usr/lib/* || "$1" == /System/Library/* || "$1" == @* ]]; }
+
+vendor_deps() {
+  local FW="$DIST/Contents/Frameworks" changed=1 lib dep real name
+  while (( changed )); do
+    changed=0
+    for lib in "$FW"/*.dylib; do
+      [[ -f "$lib" ]] || continue
+      while IFS= read -r dep; do
+        is_os_ref "$dep" && continue
+        real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$dep")"
+        name="$(basename "$dep")"
+        if [[ ! -f "$real" ]]; then
+          echo "error: $lib needs $dep which does not exist on this machine" >&2
+          exit 1
+        fi
+        if [[ ! -f "$FW/$name" ]]; then
+          cp "$real" "$FW/$name"
+          chmod u+w "$FW/$name"
+          install_name_tool -id "@rpath/$name" "$FW/$name"
+          echo "  bundled $dep -> Frameworks/$name"
+        fi
+        install_name_tool -change "$dep" "@loader_path/$name" "$lib"
+        changed=1
+      done < <(otool -L "$lib" | tail -n +2 | sed -E 's/^[[:space:]]+//; s/ \(compatibility version.*$//')
+    done
+  done
+}
+vendor_deps
+
+# install_name_tool invalidates signatures. Re-sign inside-out: nested dylibs
+# and helpers first, then the app. Ad-hoc by default; set QUILL_CODESIGN_IDENTITY
+# (e.g. an "Apple Development: ..." identity) for a stable local signature.
+SIGN_ID="${QUILL_CODESIGN_IDENTITY:--}"
+for item in "$DIST"/Contents/Frameworks/*.dylib "$DIST/Contents/MacOS/quill-qr-scanner" "$DIST"; do
+  [[ -e "$item" ]] && codesign --force --sign "$SIGN_ID" "$item"
+done
+
 echo "Assembled $DIST"
+bash "$ROOT/scripts/check-bundle-macho.sh" "$DIST"
 if command -v otool >/dev/null; then
   echo "otool -L (must not list /opt/homebrew for tdjson):"
   otool -L "$DIST/Contents/MacOS/quill" || true

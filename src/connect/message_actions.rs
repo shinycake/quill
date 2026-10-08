@@ -2,11 +2,11 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::settings::InstantViewMode;
-use crate::state::{ComposerLinkPreview, RequestPurpose};
+use crate::state::{ComposerLinkPreview, RequestPurpose, UnreadJumpKind};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
-    get_web_page_instant_view, pin_chat_message, remove_message_reaction, search_chat_messages,
-    search_messages_filter_json, unpin_all_chat_messages, unpin_chat_message,
+    get_web_page_instant_view, pin_chat_message, read_all_chat_markers, remove_message_reaction,
+    search_chat_messages, search_messages_filter_json, unpin_all_chat_messages, unpin_chat_message,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -205,6 +205,62 @@ impl<S: JsonSender> ConnectDriver<S> {
             100,
             Some(search_messages_filter_json("searchMessagesFilterPinned")),
         );
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// The corner "@" / heart buttons (tdesktop `CornerButtons`): find the
+    /// open chat's oldest unread mention or reaction. TDLib answers newest
+    /// first, so the oldest of the page is taken when the answer lands and
+    /// `ingest` jumps to it; viewing the row then reads it and TDLib
+    /// lowers the chat's counter (`updateChatUnread*Count`).
+    pub fn jump_to_unread_marker(&mut self, kind: UnreadJumpKind) -> Result<(), ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::JumpToUnread { kind };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(());
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let json = search_chat_messages(
+            extra,
+            chat_id,
+            &TopicId::None,
+            "",
+            MessageId(0),
+            0,
+            100,
+            Some(search_messages_filter_json(kind.filter_constructor())),
+        );
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Corner button context menu "Mark all as read".
+    pub fn read_all_unread_markers(
+        &mut self,
+        kind: UnreadJumpKind,
+    ) -> Result<(), ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ReadAllUnreadMarkers { kind }, Some(chat_id));
+        let json = read_all_chat_markers(extra, chat_id, kind == UnreadJumpKind::Reaction);
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
             return Err(err);
