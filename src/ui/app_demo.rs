@@ -1682,6 +1682,7 @@ impl QuillApp {
             viewer_video_path: None,
             viewer_player: None,
             viewer_clock: None,
+            capture_blocked: false,
             viewer_tick: false,
             viewer_pending_play: None,
             viewer_rotation: 0,

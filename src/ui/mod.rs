@@ -57,6 +57,7 @@ mod call_sounds;
 mod call_ui;
 mod calls;
 mod capture_access;
+mod capture_block;
 mod chat;
 mod chat_list;
 mod chat_row;

@@ -21,6 +21,7 @@ use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, StoryPostOutcome, connection_indicator};
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_capture_block(window);
         // Rows the history list painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
         // Spoiler specks painted last frame keep drifting.
