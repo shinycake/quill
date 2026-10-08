@@ -1121,14 +1121,20 @@ mod tests {
     #[test]
     fn video_note_capture_start_fails_honestly_without_camera() {
         // Environment-gated: only meaningful where no camera exists.
-        if Path::new("/dev/video0").exists() {
+        if !crate::media_tools::v4l2_capture_devices().is_empty() {
             return;
         }
         let err = match VideoNoteCapture::start(false) {
             Ok(_) => panic!("expected no-camera error"),
             Err(err) => err,
         };
-        assert!(err.contains("No camera found"), "got: {err}");
+        // Without ffmpeg the install hint comes first; with it, the camera.
+        let expected = if crate::media_tools::is_installed("ffmpeg") {
+            "No camera found"
+        } else {
+            "need ffmpeg"
+        };
+        assert!(err.contains(expected), "got: {err}");
     }
 
     #[test]
