@@ -666,6 +666,13 @@ pub enum ScreenshotDemo {
     /// reference dialog open over the demo chat list (injected, no live
     /// Telegram).
     ReadyShortcuts,
+    /// Local passcode: the settings dialog with a passcode set (auto-lock,
+    /// Touch ID rows).
+    ReadyPasscodeSettings,
+    /// Local passcode: the create form with a mismatch error.
+    ReadyPasscodeCreate,
+    /// Local passcode: the lock screen after a wrong passcode.
+    ReadyLockScreen,
     /// Avatar click in a group (injected, no live Telegram): a member's
     /// profile open as the modal layer over the group history, as after
     /// clicking the avatar next to their message.

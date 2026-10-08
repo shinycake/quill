@@ -160,6 +160,8 @@ pub enum DialogKind {
     /// Batch 4: terms of service, server service popups and the
     /// "New Login Prevented" follow-up.
     AccountNotice,
+    /// Local passcode settings.
+    Passcode,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -185,6 +187,10 @@ impl QuillShell {
     /// The app-side open flag for each dialog kind. Stays in sync with
     /// the render-time overlay conditions the hand-rolled dialogs used.
     fn dialog_is_open(app: &QuillApp, kind: DialogKind) -> bool {
+        // The lock screen covers everything: no dialog stays above it.
+        if app.passcode_ui.locked {
+            return false;
+        }
         match kind {
             DialogKind::Settings => app.settings_open,
             DialogKind::Scheduled => app.scheduled_dialog_open,
@@ -241,6 +247,7 @@ impl QuillShell {
             DialogKind::CommunityHub => app.community_ui.hub_open,
             DialogKind::Shortcuts => app.shortcuts_open,
             DialogKind::AccountNotice => app.account_notice().is_some(),
+            DialogKind::Passcode => app.passcode_ui.open,
         }
     }
 
@@ -296,6 +303,7 @@ impl QuillShell {
             DialogKind::CommunityHub => community::build_community_hub_dialog,
             DialogKind::Shortcuts => QuillApp::build_shortcuts_dialog,
             DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
+            DialogKind::Passcode => QuillApp::build_passcode_dialog,
         }
     }
 
@@ -304,6 +312,7 @@ impl QuillShell {
     const KINDS: &[DialogKind] = &[
         // Batch 4: what the server says about the account comes first.
         DialogKind::AccountNotice,
+        DialogKind::Passcode,
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,

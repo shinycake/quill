@@ -132,6 +132,7 @@ mod navigation;
 mod notification_settings;
 mod notifications;
 mod onboarding;
+mod passcode;
 mod payments;
 mod polls;
 mod pressable;
@@ -168,6 +169,7 @@ mod story_composer;
 mod story_ring;
 mod story_viewer;
 mod subsection_tabs;
+mod system_unlock;
 mod video_pip;
 mod viewer_demo;
 
