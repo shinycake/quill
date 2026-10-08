@@ -1,11 +1,11 @@
 //! Connect driver: contacts and user info.
 use super::*;
-use crate::ids::{FileId, RequestId};
+use crate::ids::{ChatId, FileId, RequestId};
 use crate::settings::save_contact_prefs;
 use crate::state::RequestPurpose;
 use crate::telegram::requests::{
     ImportedContact, add_contact, clear_imported_contacts, get_contacts, get_user_full_info,
-    import_contacts, remove_contacts, set_message_sender_block_list,
+    import_contacts, remove_contacts, set_message_sender_block_list, share_phone_number,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -126,6 +126,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        Ok(Some(extra))
+    }
+
+    /// Batch 8: `sharePhoneNumber` (schema 1.8.67, line 14584) — the action
+    /// bar's "Share my phone number" for a mutual contact. The bar is
+    /// dropped locally; TDLib confirms with `updateChatActionBar`.
+    pub fn share_phone_number(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request_for_user(RequestPurpose::SharePhoneNumber, user_id);
+        if let Err(err) = self.sender.send_json(&share_phone_number(extra, user_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.set_chat_action_bar(chat_id.0, None);
         Ok(Some(extra))
     }
 

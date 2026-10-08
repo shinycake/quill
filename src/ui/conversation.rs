@@ -935,6 +935,10 @@ impl QuillApp {
             .when(self.folder_menu_open, |this| {
                 this.child(self.folder_menu_panel(cx))
             })
+            .children(
+                open.map(|chat_id| self.chat_top_bars(chat_id, cx))
+                    .unwrap_or_default(),
+            )
             .children(open.and_then(|chat_id| self.pinned_message_banner(chat_id, cx)))
             .children(
                 open.filter(|_| self.pinned_list_open)

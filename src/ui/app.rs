@@ -924,6 +924,10 @@ pub struct QuillApp {
     /// Phase 6: add-contact dialog (phone + first/last name) opened from
     /// the user info panel.
     pub(super) add_contact_dialog: Option<AddContactDialog>,
+    /// Batch 8: "Block {name}" box opened from the chat action bar.
+    pub(super) block_bar_dialog: Option<super::chat_bars::BlockBarDialog>,
+    /// Batch 8: the join-requests box of this chat (from the requests bar).
+    pub(super) join_requests_dialog: Option<ChatId>,
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,

@@ -537,6 +537,18 @@ fn install_main_window_tray(
                             cx.activate(true);
                             window.activate_window();
                         }
+                        quill::tray::TrayAction::ToggleNotifications => {
+                            let _ = tray_view.update(cx, |this, cx| {
+                                let on = this.desktop_notifications_enabled();
+                                this.set_desktop_notifications(!on, cx);
+                            });
+                        }
+                        quill::tray::TrayAction::ToggleSounds => {
+                            let _ = tray_view.update(cx, |this, cx| {
+                                let on = this.notification_sounds_enabled();
+                                this.set_inapp_sounds_enabled(!on, cx);
+                            });
+                        }
                         quill::tray::TrayAction::Quit => cx.quit(),
                     });
                 }
@@ -634,6 +646,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-typing" => ScreenshotDemo::ReadyTyping,
                 "ready-chat-rows" => ScreenshotDemo::ReadyChatRows,
                 "ready-join-bar" => ScreenshotDemo::ReadyJoinBar,
+                "ready-top-bars" => ScreenshotDemo::ReadyTopBars,
                 "ready-search-previews" => ScreenshotDemo::ReadySearchPreviews,
                 "ready-multiline-rows" => ScreenshotDemo::ReadyMultilineRows,
                 "ready-stickers" => ScreenshotDemo::ReadyStickers,
@@ -902,6 +915,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyTyping => ".quill-ready-ready-typing",
         ScreenshotDemo::ReadyChatRows => ".quill-ready-ready-chat-rows",
         ScreenshotDemo::ReadyJoinBar => ".quill-ready-ready-join-bar",
+        ScreenshotDemo::ReadyTopBars => ".quill-ready-ready-top-bars",
         ScreenshotDemo::ReadySearchPreviews => ".quill-ready-ready-search-previews",
         ScreenshotDemo::ReadyMultilineRows => ".quill-ready-ready-multiline-rows",
         ScreenshotDemo::ReadyStickers => ".quill-ready-ready-stickers",

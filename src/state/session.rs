@@ -183,6 +183,9 @@ pub struct Session {
     /// tdesktop's "Play sounds" toggle. Loaded from `prefs.json` at
     /// connect time; the notification defaults dialog writes through.
     pub inapp_sounds_enabled: bool,
+    /// Mirror of `settings::Preferences::desktop_notifications` (tdesktop
+    /// `desktopNotify`, toggled from Settings or the tray menu).
+    pub desktop_notifications: bool,
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
@@ -738,6 +741,12 @@ pub struct Session {
     /// (schema 1.8.67, line 10555). The full request list still needs
     /// `getChatJoinRequests`; this is only the badge count.
     pub pending_join_request_counts: HashMap<i64, i32>,
+    /// Batch 8: `chatJoinRequestsInfo.user_ids` (the newest requesters)
+    /// from the same update, for the requests bar's avatars.
+    pub pending_join_request_users: HashMap<i64, Vec<i64>>,
+    /// Batch 8: `chat.action_bar` / `updateChatActionBar` per chat — the
+    /// Add contact / Block / Report spam / Share phone strip.
+    pub chat_action_bars: HashMap<i64, ChatActionBar>,
     /// Phase D3c: `getChatEventLog` fetch state, keyed by chat id.
     pub event_logs: HashMap<i64, ChatEventLogFetch>,
     /// Slice G2: per-chat event-log filters (`chatEventLogFilters`,
@@ -1047,6 +1056,7 @@ impl Session {
             app_active: true,
             hide_notification_previews: true,
             inapp_sounds_enabled: true,
+            desktop_notifications: true,
             pending_notifications: Vec::new(),
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
@@ -1224,6 +1234,8 @@ impl Session {
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),
             pending_join_request_counts: HashMap::new(),
+            pending_join_request_users: HashMap::new(),
+            chat_action_bars: HashMap::new(),
             event_logs: HashMap::new(),
             event_log_filters: HashMap::new(),
             event_log_queries: HashMap::new(),

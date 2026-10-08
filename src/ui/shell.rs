@@ -114,6 +114,10 @@ pub enum DialogKind {
     EmojiSets,
     ImportContacts,
     AddContact,
+    /// Batch 8: chat action bar's "Block {name}" box.
+    BlockBar,
+    /// Batch 8: the chat's pending join requests.
+    JoinRequests,
     EditProfile,
     GroupCallStart,
     FolderEditor,
@@ -200,6 +204,8 @@ impl QuillShell {
             DialogKind::ArchiveSettings => app.session().is_some_and(|s| s.archive_settings_open),
             DialogKind::ImportContacts => app.import_contacts_dialog.is_some(),
             DialogKind::AddContact => app.add_contact_dialog.is_some(),
+            DialogKind::BlockBar => app.block_bar_dialog.is_some(),
+            DialogKind::JoinRequests => app.join_requests_dialog.is_some(),
             DialogKind::EditProfile => app.edit_profile_dialog.is_some(),
             DialogKind::GroupCallStart => app.group_call_start_dialog.is_some(),
             DialogKind::FolderEditor => app.folder_editor.is_some(),
@@ -251,6 +257,8 @@ impl QuillShell {
             DialogKind::EmojiSets => QuillApp::build_emoji_sets_dialog,
             DialogKind::ImportContacts => QuillApp::build_import_contacts_dialog,
             DialogKind::AddContact => QuillApp::build_add_contact_dialog,
+            DialogKind::BlockBar => QuillApp::build_block_bar_dialog,
+            DialogKind::JoinRequests => QuillApp::build_join_requests_dialog,
             DialogKind::EditProfile => QuillApp::build_edit_profile_dialog,
             DialogKind::GroupCallStart => QuillApp::build_group_call_start_dialog,
             DialogKind::FolderEditor => QuillApp::build_folder_editor_dialog,
@@ -328,6 +336,8 @@ impl QuillShell {
         DialogKind::ImportContacts,
         DialogKind::EditProfile,
         DialogKind::AddContact,
+        DialogKind::BlockBar,
+        DialogKind::JoinRequests,
         DialogKind::Appearance,
         DialogKind::AccountLifecycle,
         // Slice G10: communities dialogs render last (lowest priority).
