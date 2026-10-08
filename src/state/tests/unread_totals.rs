@@ -78,3 +78,63 @@ fn badge_follows_totals_and_prefs() {
     );
     assert_eq!(badge_count(&session, &unmuted_only), 9);
 }
+
+/// Live trace (Hermesio bot with topics): TDLib's main totals said 4 while
+/// Telegram Desktop showed 16 = 4 + 11 + 1 from two topics with a read
+/// position; two never-read topics (read position 0, bogus 16 and 3) and a
+/// zero topic add nothing.
+#[test]
+fn badge_adds_forum_topic_unreads_on_top_of_totals() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUser","user":{"id":41,"first_name":"Bot","type":{"@type":"userTypeBot","has_topics":true,"allows_users_to_create_topics":false,"is_inline":false}}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":41,"title":"Bot","type":{"@type":"chatTypePrivate","user_id":41},"unread_count":0}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUnreadMessageCount","chat_list":{"@type":"chatListMain"},"unread_count":4,"unread_unmuted_count":1}"#,
+    );
+    assert_eq!(badge_count(&session, &BadgePrefs::default()), 4);
+    let topic = |id: i32, unread: i32, read: i64, last: i64| {
+        format!(
+            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":{id},"name":"T{id}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":{{"id":{last},"chat_id":41,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}},"order":"{id}","is_pinned":false,"unread_count":{unread},"last_read_inbox_message_id":{read}}}"#,
+        )
+    };
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    let topics = [
+        topic(482317, 11, 505806848000, 505859276800),
+        topic(477080, 1, 500306018304, 505744982016),
+        topic(481359, 16, 0, 504759320576),
+        topic(479296, 3, 0, 502580379648),
+        topic(470000, 0, 505000000000, 505000000000),
+    ]
+    .join(",");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"forumTopics","@extra":"{}","total_count":5,"topics":[{topics}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(badge_count(&session, &BadgePrefs::default()), 16);
+    // Chats mode counts the forum chat once.
+    let chats = BadgePrefs {
+        count_messages: false,
+        ..BadgePrefs::default()
+    };
+    session.unread_totals.main.chats = Some(UnreadPair { all: 3, unmuted: 3 });
+    assert_eq!(badge_count(&session, &chats), 4);
+}

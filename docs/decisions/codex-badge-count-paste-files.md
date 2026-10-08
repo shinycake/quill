@@ -7,6 +7,8 @@
 - **Behavior change:** `BadgePrefs::include_archived` now defaults to ON (was OFF) to match tdesktop, where archived unread is part of the badge; it stays as a Quill-only opt-out. Users who already saved prefs with an explicit `false` keep it.
 - **Assumption to verify live:** TDLib's message total counts a marked-as-unread chat as one message (tdesktop "marks").
 
+- **Forum topics (live finding, Hermesio bot):** TDLib's main totals (4) omit unread in topics the user never opened; tdesktop showed 16 = 4 + 11 + 1. tdesktop's `History::chatListUnreadState` replaces a forum chat's own state with its topics' (`AdjustedForumUnreadState`: topic message sum, or one chat in chats mode). Quill adds, per chat with topics, the sum of `Session::topic_badge` counts (so never-read topics with a bogus server count contribute nothing) minus whatever the chat's own `unread_count` already contributes (chats mode: one, unless the chat already counts). Test uses the live numbers.
+
 ### Paste copied files
 - **Windows:** no new code. gpui-pre-windows 0.3.7 already reads `CF_HDROP` into `ClipboardEntry::ExternalPaths`, which the composer attaches. (Reimplementing it with windows-sys would duplicate that.)
 - **Linux:** GPUI's Wayland/X11 clipboard exposes only text and images, not `text/uri-list` / `x-special/gnome-copied-files`. File managers also offer the selection as text, so `clipboard_files::paths_from_text` accepts clipboard text that is entirely a list of `file://` URIs (percent-decoded, `copy`/`cut` header, `#` comments) or, on Linux, bare absolute paths, and only when every line is an existing regular file. Ordinary text still pastes as text; the one residual ambiguity is a clipboard that is exactly an existing file path.

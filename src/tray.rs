@@ -86,6 +86,32 @@ fn trace_fallback(archive: bool, messages: bool) {
     }
 }
 
+/// Unread of chats split into topics, on top of the list totals. tdesktop
+/// replaces a forum chat's own state with its topics' (`AdjustedForumUnreadState`:
+/// the topics' message sum, or one chat in chats mode), while TDLib's totals
+/// know nothing of topics the user never opened. Whatever TDLib already counts
+/// for the chat itself (`unread_count`, marked unread) is subtracted so
+/// nothing is counted twice.
+fn forum_topics_extra(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
+    session
+        .chats
+        .values()
+        .filter(|chat| chat.in_archive == archive)
+        .filter(|chat| prefs.include_muted || !session.effective_muted(chat))
+        .map(|chat| {
+            let topics = session.forum_topics_unread(chat.id);
+            if topics <= 0 {
+                return 0;
+            }
+            if prefs.count_messages {
+                (topics - chat.unread_count.max(0)).max(0) as u32
+            } else {
+                u32::from(chat.unread_count <= 0 && !chat.is_marked_as_unread)
+            }
+        })
+        .fold(0u32, u32::saturating_add)
+}
+
 fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
     let totals = if archive {
         &session.unread_totals.archive
@@ -97,6 +123,7 @@ fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
     } else {
         totals.chats
     };
+    let topics = forum_topics_extra(session, prefs, archive);
     if let Some(pair) = pair {
         // Archived chats always count as muted: take the full total.
         let value = if prefs.include_muted || archive {
@@ -104,7 +131,7 @@ fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
         } else {
             pair.unmuted
         };
-        return value.max(0) as u32;
+        return (value.max(0) as u32).saturating_add(topics);
     }
     trace_fallback(archive, prefs.count_messages);
     session
@@ -124,6 +151,7 @@ fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
             }
         })
         .fold(0u32, u32::saturating_add)
+        .saturating_add(topics)
 }
 
 /// The app icon downscaled to [`ICON_SIZE`] as straight (non-premultiplied)
