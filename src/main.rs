@@ -1,3 +1,11 @@
+// Release UI builds on Windows are GUI-subsystem so launching Quill does not
+// open a console window; `attach_parent_console` restores CLI output
+// (`--version`, ...) when started from a terminal.
+#![cfg_attr(
+    all(windows, feature = "ui", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 #[cfg(feature = "ui")]
 mod ui;
 
@@ -114,7 +122,54 @@ impl gpui_kit::gpui::AssetSource for QuillAssets {
     }
 }
 
+/// A GUI-subsystem process starts without standard handles. When launched from
+/// a terminal, attach to its console and point stdout/stderr at it so CLI flags
+/// print. Redirected handles (pipes, files) are left untouched.
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        SetStdHandle,
+    };
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    // SAFETY: plain Win32 calls with valid arguments; failures are ignored.
+    unsafe {
+        let has = |which| {
+            let handle = GetStdHandle(which);
+            !handle.is_null() && handle != INVALID_HANDLE_VALUE
+        };
+        let (need_out, need_err) = (!has(STD_OUTPUT_HANDLE), !has(STD_ERROR_HANDLE));
+        if !(need_out || need_err) || AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+            return;
+        }
+        let conout: Vec<u16> = "CONOUT$\0".encode_utf16().collect();
+        let console = CreateFileW(
+            conout.as_ptr(),
+            GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        );
+        if console != INVALID_HANDLE_VALUE {
+            if need_out {
+                SetStdHandle(STD_OUTPUT_HANDLE, console);
+            }
+            if need_err {
+                SetStdHandle(STD_ERROR_HANDLE, console);
+            }
+        }
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    attach_parent_console();
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).is_some_and(|a| a == "--version") {
         println!("Quill {}", env!("CARGO_PKG_VERSION"));
