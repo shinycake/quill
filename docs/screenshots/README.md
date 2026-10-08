@@ -4,6 +4,15 @@ Captured from a real GPUI window on 2026-09-17 (Linux Xvfb + lavapipe). **Not** 
 
 | File | What it shows |
 |---|---|
+| `readme-bubble-headers.png` | Group chat with forwarded-from, reply, via-bot and imported bubble headers plus the pinned-message bar. Injected Ready session, no live Telegram; `--screenshot-demo ready-bubble-headers` (light, 1400x900). |
+| `readme-stories-archive.png` | Dark chat list with the stories strip, story rings, the **Archived chats** row and unread badges. Injected, no live Telegram; `--screenshot-demo ready-stories-expanded` (dark, 1400x900). |
+| `readme-service-messages.png` | Service messages: theme and wallpaper changes, gifts, giveaways, suggested profile photo, pins. Injected, no live Telegram; `--screenshot-demo ready-service-messages` (light, 1400x900). |
+| `readme-player-bar.png` | Audio player bar (transport, seek, speed, volume, repeat, shuffle) above a chat with music files. Injected, no live Telegram; `--screenshot-demo ready-player-bar` (dark, 1400x900). |
+| `readme-reactions-menu.png` | Reaction picker over the message context menu with reaction chips. Injected, no live Telegram; `--screenshot-demo ready-reactions` (dark, 1400x900). |
+| `readme-polls.png` | Polls and a closed quiz with explanation, voted state and vote-eligibility notice. Injected, no live Telegram; `--screenshot-demo ready-poll` (light, 1400x900). |
+| `readme-media-viewer.png` | Fullscreen media viewer with zoom controls and forward / download / delete actions. Injected, no live Telegram; `--screenshot-demo ready-media-viewer` (dark, 1400x900). |
+| `readme-voice-recording.png` | Locked voice-recording bar with live waveform and history voice notes with transcription. Injected, no live Telegram; `--screenshot-demo ready-voice` (light, 1400x900). |
+| `readme-appearance-dark.png` | Appearance settings dialog in the dark theme: theme, auto-night, accent color, wallpaper, text size. Injected, no live Telegram; `--screenshot-demo ready-appearance` (dark, 1400x900). |
 | `ready-rich-premium-gate.png` | **Slice msg-richtext-premium-gate** Multi-line composer with the **⛶ Rich editor** button visible, editor closed, and status **Rich messages require Telegram Premium**. Injected Ready session, no live Telegram; `--screenshot-demo ready-rich-premium-gate`. Captured 2026-09-30 via Xvfb + lavapipe. |
 | `ready-custom-emoji.png` | **Slice msg-richtext-custom-emoji** Message text with a custom emoji rendered inline as a sticker image (1.25× text size), the emoji char as span-text fallback. Injected Ready session, no live Telegram; `--screenshot-demo ready-custom-emoji`. Captured 2026-10-01 via Xvfb + lavapipe. |
 | `ready-animated-emoji.png` | **Slice emoji-suggest-animated** Composer with the animated-emoji suggestion row above it (injected `animatedEmoji` answer + downloaded sticker fixture, tap to send as a sticker). Injected Ready session, no live Telegram; `--screenshot-demo ready-animated-emoji`. Pending capture — no VM UI builds per 2026-10-01 rule. |
