@@ -294,6 +294,16 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadySwipeMute
+        | ScreenshotDemo::ReadySwipeReached
+        | ScreenshotDemo::ReadyStoriesExpanded
+        | ScreenshotDemo::ReadyStoriesCollapsing
+        | ScreenshotDemo::ReadyStoriesCollapsed => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat list: swipe actions · stories strip".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyChatRows => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1452,6 +1462,8 @@ impl QuillApp {
             // kit Phase 3: chat list + message history virtualization.
             chat_list_scroll: VirtualListScrollHandle::new(),
             chat_list_items: Vec::new(),
+            chat_swipe: Default::default(),
+            story_strip: Default::default(),
             history_scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             history_rows: Vec::new(),
             rendered_history_rows: std::cell::RefCell::new(Vec::new()),

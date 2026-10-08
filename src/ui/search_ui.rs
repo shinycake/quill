@@ -939,7 +939,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn sidebar_search_field(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn sidebar_search_field(
+        &self,
+        story_stack: Option<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
             .id("sidebar-search")
             .flex()
@@ -960,6 +964,7 @@ impl QuillApp {
                             .h(px(40.)),
                     ),
             )
+            .children(story_stack)
             .when(self.search_is_open(), |this| {
                 this.child(
                     Button::new("search-clear")

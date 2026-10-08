@@ -452,6 +452,11 @@ pub struct AppearancePrefs {
     /// lives in the main menu.
     #[serde(default)]
     pub archive_in_main_menu: bool,
+    /// tdesktop `quickDialogAction` ("Chat list quick action"): what a
+    /// horizontal trackpad swipe on a chat row does. Disabled by default,
+    /// as in tdesktop.
+    #[serde(default)]
+    pub swipe_action: crate::chat_swipe::SwipeAction,
     #[serde(default)]
     pub start_in_tray: bool,
     #[serde(default)]
@@ -492,6 +497,7 @@ impl Default for AppearancePrefs {
             chat_list_rich_preview: false,
             archive_collapsed: false,
             archive_in_main_menu: false,
+            swipe_action: crate::chat_swipe::SwipeAction::Disabled,
             start_in_tray: false,
             minimize_to_tray: false,
             check_updates_on_launch: true,
@@ -1226,6 +1232,7 @@ mod tests {
             chat_list_rich_preview: true,
             archive_collapsed: true,
             archive_in_main_menu: true,
+            swipe_action: crate::chat_swipe::SwipeAction::Archive,
             start_in_tray: true,
             minimize_to_tray: true,
             check_updates_on_launch: false,
