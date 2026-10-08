@@ -1360,14 +1360,16 @@ mod tests {
 /// desktop-client concern (TDLib 1.8.67 has no badge settings):
 /// - `include_muted`: count muted chats (Telegram Desktop default: ON —
 ///   its `_includeMutedCounter` is true)
-/// - `include_archived`: count archived chats (default OFF, both clients)
+/// - `include_archived`: count archived chats (default ON: tdesktop folds
+///   the archive into the main list as all-muted, so it counts whenever
+///   muted chats do; this toggle is a Quill-only opt-out)
 /// - `count_messages`: sum unread messages vs count unread chats
 ///   (default: messages)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BadgePrefs {
     #[serde(default = "default_true")]
     pub include_muted: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub include_archived: bool,
     #[serde(default = "default_true")]
     pub count_messages: bool,
@@ -1377,7 +1379,7 @@ impl Default for BadgePrefs {
     fn default() -> Self {
         Self {
             include_muted: true,
-            include_archived: false,
+            include_archived: true,
             count_messages: true,
         }
     }
@@ -1416,7 +1418,7 @@ mod badge_prefs_tests {
     fn badge_prefs_default_matches_telegram_desktop() {
         let prefs = BadgePrefs::default();
         assert!(prefs.include_muted);
-        assert!(!prefs.include_archived);
+        assert!(prefs.include_archived);
         assert!(prefs.count_messages);
     }
 

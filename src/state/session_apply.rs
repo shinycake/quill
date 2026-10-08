@@ -852,6 +852,31 @@ impl Session {
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .title = title;
             }
+            EnvelopePayload::UpdateUnreadMessageCount {
+                list,
+                unread_count,
+                unread_unmuted_count,
+            } => {
+                if let Some(totals) = self.unread_totals.list_mut(&list) {
+                    totals.messages = Some(UnreadPair {
+                        all: unread_count,
+                        unmuted: unread_unmuted_count,
+                    });
+                }
+            }
+            EnvelopePayload::UpdateUnreadChatCount {
+                list,
+                unread_count,
+                unread_unmuted_count,
+                ..
+            } => {
+                if let Some(totals) = self.unread_totals.list_mut(&list) {
+                    totals.chats = Some(UnreadPair {
+                        all: unread_count,
+                        unmuted: unread_unmuted_count,
+                    });
+                }
+            }
             EnvelopePayload::UpdateChatReadInbox {
                 chat_id,
                 last_read_inbox_message_id,

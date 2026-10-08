@@ -11,8 +11,9 @@
 //!   Desktop's default: `_includeMutedCounter = true`, tdesktop
 //!   `Telegram/SourceFiles/core/core_settings.h`, i.e. excluding muted is
 //!   the opt-out, not the opt-in; muteness is [`Session::effective_muted`]);
-//! - archived chats are excluded unless `include_archived` is on (both
-//!   clients exclude the archive by default);
+//! - archived chats count as muted (tdesktop folds the archive folder into
+//!   the main list, all-muted), so they are included with muted chats unless
+//!   `include_archived` is turned off;
 //! - the badge shows either the unread-message sum or the unread-chat count
 //!   (`count_messages`). The sum saturates instead of overflowing.
 //!
@@ -42,22 +43,65 @@ pub fn menu_action(id: &str) -> Option<TrayAction> {
     }
 }
 
-/// Badge count honoring [`BadgePrefs`]: archived chats are skipped unless
-/// `include_archived`; muted chats are skipped unless `include_muted`;
-/// the count is the unread-message sum when `count_messages` is on, else
-/// the number of unread chats. Negative per-chat counts (shouldn't happen)
-/// are ignored; the sum saturates.
+/// Badge count, mirroring Telegram Desktop's `Session::computeUnreadBadge`
+/// (`data/data_session.cpp`) over TDLib's server-side totals.
+///
+/// - The main list contributes TDLib's `updateUnreadMessageCount` (or
+///   `updateUnreadChatCount` when `count_messages` is off): the unmuted
+///   subset when `include_muted` is off, the full total otherwise.
+/// - tdesktop folds the archive folder into the main list with everything
+///   counted as muted, so the archive contributes its full total, and only
+///   when muted chats are included. `include_archived` is Quill's extra
+///   opt-out for it (default on, like tdesktop).
+/// - A list whose totals haven't arrived yet (TDLib sends them only with a
+///   message database, and after the first chat load) falls back to summing
+///   the loaded chats of that list; a chat marked as unread counts as one.
+///
+/// The sum saturates.
 pub fn badge_count(session: &Session, prefs: &BadgePrefs) -> u32 {
+    let main = list_badge(session, prefs, false);
+    let archive = if prefs.include_archived && prefs.include_muted {
+        list_badge(session, prefs, true)
+    } else {
+        0
+    };
+    main.saturating_add(archive)
+}
+
+fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
+    let totals = if archive {
+        &session.unread_totals.archive
+    } else {
+        &session.unread_totals.main
+    };
+    let pair = if prefs.count_messages {
+        totals.messages
+    } else {
+        totals.chats
+    };
+    if let Some(pair) = pair {
+        // Archived chats always count as muted: take the full total.
+        let value = if prefs.include_muted || archive {
+            pair.all
+        } else {
+            pair.unmuted
+        };
+        return value.max(0) as u32;
+    }
     session
         .chats
         .values()
-        .filter(|chat| prefs.include_archived || !chat.in_archive)
+        .filter(|chat| chat.in_archive == archive)
         .filter(|chat| prefs.include_muted || !session.effective_muted(chat))
         .map(|chat| {
             if prefs.count_messages {
-                chat.unread_count.max(0) as u32
+                if chat.unread_count > 0 {
+                    chat.unread_count as u32
+                } else {
+                    u32::from(chat.is_marked_as_unread)
+                }
             } else {
-                u32::from(chat.unread_count > 0)
+                u32::from(chat.unread_count > 0 || chat.is_marked_as_unread)
             }
         })
         .fold(0u32, u32::saturating_add)
@@ -398,7 +442,7 @@ mod tests {
     use crate::diagnostics::MemorySink;
     use crate::ids::{AccountKey, ChatId, MessageId};
     use crate::settings::BadgePrefs;
-    use crate::state::{ChatSummary, Session};
+    use crate::state::{ChatSummary, ListUnreadTotals, Session, UnreadPair};
     use crate::telegram::envelope::{ChatKind, ChatNotificationSettings};
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -506,31 +550,105 @@ mod tests {
     }
 
     #[test]
-    fn badge_count_excludes_archived_chats_by_default() {
-        // Archived chats never count (both official clients exclude them
-        // from the badge by default).
+    fn badge_count_includes_archived_chats_by_default() {
+        // tdesktop folds the all-muted archive into the main list, so it
+        // counts while muted chats do.
         let mut session = Session::new(
             AccountKey("tray-test-archived".into()),
             Arc::new(MemorySink::new()),
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, archived_chat(1, 9));
-        assert_eq!(badge_count(&session, &BadgePrefs::default()), 5);
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 14);
     }
 
     #[test]
-    fn badge_count_includes_archived_when_opted_in() {
+    fn badge_count_excludes_archived_when_opted_out_or_muted_excluded() {
         let mut session = Session::new(
-            AccountKey("tray-test-archived-in".into()),
+            AccountKey("tray-test-archived-out".into()),
             Arc::new(MemorySink::new()),
         );
         session.chats.insert(0, chat(0, 5));
         session.chats.insert(1, archived_chat(1, 9));
-        let prefs = BadgePrefs {
-            include_archived: true,
+        let no_archive = BadgePrefs {
+            include_archived: false,
             ..BadgePrefs::default()
         };
-        assert_eq!(badge_count(&session, &prefs), 14);
+        assert_eq!(badge_count(&session, &no_archive), 5);
+        let no_muted = BadgePrefs {
+            include_muted: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &no_muted), 5);
+    }
+
+    #[test]
+    fn badge_count_marked_as_unread_counts_one_in_fallback() {
+        let mut session = session_with(&[0, 2]);
+        session.chats.get_mut(&0).unwrap().is_marked_as_unread = true;
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 3);
+        let prefs = BadgePrefs {
+            count_messages: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &prefs), 2);
+    }
+
+    fn with_totals(session: &mut Session) {
+        // Loaded chats are a small slice; the server totals are what count.
+        session.chats.insert(0, chat(0, 1));
+        session.unread_totals.main = ListUnreadTotals {
+            messages: Some(UnreadPair {
+                all: 44,
+                unmuted: 13,
+            }),
+            chats: Some(UnreadPair {
+                all: 20,
+                unmuted: 6,
+            }),
+        };
+        session.unread_totals.archive = ListUnreadTotals {
+            messages: Some(UnreadPair {
+                all: 30,
+                unmuted: 0,
+            }),
+            chats: Some(UnreadPair { all: 9, unmuted: 0 }),
+        };
+    }
+
+    #[test]
+    fn badge_count_uses_server_totals_over_loaded_chats() {
+        let mut session = Session::new(AccountKey("t-totals".into()), Arc::new(MemorySink::new()));
+        with_totals(&mut session);
+        // Default: messages, muted + archive (all-muted) included.
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 44 + 30);
+        let chats = BadgePrefs {
+            count_messages: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &chats), 20 + 9);
+        let unmuted = BadgePrefs {
+            include_muted: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &unmuted), 13);
+        let no_archive = BadgePrefs {
+            include_archived: false,
+            ..BadgePrefs::default()
+        };
+        assert_eq!(badge_count(&session, &no_archive), 44);
+    }
+
+    #[test]
+    fn badge_count_totals_fall_back_per_list() {
+        // Only the main totals arrived: the archive sums its loaded chats.
+        let mut session = Session::new(AccountKey("t-partial".into()), Arc::new(MemorySink::new()));
+        session.chats.insert(1, archived_chat(1, 4));
+        session.unread_totals.main.messages = Some(UnreadPair {
+            all: 10,
+            unmuted: 7,
+        });
+        assert_eq!(badge_count(&session, &BadgePrefs::default()), 14);
     }
 
     #[test]

@@ -434,6 +434,10 @@ pub struct Session {
     /// persisted via `settings::BadgePrefs`. Loaded at startup like
     /// `call_prefs`; the UI saves on toggle.
     pub badge_prefs: BadgePrefs,
+    /// TDLib's authoritative unread totals for the main and archive chat
+    /// lists (`updateUnreadMessageCount` / `updateUnreadChatCount`); the
+    /// badge uses these instead of summing the (paginated) loaded chats.
+    pub unread_totals: UnreadTotals,
     /// Slice parity:settings-language: the app language tag sent in
     /// `setTdlibParameters`, persisted via `settings::LanguagePrefs`.
     /// Loaded at startup like `call_prefs`; the UI saves on change.
@@ -1105,6 +1109,7 @@ impl Session {
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),
+            unread_totals: UnreadTotals::default(),
             language_prefs: LanguagePrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
