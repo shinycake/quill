@@ -1,18 +1,18 @@
 //! Call sounds (tdesktop `Calls::Call` plays `call_incoming`,
 //! `call_outgoing`, `call_connect`, `call_end` and `call_busy`). Telegram's
-//! own tones can't ship in an MIT app; on macOS Quill plays the system's
-//! FaceTime sounds instead: the ringtone, the ringback, the connect and
-//! end chimes, the busy tone and the mute clicks. Nothing plays where
-//! they don't exist.
+//! own tones can't ship in an MIT app, so Quill synthesizes its own
+//! (`call_tones`) and plays them in-process through `rodio` (CoreAudio,
+//! WASAPI, ALSA/PulseAudio) on every platform. The same tones play on all
+//! of them for consistency. The "Play sounds" notification preference
+//! silences them.
 
-use std::path::{Path, PathBuf};
-use std::process::Child;
+use std::num::NonZero;
 use std::time::{Duration, Instant};
 
-const TELEPHONY: &str =
-    "/System/Library/PrivateFrameworks/TelephonyUtilities.framework/Versions/A/Resources";
-const RINGTONES: &str =
-    "/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/Ringtones";
+use rodio::buffer::SamplesBuffer;
+use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
+
+use super::call_tones;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CallSound {
@@ -28,59 +28,104 @@ pub(super) enum CallSound {
 }
 
 impl CallSound {
-    fn path(self) -> PathBuf {
-        let telephony = |name: &str| Path::new(TELEPHONY).join(name);
+    fn samples(self) -> Vec<f32> {
         match self {
-            CallSound::Incoming => Path::new(RINGTONES).join("Opening.m4r"),
-            CallSound::Ringback => telephony("vc~ringing.aif"),
-            CallSound::Connect => telephony("vc~invitation-accepted.caf"),
-            CallSound::End => telephony("vc~ended.caf"),
-            CallSound::Busy => telephony("busy_tone_cept.caf"),
-            CallSound::Mute => telephony("mute.caf"),
-            CallSound::Unmute => telephony("unmute.caf"),
+            CallSound::Incoming => call_tones::incoming(),
+            CallSound::Ringback => call_tones::ringback(),
+            CallSound::Connect => call_tones::connect(),
+            CallSound::End => call_tones::end(),
+            CallSound::Busy => call_tones::busy(),
+            CallSound::Mute => call_tones::mute(),
+            CallSound::Unmute => call_tones::unmute(),
         }
     }
 
     /// The pause before a looping sound starts again.
     fn gap(self) -> Duration {
         match self {
-            CallSound::Ringback => Duration::from_millis(1200),
-            _ => Duration::from_millis(400),
+            CallSound::Ringback => Duration::from_millis(call_tones::RINGBACK_GAP_MS),
+            _ => Duration::from_millis(call_tones::INCOMING_GAP_MS),
         }
     }
 }
 
 /// The one call sound playing (a new one cuts the last), and the loop to
 /// keep going.
-#[derive(Default)]
 pub(super) struct CallSounds {
-    child: Option<Child>,
+    /// The audio output, opened on first use; `None` until then and when
+    /// the machine has no usable output device.
+    output: Option<MixerDeviceSink>,
+    /// When opening the output last failed, to not retry on every tick.
+    open_failed_at: Option<Instant>,
+    player: Option<Player>,
     looping: Option<CallSound>,
     /// When the current loop's sound may start again.
     again_at: Option<Instant>,
+    /// The "Play sounds" preference.
+    enabled: bool,
+}
+
+impl Default for CallSounds {
+    fn default() -> Self {
+        Self {
+            output: None,
+            open_failed_at: None,
+            player: None,
+            looping: None,
+            again_at: None,
+            enabled: true,
+        }
+    }
 }
 
 impl CallSounds {
-    fn spawn(&mut self, sound: CallSound) {
-        self.stop_child();
-        let path = sound.path();
-        if !cfg!(target_os = "macos") || !path.is_file() {
-            return;
+    /// Follow the "Play sounds" preference; turning it off cuts any sound.
+    pub(super) fn set_enabled(&mut self, enabled: bool) {
+        if self.enabled && !enabled && self.looping.is_none() {
+            self.stop_player();
         }
-        self.child = std::process::Command::new("afplay")
-            .arg("--")
-            .arg(path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .ok();
+        self.enabled = enabled;
     }
 
-    fn stop_child(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+    fn output(&mut self) -> Option<&MixerDeviceSink> {
+        if self.output.is_none()
+            && self
+                .open_failed_at
+                .is_none_or(|at| at.elapsed() > Duration::from_secs(5))
+        {
+            match DeviceSinkBuilder::open_default_sink() {
+                Ok(mut sink) => {
+                    sink.log_on_drop(false);
+                    self.output = Some(sink);
+                }
+                Err(_) => self.open_failed_at = Some(Instant::now()),
+            }
+        }
+        self.output.as_ref()
+    }
+
+    fn spawn(&mut self, sound: CallSound) {
+        self.stop_player();
+        // Ringing always plays; the "Play sounds" toggle only mutes cues.
+        let rings = matches!(sound, CallSound::Incoming | CallSound::Ringback);
+        if !self.enabled && !rings {
+            return;
+        }
+        let Some(output) = self.output() else {
+            return;
+        };
+        let player = Player::connect_new(output.mixer());
+        player.append(SamplesBuffer::new(
+            NonZero::<u16>::MIN,
+            NonZero::new(call_tones::SAMPLE_RATE).unwrap_or(NonZero::<u32>::MIN),
+            sound.samples(),
+        ));
+        self.player = Some(player);
+    }
+
+    fn stop_player(&mut self) {
+        if let Some(player) = self.player.take() {
+            player.stop();
         }
     }
 
@@ -96,7 +141,7 @@ impl CallSounds {
     pub(super) fn keep_looping(&mut self, sound: Option<CallSound>) {
         if self.looping != sound {
             if self.looping.is_some() || sound.is_some() {
-                self.stop_child();
+                self.stop_player();
             }
             self.looping = sound;
             self.again_at = Some(Instant::now());
@@ -104,10 +149,7 @@ impl CallSounds {
         let Some(sound) = self.looping else {
             return;
         };
-        let finished = self
-            .child
-            .as_mut()
-            .is_none_or(|child| child.try_wait().ok().flatten().is_some());
+        let finished = self.player.as_ref().is_none_or(Player::empty);
         if !finished {
             return;
         }
@@ -119,12 +161,6 @@ impl CallSounds {
             Some(_) => {}
             None => self.again_at = Some(Instant::now() + sound.gap()),
         }
-    }
-}
-
-impl Drop for CallSounds {
-    fn drop(&mut self) {
-        self.stop_child();
     }
 }
 
@@ -146,8 +182,10 @@ impl super::app::QuillApp {
             return;
         };
         let (call, summary) = (session.active_call.clone(), session.call_summary.clone());
+        let enabled = session.inapp_sounds_enabled;
         let marks = &mut self.call_sound_marks;
         let sounds = &mut self.call_sounds;
+        sounds.set_enabled(enabled);
         match (call, summary) {
             (Some(call), _) => {
                 if marks.call_id != Some(call.id) {
