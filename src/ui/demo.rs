@@ -72,6 +72,7 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
         &mut session,
         r#"{"@type":"updateNewMessage","message":{"id":105,"chat_id":11,"is_outgoing":false,"date":1790632300,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Custom emoji: 😀 inline","entities":[{"@type":"textEntity","offset":14,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4242"}}]}}}}"#,
     );
+    apply(&mut session, &rich_post_message_json(106));
     // The sticker file the custom emoji resolves to (completed download).
     apply(
         &mut session,
@@ -93,6 +94,77 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
     });
     session.open_chat(ChatId(11));
     session
+}
+
+/// A channel-post style message mixing custom emoji (at the start of
+/// paragraphs and mid-line), bold amounts, and inline links followed by
+/// punctuation, as seen in a real announcement post. Every paragraph must
+/// flow as one wrapped block of text.
+pub(super) fn rich_post_message_json(id: u64) -> String {
+    #[derive(Clone, Copy)]
+    enum Kind {
+        Plain,
+        Emoji,
+        Bold,
+        Link,
+    }
+    use Kind::*;
+    let parts: [(&str, Kind); 24] = [
+        ("\u{1F91D}", Emoji),
+        (" In just one month, Telegram has awarded over ", Plain),
+        ("$2,222,000", Bold),
+        (" to some of the brightest minds on our planet.\n\n", Plain),
+        ("\u{1F3A8}", Emoji),
+        (" This week alone we distributed ", Plain),
+        ("$222,000", Bold),
+        (
+            " among the winners of our two latest competitions \u{2014} the ",
+            Plain,
+        ),
+        ("Design Contest", Link),
+        (" and the ", Plain),
+        ("Digital Freedom Contest", Link),
+        (", ", Plain),
+        ("worth more", Link),
+        (" than ", Plain),
+        ("$2 million", Bold),
+        (
+            ".\n\nOn top of that, over the past month we awarded prizes to the winners of the 2026 International Olympiads in ",
+            Plain,
+        ),
+        ("Informatics", Link),
+        (" and ", Plain),
+        ("AI", Link),
+        (". ", Plain),
+        ("\u{1F3C6}", Emoji),
+        (" We're proud to support the best! ", Plain),
+        ("\u{1F680}", Emoji),
+        (" Keep building.", Plain),
+    ];
+    let mut text = String::new();
+    let mut entities = Vec::new();
+    for (part, kind) in parts {
+        let offset = text.encode_utf16().count();
+        text.push_str(part);
+        let length = part.encode_utf16().count();
+        let ty = match kind {
+            Plain => continue,
+            Emoji => {
+                r#"{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4242"}"#.to_string()
+            }
+            Bold => r#"{"@type":"textEntityTypeBold"}"#.to_string(),
+            Link => r#"{"@type":"textEntityTypeTextUrl","url":"https://example.com/contest"}"#
+                .to_string(),
+        };
+        entities.push(format!(
+            r#"{{"@type":"textEntity","offset":{offset},"length":{length},"type":{ty}}}"#
+        ));
+    }
+    let text = serde_json::to_string(&text).unwrap_or_default();
+    let entities = entities.join(",");
+    format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1790632400,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text},"entities":[{entities}]}}}}}}}}"#
+    )
 }
 
 /// Suggest-animated-emoji fixture — an injected `animatedEmoji` answer
