@@ -286,6 +286,11 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // The composer's link dialog closes first.
+        if self.composer_link_dialog.is_some() {
+            self.close_composer_link_dialog(window, cx);
+            return;
+        }
         // Slice CL: the peek preview is the most transient layer —
         // Escape dismisses it before anything else.
         if self.chat_preview.is_some() || self.preview_press.is_some() {

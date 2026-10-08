@@ -6,12 +6,10 @@ use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
 use super::history::{album_history_row, history_skeleton, session_history_row};
 use super::pressable::PressableDiv;
-use super::recording::RecordMode;
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
-use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::message_scroller::MessageScroller;
 use gpui_kit::component::*;
 use gpui_kit::gpui::StyleRefinement;
@@ -666,31 +664,11 @@ impl QuillApp {
                         })
                         // Phase A1: slow-mode countdown. The composer stays
                         // usable (typing is fine) but sends are blocked
-                        // until the wait expires; `ensure_slow_mode_tick`
-                        // re-renders every second so the number counts down.
-                        .when_some(self.slow_mode_wait_secs(), |this, wait| {
-                            this.child(
-                                div()
-                                    .id("slow-mode-banner")
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(text_muted())
-                                    .bg(bg_subtle())
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .font_medium()
-                                            .child(format!("Slow mode · wait {wait}s")),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(text_primary())
-                                            .child("sending is paused until the timer expires"),
-                                    ),
-                            )
+                        // until the wait expires; the send button shows the
+                        // remaining time (`composer_send_button`) and
+                        // `ensure_slow_mode_tick` re-renders every second.
+                        .when_some(self.composer_link_dialog_panel(cx), |this, panel| {
+                            this.child(panel)
                         })
                         // Non-default send options as clearable chips; the
                         // schedule picker opens above the input.
@@ -746,6 +724,9 @@ impl QuillApp {
                                         .relative()
                                         .flex_1()
                                         .min_w_0()
+                                        // Scopes Cmd/Ctrl+K to "edit link" here
+                                        // (see `composer_bindings`).
+                                        .key_context(super::keybindings::COMPOSER_CONTEXT)
                                         .child(
                                             Textarea::new(&self.composer)
                                                 .appearance(false)
@@ -773,85 +754,11 @@ impl QuillApp {
                                             |wrap, lines| wrap.child(lines),
                                         ),
                                 )
-                                // Telegram Desktop shows the mic while there's
-                                // nothing to send, and Send once there is.
-                                .when(show_attach && !sendable, |row| {
-                                    row.child(
-                                        // MED2: click records in the current
-                                        // mode; right-click flips audio/video
-                                        // mode (TGX tap-to-switch,
-                                        // desktop-mapped).
-                                        div()
-                                            .id("record-mode-wrap")
-                                            .on_mouse_down(
-                                                MouseButton::Right,
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.toggle_record_mode(cx);
-                                                }),
-                                            )
-                                            .child(
-                                                Button::new("record-voice")
-                                                    .icon(match self.record_mode() {
-                                                        RecordMode::Audio => IconName::Mic,
-                                                        RecordMode::Video => IconName::Video,
-                                                    })
-                                                    .ghost()
-                                                    .tooltip(self.record_mode().hint())
-                                                    .accessibility_label("Record")
-                                                    .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.start_recording(cx);
-                                                    })),
-                                            ),
-                                    )
-                                })
-                                .when(sendable, |row| {
-                                    row.child(
-                                        // Right-click: send options (silent,
-                                        // schedule, link preview).
-                                        div()
-                                            .id("composer-send-wrap")
-                                            .context_menu({
-                                                let owner = cx.entity().downgrade();
-                                                move |menu, _, cx| {
-                                                    QuillApp::send_options_menu(
-                                                        owner.clone(),
-                                                        menu,
-                                                        cx,
-                                                    )
-                                                }
-                                            })
-                                            .child(
-                                                Button::new("composer-send")
-                                                    .icon(IconName::Send)
-                                                    .primary()
-                                                    .rounded_full()
-                                                    .tooltip("Send · right-click for options")
-                                                    .accessibility_label("Send message")
-                                                    .on_click(cx.listener(
-                                                        |this, _, window, cx| {
-                                                            let text = this
-                                                                .composer
-                                                                .read(cx)
-                                                                .value()
-                                                                .to_string();
-                                                            // Same guard as
-                                                            // Enter-to-send: text, or
-                                                            // attachments without a
-                                                            // caption.
-                                                            if !text.trim().is_empty()
-                                                                || !this
-                                                                    .pending_attachments
-                                                                    .is_empty()
-                                                            {
-                                                                this.submit_composer(
-                                                                    text, window, cx,
-                                                                );
-                                                            }
-                                                        },
-                                                    )),
-                                            ),
-                                    )
-                                }),
+                                // Telegram Desktop's round button: the mic
+                                // while there's nothing to send, Send once
+                                // there is, Save when editing, the slow-mode
+                                // countdown while the chat is rate-limited.
+                                .child(self.composer_send_button(show_attach, sendable, cx)),
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.

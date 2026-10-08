@@ -39,10 +39,22 @@ actions!(
         SubmitPhone,
         SubmitCode,
         SubmitPassword,
-        /// M1: composer formatting shortcuts (ctrl-b / ctrl-i / ctrl-u).
+        /// Composer formatting shortcuts, after tdesktop's InputField:
+        /// Cmd/Ctrl+B / I / U and +Shift+X (strikethrough) / M (monospace) /
+        /// . (quote) / P (spoiler) / N (clear formatting).
         FormatBold,
         FormatItalic,
         FormatUnderline,
+        FormatStrikethrough,
+        FormatMonospace,
+        FormatBlockQuote,
+        FormatSpoiler,
+        FormatClear,
+        /// Cmd/Ctrl+K inside the composer (key context `QuillComposer`):
+        /// edit the link of the selection, or quick switch without one.
+        ComposerEditLink,
+        /// Cmd/Ctrl+Shift+V: paste the clipboard text as plain text.
+        ComposerPastePlain,
         /// Parity slice 5: step the fullscreen media viewer to the
         /// previous / next item (left/right arrows, viewer-open only).
         ViewerPrev,
