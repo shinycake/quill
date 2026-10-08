@@ -152,6 +152,7 @@ mod settings_ui;
 mod shared_media;
 mod shell;
 mod shortcuts;
+mod showcase_demo;
 #[cfg(target_os = "macos")]
 mod spellcheck_mac;
 mod spellcheck_ui;

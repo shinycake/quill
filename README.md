@@ -13,19 +13,19 @@ An independent, keyboard-first **Telegram desktop client** written in Rust — a
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/readme-bubble-headers.png" alt="Chat with forwarded, replied and via-bot bubble headers, pinned message bar"/><br/><sub>Bubble headers &amp; pinned message</sub></td>
-    <td><img src="docs/screenshots/readme-stories-archive.png" alt="Chat list with stories strip, archive row, unread badges and story rings (dark)"/><br/><sub>Chat list · stories &amp; archive</sub></td>
-    <td><img src="docs/screenshots/readme-service-messages.png" alt="Service messages: gifts, giveaways, chat theme and wallpaper changes"/><br/><sub>Service messages</sub></td>
+    <td><img src="docs/screenshots/readme-chat-dark.png" alt="Group chat in the dark theme: chat list with stories, archive row and badges; voice note, link preview and replies"/><br/><sub>Group chat · dark</sub></td>
+    <td><img src="docs/screenshots/readme-chat-light.png" alt="Group chat in the light theme with reactions, replies and colored sender names"/><br/><sub>Group chat · light</sub></td>
+    <td><img src="docs/screenshots/readme-media-viewer.png" alt="Fullscreen media viewer with zoom, forward and download actions"/><br/><sub>Media viewer</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/readme-player-bar.png" alt="Audio player bar with transport, seek, speed, repeat and shuffle (dark)"/><br/><sub>Audio player bar</sub></td>
-    <td><img src="docs/screenshots/readme-reactions-menu.png" alt="Reaction picker with message context menu (dark)"/><br/><sub>Reactions &amp; message menu</sub></td>
-    <td><img src="docs/screenshots/readme-polls.png" alt="Polls and quizzes with results and explanations"/><br/><sub>Polls &amp; quizzes</sub></td>
+    <td><img src="docs/screenshots/readme-reactions-menu.png" alt="Reaction picker over the message context menu"/><br/><sub>Reactions &amp; message menu</sub></td>
+    <td><img src="docs/screenshots/readme-polls.png" alt="Polls and a closed quiz with explanation"/><br/><sub>Polls &amp; quizzes</sub></td>
+    <td><img src="docs/screenshots/readme-player-bar.png" alt="Audio player bar above a private chat with music, a photo and reactions"/><br/><sub>Audio player bar</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/readme-media-viewer.png" alt="Fullscreen media viewer with zoom, forward and download actions (dark)"/><br/><sub>Media viewer</sub></td>
-    <td><img src="docs/screenshots/readme-voice-recording.png" alt="Voice message recording bar with waveform and voice notes with transcription"/><br/><sub>Voice messages</sub></td>
-    <td><img src="docs/screenshots/readme-appearance-dark.png" alt="Appearance settings: themes, accent colors, wallpapers, text size (dark)"/><br/><sub>Appearance settings</sub></td>
+    <td><img src="docs/screenshots/readme-channel-photos.png" alt="Channel with photo posts, reactions and view counts"/><br/><sub>Channels</sub></td>
+    <td><img src="docs/screenshots/readme-appearance-dark.png" alt="Appearance settings: themes, accent colors, wallpapers"/><br/><sub>Appearance settings</sub></td>
+    <td><img src="docs/screenshots/readme-accent-light.png" alt="Private chat in the light theme with a purple accent color"/><br/><sub>Accent colors</sub></td>
   </tr>
 </table>
 

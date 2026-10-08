@@ -306,6 +306,10 @@ pub enum ScreenshotDemo {
     /// channel and an imported message; "via @bot"; and the footer's
     /// "edited" / pin / views / "imported" marks.
     ReadyBubbleHeaders,
+    /// README showcase scene: a populated account (generated avatars and
+    /// photos, a lively group conversation); `QUILL_DEMO_SHOWCASE` picks
+    /// the view.
+    ReadyShowcase,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting
