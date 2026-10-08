@@ -1858,6 +1858,7 @@ impl QuillApp {
             restrict_dialog: None,
             group_confirm_dialog: None,
             message_menu_selection: None,
+            message_menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             media_viewer: MediaViewer::closed(),
             photo_editor: None,
             viewer_zoom: ViewerZoom::new(),

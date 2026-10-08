@@ -88,6 +88,8 @@ pub struct Session {
     pub message_report: Option<MessageReportFlow>,
     /// Viewers, read date and reactors of the message the menu is open on.
     pub message_audience: Option<MessageAudience>,
+    /// The sticker set the message menu's "View Sticker Set" opened.
+    pub sticker_set_view: Option<StickerSetView>,
     /// One-shot result of an admin moderation call from the delete box
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
@@ -1032,6 +1034,7 @@ impl Session {
             message_menu_actions: None,
             message_report: None,
             message_audience: None,
+            sticker_set_view: None,
             message_action_note: None,
             supergroup_member_counts: HashMap::new(),
             basic_group_member_counts: HashMap::new(),

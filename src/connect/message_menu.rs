@@ -5,7 +5,7 @@ use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::{ChatKind, MessageActions};
 use crate::telegram::requests::{
-    delete_chat_messages_by_sender, get_message_added_reactions, get_message_read_date,
+    add_profile_audio, get_installed_sticker_sets, get_sticker_set, delete_chat_messages_by_sender, delete_messages, get_message_added_reactions, get_message_read_date,
     get_message_viewers, report_chat_messages, report_supergroup_spam,
 };
 
@@ -183,5 +183,115 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.ban_chat_member(chat_id, user_id, 0)?;
         }
         Ok(())
+    }
+
+    /// "Save to... Profile": add a song to the profile's music.
+    pub fn save_audio_to_profile(
+        &mut self,
+        file_id: crate::ids::FileId,
+        duration: i32,
+        title: &str,
+        performer: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || file_id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(RequestPurpose::AddProfileAudio, None);
+        let json = add_profile_audio(extra, file_id.0, duration, title, performer);
+        self.send_audience(extra, &json)?;
+        Ok(extra)
+    }
+
+    /// "Cancel Upload": TDLib stops sending a message that is still being
+    /// sent when it is deleted. Only a pending media message qualifies.
+    pub fn cancel_upload(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let uploading = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|h| h.messages.get(&message_id.0))
+            .is_some_and(|m| {
+                m.pending && crate::message_menu::media_target(&m.content).is_some()
+            });
+        if !uploading {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::CancelUpload, Some(chat_id));
+        let json = delete_messages(extra, chat_id, &[message_id], false);
+        self.send_audience(extra, &json)?;
+        Ok(extra)
+    }
+
+    /// Open the sticker set a message's sticker belongs to
+    /// (`getStickerSet`); the answer lands in `Session::sticker_set_view`.
+    pub fn view_sticker_set(&mut self, set_id: i64) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || set_id == 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.sticker_set_view = Some(crate::state::StickerSetView {
+            set_id,
+            stage: crate::state::StickerSetViewStage::Loading,
+            files_requested: false,
+        });
+        let extra = self
+            .session
+            .request(RequestPurpose::ViewStickerSet { set_id }, None);
+        match self.sender.send_json(&get_sticker_set(extra, set_id)) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.fail_sticker_set_view(set_id);
+                Err(err)
+            }
+        }
+    }
+
+    /// Download the sticker previews of the open set view, once.
+    pub fn ensure_sticker_set_view_files(&mut self) -> Result<(), ConnectSendError> {
+        let Some(view) = self.session.sticker_set_view.as_mut() else {
+            return Ok(());
+        };
+        let crate::state::StickerSetViewStage::Ready { stickers, .. } = &view.stage else {
+            return Ok(());
+        };
+        if view.files_requested {
+            return Ok(());
+        }
+        view.files_requested = true;
+        let files: Vec<crate::ids::FileId> = stickers
+            .iter()
+            .filter_map(|s| s.display_file_id())
+            .take(60)
+            .collect();
+        self.ensure_media_files(&files)
+    }
+
+    /// What a sticker message's menu needs to word its sticker items:
+    /// whether the set is installed and whether the sticker is a favorite.
+    pub fn fetch_sticker_menu_facts(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.stickers.installed_loaded
+            && !self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetInstalledStickerSets)
+        {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetInstalledStickerSets, None);
+            self.send_audience(extra, &get_installed_sticker_sets(extra))?;
+        }
+        self.fetch_editor_stickers()
     }
 }

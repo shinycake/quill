@@ -342,6 +342,29 @@ pub fn sent_label(date: &CivilTime, now: &CivilTime) -> String {
     }
 }
 
+/// "Edited today at 12:36" (the date row `WhenEdited` shows).
+pub fn edited_label(date: &CivilTime, now: &CivilTime) -> String {
+    format!("Edited {}", read_date_label(date, now))
+}
+
+/// The file name "Save As..." proposes: the file's own name, else the
+/// local file's name, with the audio's "Performer - Title" preferred over
+/// a bare id-like name.
+pub fn suggested_save_name(target: &MediaTarget, local_name: &str) -> String {
+    if !target.file_name.is_empty() {
+        return target.file_name.clone();
+    }
+    let extension = std::path::Path::new(local_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
+    match (&target.copy_name, extension) {
+        (Some(name), "") => name.clone(),
+        (Some(name), ext) => format!("{name}.{ext}"),
+        (None, _) => local_name.to_string(),
+    }
+}
+
 /// Telegram Desktop's wording for the link item: a supergroup gets "Copy
 /// Message Link", a channel "Copy Post Link"
 /// (`lng_context_copy_message_link` / `lng_context_copy_post_link`).
@@ -606,6 +629,36 @@ mod tests {
         assert_eq!(
             read_status_label(MessageReadDate::TooOld, &now),
             "Seen a long time ago"
+        );
+    }
+
+    #[test]
+    fn save_names_prefer_the_files_own_name() {
+        let mut t = target(MediaKind::Document);
+        assert_eq!(
+            crate::message_menu::suggested_save_name(&t, "/cache/x1.bin"),
+            "name.bin"
+        );
+        t.file_name.clear();
+        t.copy_name = Some("Artist - Song".into());
+        assert_eq!(
+            crate::message_menu::suggested_save_name(&t, "/cache/x1.mp3"),
+            "Artist - Song.mp3"
+        );
+        t.copy_name = None;
+        assert_eq!(
+            crate::message_menu::suggested_save_name(&t, "/cache/photo_7.jpg"),
+            "/cache/photo_7.jpg".to_string()
+        );
+    }
+
+    #[test]
+    fn edited_row_reads_like_the_read_date() {
+        let now = civil_at(NOW, 0);
+        let earlier = civil_at(NOW - 600, 0);
+        assert_eq!(
+            crate::message_menu::edited_label(&earlier, &now),
+            "Edited today at 21:32"
         );
     }
 

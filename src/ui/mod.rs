@@ -120,6 +120,7 @@ mod media_panel;
 mod media_viewer;
 mod message_actions;
 mod message_games;
+mod message_menu_ui;
 mod message_media;
 mod message_payments;
 mod message_poll;

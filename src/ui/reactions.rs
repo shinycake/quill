@@ -50,6 +50,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_menu = Some(menu);
+        self.message_menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
         self.message_menu_link = self.take_right_clicked_link(menu.position);
         self.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
@@ -65,6 +66,26 @@ impl QuillApp {
             let _ = live
                 .driver
                 .fetch_message_menu_actions(menu.chat_id, menu.message_id);
+            // Stickers and GIFs word their menu items by what the user has
+            // installed, favorited and saved.
+            let content = live
+                .driver
+                .session
+                .histories
+                .get(&menu.chat_id.0)
+                .and_then(|h| h.messages.get(&menu.message_id.0))
+                .map(|m| quill::telegram::envelope::effective_content(&m.content, m.ephemeral.as_ref()).clone());
+            match content {
+                Some(quill::telegram::envelope::MessageContent::Sticker(_)) => {
+                    let _ = live.driver.fetch_sticker_menu_facts();
+                }
+                Some(quill::telegram::envelope::MessageContent::Animation(_))
+                    if !live.driver.session.gifs.loaded =>
+                {
+                    let _ = live.driver.show_saved_gifs();
+                }
+                _ => {}
+            }
         }
         cx.notify();
     }

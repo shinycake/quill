@@ -328,6 +328,16 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // Ban / delete-all / report-spam from the delete box, and "Save to
+        // Profile": their outcome lands in the status note.
+        if let Some(note) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.message_action_note.take())
+        {
+            self.status_note = note;
+            progressed = true;
+        }
         // Slice CL3: a `reportChat` outcome arrived — surface it in the
         // status bar alongside the other async error drains.
         if let Some(note) = self

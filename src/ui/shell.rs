@@ -109,6 +109,10 @@ pub enum DialogKind {
     /// "Open this link?" for a hidden or look-alike message link.
     OpenLink,
     PollVoters,
+    /// The message menu's Report flow.
+    MessageReport,
+    /// "View Sticker Set" / "Add Stickers" from a sticker message.
+    StickerSet,
     ArchiveSettings,
     ArchivedStickers,
     EmojiSets,
@@ -195,6 +199,8 @@ impl QuillShell {
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
             DialogKind::OpenLink => app.open_link_confirm.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
+            DialogKind::MessageReport => app.message_menu_ui.report_open,
+            DialogKind::StickerSet => app.message_menu_ui.sticker_set_open,
             DialogKind::ArchivedStickers => app.sticker_settings_open,
             DialogKind::EmojiSets => app.session().is_some_and(|s| s.emoji.open),
             DialogKind::ArchiveSettings => app.session().is_some_and(|s| s.archive_settings_open),
@@ -246,6 +252,8 @@ impl QuillShell {
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
             DialogKind::OpenLink => QuillApp::build_open_link_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
+            DialogKind::MessageReport => QuillApp::build_message_report_dialog,
+            DialogKind::StickerSet => QuillApp::build_sticker_set_dialog,
             DialogKind::ArchiveSettings => QuillApp::build_archive_settings_dialog,
             DialogKind::ArchivedStickers => QuillApp::build_archived_stickers_dialog,
             DialogKind::EmojiSets => QuillApp::build_emoji_sets_dialog,
@@ -324,6 +332,8 @@ impl QuillShell {
         DialogKind::ForumManage,
         DialogKind::CommentThread,
         DialogKind::PollVoters,
+        DialogKind::MessageReport,
+        DialogKind::StickerSet,
         DialogKind::Welcome,
         DialogKind::ImportContacts,
         DialogKind::EditProfile,

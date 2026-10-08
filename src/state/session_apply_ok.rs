@@ -16,6 +16,9 @@ impl Session {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::AddProfileAudio) => {
+                self.message_action_note = Some("saved to your profile".into());
+            }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
                 self.message_action_note = Some("messages deleted".into());
             }

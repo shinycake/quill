@@ -255,6 +255,10 @@ pub(crate) fn parse_sticker_set(value: &Value) -> EnvelopePayload {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        is_installed: value
+            .get("is_installed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         stickers,
         files,
     }

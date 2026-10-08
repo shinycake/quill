@@ -2,6 +2,9 @@
 
 use super::app::QuillApp;
 use super::chat_row::{ChatPreviewState, chat_preview_line};
+use super::message_menu_ui::{
+    MenuRow, MessageMenuPage, info_row, menu_row, menu_separator, stack_rows,
+};
 use super::message_text::message_rich_block;
 use super::search_ui::chat_search_jump_note;
 use super::*;
@@ -13,6 +16,7 @@ use gpui_kit::*;
 use quill::composer::DeleteConfirm;
 use quill::connect::PREVIEW_HISTORY_LIMIT;
 use quill::diagnostics::DiagnosticSink;
+use quill::message_menu::order;
 use quill::ids::{ChatId, MessageId};
 use quill::poll::can_stop_poll;
 use quill::state::{RequestPurpose, effective_preview};
@@ -118,8 +122,8 @@ impl QuillApp {
         // Reactions lead the menu (Telegram Desktop): the chat's quick
         // strip in its own pill above the menu, expandable to every
         // reaction it allows.
-        let strip = message
-            .can_react()
+        let page = self.message_menu_ui.page;
+        let strip = (message.can_react() && page == MessageMenuPage::Main)
             .then(|| self.reaction_strip(chat_id, message_id, &message, cx));
         // Telegram Desktop's message menu: left-aligned rows with an icon,
         // in its order (Reply, Edit, Pin, Copy Text, Copy Link, Forward,
@@ -159,7 +163,7 @@ impl QuillApp {
         if can_reply {
             let quote = selection.clone();
             item!(
-                10,
+                order::REPLY,
                 gpui_kit::assets::IconName::Reply,
                 "menu-reply",
                 if quote.is_some() {
@@ -195,7 +199,13 @@ impl QuillApp {
             copy.filter(|_| !protected && allows(true, |a| a.can_be_copied))
         {
             item!(
-                40,
+                // Copy Selected Text leads the menu; Copy Text follows the
+                // media actions (`FillContextMenuItems`).
+                if label == "Copy Text" {
+                    order::COPY_TEXT
+                } else {
+                    order::COPY_SELECTED
+                },
                 gpui_kit::assets::IconName::Copy,
                 "menu-copy",
                 label,
@@ -333,10 +343,10 @@ impl QuillApp {
         }
         if allows(is_shared_chat, |a| a.can_get_link) {
             item!(
-                45,
+                order::COPY_POST_LINK,
                 gpui_kit::assets::IconName::Link,
                 "menu-share",
-                "Copy Message Link",
+                quill::message_menu::copy_link_label(is_channel_post),
                 this,
                 _window,
                 cx,
@@ -416,6 +426,7 @@ impl QuillApp {
             confirm.revoke = can_revoke;
             confirm
         });
+        let moderation = self.moderation_offer(chat_id, &message, actions);
         if let Some(confirm) =
             delete_confirm.filter(|_| allows(!is_channel_post, |a| a.can_be_deleted()))
         {
@@ -428,15 +439,124 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.open_delete_dialog(confirm.clone(), window, cx);
+                    this.open_delete_dialog_with(
+                        confirm.clone(),
+                        moderation.clone(),
+                        window,
+                        cx,
+                    );
                     this.message_menu = None;
                     cx.notify();
                 }
             );
         }
-        rows.sort_by_key(|(order, _)| *order);
-        for (_, row) in rows {
-            panel = panel.child(row);
+        // Cancel Upload takes Delete's place on a message still being sent.
+        if message.pending
+            && quill::message_menu::media_target(effective_content(
+                &message.content,
+                message.ephemeral.as_ref(),
+            ))
+            .is_some()
+        {
+            let cancel = menu_row(
+                order::DELETE,
+                gpui_kit::assets::IconName::X,
+                "menu-cancel-upload",
+                "Cancel Upload",
+                true,
+                cx,
+                move |this, _, cx| {
+                    this.cancel_message_upload(chat_id, message_id, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                },
+            );
+            rows.push(cancel);
+        }
+        // Telegram Desktop's media block, Report, and the audience rows.
+        rows.extend(self.menu_media_rows(chat_id, &message, actions, cx));
+        let reportable = !message.pending
+            && message.id.0 > 0
+            && !message.is_outgoing
+            && !saved
+            && actions.map_or(true, |a| a.can_report_chat);
+        if reportable {
+            let report = menu_row(
+                order::REPORT,
+                gpui_kit::assets::IconName::Flag,
+                "menu-report",
+                "Report",
+                false,
+                cx,
+                move |this, _, cx| {
+                    // A grouped album reports every photo in it.
+                    this.open_message_report(chat_id, vec![message_id], cx);
+                },
+            );
+            rows.push(report);
+        }
+        let audience_rows = self.menu_audience_rows(chat_id, &message, cx);
+        if !audience_rows.is_empty() {
+            rows.push(menu_separator(order::AUDIENCE - 1));
+            rows.extend(audience_rows);
+        }
+        // Nothing to copy or forward: say why (`AddSelectRestrictionAction`).
+        if protected && !message.pending {
+            let is_group = matches!(chat_kind, Some(ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. }));
+            rows.push(info_row(
+                order::SELECT,
+                "menu-noforwards",
+                None,
+                quill::message_menu::noforwards_info(
+                    is_channel_post,
+                    is_group && !is_channel_post,
+                    false,
+                    message.is_outgoing,
+                ),
+            ));
+        }
+        let _translate_hook = (order::TRANSLATE_SELECTED, order::TRANSLATE);
+        // Batch 7 adds "Translate Selected Text" and "Translate" to `rows`
+        // with those two sort keys.
+        let page_rows: Vec<MenuRow> = match page {
+            MessageMenuPage::Main => rows,
+            sub => {
+                let mut sub_rows = vec![menu_row(
+                    0,
+                    gpui_kit::assets::IconName::ChevronLeft,
+                    "menu-back",
+                    match sub {
+                        MessageMenuPage::SaveTo => "Save to...",
+                        _ => "Back",
+                    },
+                    false,
+                    cx,
+                    |this, _, cx| {
+                        this.message_menu_ui.page = MessageMenuPage::Main;
+                        cx.notify();
+                    },
+                )];
+                sub_rows.extend(match sub {
+                    MessageMenuPage::SaveTo => self.menu_save_to_rows(chat_id, message_id, cx),
+                    _ => self.menu_audience_page(chat_id, &message, cx),
+                });
+                sub_rows
+            }
+        };
+        let stacked = stack_rows(page_rows);
+        if page == MessageMenuPage::Audience {
+            panel = panel.w(px(280.));
+            panel = panel.child(
+                div()
+                    .id("menu-audience-scroll")
+                    .flex()
+                    .flex_col()
+                    .max_h(px(360.))
+                    .overflow_y_scroll()
+                    .children(stacked),
+            );
+        } else {
+            panel = panel.children(stacked);
         }
         div()
             .id("message-menu-overlay")

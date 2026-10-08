@@ -1,7 +1,7 @@
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{
-    delete_chat_messages_by_sender, get_message_added_reactions, get_message_read_date,
+    add_profile_audio, delete_chat_messages_by_sender, get_message_added_reactions, get_message_read_date,
     get_message_viewers, report_chat_messages, report_supergroup_spam,
 };
 use serde_json::Value;
@@ -79,4 +79,14 @@ fn moderation_requests_match_the_schema() {
     assert_eq!(spam["@type"], "reportSupergroupSpam");
     assert_eq!(spam["supergroup_id"], 9);
     assert_eq!(spam["message_ids"], serde_json::json!([4]));
+}
+
+#[test]
+fn profile_audio_is_sent_by_file_id() {
+    let value = parse(&add_profile_audio(RequestId(3), 12, 200, "Song", "Artist"));
+    assert_eq!(value["@type"], "addProfileAudio");
+    assert_eq!(value["audio"]["@type"], "inputAudio");
+    assert_eq!(value["audio"]["audio"]["@type"], "inputFileId");
+    assert_eq!(value["audio"]["audio"]["id"], 12);
+    assert_eq!(value["audio"]["performer"], "Artist");
 }

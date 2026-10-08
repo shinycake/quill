@@ -111,7 +111,8 @@ pub use session::*;
 pub(crate) use session_chat_search::history_message;
 pub use session_history_window::MentionSearch;
 pub use session_message_menu::{
-    Audience, MessageAudience, MessageReportFlow, MessageReportStage,
+    Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
+    StickerSetViewStage,
 };
 pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,

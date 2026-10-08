@@ -756,6 +756,8 @@ pub enum EnvelopePayload {
         id: i64,
         title: String,
         name: String,
+        /// `stickerSet.is_installed`: the set is in the user's collection.
+        is_installed: bool,
         stickers: Vec<StickerItem>,
         files: Vec<ParsedFile>,
     },

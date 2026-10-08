@@ -1543,7 +1543,7 @@ fn custom_emoji_chip_glyph(
 }
 
 /// A reactor's avatar: name and (sandboxed) photo for a user or chat.
-fn reactor_avatar(
+pub(super) fn reactor_avatar(
     sender: &quill::telegram::envelope::MessageSender,
     session: Option<&Session>,
     media_roots: &[PathBuf],

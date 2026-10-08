@@ -104,3 +104,28 @@ pub fn report_supergroup_spam(
     })
     .to_string()
 }
+
+/// `addProfileAudio audio:inputAudio = Ok` (schema 1.8.67, line 14604):
+/// "Save to... Profile" for a song. The file is sent by its TDLib file id
+/// (`inputFileId`), so nothing is uploaded again.
+pub fn add_profile_audio(
+    extra: RequestId,
+    file_id: i32,
+    duration: i32,
+    title: &str,
+    performer: &str,
+) -> String {
+    json!({
+        "@type": "addProfileAudio",
+        "@extra": extra.as_extra(),
+        "audio": {
+            "@type": "inputAudio",
+            "audio": { "@type": "inputFileId", "id": file_id },
+            "album_cover_thumbnail": Value::Null,
+            "duration": duration,
+            "title": title,
+            "performer": performer,
+        },
+    })
+    .to_string()
+}

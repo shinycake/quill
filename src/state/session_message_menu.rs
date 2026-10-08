@@ -89,7 +89,54 @@ impl MessageAudience {
     }
 }
 
+/// The sticker set behind "View Sticker Set" / "Add Stickers".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StickerSetView {
+    pub set_id: i64,
+    pub stage: StickerSetViewStage,
+    /// The sticker files were asked to download.
+    pub files_requested: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StickerSetViewStage {
+    Loading,
+    Ready {
+        title: String,
+        installed: bool,
+        stickers: Vec<StickerItem>,
+    },
+    Failed,
+}
+
 impl Session {
+    /// The set's contents arrived.
+    pub(crate) fn accept_sticker_set_view(
+        &mut self,
+        set_id: i64,
+        title: String,
+        installed: bool,
+        stickers: Vec<StickerItem>,
+    ) {
+        if let Some(view) = self.sticker_set_view.as_mut()
+            && view.set_id == set_id
+        {
+            view.stage = StickerSetViewStage::Ready {
+                title,
+                installed,
+                stickers,
+            };
+        }
+    }
+
+    pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64) {
+        if let Some(view) = self.sticker_set_view.as_mut()
+            && view.set_id == set_id
+        {
+            view.stage = StickerSetViewStage::Failed;
+        }
+    }
+
     /// Start reporting `message_ids` of `chat_id`.
     pub fn begin_message_report(&mut self, chat_id: ChatId, message_ids: Vec<MessageId>) {
         self.message_report = Some(MessageReportFlow {

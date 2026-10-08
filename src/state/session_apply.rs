@@ -1888,9 +1888,16 @@ impl Session {
                 stickers,
                 files,
                 title,
+                is_installed,
                 ..
             } => {
-                if let Some(RequestPurpose::LoadLibrarySet { set_id }) = pending.map(|p| p.purpose)
+                if let Some(RequestPurpose::ViewStickerSet { set_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.remember_files(&files);
+                    self.accept_sticker_set_view(set_id, title, is_installed, stickers);
+                } else if let Some(RequestPurpose::LoadLibrarySet { set_id }) =
+                    pending.map(|p| p.purpose)
                 {
                     self.remember_files(&files);
                     self.accept_library_set(set_id, stickers);

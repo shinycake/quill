@@ -241,6 +241,15 @@ pub enum RequestPurpose {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// "View Sticker Set" / "Add Stickers" on a sticker message:
+    /// `getStickerSet`, answered into `Session::sticker_set_view`.
+    ViewStickerSet {
+        set_id: i64,
+    },
+    /// "Save to... Profile" on a song: `addProfileAudio`.
+    AddProfileAudio,
+    /// "Cancel Upload": `deleteMessages` on a message still being sent.
+    CancelUpload,
     /// Admin moderation from the delete box: `deleteChatMessagesBySender`.
     DeleteChatMessagesBySender,
     /// Admin moderation from the delete box: `reportSupergroupSpam`.
