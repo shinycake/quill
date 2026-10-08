@@ -11,6 +11,7 @@ mod folders;
 mod group_calls;
 mod groups;
 mod media;
+mod message_menu;
 mod messages;
 mod misc;
 mod payments;
@@ -33,6 +34,8 @@ mod tests_groups;
 #[cfg(test)]
 mod tests_media;
 #[cfg(test)]
+mod tests_message_menu;
+#[cfg(test)]
 mod tests_messages;
 #[cfg(test)]
 mod tests_misc;
@@ -54,6 +57,7 @@ pub use folders::*;
 pub use group_calls::*;
 pub use groups::*;
 pub use media::*;
+pub use message_menu::*;
 pub use messages::*;
 pub(crate) use messages::{
     formatted_caption, message_topic_value, self_destruct_type_value, send_reply_value,

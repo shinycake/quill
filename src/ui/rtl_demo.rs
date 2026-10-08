@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 /// The Hebrew chats: (chat id, title, last message text, outgoing, unread, order).
-const CHATS: [(i64, &str, &str, bool, i32, i64); 5] = [
+const CHATS: [(i64, &str, &str, bool, i32, i64); 7] = [
     (
         31,
         "משפחה כהן",
@@ -45,10 +45,27 @@ const CHATS: [(i64, &str, &str, bool, i32, i64); 5] = [
         0,
         2010,
     ),
+    // Emoji in right-to-left text (codex:rtl-emoji): the live bug report's caption.
+    (
+        38,
+        "ערוץ חדשות",
+        "תיעוד התקיפה, אחרי התרעת פינוי, על בית משפחת א-סואפירי בשכונת צברה בעיר עזה \u{261D}\u{FE0F}",
+        false,
+        1,
+        2005,
+    ),
+    (
+        39,
+        "יעל",
+        "מעולה \u{1F44D}\u{1F3FD} \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{1F1EE}\u{1F1F1} 1\u{FE0F}\u{20E3}",
+        false,
+        0,
+        2004,
+    ),
 ];
 
 /// Messages of the open chat (11): (id, outgoing, text).
-const MESSAGES: [(i64, bool, &str); 8] = [
+const MESSAGES: [(i64, bool, &str); 10] = [
     (911, false, "תודה רבה!"),
     (912, true, "בסדר גמור"),
     (
@@ -65,6 +82,16 @@ const MESSAGES: [(i64, bool, &str); 8] = [
         "שלום עולם, מה שלומך היום? זו הודעה ארוכה יותר כדי לראות את הטקסט נשבר לשורות בתוך הבועה.",
     ),
     (918, true, "בשמחה"),
+    (
+        919,
+        false,
+        "תיעוד התקיפה, אחרי התרעת פינוי, על בית משפחת א-סואפירי בשכונת צברה בעיר עזה \u{261D}\u{FE0F}",
+    ),
+    (
+        920,
+        true,
+        "מעולה \u{1F44D}\u{1F3FD} \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{1F1EE}\u{1F1F1} שלב 1\u{FE0F}\u{20E3} done \u{261D}\u{FE0F}",
+    ),
 ];
 
 /// Applies the fixture; `view` is `chat` or `search`.

@@ -16,6 +16,18 @@ impl Session {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
         self.apply_proxy_ok(pending);
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::AddProfileAudio) => {
+                self.message_action_note = Some("saved to your profile".into());
+            }
+            Some(RequestPurpose::DeleteChatMessagesBySender) => {
+                self.message_action_note = Some("messages deleted".into());
+            }
+            Some(RequestPurpose::ReportSupergroupSpam) => {
+                self.message_action_note = Some("spam reported".into());
+            }
+            _ => {}
+        }
         // Slice A3: a `terminateSession` /
         // `terminateAllOtherSessions` succeeded — keep the old
         // cache visible and mark it stale so the driver refetches

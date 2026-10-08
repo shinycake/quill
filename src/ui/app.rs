@@ -496,6 +496,8 @@ pub struct QuillApp {
     /// (list / switch / add / remove). Working state lives in
     /// `accounts.rs`; this is the one field the dialog machinery reads.
     pub(super) accounts_ui: AccountsUiState,
+    /// Local passcode: settings dialog, lock screen, auto-lock.
+    pub(super) passcode_ui: super::passcode::PasscodeUi,
     /// Slice A3: Active Sessions overlay (TGX Settings → Devices /
     /// `SettingsSessionsController`).
     pub(super) sessions_open: bool,
@@ -737,6 +739,8 @@ pub struct QuillApp {
     /// Message text selected when the message menu opened, if the
     /// selection lies in that message (Quote & Reply, Copy Selected Text).
     pub(super) message_menu_selection: Option<String>,
+    /// Page, report and sticker-set dialogs of the message menu's extras.
+    pub(super) message_menu_ui: super::message_menu_ui::MessageMenuUi,
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     pub(super) media_viewer: MediaViewer,
     /// Shared Media paging, video full screen and inactive-window state of

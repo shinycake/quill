@@ -36,6 +36,7 @@ pub(super) enum NavigationAction {
     TwoFa,
     Sessions,
     Websites,
+    Passcode,
     Account,
     Accounts,
     Notifications,
@@ -163,6 +164,7 @@ impl QuillApp {
             NavigationAction::Sessions => {
                 self.open_sessions(cx);
             }
+            NavigationAction::Passcode => self.open_passcode(cx),
             NavigationAction::Websites => {
                 self.open_websites(cx);
             }
@@ -215,6 +217,7 @@ impl QuillApp {
                         this.open_privacy(cx);
                     })),
             )
+            .child(self.settings_link("Local passcode", NavigationAction::Passcode, cx))
             .child(self.settings_link("Two-step verification", NavigationAction::TwoFa, cx))
             .child(self.settings_link("Connected websites", NavigationAction::Websites, cx))
             .child(self.settings_link(

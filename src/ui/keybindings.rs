@@ -2,10 +2,10 @@ use super::actions::{
     CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
     ComposerPastePlain, FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear,
     FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, LoadOlder,
-    MinimizeWindow, NextChat, OpenChatSearch, OpenHelp, OpenSearch, OpenSettings, OpenShortcuts,
-    PrevChat, QuitApp, ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
-    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
-    ViewerZoomReset, ZoomWindow,
+    LockApp, MinimizeWindow, NextChat, OpenChatSearch, OpenHelp, OpenSearch, OpenSettings,
+    OpenShortcuts, PrevChat, QuitApp, ToggleFullscreen, ToggleTheme, ViewerCopy,
+    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
+    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -310,6 +310,10 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-,", OpenSettings, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("ctrl-w", CloseWindow, None),
+        // Local passcode. tdesktop uses Ctrl/Cmd+L, which Quill already
+        // gives to "Focus composer", so lock takes the Shift variant.
+        KeyBinding::new("cmd-shift-l", LockApp, None),
+        KeyBinding::new("ctrl-shift-l", LockApp, None),
         KeyBinding::new("cmd-m", MinimizeWindow, None),
         KeyBinding::new("ctrl-m", MinimizeWindow, None),
         KeyBinding::new("f11", ToggleFullscreen, None),
@@ -666,6 +670,8 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("ctrl-q", "Quit Quill", "General", QuitApp),
         // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
         // minimize; F11 / Cmd+Ctrl+F fullscreen).
+        row("cmd-shift-l", "Lock Quill", "General", LockApp),
+        row("ctrl-shift-l", "Lock Quill", "General", LockApp),
         row("cmd-w", "Close window", "General", CloseWindow),
         row("ctrl-w", "Close window", "General", CloseWindow),
         row("cmd-m", "Minimize window", "General", MinimizeWindow),
@@ -809,6 +815,7 @@ fn app_menus() -> Vec<Menu> {
     #[cfg(target_os = "macos")]
     menus.push(Menu::new("Quill").items([
         MenuItem::action("Settings…", OpenSettings),
+        MenuItem::action("Lock Quill", LockApp),
         MenuItem::separator(),
         MenuItem::action("Quit Quill", QuitApp),
     ]));
@@ -892,7 +899,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 49);
+        assert_eq!(defaults.len(), 51);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
