@@ -3,7 +3,7 @@
 //! Pure seek-state machine behind the history-row seek bars: it tracks the
 //! elapsed position of one track against the TDLib `duration`, with
 //! pause/resume and clamped seeking. There is no GPUI and no subprocess
-//! here — the UI layer (`src/ui/mod.rs`) owns the ffplay child, the
+//! here — the UI layer (`src/ui/audio`) owns the in-process player, the
 //! `SliderState` entity, and the tick that re-renders while playing.
 
 use std::time::Instant;
@@ -14,7 +14,7 @@ use std::time::Instant;
 /// seek target, or resume point) and an optional `started_at` instant while
 /// the player is running. Elapsed time is `base + (now - started) * rate`,
 /// always clamped to `[0, duration]`. `rate` is the playback speed
-/// multiplier (TGX `PlaybackSpeed*`: 0.5x–2x); ffplay applies the same
+/// multiplier (TGX `PlaybackSpeed*`: 0.5x–2x); the player applies the same
 /// factor through its `atempo` filter so audio stays in sync.
 #[derive(Debug, Clone)]
 pub struct PlaybackClock {

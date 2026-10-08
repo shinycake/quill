@@ -33,7 +33,7 @@ use quill::voice::format_voice_duration;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::process::{Child, Stdio};
+use std::process::Child;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -268,7 +268,7 @@ impl QuillApp {
     /// extracted with ffmpeg, pre-decoded into GPUI image handles, and
     /// rendered in-place in the viewer overlay (no GPUI video element in
     /// this stack — same frame-cycling approach as the row video preview,
-    /// but full-clip); ffplay runs `-nodisp` for the audio track only. The
+    /// but full-clip); the audio engine plays the audio track. The
     /// overlay keeps Play/Pause and elapsed/total; the thumbnail shows
     /// until frames are ready. Closing or stepping the viewer stops
     /// playback and drops the frame cache.
@@ -311,7 +311,7 @@ impl QuillApp {
     ///
     /// Parity slice 5: the clip's frames are extracted (async — ffmpeg takes
     /// ~2 s for a 12 s clip), decoded into pre-loaded image handles, and
-    /// rendered in-viewer; ffplay runs `-nodisp` for audio only. If frames
+    /// rendered in-viewer; the audio engine plays the sound. If frames
     /// are already cached for this file (e.g. the screenshot demo decoded
     /// them synchronously), playback starts at once. Every start path
     /// routes through `decide_viewer_video_start` so a local clip without
@@ -707,7 +707,7 @@ impl QuillApp {
     /// Stops every other player first — one thing plays at a time.
     /// Frames must already be in `viewer_video_frames` (extracted async by
     /// `extract_viewer_frames`, or synchronously by the screenshot demo).
-    /// State only: the caller spawns ffplay (the screenshot demo skips the
+    /// State only: the caller starts the audio (the screenshot demo skips the
     /// subprocess, like the audio slice's demo).
     pub(super) fn begin_viewer_video(
         &mut self,
@@ -755,7 +755,7 @@ impl QuillApp {
         .detach();
         self.viewer_seek_slider = Some(slider);
         // MED1: volume slider (0–100%); applies on release so a drag
-        // doesn't restart ffplay per tick.
+        // doesn't restart the sound per tick.
         let volume = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
@@ -771,7 +771,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Begin viewer playback *and* spawn ffplay for audio — unless this
+    /// Begin viewer playback *and* start the audio — unless this
     /// is a screenshot demo, which skips the subprocess (same posture as
     /// `request_media_download`'s demo branch).
     pub(super) fn play_viewer_video(
@@ -783,7 +783,7 @@ impl QuillApp {
         self.begin_viewer_video(item, path, cx);
         // GIFs are silent: no audio player.
         if self.demo_session.is_none() && !item.kind.loops() {
-            self.spawn_viewer_ffplay(path, 0.0);
+            self.start_viewer_audio(path, 0.0);
         }
     }
 
@@ -816,42 +816,32 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Spawn ffplay `-nodisp` (audio only) for the viewer clip. The video
-    /// frames render in-viewer from `viewer_video_frames`; ffplay only
-    /// supplies the soundtrack. `-autoexit` ends the child at the clip's
-    /// end; our tick clears state to match. A missing ffplay (or a clip
-    /// with no audio) just means silent playback — the frames still show.
-    pub(super) fn spawn_viewer_ffplay(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
-        self.kill_viewer_player();
-        let mut command = self.ffplay_command(offset_secs);
-        match command
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+    /// Play the viewer clip's soundtrack in-process (MP4/AAC and friends
+    /// decode in the same engine as voice notes). The video frames render
+    /// in-viewer from `viewer_video_frames`; this only supplies the sound.
+    /// A clip with no decodable audio just plays silently, with the error
+    /// shown on the transport.
+    pub(super) fn start_viewer_audio(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
+        match self
+            .viewer_audio
+            .start(path, offset_secs, self.playback_volume, self.playback_speed)
         {
-            Ok(child) => {
-                self.viewer_player = Some(child);
+            Ok(()) => {
                 self.playback_error = None;
                 true
             }
-            // MED1: honest error instead of the old silent failure.
-            Err(_) => {
-                self.playback_error = Some("audio player (ffplay) couldn't start".into());
+            Err(err) => {
+                self.playback_error = Some(err.to_string());
                 false
             }
         }
     }
 
     pub(super) fn kill_viewer_player(&mut self) {
-        if let Some(mut child) = self.viewer_player.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        self.viewer_audio.stop();
     }
 
-    /// Pause: freeze the clock, kill ffplay, keep the item active so the
+    /// Pause: freeze the clock, stop the sound, keep the item active so the
     /// controls stay and Play resumes from the frozen offset.
     pub(super) fn pause_viewer_video(&mut self, cx: &mut Context<Self>) {
         if let Some(clock) = self.viewer_clock.as_mut() {
@@ -884,7 +874,7 @@ impl QuillApp {
         match (offset, path) {
             (Some(offset), Some(path)) => {
                 if !loops {
-                    self.spawn_viewer_ffplay(&path, offset);
+                    self.start_viewer_audio(&path, offset);
                 }
                 if let Some(clock) = self.viewer_clock.as_mut() {
                     clock.resume();
@@ -916,7 +906,7 @@ impl QuillApp {
         }
     }
 
-    /// Full stop: kill ffplay and any running frame extraction, and clear
+    /// Full stop: stop the sound and any running frame extraction, and clear
     /// all viewer-video state. Called on viewer close/step and when any
     /// other player starts.
     pub(super) fn stop_viewer_video(&mut self) {
@@ -1369,7 +1359,7 @@ impl QuillApp {
     // ===================== MED1: viewer seek =====================
 
     /// MED1: `SliderEvent` sink for the viewer video seek slider. Drag
-    /// previews the position; release seeks the clock and restarts ffplay
+    /// previews the position; release seeks the clock and restarts the sound
     /// at the new offset (the history-row `on_seek_event` pattern).
     pub(super) fn on_viewer_seek_event(&mut self, event: &SliderEvent, cx: &mut Context<Self>) {
         match event {
@@ -1387,7 +1377,7 @@ impl QuillApp {
     }
 
     /// MED1: apply a finished viewer seek. Seeking while paused just moves
-    /// the frozen clock; while playing, ffplay restarts at the offset.
+    /// the frozen clock; while playing, the sound restarts at the offset.
     pub(super) fn seek_viewer_to(&mut self, secs: f64, cx: &mut Context<Self>) {
         let Some(clock) = self.viewer_clock.as_mut() else {
             return;
@@ -1403,7 +1393,7 @@ impl QuillApp {
             && !self.viewer_loops()
             && let Some(path) = self.viewer_video_path.clone()
         {
-            self.spawn_viewer_ffplay(&path, offset);
+            self.start_viewer_audio(&path, offset);
         }
         cx.notify();
     }
@@ -1551,7 +1541,7 @@ impl QuillApp {
     }
 
     /// MED1: `SliderEvent` sink for the viewer volume slider. The volume
-    /// applies on release so a drag doesn't restart ffplay per tick.
+    /// applies on release so a drag doesn't restart the sound per tick.
     pub(super) fn on_viewer_volume_event(&mut self, event: &SliderEvent, cx: &mut Context<Self>) {
         match event {
             SliderEvent::Change(_) => {
@@ -1591,7 +1581,7 @@ impl QuillApp {
     /// MED1: cycle playback speed through the TGX `PlaybackSpeedLayout`
     /// set (0.5x, 0.7x, 1x, 1.2x, 1.5x, 2x). Applies to the active
     /// voice/audio track and the viewer video: the clock rate moves the
-    /// playhead and ffplay restarts with `-af atempo=` so audio stays in
+    /// playhead and the sound restarts at the new tempo so audio stays in
     /// sync.
     pub(super) fn cycle_playback_speed(&mut self, cx: &mut Context<Self>) {
         const SPEEDS: [f64; 6] = [0.5, 0.7, 1.0, 1.2, 1.5, 2.0];
@@ -1603,13 +1593,11 @@ impl QuillApp {
         self.playback_speed = next;
         let mut restarted = false;
         if let Some(clock) = self.playback_clock.as_mut() {
-            let offset = clock.elapsed_secs();
             let was_playing = clock.is_playing();
             clock.set_rate(next);
-            if was_playing {
-                self.restart_player_at(offset);
-                restarted = true;
-            }
+            // The tempo stretcher follows the new speed on the fly.
+            self.audio.set_speed(next);
+            restarted = was_playing;
         }
         if let Some(video) = self.viewer_native.as_mut() {
             video.set_rate(next as f32);
@@ -1622,7 +1610,7 @@ impl QuillApp {
             let was_playing = clock.is_playing();
             clock.set_rate(next);
             if was_playing && let Some(path) = self.viewer_video_path.clone() {
-                self.spawn_viewer_ffplay(&path, offset);
+                self.start_viewer_audio(&path, offset);
                 restarted = true;
             }
         }
@@ -1643,7 +1631,7 @@ impl QuillApp {
     }
 
     /// MED1: mute toggle — 0 volume remembers the previous level and
-    /// restores it on unmute; ffplay restarts with `-volume`.
+    /// restores it on unmute; the sound restarts at the new volume.
     pub(super) fn toggle_playback_mute(&mut self, cx: &mut Context<Self>) {
         if self.playback_volume > 0.01 {
             self.playback_unmuted_volume = self.playback_volume;
@@ -1655,17 +1643,10 @@ impl QuillApp {
     }
 
     /// MED1: set playback volume 0.0–1.0 and restart any active player so
-    /// ffplay picks up the new `-volume`.
+    /// the sound picks up the new volume.
     pub(super) fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
         self.playback_volume = volume.clamp(0.0, 1.0);
-        if self.playback_clock.as_ref().is_some_and(|c| c.is_playing()) {
-            let offset = self
-                .playback_clock
-                .as_ref()
-                .map(|c| c.elapsed_secs())
-                .unwrap_or(0.0);
-            self.restart_player_at(offset);
-        }
+        self.audio.set_volume(self.playback_volume);
         if let Some(video) = self.viewer_native.as_ref() {
             video.set_volume(self.playback_volume);
         } else if self.viewer_clock.as_ref().is_some_and(|c| c.is_playing())
@@ -1676,7 +1657,7 @@ impl QuillApp {
                 .as_ref()
                 .map(|c| c.elapsed_secs())
                 .unwrap_or(0.0);
-            self.spawn_viewer_ffplay(&path, offset);
+            self.start_viewer_audio(&path, offset);
         }
         cx.notify();
     }
@@ -1751,7 +1732,7 @@ impl QuillApp {
     /// 125 ms tick while a viewer clip is active: re-renders so the
     /// elapsed/total label advances and the in-viewer frame animates
     /// (8 fps frames need a sub-250 ms refresh); auto-stops when the clock
-    /// reaches the duration (ffplay `-autoexit` exits on its own).
+    /// reaches the duration (the sound ends on its own).
     pub(super) fn spawn_viewer_tick(&mut self, cx: &mut Context<Self>) {
         if self.viewer_tick {
             return;
@@ -2267,7 +2248,7 @@ impl QuillApp {
                     menu
                 })
         };
-        // Parity slice 5: video transport under the visual. ffplay runs
+        // Parity slice 5: video transport under the visual. the audio engine runs
         // `-nodisp` for audio only (no GPUI video element in this stack);
         // the decoded video frames render in-viewer above. The overlay
         // shows Play/Pause plus elapsed/total, or a download CTA while the
