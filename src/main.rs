@@ -973,6 +973,49 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     }
                 }
                 let _ = std::fs::write(&marker_for_spawn, b"ready\n");
+                // Performance fixture:
+                // `QUILL_DEMO_AUTOSCROLL=<x>,<y>[,<dy>[,<steps>]]` scrolls
+                // whatever sits under that window point with synthetic wheel
+                // events (~60/s, `dy` px each, turning around every `steps`),
+                // to profile scrolling.
+                if let Some((x, y, step_dy, turn)) =
+                    std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
+                        let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
+                        let x = parts.next()??;
+                        let y = parts.next()??;
+                        let dy = parts.next().flatten().unwrap_or(24.);
+                        let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
+                        Some((x, y, dy, turn))
+                    })
+                {
+                    cx.spawn(async move |cx| {
+                        for step in 0_u32.. {
+                            cx.background_executor()
+                                .timer(Duration::from_millis(16))
+                                .await;
+                            let dy = if (step / turn) % 2 == 0 {
+                                -step_dy
+                            } else {
+                                step_dy
+                            };
+                            let scrolled = demo_window.update(cx, |_, window, cx| {
+                                window.dispatch_event(
+                                    PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                        position: point(px(x), px(y)),
+                                        delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                                        modifiers: Modifiers::default(),
+                                        touch_phase: TouchPhase::Moved,
+                                    }),
+                                    cx,
+                                );
+                            });
+                            if scrolled.is_err() {
+                                break;
+                            }
+                        }
+                    })
+                    .detach();
+                }
                 cx.background_executor()
                     .timer(Duration::from_millis(
                         std::env::var("QUILL_DEMO_LINGER_MS")

@@ -956,7 +956,9 @@ impl QuillApp {
         let primary = if let Some(live) = self.live.as_ref() {
             live.driver.tdlib_media_roots()
         } else if self.demo_session.is_some() {
-            vec![demo_media_allowlist()]
+            let mut roots = vec![demo_media_allowlist()];
+            roots.extend(super::demo::demo_stress_avatar_dir());
+            roots
         } else {
             Vec::new()
         };

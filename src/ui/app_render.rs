@@ -28,7 +28,8 @@ impl Render for QuillApp {
         // Rows the history list painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
         self.inline_videos.borrow_mut().frame_start();
-        self.window_active.set(window.is_window_active());
+        self.window_active
+            .set(window.is_window_active() || super::frame_clock::assume_active());
         self.media_roots_frame.borrow_mut().take();
         // Spoiler specks painted last frame keep drifting.
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {

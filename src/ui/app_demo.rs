@@ -1950,8 +1950,12 @@ impl QuillApp {
         })
         .detach();
         // Performance fixture: keep rendering at ~60 Hz so a profiler sees
-        // steady-state frames.
-        if demo.is_some() && super::demo::demo_stress_size().is_some() {
+        // steady-state frames (`QUILL_DEMO_STRESS_REDRAW=0`: only what the
+        // app itself asks for, to measure idle animation cost).
+        if demo.is_some()
+            && super::demo::demo_stress_size().is_some()
+            && std::env::var_os("QUILL_DEMO_STRESS_REDRAW").is_none_or(|v| v != "0")
+        {
             cx.spawn(async move |this, cx| {
                 loop {
                     cx.background_executor()

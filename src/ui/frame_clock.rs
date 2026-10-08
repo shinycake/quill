@@ -51,6 +51,14 @@ impl QuillApp {
     }
 }
 
+/// `QUILL_ASSUME_ACTIVE=1`: animate as if the window had focus, so CPU can
+/// be measured on a demo window launched from a terminal (which macOS does
+/// not bring to the front).
+pub(super) fn assume_active() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("QUILL_ASSUME_ACTIVE").is_some())
+}
+
 fn trace_ticks() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_TICKS").is_some())
