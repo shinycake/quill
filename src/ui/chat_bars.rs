@@ -54,14 +54,17 @@ impl QuillApp {
     /// All bars for the open chat, in tdesktop's order: contact status,
     /// join requests, voice chat.
     pub(super) fn chat_top_bars(&self, chat_id: ChatId, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        [
+        let mut bars: Vec<AnyElement> = [
             self.chat_action_bar_view(chat_id, cx),
             self.join_requests_bar(chat_id, cx),
             self.voice_chat_bar(chat_id, cx),
         ]
         .into_iter()
         .flatten()
-        .collect()
+        .collect();
+        // Batch 7: the translate bar (and its toast) sits below the others.
+        bars.extend(self.translate_bar_views(chat_id, cx));
+        bars
     }
 
     fn bar_shell(&self, id: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {

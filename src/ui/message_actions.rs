@@ -209,6 +209,58 @@ impl QuillApp {
                 }
             );
         }
+        // Translate Selected Text over a selection, Translate for the
+        // message's own text (Telegram Desktop: both can show; the second
+        // only while the chat is not already shown translated).
+        if let Some(selected) = self
+            .message_menu_selection
+            .clone()
+            .filter(|selected| self.translate_menu_offered(chat_id, selected))
+        {
+            item!(
+                13,
+                gpui_kit::assets::IconName::Languages,
+                "menu-translate-selected",
+                "Translate Selected Text",
+                this,
+                window,
+                cx,
+                {
+                    this.message_menu = None;
+                    this.open_translate_selection(chat_id, selected.clone(), window, cx);
+                }
+            );
+        }
+        let already_translated = self.session().is_some_and(|s| {
+            s.chat_translated_to(chat_id).is_some_and(|to| {
+                matches!(
+                    s.message_translation(chat_id, message_id, to),
+                    Some(quill::state::Translation::Done { .. })
+                )
+            })
+        });
+        if !already_translated
+            && message_id.0 > 0
+            && quill::translate::translatable_content(effective_content(
+                &message.content,
+                message.ephemeral.as_ref(),
+            ))
+            .is_some_and(|(text, _)| self.translate_menu_offered(chat_id, text))
+        {
+            item!(
+                42,
+                gpui_kit::assets::IconName::Languages,
+                "menu-translate",
+                "Translate",
+                this,
+                window,
+                cx,
+                {
+                    this.message_menu = None;
+                    this.open_translate_message(chat_id, message_id, window, cx);
+                }
+            );
+        }
         // Over a link, the menu leads with what Telegram Desktop adds for it:
         // a copy entry named for the kind of link (`copyToClipboardContextItemText`),
         // and, for web links, Open.

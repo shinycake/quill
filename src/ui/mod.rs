@@ -55,6 +55,8 @@ mod story_page;
 pub(crate) use story_page::{StoryPage, apply_ready_story_albums};
 
 mod actions;
+mod translate_demo;
+mod translate_ui;
 mod activity_indicator;
 mod app;
 mod app_demo;

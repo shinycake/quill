@@ -47,6 +47,8 @@ pub(super) struct HistoryRowsKey {
     unread_anchor: Option<MessageId>,
     highlight: Option<MessageId>,
     ui: u64,
+    /// Translations received or switched (`Session::translate.revision`).
+    translate: u64,
     /// Local day: "Today"/"Yesterday" labels roll over at midnight.
     today: i64,
 }
@@ -892,13 +894,19 @@ impl QuillApp {
                 unread_anchor: history.and_then(|h| h.unread_anchor),
                 highlight: highlight_id,
                 ui,
+                translate: self.translate_revision(),
                 today,
             });
             let reuse = key.is_some() && key == self.history_rows_key;
             let messages = (!reuse).then(|| {
-                history
+                let mut messages: Vec<quill::state::HistoryMessage> = history
                     .map(|h| h.ordered().into_iter().cloned().collect())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                // A translated chat shows the translations in place.
+                if let Some(chat_id) = open {
+                    self.apply_chat_translation(chat_id, &mut messages);
+                }
+                messages
             });
             (key, messages)
         };

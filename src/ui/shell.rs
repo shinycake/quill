@@ -156,6 +156,8 @@ pub enum DialogKind {
     /// Batch 4: terms of service, server service popups and the
     /// "New Login Prevented" follow-up.
     AccountNotice,
+    /// Batch 7: the translate box and its language choosers.
+    Translate,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -235,6 +237,7 @@ impl QuillShell {
             DialogKind::CommunityHub => app.community_ui.hub_open,
             DialogKind::Shortcuts => app.shortcuts_open,
             DialogKind::AccountNotice => app.account_notice().is_some(),
+            DialogKind::Translate => app.translate_ui.dialog.is_some(),
         }
     }
 
@@ -288,6 +291,7 @@ impl QuillShell {
             DialogKind::CommunityHub => community::build_community_hub_dialog,
             DialogKind::Shortcuts => QuillApp::build_shortcuts_dialog,
             DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
+            DialogKind::Translate => QuillApp::build_translate_dialog,
         }
     }
 
@@ -338,6 +342,9 @@ impl QuillShell {
         DialogKind::AddContact,
         DialogKind::BlockBar,
         DialogKind::JoinRequests,
+        // Opened from the Appearance dialog's translation options: it
+        // takes over and Appearance returns when it closes.
+        DialogKind::Translate,
         DialogKind::Appearance,
         DialogKind::AccountLifecycle,
         // Slice G10: communities dialogs render last (lowest priority).

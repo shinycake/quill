@@ -419,6 +419,9 @@ pub struct QuillApp {
     /// Chat prefs slice: chat-composer behavior (send-key mode),
     /// persisted to `chat_prefs.json`.
     pub(super) chat_prefs: ChatPrefs,
+    /// Translation: prefs (`translate_prefs.json`), the translate dialog,
+    /// the bar's toast.
+    pub(super) translate_ui: super::translate_ui::TranslateUi,
     /// Settings → Appearance slice: the dialog is on screen.
     pub(super) appearance_open: bool,
     pub(super) settings_open: bool,

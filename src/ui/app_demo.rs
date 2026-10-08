@@ -621,6 +621,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — bubble headers".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyTranslate => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — translation".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyPoll => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1722,6 +1728,7 @@ impl QuillApp {
             storage_usage_open: false,
             appearance: Self::load_appearance(),
             chat_prefs,
+            translate_ui: super::translate_ui::TranslateUi::load(),
             appearance_open: false,
             settings_open: false,
             settings_page: None,

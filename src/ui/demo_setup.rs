@@ -1875,6 +1875,9 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — service messages".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyTranslate)) {
+            self.demo_setup_translate(window, cx);
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyBubbleHeaders)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
