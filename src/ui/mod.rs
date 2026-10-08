@@ -134,6 +134,7 @@ mod polls;
 mod pressable;
 mod profile;
 mod profile_modal;
+mod proxy;
 mod reactions;
 mod recording;
 mod round_record;

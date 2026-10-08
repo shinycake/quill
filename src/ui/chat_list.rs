@@ -1309,7 +1309,8 @@ impl QuillApp {
                     .when(mode == PaneMode::Ready, |this| {
                         this.child(self.main_navigation_menu(cx))
                     })
-                    .child(self.list_tabs(cx)),
+                    .child(self.list_tabs(cx))
+                    .children(self.proxy_shield_button(cx)),
             )
             .when_some(
                 (!self.contacts_tab_open && !self.calls_tab_open)

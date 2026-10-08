@@ -578,7 +578,8 @@ impl Render for QuillApp {
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(label),
-                            ),
+                            )
+                            .child(self.proxy_strip_link(cx)),
                     )
                 },
             )

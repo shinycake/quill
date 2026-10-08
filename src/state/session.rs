@@ -859,6 +859,9 @@ pub struct Session {
     pub deep_link: Option<DeepLinkState>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
+    /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
+    /// auto-switch / IPv6 preferences.
+    pub proxy: crate::proxy::ProxyState,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -1268,6 +1271,7 @@ impl Session {
             inline_bot_resolve_seq: 0,
             deep_link: None,
             deep_link_seq: 0,
+            proxy: Default::default(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),

@@ -19,6 +19,7 @@ mod media_library;
 mod message_ops;
 mod messaging;
 mod payments;
+mod proxy;
 mod registration;
 mod search;
 mod settings;

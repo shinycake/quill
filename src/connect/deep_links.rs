@@ -51,7 +51,7 @@ fn percent_decode(value: &str) -> String {
 }
 
 /// Query params of a `tg://` URL as `(name, decoded value)` pairs.
-fn tg_query_params(url: &str) -> Vec<(String, String)> {
+pub(crate) fn tg_query_params(url: &str) -> Vec<(String, String)> {
     let query = url.split('?').nth(1).unwrap_or("");
     query
         .split('&')
