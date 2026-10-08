@@ -1016,6 +1016,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .collect();
             Ok(EnvelopePayload::Messages(parsed))
         }
+        // `getMessageThread` answer (schema 1.8.67, line 3897).
+        "messageThreadInfo" => Ok(EnvelopePayload::MessageThreadInfo(Box::new(
+            parse_message_thread_info(&value)?,
+        ))),
         "chats" => Ok(EnvelopePayload::Chats {
             total_count: value
                 .get("total_count")

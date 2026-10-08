@@ -331,6 +331,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             ..animation
         };
         let json = send_animation(extra, chat_id, animation);
+        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -372,6 +373,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             ..sticker
         };
         let json = send_sticker(extra, chat_id, sticker);
+        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -589,6 +591,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         };
         let json = if spoiler { with_spoiler(json) } else { json };
+        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -637,6 +640,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::SendMessage, Some(chat_id));
         let topic_id = self.send_topic(chat_id);
         let json = send_rich_message(extra, chat_id, topic_id, &rich, reply_to, options);
+        let json = self.thread_routed(chat_id, json);
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
             return Err(err);
@@ -898,6 +902,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::SendMessageAlbum, Some(chat_id));
         let topic_id = self.send_topic(chat_id);
         let json = send_message_album(extra, chat_id, topic_id, reply_to, contents);
+        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -950,6 +955,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 topic_id,
             },
         );
+        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();
@@ -1011,6 +1017,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             reply_to,
         );
+        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();

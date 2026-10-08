@@ -113,6 +113,14 @@ impl Session {
         self.open_chat = Some(chat_id);
         // Phase 5.1: switching chats leaves the topic view.
         self.open_topic = None;
+        // ... and any comment thread that lives elsewhere.
+        if self
+            .thread
+            .as_ref()
+            .is_some_and(|thread| thread.chat_id != chat_id)
+        {
+            self.thread = None;
+        }
         self.view_generation.bump();
         let history = self.histories.entry(chat_id.0).or_default();
         history.view_generation = self.view_generation;

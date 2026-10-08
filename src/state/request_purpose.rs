@@ -786,10 +786,17 @@ pub enum RequestPurpose {
     GetForumTopic {
         forum_topic_id: i32,
     },
-    /// Slice G2: `getMessageThreadHistory` (schema 1.8.67, line 11839)
-    /// — the channel-comments viewer. Response is `messages`;
-    /// `message_id` identifies the channel post, correlated to the chat
-    /// via `PendingRequest::chat_id`.
+    /// `getMessageThread` (schema 1.8.67, line 11566) — resolves the
+    /// comment / reply thread of `message_id`. Response is
+    /// `messageThreadInfo`; correlated to the origin chat via
+    /// `PendingRequest::chat_id`.
+    GetMessageThread {
+        message_id: i64,
+    },
+    /// `getMessageThreadHistory` (schema 1.8.67, line 11839) — one page of
+    /// the open thread. Response is `messages`; `message_id` identifies the
+    /// thread's origin message, correlated to the chat via
+    /// `PendingRequest::chat_id`.
     GetMessageThreadHistory {
         message_id: i64,
     },

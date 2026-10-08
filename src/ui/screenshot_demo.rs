@@ -300,6 +300,11 @@ pub enum ScreenshotDemo {
     /// Service-message tour in a group: members, pins with excerpt,
     /// photo change, calls, gifts, giveaways, topics, timers, boosts.
     ReadyServiceMessages,
+    /// Channel comments and reply threads (injected, no live Telegram):
+    /// `QUILL_DEMO_THREADS_VIEW=posts` shows channel posts with comment
+    /// bars, `thread` a post's comment thread in its discussion group,
+    /// `group` a group message with replies.
+    ReadyThreads,
     /// Bubble headers and footer (injected, no live Telegram): replies with
     /// a colored sender name, a quote, a media thumbnail, a reply from another
     /// chat and a deleted original; forwards from a user, a hidden account, a

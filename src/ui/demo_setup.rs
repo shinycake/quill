@@ -1940,6 +1940,19 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — service messages".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyThreads)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                let view = std::env::var("QUILL_DEMO_THREADS_VIEW").unwrap_or_default();
+                super::threads_demo::apply_ready_threads(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            self.status_note = "screenshot demo — comments and threads".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyBubbleHeaders)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

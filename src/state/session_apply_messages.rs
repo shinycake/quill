@@ -31,18 +31,14 @@ impl Session {
             self.finish_forward(pending, &messages, false);
             return;
         }
-        // Slice G2: channel-comments viewer — cache the thread
-        // history for the requesting channel post.
+        // Comment / reply thread page.
         if let Some(pending) = pending
-            && let RequestPurpose::GetMessageThreadHistory { message_id } = pending.purpose
-            && let Some(chat_id) = pending.chat_id
+            && matches!(
+                pending.purpose,
+                RequestPurpose::GetMessageThreadHistory { .. }
+            )
         {
-            self.comment_thread = Some(CommentThreadFetch {
-                chat_id,
-                message_id: MessageId(message_id),
-                messages: messages.to_vec(),
-                failed: None,
-            });
+            self.apply_thread_history(messages, Some(pending));
             return;
         }
         // Slice CL: chat-list peek preview — cache the latest
@@ -473,6 +469,12 @@ impl Session {
             chat_id: message.chat_id,
             message_id: message.id,
         });
+        // The open comment / reply thread shows its own replies.
+        if self.thread_accepts(&message) {
+            self.remember_files(&message.files);
+            let row = history_message(message.clone(), false);
+            self.thread_upsert(row);
+        }
         if self.route_new_message_into_window(&message) {
             self.upsert_message(message, false);
         } else {

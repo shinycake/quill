@@ -825,7 +825,7 @@ pub struct Session {
     pub boost_intent: Option<i64>,
     /// Slice G2: channel-comments viewer — the latest
     /// `getMessageThreadHistory` result (channel post → comment thread).
-    pub comment_thread: Option<CommentThreadFetch>,
+    pub thread: Option<ThreadView>,
     /// Slice CL: chat-list peek preview — the latest `getChatHistory`
     /// result for one unopened chat (`parity:chatlist-chat-preview`).
     pub chat_preview_fetch: Option<PreviewHistoryFetch>,
@@ -1284,7 +1284,7 @@ impl Session {
             chat_boost_status: HashMap::new(),
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
-            comment_thread: None,
+            thread: None,
             chat_preview_fetch: None,
             chat_export: None,
             account_export: None,

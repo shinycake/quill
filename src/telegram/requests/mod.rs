@@ -44,6 +44,8 @@ mod tests_polls;
 mod tests_stickers;
 #[cfg(test)]
 mod tests_stories;
+#[cfg(test)]
+mod tests_threads;
 mod users;
 
 pub use auth::*;

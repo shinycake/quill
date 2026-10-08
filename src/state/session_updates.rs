@@ -213,6 +213,13 @@ impl Session {
                 found = true;
             }
         }
+        if let Some(thread) = self.thread.as_mut()
+            && thread.chat_id == chat_id
+            && let Some(message) = thread.history.messages.get_mut(&message_id.0)
+        {
+            edit(message);
+            found = true;
+        }
         found
     }
 

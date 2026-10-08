@@ -95,6 +95,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 "chatActionCancel"
             },
         );
+        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 self.outgoing_voice = recording.then_some(OutgoingTyping {
@@ -170,7 +171,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendChatAction, Some(chat_id));
-        let json = send_chat_action(extra, chat_id, typing);
+        let json = self.thread_routed(chat_id, send_chat_action(extra, chat_id, typing));
         match self.sender.send_json(&json) {
             Ok(()) => {
                 self.outgoing_typing = typing.then_some(OutgoingTyping {
