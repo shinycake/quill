@@ -1712,23 +1712,31 @@ pub(super) fn preview_thumb(
         (px(72.), px(72.))
     };
     if let Some(path) = photo_display_path(photo, files, media_roots) {
-        return img(path)
-            .id(("link-preview-img", row_id))
-            .w(w)
-            .h(h)
-            .aspect_ratio(w / h)
-            .rounded_md()
-            .object_fit(ObjectFit::Cover)
-            .flex_shrink_0()
-            .with_fallback(move || {
-                div()
-                    .w(w)
-                    .h(h)
-                    .rounded_md()
-                    .bg(fill_muted())
-                    .into_any_element()
-            })
-            .into_any_element();
+        return img(super::image_budget::sized_media(
+            &path,
+            (w, h),
+            photo
+                .largest_size()
+                .or_else(|| photo.thumb_size())
+                .map(|size| (size.width, size.height)),
+            super::image_budget::Fit::Cover,
+        ))
+        .id(("link-preview-img", row_id))
+        .w(w)
+        .h(h)
+        .aspect_ratio(w / h)
+        .rounded_md()
+        .object_fit(ObjectFit::Cover)
+        .flex_shrink_0()
+        .with_fallback(move || {
+            div()
+                .w(w)
+                .h(h)
+                .rounded_md()
+                .bg(fill_muted())
+                .into_any_element()
+        })
+        .into_any_element();
     }
     let file_id = photo
         .thumb_size()
