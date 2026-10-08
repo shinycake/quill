@@ -330,3 +330,89 @@ fn chat_peer_online_follows_the_private_user_status() {
     h.ingest(r#"{"@type":"updateUserStatus","user_id":7,"status":{"@type":"userStatusOffline","was_online":1700000000}}"#);
     assert!(!h.driver.session.chat_peer_online(&h_chat(&h)));
 }
+
+#[test]
+fn unread_bar_count_is_captured_when_the_chat_opens() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+    // The live counter shrinks as rows are read; the bar keeps the count.
+    h.ingest(r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":40,"unread_count":1}"#);
+    assert_eq!(h.history().unread_at_open, 3);
+}
+
+fn sent_json(h: &Harness, ty: &str) -> Option<Value> {
+    h.recorder
+        .snapshot()
+        .into_iter()
+        .rev()
+        .find(|j| j.contains(&format!("\"@type\":\"{ty}\"")))
+        .map(|j| serde_json::from_str(&j).unwrap())
+}
+
+#[test]
+fn mention_button_jumps_to_the_oldest_unread_mention() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+
+    h.driver
+        .jump_to_unread_marker(crate::state::UnreadJumpKind::Mention)
+        .unwrap();
+    let search = sent_json(&h, "searchChatMessages").expect("search sent");
+    assert_eq!(
+        search["filter"]["@type"],
+        "searchMessagesFilterUnreadMention"
+    );
+    assert_eq!(search["from_message_id"], 0);
+    // Dedupe while in flight.
+    let before = h.recorder.snapshot().len();
+    h.driver
+        .jump_to_unread_marker(crate::state::UnreadJumpKind::Mention)
+        .unwrap();
+    assert_eq!(h.recorder.snapshot().len(), before);
+
+    // TDLib answers newest first; the oldest (5) is outside the window.
+    let extra = search["@extra"].as_str().unwrap();
+    let messages: Vec<String> = [55, 52, 5]
+        .iter()
+        .map(|id| message_json(*id, false))
+        .collect();
+    h.ingest(&format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":3,"messages":[{}],"next_from_message_id":0}}"#,
+        messages.join(",")
+    ));
+    let around = h.last_history_request();
+    assert_eq!(around["from_message_id"], 5);
+    assert_eq!(
+        h.driver.session.chat_search.jump,
+        crate::state::ChatSearchJump::Loading {
+            message_id: MessageId(5)
+        }
+    );
+}
+
+#[test]
+fn reaction_button_uses_the_reaction_filter_and_read_all_sends_the_rpc() {
+    let mut h = Harness::with_unread_chat();
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+
+    h.driver
+        .jump_to_unread_marker(crate::state::UnreadJumpKind::Reaction)
+        .unwrap();
+    let search = sent_json(&h, "searchChatMessages").expect("search sent");
+    assert_eq!(
+        search["filter"]["@type"],
+        "searchMessagesFilterUnreadReaction"
+    );
+
+    h.driver
+        .read_all_unread_markers(crate::state::UnreadJumpKind::Reaction)
+        .unwrap();
+    assert_eq!(sent_json(&h, "readAllChatReactions").unwrap()["chat_id"], 7);
+    h.driver
+        .read_all_unread_markers(crate::state::UnreadJumpKind::Mention)
+        .unwrap();
+    assert_eq!(sent_json(&h, "readAllChatMentions").unwrap()["chat_id"], 7);
+}

@@ -608,6 +608,17 @@ pub fn unpin_all_chat_messages(extra: RequestId, chat_id: ChatId) -> String {
     .to_string()
 }
 
+/// `readAllChatMentions` / `readAllChatReactions` (`schema/td_api.tl:13302,
+/// 13305` — `… chat_id:int53 = Ok;`): the corner buttons' "Mark all as read".
+pub fn read_all_chat_markers(extra: RequestId, chat_id: ChatId, reactions: bool) -> String {
+    json!({
+        "@type": if reactions { "readAllChatReactions" } else { "readAllChatMentions" },
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
 /// M1: `getMessageLink` (TDLib 1.8.67, `schema/td_api.tl:12064` —
 /// `getMessageLink chat_id message_id media_timestamp checklist_task_id
 /// poll_option_id for_album in_message_thread = MessageLink`). Plain
