@@ -5,6 +5,7 @@ mod appearance;
 mod auth_recovery;
 mod chat_theme;
 mod clipboard_files;
+mod composer_rtl;
 mod composer_thumb;
 mod editor_art;
 mod force_reply;
