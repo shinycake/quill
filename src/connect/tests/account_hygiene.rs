@@ -128,7 +128,12 @@ fn new_login_yes_confirms_the_unconfirmed_session() {
     // Not twice while the answer is pending.
     assert_invalid(f.1.review_unconfirmed_sessions(true));
     let extra = request["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3, &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
     assert_eq!(
         f.1.session.notices.review_outcome,
         Some(LoginReview::Allowed)
@@ -147,7 +152,12 @@ fn new_login_no_terminates_and_names_the_attempt() {
     assert_eq!(request["@type"], "terminateSession");
     assert_eq!(request["session_id"], 77);
     let extra = request["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3, &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
     assert_eq!(
         f.1.session.notices.review_outcome,
         Some(LoginReview::Prevented {
@@ -163,8 +173,13 @@ fn new_login_review_error_keeps_the_alert() {
     unconfirmed_alert(&mut f);
     f.1.review_unconfirmed_sessions(true).unwrap();
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
-        &format!(r#"{{"@type":"error","code":400,"message":"SESSION_NOT_FOUND","@extra":"{extra}"}}"#),
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"SESSION_NOT_FOUND","@extra":"{extra}"}}"#
+        ),
     );
     assert!(f.1.session.notices.review_error.is_some());
     assert!(f.1.session.notices.review_outcome.is_none());
@@ -177,7 +192,10 @@ fn new_login_review_error_keeps_the_alert() {
 fn unconfirmed_update_with_none_left_clears_the_alert() {
     let mut f = fixture();
     unconfirmed_alert(&mut f);
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         r#"{"@type":"updateUnconfirmedSession","session":null,"unconfirmed_session_count":0}"#,
     );
     assert_eq!(f.1.session.notices.unconfirmed_count, 0);
@@ -194,20 +212,22 @@ fn service_notifications_queue_in_order_and_skip_withdrawal_ones() {
         ("API_WITHDRAWAL_FEATURE_DISABLED_X", "Hidden"),
         ("", "Second"),
     ] {
-        ingest(&mut f.1, &f.4, &f.3,
+        ingest(
+            &mut f.1,
+            &f.4,
+            &f.3,
             &format!(
                 r#"{{"@type":"updateServiceNotification","type":"{kind}","content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}"#
             ),
         );
     }
-    let queue: Vec<&str> = f
-        .1
-        .session
-        .notices
-        .service
-        .iter()
-        .map(|n| n.text.as_str())
-        .collect();
+    let queue: Vec<&str> =
+        f.1.session
+            .notices
+            .service
+            .iter()
+            .map(|n| n.text.as_str())
+            .collect();
     assert_eq!(queue, ["First", "Second"]);
     f.1.session.dismiss_service_notice();
     assert_eq!(f.1.session.notices.service.front().unwrap().text, "Second");
@@ -218,7 +238,10 @@ fn service_notifications_queue_in_order_and_skip_withdrawal_ones() {
 fn terms_of_service_accept_round_trip() {
     let mut f = fixture();
     assert_invalid(f.1.accept_terms());
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         r#"{"@type":"updateTermsOfService","terms_of_service_id":"tos-1","terms_of_service":{"@type":"termsOfService","text":{"@type":"formattedText","text":"Be nice.","entities":[]},"min_user_age":0,"show_popup":true}}"#,
     );
     assert_eq!(f.1.session.notices.terms.as_ref().unwrap().id, "tos-1");
@@ -229,7 +252,12 @@ fn terms_of_service_accept_round_trip() {
     assert!(f.1.session.notices.terms_in_flight);
     assert_invalid(f.1.accept_terms());
     let extra = request["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3, &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
     assert!(f.1.session.notices.terms.is_none());
     assert!(!f.1.session.notices.terms_in_flight);
     std::fs::remove_dir_all(&f.0).unwrap();
@@ -238,12 +266,18 @@ fn terms_of_service_accept_round_trip() {
 #[test]
 fn terms_accept_failure_keeps_the_prompt_with_an_error() {
     let mut f = fixture();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         r#"{"@type":"updateTermsOfService","terms_of_service_id":"tos-1","terms_of_service":{"@type":"termsOfService","text":{"@type":"formattedText","text":"Be nice.","entities":[]},"min_user_age":18,"show_popup":true}}"#,
     );
     f.1.accept_terms().unwrap();
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
     assert!(f.1.session.notices.terms.is_some());
@@ -271,7 +305,10 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
     // One clear at a time.
     assert_invalid(f.1.clear_storage(&[], &[]));
     let extra = request["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(
             r#"{{"@type":"storageStatistics","size":"5242880","count":3,"by_chat":[],"@extra":"{extra}"}}"#
         ),
@@ -299,7 +336,10 @@ fn clear_storage_failure_reports_and_frees_the_gate() {
     let mut f = fixture();
     f.1.clear_storage(&[], &[]).unwrap();
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
     assert!(!f.1.session.storage_clearing);
@@ -345,7 +385,10 @@ fn storage_limits_send_the_four_options_and_read_them_back() {
             r#"{"@type":"optionValueBoolean","value":true}"#,
         ),
     ] {
-        ingest(&mut f.1, &f.4, &f.3,
+        ingest(
+            &mut f.1,
+            &f.4,
+            &f.3,
             &format!(r#"{{"@type":"updateOption","name":"{name}","value":{value}}}"#),
         );
     }
@@ -375,7 +418,14 @@ fn recovery_email_code_confirms_the_pending_address() {
     let extra = request["@extra"].as_str().unwrap().to_string();
     let done = PASSWORD_STATE_ON.replace("EXTRA", &extra);
     ingest(&mut f.1, &f.4, &f.3, &done);
-    assert_eq!(f.1.session.password_state.as_ref().unwrap().pending_email_pattern, None);
+    assert_eq!(
+        f.1.session
+            .password_state
+            .as_ref()
+            .unwrap()
+            .pending_email_pattern,
+        None
+    );
     assert_eq!(
         f.1.session.twofa_flow.notice,
         Some(TwofaNotice::RecoveryEmailConfirmed)
@@ -395,13 +445,23 @@ fn wrong_recovery_email_code_reports_without_changing_state() {
     ingest(&mut f.1, &f.4, &f.3, &pending);
     f.1.check_recovery_email_code("000000").unwrap();
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(r#"{{"@type":"error","code":400,"message":"CODE_INVALID","@extra":"{extra}"}}"#),
     );
     let line = f.1.session.password_op_error.clone().unwrap();
     assert!(line.contains("confirm the recovery email"), "{line}");
     assert!(line.contains("wrong or has expired"), "{line}");
-    assert!(f.1.session.password_state.as_ref().unwrap().pending_email_pattern.is_some());
+    assert!(
+        f.1.session
+            .password_state
+            .as_ref()
+            .unwrap()
+            .pending_email_pattern
+            .is_some()
+    );
     std::fs::remove_dir_all(&f.0).unwrap();
 }
 
@@ -415,7 +475,10 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
     let request = last_request(&f.2);
     assert_eq!(request["@type"], "requestPasswordRecovery");
     let extra = request["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(
             r#"{{"@type":"emailAddressAuthenticationCodeInfo","email_address_pattern":"i***@example.com","length":6,"@extra":"{extra}"}}"#
         ),
@@ -435,7 +498,12 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
     assert_eq!(request["new_password"], "newpw");
     assert_eq!(request["new_hint"], "new hint");
     let extra = request["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3, &PASSWORD_STATE_ON.replace("EXTRA", &extra));
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &PASSWORD_STATE_ON.replace("EXTRA", &extra),
+    );
     assert!(f.1.session.twofa_flow.recovery_code_sent_to.is_none());
     assert_eq!(
         f.1.session.twofa_flow.notice,
@@ -469,7 +537,10 @@ fn reset_password_pending_refetches_the_state_for_the_date() {
     f.1.reset_twofa_password().unwrap();
     assert_eq!(last_request(&f.2)["@type"], "resetPassword");
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(
             r#"{{"@type":"resetPasswordResultPending","pending_reset_date":1760604800,"@extra":"{extra}"}}"#
         ),
@@ -491,7 +562,10 @@ fn reset_password_declined_reports_the_retry_date() {
     seed_password_state(&mut f, PASSWORD_STATE_ON);
     f.1.reset_twofa_password().unwrap();
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(
             r#"{{"@type":"resetPasswordResultDeclined","retry_date":1760700000,"@extra":"{extra}"}}"#
         ),
@@ -510,14 +584,22 @@ fn cancel_password_reset_needs_a_pending_reset() {
     let mut f = fixture();
     seed_password_state(&mut f, PASSWORD_STATE_ON);
     assert_invalid(f.1.cancel_twofa_password_reset());
-    let pending_json = PASSWORD_STATE_ON.replace(r#""pending_reset_date":0"#, r#""pending_reset_date":1760604800"#);
+    let pending_json = PASSWORD_STATE_ON.replace(
+        r#""pending_reset_date":0"#,
+        r#""pending_reset_date":1760604800"#,
+    );
     f.1.refresh_password_state().unwrap();
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
     ingest(&mut f.1, &f.4, &f.3, &pending_json.replace("EXTRA", &extra));
     f.1.cancel_twofa_password_reset().unwrap();
     assert_eq!(last_request(&f.2)["@type"], "cancelPasswordReset");
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3, &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
     assert_eq!(
         f.1.session.twofa_flow.notice,
         Some(TwofaNotice::ResetCancelled)
@@ -537,7 +619,10 @@ fn login_email_change_is_code_confirmed() {
     assert_eq!(request["@type"], "setLoginEmailAddress");
     assert_eq!(request["new_login_email_address"], "me@example.com");
     let extra = request["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(
             r#"{{"@type":"emailAddressAuthenticationCodeInfo","email_address_pattern":"m***@example.com","length":5,"@extra":"{extra}"}}"#
         ),
@@ -549,7 +634,10 @@ fn login_email_change_is_code_confirmed() {
     f.1.resend_login_email_code().unwrap();
     assert_eq!(last_request(&f.2)["@type"], "resendLoginEmailAddressCode");
     let extra = last_request(&f.2)["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3,
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
         &format!(
             r#"{{"@type":"emailAddressAuthenticationCodeInfo","email_address_pattern":"m***@example.com","length":5,"@extra":"{extra}"}}"#
         ),
@@ -560,7 +648,12 @@ fn login_email_change_is_code_confirmed() {
     assert_eq!(request["code"]["@type"], "emailAddressAuthenticationCode");
     assert_eq!(request["code"]["code"], "12345");
     let extra = request["@extra"].as_str().unwrap().to_string();
-    ingest(&mut f.1, &f.4, &f.3, &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
     assert!(f.1.session.twofa_flow.login_email_code_sent_to.is_none());
     assert_eq!(
         f.1.session.twofa_flow.notice,

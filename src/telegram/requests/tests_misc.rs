@@ -363,13 +363,30 @@ fn b6_option_and_optimize_storage_shapes_match_1_8_67() {
     let v = parse(set_option_boolean(RequestId(1), "online", true));
     assert_eq!(v["@type"], "setOption");
     assert_eq!(v["name"], "online");
-    assert_eq!(v["value"], serde_json::json!({"@type": "optionValueBoolean", "value": true}));
-    let v = parse(set_option_integer(RequestId(2), "storage_max_files_size", Some(1024)));
-    assert_eq!(v["value"], serde_json::json!({"@type": "optionValueInteger", "value": "1024"}));
-    let v = parse(set_option_integer(RequestId(3), "storage_max_files_size", None));
+    assert_eq!(
+        v["value"],
+        serde_json::json!({"@type": "optionValueBoolean", "value": true})
+    );
+    let v = parse(set_option_integer(
+        RequestId(2),
+        "storage_max_files_size",
+        Some(1024),
+    ));
+    assert_eq!(
+        v["value"],
+        serde_json::json!({"@type": "optionValueInteger", "value": "1024"})
+    );
+    let v = parse(set_option_integer(
+        RequestId(3),
+        "storage_max_files_size",
+        None,
+    ));
     assert_eq!(v["value"]["@type"], "optionValueEmpty");
 
-    let v = parse(optimize_storage(RequestId(4), &OptimizeStorage::everything(50)));
+    let v = parse(optimize_storage(
+        RequestId(4),
+        &OptimizeStorage::everything(50),
+    ));
     assert_eq!(v["@type"], "optimizeStorage");
     for key in ["size", "ttl", "count", "immunity_delay"] {
         assert_eq!(v[key], 0, "{key}");

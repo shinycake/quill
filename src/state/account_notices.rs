@@ -187,8 +187,12 @@ impl Session {
         self.twofa_flow.recovery_code_sent_to = None;
         self.twofa_flow.notice = Some(match outcome {
             ResetPasswordOutcome::Ok => TwofaNotice::PasswordRemoved,
-            ResetPasswordOutcome::Pending { reset_date } => TwofaNotice::ResetPending { reset_date },
-            ResetPasswordOutcome::Declined { retry_date } => TwofaNotice::ResetDeclined { retry_date },
+            ResetPasswordOutcome::Pending { reset_date } => {
+                TwofaNotice::ResetPending { reset_date }
+            }
+            ResetPasswordOutcome::Declined { retry_date } => {
+                TwofaNotice::ResetDeclined { retry_date }
+            }
         });
         // The pending date (or the removed password) lives in the state.
         self.twofa_flow.refetch = true;
@@ -259,7 +263,9 @@ pub fn unconfirmed_login_message(entries: &[UnconfirmedEntry]) -> String {
                 .filter(|location| !location.is_empty());
             match common {
                 Some(country) => {
-                    format!("We detected new {count} logins to your account from {country}. Is it you?")
+                    format!(
+                        "We detected new {count} logins to your account from {country}. Is it you?"
+                    )
                 }
                 None => format!("We detected new {count} logins to your account. Is it you?"),
             }

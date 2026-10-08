@@ -590,6 +590,22 @@ pub enum ScreenshotDemo {
     /// confirmation (injected `passwordState` with
     /// `recovery_email_address_code_info`, no live Telegram).
     ReadyRecoveryEmail,
+    /// Batch 4/6: New-login alert strip over the chat list (injected unconfirmed session, no live Telegram).
+    ReadyNewLogin,
+    /// Batch 4/6: "New Login Prevented" box after "No, it's not me!" (injected, no live Telegram).
+    ReadyLoginPrevented,
+    /// Batch 4/6: Server service notification popup (injected, no live Telegram).
+    ReadyServiceNotice,
+    /// Batch 4/6: Terms of Service prompt with the age check (injected, no live Telegram).
+    ReadyTerms,
+    /// Batch 4/6: Local storage: ticked types, clear confirmation and limits (injected, no live Telegram).
+    ReadyLocalStorage,
+    /// Batch 4/6: Two-step "Forgot password?" code step (injected, no live Telegram).
+    Ready2faForgot,
+    /// Batch 4/6: Two-step password reset waiting period (injected, no live Telegram).
+    Ready2faReset,
+    /// Batch 4/6: Login email code step (injected, no live Telegram).
+    ReadyLoginEmail,
     /// Slice A9: account lifecycle dialog — injected `accountTtl` (180
     /// days) + `passwordState` with a password set, dialog open (no live
     /// Telegram).

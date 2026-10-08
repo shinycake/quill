@@ -375,6 +375,15 @@ pub struct QuillApp {
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.
     pub(super) window_active: std::cell::Cell<bool>,
+    /// Batch 4: the last `online` value sent to TDLib.
+    pub(super) presence: quill::presence::PresenceSync,
+    /// Batch 4: the attempts the user just terminated from the new-login
+    /// alert ("New Login Prevented" box), until acknowledged.
+    pub(super) login_prevented: Option<Vec<String>>,
+    /// Batch 4: terms of service prompt state (decline flow, age check).
+    pub(super) terms_step: TermsStep,
+    pub(super) terms_age_ok: bool,
+    pub(super) terms_age_error: bool,
     /// `media_display_roots`, computed once per frame (rows ask for it
     /// one by one, and it touches the file system).
     pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
@@ -456,7 +465,9 @@ pub struct QuillApp {
     pub(super) data_storage_editor: Option<(NetworkKind, AutoDownloadNetSettings)>,
     /// Slice S4: the "Clear cache" button is awaiting its second,
     /// confirming tap.
-    pub(super) data_storage_confirm_clear: bool,
+    pub(super) storage_confirm: Option<StorageClear>,
+    /// Batch 6: the file types ticked for "Clear selected".
+    pub(super) storage_selected: std::collections::BTreeSet<&'static str>,
     /// Slice A2: two-step verification overlay. `twofa_view` picks the
     /// status screen or one of the forms; the four textareas back the
     /// enable/change/disable/recovery-email forms. Passwords live in the
@@ -471,6 +482,10 @@ pub struct QuillApp {
     /// your current password") — the driver rejects doomed requests
     /// silently, so the form must speak before sending.
     pub(super) twofa_notice: Option<String>,
+    /// Batch 6: code entry (recovery email, password recovery, login
+    /// email) and the inline confirmation on the recovery screen.
+    pub(super) twofa_code: Entity<InputState>,
+    pub(super) twofa_confirm: Option<TwofaConfirm>,
     /// Slice A9: account lifecycle dialog (delete account + self-destruct
     /// TTL). Working state lives in the named module; this is the one
     /// field the dialog machinery reads.

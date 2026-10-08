@@ -49,13 +49,13 @@ pub mod send_button;
 pub mod settings;
 pub mod single_instance;
 pub mod spell_dict;
-pub mod storage_limits;
 #[cfg(windows)]
 pub mod spell_win;
 pub mod spellcheck;
 pub mod state;
 pub mod sticker_playback;
 pub mod sticker_suggest;
+pub mod storage_limits;
 pub mod stories_strip;
 pub mod story_composer;
 pub mod story_page;

@@ -17,10 +17,10 @@ use crate::telegram::requests::{
     get_active_sessions, get_chat_notification_settings_exceptions, get_connected_websites,
     get_saved_notification_sounds, get_scope_notification_settings, get_storage_statistics,
     optimize_storage, reset_all_notification_settings, set_account_ttl,
-    set_chat_notification_settings, set_option_boolean, set_option_integer,
-    set_message_sender_block_list, set_reaction_notification_settings,
-    set_scope_notification_settings, terminate_all_other_sessions, terminate_session,
-    toggle_session_can_accept_calls, toggle_session_can_accept_secret_chats,
+    set_chat_notification_settings, set_message_sender_block_list, set_option_boolean,
+    set_option_integer, set_reaction_notification_settings, set_scope_notification_settings,
+    terminate_all_other_sessions, terminate_session, toggle_session_can_accept_calls,
+    toggle_session_can_accept_secret_chats,
 };
 use crate::telegram::requests_data_settings::{
     get_auto_download_settings_presets, set_auto_download_settings,

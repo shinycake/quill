@@ -32,6 +32,7 @@ mod secret_chat;
 mod sessions;
 mod statistics;
 mod storage;
+mod storage_categories;
 mod stories;
 mod users;
 
@@ -111,5 +112,6 @@ pub use secret_chat::*;
 pub use sessions::*;
 pub use statistics::*;
 pub use storage::*;
+pub use storage_categories::*;
 pub use stories::*;
 pub use users::*;

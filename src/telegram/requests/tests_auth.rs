@@ -354,7 +354,10 @@ fn b6_recovery_reset_and_login_email_shapes_match_1_8_67() {
     assert_eq!(v["recovery_code"], "654321");
     assert_eq!(v["new_password"], "new");
     assert_eq!(v["new_hint"], "hint");
-    assert_eq!(parse(reset_password(RequestId(4)))["@type"], "resetPassword");
+    assert_eq!(
+        parse(reset_password(RequestId(4)))["@type"],
+        "resetPassword"
+    );
     assert_eq!(
         parse(cancel_password_reset(RequestId(5)))["@type"],
         "cancelPasswordReset"

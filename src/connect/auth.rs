@@ -5,14 +5,14 @@ use crate::state::{PasswordOp, RequestPurpose};
 use crate::telegram::envelope::AuthorizationState;
 use crate::telegram::requests::{
     cancel_password_reset, cancel_recovery_email_address_verification, check_authentication_code,
-    check_authentication_email_code, check_authentication_password,
-    check_login_email_address_code, check_phone_number_code, check_recovery_email_address_code,
-    get_password_state, recover_authentication_password, recover_password,
-    request_authentication_password_recovery, request_password_recovery,
-    request_qr_code_authentication, resend_authentication_code, resend_login_email_address_code,
-    resend_phone_number_code, resend_recovery_email_address_code, reset_password,
-    send_phone_number_code, set_authentication_email_address, set_authentication_phone_number,
-    set_login_email_address, set_password, set_recovery_email_address,
+    check_authentication_email_code, check_authentication_password, check_login_email_address_code,
+    check_phone_number_code, check_recovery_email_address_code, get_password_state,
+    recover_authentication_password, recover_password, request_authentication_password_recovery,
+    request_password_recovery, request_qr_code_authentication, resend_authentication_code,
+    resend_login_email_address_code, resend_phone_number_code, resend_recovery_email_address_code,
+    reset_password, send_phone_number_code, set_authentication_email_address,
+    set_authentication_phone_number, set_login_email_address, set_password,
+    set_recovery_email_address,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {

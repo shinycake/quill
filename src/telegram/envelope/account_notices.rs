@@ -121,7 +121,8 @@ mod tests {
 
     #[test]
     fn unconfirmed_session_cleared_when_none_left() {
-        let json = r#"{"@type":"updateUnconfirmedSession","session":null,"unconfirmed_session_count":0}"#;
+        let json =
+            r#"{"@type":"updateUnconfirmedSession","session":null,"unconfirmed_session_count":0}"#;
         match parse_envelope(json).unwrap().payload {
             EnvelopePayload::UpdateUnconfirmedSession { session, count } => {
                 assert!(session.is_none());

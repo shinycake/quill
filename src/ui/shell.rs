@@ -147,6 +147,9 @@ pub enum DialogKind {
     /// Slice parity:platform-shortcuts-reference: read-only keyboard
     /// shortcuts reference dialog.
     Shortcuts,
+    /// Batch 4: terms of service, server service popups and the
+    /// "New Login Prevented" follow-up.
+    AccountNotice,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -222,6 +225,7 @@ impl QuillShell {
             DialogKind::CommunityCreate => app.community_ui.create_dialog.is_some(),
             DialogKind::CommunityHub => app.community_ui.hub_open,
             DialogKind::Shortcuts => app.shortcuts_open,
+            DialogKind::AccountNotice => app.account_notice().is_some(),
         }
     }
 
@@ -271,12 +275,15 @@ impl QuillShell {
             DialogKind::CommunityCreate => community::build_create_community_dialog,
             DialogKind::CommunityHub => community::build_community_hub_dialog,
             DialogKind::Shortcuts => QuillApp::build_shortcuts_dialog,
+            DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
         }
     }
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
     const KINDS: &[DialogKind] = &[
+        // Batch 4: what the server says about the account comes first.
+        DialogKind::AccountNotice,
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,

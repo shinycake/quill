@@ -471,11 +471,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // post-apply refetch shows the post-clear numbers. A dropped
         // cache is the success signal: on a TDLib error the cache stays
         // and nothing refetches.
-        let cleared_download_cache =
-            matches!(&owned.envelope.payload, EnvelopePayload::StorageStatistics { .. })
-                && owned.envelope.extra.is_some_and(|id| {
-                    self.session.requests.purpose(id) == Some(RequestPurpose::OptimizeStorage)
-                });
+        let cleared_download_cache = matches!(
+            &owned.envelope.payload,
+            EnvelopePayload::StorageStatistics { .. }
+        ) && owned.envelope.extra.is_some_and(|id| {
+            self.session.requests.purpose(id) == Some(RequestPurpose::OptimizeStorage)
+        });
         let used_emoji: Vec<_> = match &owned.envelope.payload {
             EnvelopePayload::UpdateMessageSendSucceeded { message, .. } if message.is_outgoing => {
                 if let crate::telegram::envelope::MessageContent::Text(text) = &message.content {

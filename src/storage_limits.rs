@@ -139,7 +139,10 @@ mod tests {
     fn limits_read_from_tdlib_options() {
         let mut limits = StorageLimits::default();
         assert_eq!(limits.size_limit(), None);
-        limits.apply_option("storage_max_files_size", &OptionValue::Integer(2 * 1024 * 1024));
+        limits.apply_option(
+            "storage_max_files_size",
+            &OptionValue::Integer(2 * 1024 * 1024),
+        );
         limits.apply_option(
             "storage_max_time_from_last_access",
             &OptionValue::Integer(31 * DAY),
@@ -170,10 +173,22 @@ mod tests {
     #[test]
     fn no_limits_switches_the_optimizer_off() {
         let options = options_for(None, None);
-        assert_eq!(options[3], ("use_storage_optimizer", StorageOptionValue::Boolean(false)));
+        assert_eq!(
+            options[3],
+            ("use_storage_optimizer", StorageOptionValue::Boolean(false))
+        );
         let on = options_for(Some(GIB), None);
-        assert_eq!(on[0], ("storage_max_files_size", StorageOptionValue::Integer(1024 * 1024)));
-        assert_eq!(on[3], ("use_storage_optimizer", StorageOptionValue::Boolean(true)));
+        assert_eq!(
+            on[0],
+            (
+                "storage_max_files_size",
+                StorageOptionValue::Integer(1024 * 1024)
+            )
+        );
+        assert_eq!(
+            on[3],
+            ("use_storage_optimizer", StorageOptionValue::Boolean(true))
+        );
     }
 
     #[test]
