@@ -167,6 +167,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn enable_disable_roundtrip() {
         // Exercises the enable/disable logic against a sandboxed home —

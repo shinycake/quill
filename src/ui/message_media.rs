@@ -388,6 +388,7 @@ impl MediaCorners {
         })
     }
 
+    #[cfg(any(target_os = "macos", test))]
     /// The corner radii in whole points, `[tl, tr, br, bl]`.
     fn radii(self) -> [u32; 4] {
         [self.tl, self.tr, self.br, self.bl].map(|r| f32::from(r).round().max(0.) as u32)

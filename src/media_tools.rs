@@ -50,7 +50,7 @@ fn resolve(name: &str) -> PathBuf {
 
 fn find_in(name: &str, dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
     dirs.into_iter()
-        .map(|dir| dir.join(name))
+        .map(|dir| dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)))
         .find(|candidate| is_executable(candidate))
 }
 
@@ -175,9 +175,19 @@ pub fn capture_failure(log: &Path, camera: bool) -> String {
 /// Stop a capture's ffmpeg: SIGINT lets it finish the file, a kill drops it.
 pub fn stop_capture(child: &mut std::process::Child, graceful: bool) {
     if graceful {
+        #[cfg(unix)]
         let _ = Command::new("kill")
             .args(["-INT", &child.id().to_string()])
             .status();
+        // Windows has no SIGINT: ffmpeg stops and finalizes the file on `q`
+        // from stdin (when the capture was spawned with a piped stdin).
+        #[cfg(not(unix))]
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(b"q");
+        } else {
+            let _ = child.kill();
+        }
     } else {
         let _ = child.kill();
     }
