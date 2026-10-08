@@ -994,6 +994,7 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             let mut roots = vec![demo_media_allowlist()];
             roots.extend(super::demo::demo_stress_avatar_dir());
+            roots.extend(super::demo::demo_stress_photo_dir());
             roots
         } else {
             Vec::new()
