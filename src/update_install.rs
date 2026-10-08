@@ -1,4 +1,7 @@
 //! Explicit binary updates: verify first, hand off after exit, retain rollback.
+// The self-update handoff is Unix-only for now (Windows needs an installer
+// handoff — see the cross-platform backlog), so its helpers go unused there.
+#![cfg_attr(not(unix), allow(dead_code))]
 use crate::updater::{ReleaseInfo, UpdateState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

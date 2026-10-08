@@ -27,6 +27,7 @@ impl AccountExport {
             .unwrap_or_default()
             .as_nanos();
         let folder = parent.join(format!("Quill-export-{nonce}"));
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
         {

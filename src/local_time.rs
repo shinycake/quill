@@ -94,10 +94,47 @@ fn os_utc_offset_at(unix: i64) -> i32 {
         }
         tm.tm_gmtoff as i32
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        windows_utc_offset_at(unix)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = unix;
         0
+    }
+}
+
+/// The local offset (seconds east of UTC) at `unix` on Windows: convert
+/// the instant to local time with the current time-zone rules (DST
+/// included) and take the difference.
+#[cfg(windows)]
+fn windows_utc_offset_at(unix: i64) -> i32 {
+    use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows_sys::Win32::System::Time::{
+        FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
+    };
+    // FILETIME counts 100 ns ticks since 1601-01-01.
+    let ticks = (unix + 11_644_473_600).max(0) as u64 * 10_000_000;
+    let utc_file = FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    // SAFETY: plain value conversions into structs we own; any failure
+    // returns 0 and leaves us on UTC.
+    unsafe {
+        let mut utc: SYSTEMTIME = std::mem::zeroed();
+        let mut local: SYSTEMTIME = std::mem::zeroed();
+        let mut local_file: FILETIME = std::mem::zeroed();
+        if FileTimeToSystemTime(&utc_file, &mut utc) == 0
+            || SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) == 0
+            || SystemTimeToFileTime(&local, &mut local_file) == 0
+        {
+            return 0;
+        }
+        let local_ticks =
+            (u64::from(local_file.dwHighDateTime) << 32) | u64::from(local_file.dwLowDateTime);
+        ((local_ticks as i64 - ticks as i64) / 10_000_000) as i32
     }
 }
 
