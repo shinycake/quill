@@ -41,11 +41,26 @@ impl ServiceNames for SessionNames<'_> {
     }
 
     fn pinned(&self, message_id: i64) -> PinTarget {
+        // Loaded history first, else the copy `getRepliedMessage` fetched
+        // for the pin row (a pin service message replies to the pinned one).
+        let fetched = self
+            .session
+            .reply_targets
+            .values()
+            .find_map(|target| match target {
+                ReplyTarget::Loaded(found)
+                    if found.id.0 == message_id && found.chat_id.0 == self.chat_id =>
+                {
+                    Some(found.as_ref())
+                }
+                _ => None,
+            });
         let Some(message) = self
             .session
             .histories
             .get(&self.chat_id)
             .and_then(|history| history.messages.get(&message_id))
+            .or(fetched)
         else {
             return PinTarget::Loading;
         };

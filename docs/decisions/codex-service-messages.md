@@ -54,9 +54,7 @@ constructors stay `Unsupported`.
 
 ## Known simplifications
 
-- Pinned excerpt needs the pinned message in the loaded history; otherwise the
-  row says "pinned a message" (still jumps). No `getMessage` fetch here (batch 2
-  owns fetching replied messages).
+- Pinned excerpt: loaded history, else the message `getRepliedMessage` fetched for the pin row (#459's `reply_targets`; TDLib gives pin service messages a `reply_to`). If neither exists the row says "pinned a message" (still jumps).
 - The chat-list preview is computed when the last message arrives; if a name
   was not cached yet it reads "Someone" until the next update of that chat.
 - Checklist done/undone rows say "2 tasks" rather than naming tasks; gift,

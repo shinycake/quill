@@ -66,6 +66,8 @@ mod auth_ui;
 mod bot_pending;
 mod bot_stream;
 mod bots;
+mod bubble_header;
+mod bubble_header_demo;
 mod call_panel;
 mod call_sounds;
 mod call_tones;

@@ -296,6 +296,12 @@ pub enum ScreenshotDemo {
     /// Service-message tour in a group: members, pins with excerpt,
     /// photo change, calls, gifts, giveaways, topics, timers, boosts.
     ReadyServiceMessages,
+    /// Bubble headers and footer (injected, no live Telegram): replies with
+    /// a colored sender name, a quote, a media thumbnail, a reply from another
+    /// chat and a deleted original; forwards from a user, a hidden account, a
+    /// channel and an imported message; "via @bot"; and the footer's
+    /// "edited" / pin / views / "imported" marks.
+    ReadyBubbleHeaders,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting

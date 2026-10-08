@@ -1,0 +1,13 @@
+# codex:bubble-headers — reply, forward and footer facts (gap-audit batch 2)
+
+Closes gaps.md items 3-6 and the "via @bot", imported-label, pin-in-footer lines.
+
+- **Reply strip** (`state/session_reply.rs::reply_header`, `ui/bubble_header.rs`): sender name in the sender's peer color (user `accent_color_id`, chats derive from the id), quote text with a quote glyph when `quote` is set, a 30 px media thumbnail (photo, video, animation, video note, sticker), "Name › Chat" for replies from another chat (`origin`, `content` now parsed), "Deleted message" for tombstoned or 404 originals, "Loading…" until the original arrives. Clicking jumps via the existing around-load jump; other-chat replies open that chat at the message (`select_search_message`).
+- **Fetching outside the window**: after each `messages`/`updateNewMessage` the driver asks `getRepliedMessage` (replying chat + message id, so it also works for other-chat replies) for open-chat rows whose original is unknown, 24 per ingest. Answers live in `Session::reply_targets` (never in the history window); an error marks the target missing so it is not re-asked. Thumbnails of fetched originals join the normal thumbnail download pass.
+- **Footer**: `edit_date` (parsed from the message and kept current by `updateMessageEdited`) shows "edited"; imported messages show "imported"; pinned messages a pin glyph; views and signature as before. The time tooltip is tdesktop's date tooltip: sent date, "Edited: …", "Original: …" (forward/import date), imported warning first. The footer reserve widens for the extras.
+- **Forward line**: "Forwarded from" + bold colored name; clicking opens the user profile, the channel post (`messageOriginChannel`) or the chat. Hidden accounts get the `lng_forwarded_hidden` tooltip and no link; imported messages draw as a forward from the imported sender and toast the imported warning. Channel signature renders as "Channel (Author)". An origin whose chat is unknown reads "Forwarded message" without a link.
+- **via @bot**: appended to the forward line, or its own muted line, when the bot's username is known.
+- Outgoing (filled) bubbles use on-fill colors for all three headers.
+- Not done: reply-to-story strips, reply custom-emoji accent backgrounds, fetching an unknown `via_bot` user.
+
+Tests: `state/tests/bubble_headers.rs` (recorded TDLib JSON: quote, other-chat origin + content, all four forward origins, import_info, via_bot_user_id, edit_date, deleted/loading/fetched replies, tooltip text). Visual: `QUILL_DEMO_THEME=light|dark QUILL_DEMO_CAPTURE=out.png QUILL_DEMO_WINDOW_SIZE=1000x1500 quill --screenshot-demo ready-bubble-headers <dir>`.
