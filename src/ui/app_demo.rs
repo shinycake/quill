@@ -390,6 +390,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — audio file playback".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyPlayerBar => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — player bar".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyVideoSend => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1797,6 +1803,7 @@ impl QuillApp {
             call_ended_at: None,
             call_sounds: super::call_sounds::CallSounds::new(audio_output.clone()),
             call_sound_marks: Default::default(),
+            player: Default::default(),
             playing_voice: None,
             playing_audio: None,
             pending_audio_play: None,

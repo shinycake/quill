@@ -620,7 +620,7 @@ impl QuillApp {
             // Exercise failed playback recovery without a network request.
             self.pending_gif_play = Some((MessageId(205), FileId(26), String::new()));
             self.pending_video_play = Some((MessageId(205), FileId(26), String::new(), 0, None));
-            self.pending_audio_play = Some((MessageId(205), FileId(26), 1.));
+            self.pending_audio_play = Some((ChatId(11), MessageId(205), FileId(26), 1.));
             self.viewer_pending_play = Some((MessageId(205), FileId(26)));
             self.pending_voice_play = Some((ChatId(11), MessageId(205), FileId(26), false, 1.));
             self.discard_stopped_media_playback(cx);
@@ -631,7 +631,7 @@ impl QuillApp {
                     && self.viewer_pending_play.is_none()
                     && self.pending_voice_play.is_none()
             );
-            self.pending_audio_play = Some((MessageId(204), FileId(24), 1.));
+            self.pending_audio_play = Some((ChatId(11), MessageId(204), FileId(24), 1.));
             self.discard_stopped_media_playback(cx);
             assert!(self.pending_audio_play.is_some());
             self.pending_audio_play = None;
@@ -854,6 +854,26 @@ impl QuillApp {
             self.playing_audio = Some(MessageId(801));
             self.status_note = "screenshot demo — audio · playing".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyPlayerBar)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_audio(session, &self.demo_sink, &self.demo_seq);
+            }
+            // Music paused at 1:27 of 3:34; the bar shows repeat-all and
+            // shuffle as active.
+            self.begin_track_playback(
+                PlaybackKind::Audio,
+                ChatId(11),
+                MessageId(801),
+                214.0,
+                87.0,
+                cx,
+            );
+            self.pause_active_playback();
+            self.player.repeat = quill::playlist::RepeatMode::All;
+            self.player.order = quill::playlist::OrderMode::Shuffle;
+            self.status_note = "screenshot demo — player bar".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadySeekBars)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -864,7 +884,14 @@ impl QuillApp {
             // note 90 (12 s) playing from 5.0 s — the tick advances it —
             // and the music track 801 (214 s) paused with a remembered
             // 1:27 position, so both rows show seek bars.
-            self.begin_track_playback(PlaybackKind::Voice, MessageId(90), 12.0, 5.0, cx);
+            self.begin_track_playback(
+                PlaybackKind::Voice,
+                ChatId(11),
+                MessageId(90),
+                12.0,
+                5.0,
+                cx,
+            );
             self.playback_positions.insert(MessageId(801), 87.0);
             self.status_note = "screenshot demo — seek bars · voice playing · audio paused".into();
         }
