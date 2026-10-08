@@ -167,10 +167,29 @@ jobs:
         with:
           path: native/prefix
           key: tdlib-windows-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
+      # Incremental state (sources + objects) so a failure late in the cold
+      # build does not cost another 45 minutes. Saved even when the build fails.
+      - name: restore TDLib work tree
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            native/td
+            native/build
+          key: tdlib-windows-work-${{ github.run_id }}
+          restore-keys: tdlib-windows-work-
       - name: build TDLib
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: scripts/build-tdlib-windows.ps1
+      - name: save TDLib work tree
+        if: always() && steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            native/td
+            native/build
+          key: tdlib-windows-work-${{ github.run_id }}
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

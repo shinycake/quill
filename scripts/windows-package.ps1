@@ -3,7 +3,7 @@
 #
 #   quill-windows-<arch>/
 #     quill.exe
-#     tdjson.dll libssl-3-x64.dll libcrypto-3-x64.dll zlib1.dll
+#     tdjson.dll libssl-3-x64.dll libcrypto-3-x64.dll z.dll
 #     ntgcalls.dll rlottie.dll
 #     vcruntime140*.dll msvcp140*.dll   (app-local VC++ runtime, see decision doc)
 #     README.txt LICENSE THIRD_PARTY.md
@@ -20,8 +20,8 @@ $ntg = Pick $env:QUILL_NTGCALLS_DLL 'vendor/ntgcalls/lib/Release/ntgcalls.dll'
 $rlottie = Pick $env:QUILL_RLOTTIE_DLL 'vendor/rlottie/prefix/bin/rlottie.dll'
 $out = Pick $env:OUT 'dist/windows'
 
-$tdFiles = 'tdjson.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll', 'zlib1.dll'
-foreach ($f in @($bin, $ntg, $rlottie) + ($tdFiles | ForEach-Object { Join-Path $tdDir $_ })) {
+$tdFiles = @(Get-ChildItem -File $tdDir -Filter *.dll | ForEach-Object Name)   # tdjson + OpenSSL + zlib
+foreach ($f in @($bin, $ntg, $rlottie, (Join-Path $tdDir 'tdjson.dll'))) {
     if (-not (Test-Path $f)) { throw "missing input $f" }
 }
 

@@ -1,6 +1,6 @@
 # Build the pinned TDLib (tdjson.dll) with the reviewed Quill export patch on
 # Windows (MSVC + vcpkg for OpenSSL/zlib/gperf, as in TDLib's own instructions).
-# Output: native/prefix/bin/{tdjson.dll, libssl-3-x64.dll, libcrypto-3-x64.dll, zlib1.dll}
+# Output: native/prefix/bin/{tdjson.dll, libssl-3-x64.dll, libcrypto-3-x64.dll, z.dll}
 # Run from an MSVC developer environment. Does not download prebuilt binaries.
 . "$PSScriptRoot/windows-common.ps1"
 $root = (Resolve-Path "$PSScriptRoot/..").Path
@@ -45,11 +45,11 @@ Invoke-Native cmake @('--build', $build, '--target', 'tdjson', '--config', 'Rele
 New-Item -ItemType Directory -Force (Join-Path $prefix 'bin') | Out-Null
 $dll = Get-ChildItem -Recurse -Path $build -Filter tdjson.dll | Select-Object -First 1
 if (-not $dll) { throw "tdjson.dll was not built under $build" }
-Copy-Item $dll.FullName (Join-Path $prefix 'bin')
-foreach ($name in 'libssl-3-x64.dll', 'libcrypto-3-x64.dll', 'zlib1.dll') {
-    $f = Join-Path $installed "bin\$name"
-    if (-not (Test-Path $f)) { throw "vcpkg did not provide $name" }
-    Copy-Item $f (Join-Path $prefix 'bin')
+# The vcpkg toolchain's app-local step puts the runtime DLLs (OpenSSL and zlib,
+# which vcpkg names z.dll) next to tdjson.dll; ship exactly that set.
+foreach ($f in Get-ChildItem -File $dll.DirectoryName -Filter *.dll) { Copy-Item $f.FullName (Join-Path $prefix 'bin') }
+foreach ($name in 'tdjson.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll') {
+    if (-not (Test-Path (Join-Path $prefix "bin\$name"))) { throw "$name missing from $prefix\bin" }
 }
 $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $prefix 'bin\tdjson.dll')).Hash.ToLower()
 "$hash  tdjson.dll" | Tee-Object (Join-Path $prefix 'tdjson.sha256')

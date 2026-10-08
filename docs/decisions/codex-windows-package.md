@@ -5,7 +5,7 @@
 ```
 quill-windows-x86_64/
   quill.exe
-  tdjson.dll  libssl-3-x64.dll  libcrypto-3-x64.dll  zlib1.dll
+  tdjson.dll  libssl-3-x64.dll  libcrypto-3-x64.dll  z.dll
   ntgcalls.dll
   rlottie.dll
   vcruntime140.dll  vcruntime140_1.dll  msvcp140*.dll   (whatever the PE closure needs)

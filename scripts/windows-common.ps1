@@ -45,7 +45,7 @@ function Get-PeDependents {
 
 # DLLs that exist in System32 on a dev machine but are not guaranteed on a clean
 # Windows install (the VC runtime is bundled app-locally; the rest ships with us).
-$script:NotSystem = '^(vcruntime|msvcp|concrt|vcomp|vccorlib|libcrypto|libssl|zlib|vulkan-1)'
+$script:NotSystem = '^(vcruntime|msvcp|concrt|vcomp|vccorlib|libcrypto|libssl|zlib|z\.dll|vulkan-1)'
 
 function Test-SystemDll([string]$Name) {
     if ($Name -match '^(api-ms-win-|ext-ms-win-)') { return $true }

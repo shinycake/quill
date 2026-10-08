@@ -17,12 +17,12 @@ foreach ($name in 'tdjson.dll', 'ntgcalls.dll', 'rlottie.dll') {
 }
 $bad = @()
 foreach ($m in [System.Diagnostics.Process]::GetCurrentProcess().Modules) {
-    if ($m.ModuleName -match '^(libssl-3|libcrypto-3|zlib1|vcruntime140|msvcp140)') {
+    if ($m.ModuleName -match '^(libssl-3|libcrypto-3|z\.dll|vcruntime140|msvcp140)') {
         $inPkg = $m.FileName.StartsWith($Dir, [System.StringComparison]::OrdinalIgnoreCase)
         Write-Host ("{0,-28} {1}" -f $m.ModuleName, $m.FileName)
         # pwsh itself loads vcruntime/msvcp from its own directory, so only the
         # libraries that exist solely for Quill must come from the package.
-        if (-not $inPkg -and $m.ModuleName -match '^(libssl-3|libcrypto-3|zlib1)') { $bad += $m.FileName }
+        if (-not $inPkg -and $m.ModuleName -match '^(libssl-3|libcrypto-3|z\.dll)') { $bad += $m.FileName }
     }
 }
 if ($bad.Count) { throw "libraries not loaded from the package: $($bad -join ', ')" }
