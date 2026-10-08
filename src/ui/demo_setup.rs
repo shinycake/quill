@@ -1809,6 +1809,17 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — expandable block quotes".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyServiceMessages)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::service_demo::apply_ready_service_messages(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                );
+            }
+            self.status_note = "screenshot demo — service messages".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyBubbleHeaders)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
