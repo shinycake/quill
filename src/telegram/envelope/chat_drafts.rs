@@ -14,14 +14,37 @@ pub struct ChatDraft {
     pub quote: Option<(String, i32)>,
 }
 
-/// `ChatAction` values this slice acts on. Other constructors stay `Other`
-/// so a replacement action clears typing without inventing labels.
+/// `updateChatAction` payloads. Kinds Quill does not label (such as
+/// `chatActionWatchingAnimations`) stay `Other`, which clears the sender's
+/// previous action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatAction {
     /// `chatActionTyping`
     Typing,
+    /// `chatActionRecordingVideo`
+    RecordingVideo,
+    /// `chatActionUploadingVideo`
+    UploadingVideo,
+    /// `chatActionRecordingVoiceNote`
+    RecordingVoice,
+    /// `chatActionUploadingVoiceNote`
+    UploadingVoice,
+    /// `chatActionUploadingPhoto`
+    UploadingPhoto,
+    /// `chatActionUploadingDocument`
+    UploadingDocument,
     /// `chatActionChoosingSticker` (TDLib 1.8.67, line 6380).
     ChoosingSticker,
+    /// `chatActionChoosingLocation`
+    ChoosingLocation,
+    /// `chatActionChoosingContact`
+    ChoosingContact,
+    /// `chatActionStartPlayingGame`
+    PlayingGame,
+    /// `chatActionRecordingVideoNote`
+    RecordingRound,
+    /// `chatActionUploadingVideoNote`
+    UploadingRound,
     /// `chatActionCancel`, or a null action (schema: null cancels).
     Cancel,
     Other,
@@ -82,7 +105,18 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
 pub(crate) fn parse_chat_action(value: Option<&Value>) -> ChatAction {
     match value.and_then(|v| v.get("@type")).and_then(Value::as_str) {
         Some("chatActionTyping") => ChatAction::Typing,
+        Some("chatActionRecordingVideo") => ChatAction::RecordingVideo,
+        Some("chatActionUploadingVideo") => ChatAction::UploadingVideo,
+        Some("chatActionRecordingVoiceNote") => ChatAction::RecordingVoice,
+        Some("chatActionUploadingVoiceNote") => ChatAction::UploadingVoice,
+        Some("chatActionUploadingPhoto") => ChatAction::UploadingPhoto,
+        Some("chatActionUploadingDocument") => ChatAction::UploadingDocument,
         Some("chatActionChoosingSticker") => ChatAction::ChoosingSticker,
+        Some("chatActionChoosingLocation") => ChatAction::ChoosingLocation,
+        Some("chatActionChoosingContact") => ChatAction::ChoosingContact,
+        Some("chatActionStartPlayingGame") => ChatAction::PlayingGame,
+        Some("chatActionRecordingVideoNote") => ChatAction::RecordingRound,
+        Some("chatActionUploadingVideoNote") => ChatAction::UploadingRound,
         None | Some("chatActionCancel") => ChatAction::Cancel,
         Some(_) => ChatAction::Other,
     }

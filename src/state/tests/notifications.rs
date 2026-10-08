@@ -328,9 +328,12 @@ fn chat_action_choosing_sticker_label() {
     );
     let chat = session.chats.get(&7).unwrap();
     assert!(!chat.is_peer_typing());
-    assert_eq!(chat.peer_activity_label(), Some("choosing a sticker…"));
-    assert_eq!(chat.sidebar_preview(), "choosing a sticker…");
-    // A typing peer alongside keeps the sticker label (more specific wins).
+    assert_eq!(
+        chat.peer_activity_label(),
+        Some("choosing a sticker".into())
+    );
+    assert_eq!(chat.sidebar_preview(), "choosing a sticker");
+    // A typing peer alongside wins over the sticker picker (tdesktop).
     apply_json(
         &mut session,
         &seq,
@@ -339,7 +342,7 @@ fn chat_action_choosing_sticker_label() {
     );
     assert_eq!(
         session.chats.get(&7).unwrap().peer_activity_label(),
-        Some("choosing a sticker…")
+        Some("typing".into())
     );
     // Cancel clears only the sticker sender; the typer remains.
     apply_json(
@@ -349,8 +352,8 @@ fn chat_action_choosing_sticker_label() {
         r#"{"@type":"updateChatAction","chat_id":7,"sender_id":{"@type":"messageSenderUser","user_id":7},"action":{"@type":"chatActionCancel"}}"#,
     );
     let chat = session.chats.get(&7).unwrap();
-    assert_eq!(chat.peer_activity_label(), Some("typing…"));
-    assert_eq!(chat.sidebar_preview(), "typing…");
+    assert_eq!(chat.peer_activity_label(), Some("typing".into()));
+    assert_eq!(chat.sidebar_preview(), "typing");
 }
 
 #[test]
@@ -600,4 +603,40 @@ fn story_settings_effective_mute_and_poster_follow_scope_then_chat_exception() {
     let chat = session.chats.get(&7).unwrap();
     assert!(!session.effective_story_muted(chat));
     assert!(!session.effective_story_poster(chat));
+}
+
+#[test]
+fn group_chat_actions_name_the_sender_by_first_name() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","type":{"@type":"userTypeRegular"}}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":21,"title":"Club","type":{"@type":"chatTypeBasicGroup","basic_group_id":21},"unread_count":0}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatAction","chat_id":21,"sender_id":{"@type":"messageSenderUser","user_id":31},"action":{"@type":"chatActionRecordingVoiceNote"}}"#,
+    );
+    let chat = session.chats.get(&21).unwrap();
+    assert_eq!(
+        chat.peer_activity_label().as_deref(),
+        Some("Ada is recording a voice message")
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatAction","chat_id":21,"sender_id":{"@type":"messageSenderUser","user_id":31},"action":{"@type":"chatActionWatchingAnimations"}}"#,
+    );
+    assert_eq!(session.chats.get(&21).unwrap().peer_activity_label(), None);
 }

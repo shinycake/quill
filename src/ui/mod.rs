@@ -43,6 +43,7 @@ mod story_page;
 pub(crate) use story_page::{StoryPage, apply_ready_story_albums};
 
 mod actions;
+mod activity_indicator;
 mod app;
 mod app_demo;
 mod app_render;

@@ -125,17 +125,17 @@ impl QuillApp {
                 .and_then(|s| s.chats.get(&chat_id.0))
                 .and_then(|chat| chat.ttl_status_line())
         });
-        // Slice S17: peer activity label — "choosing a sticker…" wins over
-        // "typing…" while a peer picks a sticker (`chatActionChoosingSticker`,
-        // schema 1.8.67 line 6380).
-        let activity_label: Option<&'static str> = actions.and_then(|(chat_id, _, _, _)| {
-            self.session()
-                .and_then(|s| s.chats.get(&chat_id.0))
-                .and_then(|chat| chat.peer_activity_label())
-        });
-        // S17: widen the gate — sticker-picking sets no typing senders, so
-        // `typing` alone would hide the "choosing a sticker…" label.
-        let typing = typing || activity_label.is_some();
+        // Peer activity line: typing wins over other actions, as in
+        // tdesktop's `SendActionPainter`.
+        let activity_line: Option<quill::state::ActivityLine> =
+            actions.and_then(|(chat_id, _, _, _)| {
+                self.session()
+                    .and_then(|s| s.chats.get(&chat_id.0))
+                    .and_then(|chat| chat.peer_activity())
+            });
+        // Non-typing activity (recording, uploading...) sets no typing
+        // senders, so `typing` alone would hide it.
+        let typing = typing || activity_line.is_some();
         // One identity block for every chat kind: avatar, title, and a
         // single status line — activity wins, then secret-chat state, then
         // presence or member count, then the muted / timer notes.
@@ -175,8 +175,23 @@ impl QuillApp {
             (!meta.is_empty()).then(|| meta.join(" · "))
         });
         let secret_line = self.secret_pending_subtitle(chat_id);
+        if typing {
+            self.request_animation_tick(12, cx);
+        }
+        let status_indicator = if typing {
+            Some(
+                activity_line
+                    .as_ref()
+                    .map_or(quill::state::ActivityIndicator::Dots, |l| l.indicator),
+            )
+        } else {
+            None
+        };
         let (status_line, status_accent): (Option<String>, bool) = if typing {
-            (Some(activity_label.unwrap_or("typing…").to_string()), true)
+            (
+                Some(activity_line.map_or_else(|| "typing".to_string(), |l| l.text)),
+                true,
+            )
         } else if let Some(line) = secret_line {
             (Some(line), true)
         } else if let Some((line, online)) = presence {
@@ -207,14 +222,22 @@ impl QuillApp {
                         this.child(
                             div()
                                 .id("conversation-status")
+                                .flex()
+                                .items_center()
                                 .text_xs()
-                                .truncate()
                                 .text_color(if status_accent {
                                     cx.theme().primary
                                 } else {
                                     muted_fg
                                 })
-                                .child(line),
+                                .when_some(status_indicator, |this, indicator| {
+                                    this.child(super::activity_indicator::activity_indicator(
+                                        indicator,
+                                        cx.theme().primary,
+                                        "header-activity".into(),
+                                    ))
+                                })
+                                .child(div().min_w_0().truncate().child(line)),
                         )
                     }),
             )
