@@ -98,6 +98,7 @@ impl Rlottie {
             .and_then(|p| p.parent().map(Path::to_path_buf))
         {
             candidates.push(dir.join(name));
+            candidates.push(dir.join("lib").join(name));
             candidates.push(dir.join("../Frameworks").join(name));
             for ancestor in dir.ancestors() {
                 candidates.push(ancestor.join("vendor/rlottie/prefix/lib").join(name));
