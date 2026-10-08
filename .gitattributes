@@ -1,0 +1,5 @@
+# Byte-exact inputs: Windows checkouts must not rewrite line endings.
+schema/** -text
+native/patches/** -text
+*.sh text eol=lf
+*.py text eol=lf
