@@ -9,6 +9,10 @@ use std::time::Duration;
 
 /// Where macOS stands on one kind of capture device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(dead_code, reason = "only macOS reports device permission")
+)]
 pub(super) enum Access {
     Granted,
     Denied,

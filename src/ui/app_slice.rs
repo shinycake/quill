@@ -182,8 +182,8 @@ impl QuillApp {
     /// Redraw only the chat list (pinned drag follows the pointer).
     pub(super) fn notify_sidebar(&self, cx: &mut Context<Self>) {
         match &self.slices.sidebar {
-            Some(parts) => {
-                let id = parts.slice.entity_id();
+            Some(slice) => {
+                let id = slice.slice.entity_id();
                 let app: &mut App = cx;
                 app.notify(id);
             }
