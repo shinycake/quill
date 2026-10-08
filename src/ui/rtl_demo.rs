@@ -91,6 +91,40 @@ pub(super) fn apply_ready_rtl_polish(
             id * 1_048_576
         ));
     }
+    // Group rows: the preview carries the sender ("Shahar: ...") before the Hebrew text.
+    for (chat, user, name, text) in [
+        (
+            36_i64,
+            41_i64,
+            "Shahar",
+            "חחחח שרמיט גדול, אין מצב שזה קרה באמת",
+        ),
+        (
+            37,
+            42,
+            "בר",
+            "אם הם לא מגיעים עד שמונה אנחנו מתחילים בלעדיהם",
+        ),
+    ] {
+        let text = serde_json::to_string(text).unwrap_or_default();
+        let name_json = serde_json::to_string(name).unwrap_or_default();
+        let title = if chat == 36 {
+            "קבוצת חברים"
+        } else {
+            "Work chat"
+        };
+        jsons.push(format!(
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{user},"first_name":{name_json},"last_name":"","usernames":null,"phone_number":"","status":{{"@type":"userStatusRecently"}},"profile_photo":null,"is_contact":true,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        ));
+        jsons.push(format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{chat},"title":"{title}","type":{{"@type":"chatTypeBasicGroup","basic_group_id":{chat}}},"unread_count":0}}}}"#
+        ));
+        jsons.push(format!(
+            r#"{{"@type":"updateChatLastMessage","chat_id":{chat},"last_message":{{"id":{},"chat_id":{chat},"date":{now},"is_outgoing":false,"sender_id":{{"@type":"messageSenderUser","user_id":{user}}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text},"entities":[]}}}}}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{}","is_pinned":false}}]}}"#,
+            chat * 1_048_576,
+            2000 - chat
+        ));
+    }
     for (id, outgoing, text) in MESSAGES {
         let text = serde_json::to_string(text).unwrap_or_default();
         jsons.push(format!(

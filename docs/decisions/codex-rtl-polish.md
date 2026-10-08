@@ -45,6 +45,16 @@ chat-list titles (elision only), search results (chat title, preview, in-chat
 hit), the archive row, reply strips in bubbles, the pinned bar and its list.
 The composer reply bar already goes through the chat-list preview line.
 
+Sender prefix: tdesktop builds "From: text" as one `Ui::Text::String`, so the
+paragraph direction is that of the first strong character: `Shahar: חחחח…` is a
+left-to-right line (accent-coloured prefix as the first run, Hebrew following),
+`בר: …` is right-to-left. Quill lays prefix, media icon glyph and preview out as
+one bidi line when the preview has RTL text (`chat_list_preview_line_layered`
+`prefix`). With a mini-thumbnail the prefix and thumb stay separate boxes and
+the text is right-aligned in the rest, as in tdesktop (sender, thumbs, text).
+Draft prefixes ("Draft:") are still separate. Search hit rows carry no sender
+prefix in Quill.
+
 Deviations: a chat-list *title* stays at the start edge next to its badges
 (tdesktop right-aligns the name in its box and then places badges from the
 left, which overlaps); previews that contain a rendered custom-emoji picture

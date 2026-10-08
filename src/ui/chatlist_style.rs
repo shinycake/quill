@@ -27,6 +27,7 @@ pub(crate) fn chat_list_preview_line(
         entities,
         emoji,
         &std::collections::HashMap::new(),
+        None,
         cx,
     )
 }
@@ -39,6 +40,11 @@ pub(crate) fn chat_list_preview_line_layered(
     entities: &[TextEntity],
     emoji: &std::collections::HashMap<i64, ImageSource>,
     layered: &std::collections::HashMap<i64, super::anim_layer::LayeredClip>,
+    // The sender ("Name: ") in the accent color. Right-to-left previews lay it out as the
+    // first run of the one line (Telegram Desktop builds "from: text" as one
+    // `Ui::Text::String`, so a Latin name makes the paragraph left-to-right); the caller
+    // draws the prefix itself for every other preview.
+    prefix: Option<String>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // One line, as in Telegram Desktop: line breaks read as spaces (same
@@ -51,11 +57,25 @@ pub(crate) fn chat_list_preview_line_layered(
             Some(glyph) => format!("{glyph} {preview}"),
             None => preview,
         };
+        let mut highlights = Vec::new();
+        let text = match &prefix {
+            Some(prefix) => {
+                highlights.push((
+                    0..prefix.len(),
+                    HighlightStyle {
+                        color: Some(accent().into()),
+                        ..Default::default()
+                    },
+                ));
+                format!("{prefix}{text}")
+            }
+            None => text,
+        };
         return div()
             .text_xs()
             .truncate()
             .text_color(muted)
-            .child(super::bidi_line::one_line_plain(text))
+            .child(super::bidi_line::one_line(text, highlights, Vec::new()))
             .into_any_element();
     }
     // Right-to-left text without pictures to place: one bidi-correct line (typing-order
@@ -70,6 +90,16 @@ pub(crate) fn chat_list_preview_line_layered(
             let mut text = String::new();
             let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
             let mut mono: Vec<(std::ops::Range<usize>, SharedString)> = Vec::new();
+            if let Some(prefix) = &prefix {
+                text.push_str(prefix);
+                highlights.push((
+                    0..prefix.len(),
+                    HighlightStyle {
+                        color: Some(accent().into()),
+                        ..Default::default()
+                    },
+                ));
+            }
             if let Some(glyph) = icon {
                 text.push_str(glyph);
                 text.push(' ');
@@ -118,6 +148,9 @@ pub(crate) fn chat_list_preview_line_layered(
         }
     }
     let mut parts: Vec<(bool, Div)> = Vec::new();
+    if let Some(prefix) = prefix {
+        parts.push((false, div().text_color(accent()).child(prefix)));
+    }
     if let Some(glyph) = icon {
         parts.push((false, div().child(format!("{glyph} "))));
     }
