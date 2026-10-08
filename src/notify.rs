@@ -427,7 +427,6 @@ fn powershell_command(script: &str) -> SoundCommand {
 
 /// Windows MP3 player: WPF `MediaPlayer`; the path is a quoted literal, never
 /// code.
-#[cfg(any(windows, test))]
 fn windows_file_sound_command(path: &str) -> SoundCommand {
     powershell_command(&format!(
         "Add-Type -AssemblyName PresentationCore; \
