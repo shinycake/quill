@@ -1009,6 +1009,42 @@ fn chat_export_pages_history_until_a_page_adds_nothing() {
 }
 
 #[test]
+fn chat_export_refuses_protected_chats() {
+    // A chat with `has_protected_content` can't be saved or forwarded, so
+    // the export never starts and no `getChatHistory` page goes out.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateChatHasProtectedContent","chat_id":16,"has_protected_content":true}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+
+    assert!(
+        driver
+            .start_chat_export(ChatId(16), "Protected".into())
+            .is_err()
+    );
+    assert!(driver.session.chat_export.is_none());
+    assert!(
+        !recorder
+            .snapshot()
+            .iter()
+            .any(|j| j.contains("\"@type\":\"getChatHistory\""))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn view_messages_reports_only_what_is_shown() {
     // Opening a chat views only its newest message (Telegram X opens at the
     // bottom and its viewport reports what is on screen); older loaded rows

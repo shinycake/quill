@@ -1,3 +1,5 @@
+// Added by the Quill project (2026) to gpui-base 0.7.0; licensed Apache-2.0
+// like the rest of this crate. See third_party/gpui-base/QUILL-CHANGES.md.
 //! Wrapped, painted and hit-tested bidirectional text outside the input engine.
 //!
 //! GPUI wraps a paragraph by walking its shaped glyphs left to right, which for a

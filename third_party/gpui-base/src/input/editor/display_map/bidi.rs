@@ -1,3 +1,5 @@
+// Added by the Quill project (2026) to gpui-base 0.7.0; licensed Apache-2.0
+// like the rest of this crate. See third_party/gpui-base/QUILL-CHANGES.md.
 //! Bidirectional text for the input engine (Unicode Bidirectional Algorithm,
 //! UAX #9), the way Qt's `QTextEdit` in Telegram Desktop's `InputField` lays
 //! out a paragraph:

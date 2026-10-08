@@ -13,4 +13,12 @@ Needs Windows 10 or newer. Nothing is installed or written outside your user
 profile. Account data lives in the per-user application data directory,
 never next to the executable.
 
-Licenses: see LICENSE and THIRD_PARTY.md. Source: https://github.com/shinycake/quill
+Licenses: Quill is MIT (LICENSE). THIRD_PARTY.md lists every bundled
+component and its license. The license texts are in licenses\, and the Rust
+crate licenses are in THIRD_PARTY_LICENSES.md. The Visual C++ runtime DLLs are
+Microsoft files redistributed under Microsoft's terms (licenses\msvc-runtime.txt).
+Source: https://github.com/shinycake/quill
+
+Quill is an independent, unofficial Telegram client. It is not affiliated with,
+endorsed by, or sponsored by Telegram. It is early, experimental software and
+comes with no warranty (see LICENSE).

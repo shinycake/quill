@@ -12,7 +12,8 @@
 #     licenses/ffmpeg/           FFmpeg license texts + exact source and configure line
 #     lib/libssl.so.3, libcrypto.so.3   (bundled OpenSSL, see decision doc)
 #     share/applications/quill.desktop, share/icons/hicolor/<size>/apps/quill.png
-#     install.sh, README.txt, LICENSE, THIRD_PARTY.md
+#     install.sh, README.txt, LICENSE, THIRD_PARTY.md, THIRD_PARTY_LICENSES.md
+#     licenses/                  native-library license texts (scripts/stage-licenses.sh)
 #
 # Inputs (env, all optional):
 #   QUILL_BIN            release binary            (default target/release/quill)
@@ -108,7 +109,7 @@ for icon in assets/icons/hicolor/*/apps/quill.png; do
 done
 install -m 755 scripts/linux-install.sh "$PKG/install.sh"
 install -m 644 scripts/linux-package-README.txt "$PKG/README.txt"
-install -m 644 LICENSE THIRD_PARTY.md "$PKG/"
+bash scripts/stage-licenses.sh "$PKG"
 
 bash scripts/check-bundle-elf.sh "$PKG"
 
