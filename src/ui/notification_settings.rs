@@ -175,7 +175,30 @@ impl QuillApp {
     /// Parity slice: in-app notification sounds toggle (tdesktop "Play
     /// sounds"). Writes through to prefs (persist) and updates the
     /// Session mirror immediately.
-    pub(super) fn set_inapp_sounds_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
+    /// tdesktop "Desktop notifications" (`desktopNotify`), also flipped from
+    /// the tray menu's "Disable/Enable notifications".
+    pub(crate) fn set_desktop_notifications(&mut self, on: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.desktop_notifications = on;
+            if let Err(err) = live.driver.save_desktop_notifications() {
+                self.status_note = format!("couldn’t save desktop notifications: {err}");
+            }
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.desktop_notifications = on;
+            self.status_note = "demo: desktop notifications are not saved".into();
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn desktop_notifications_enabled(&self) -> bool {
+        self.session().is_none_or(|s| s.desktop_notifications)
+    }
+
+    pub(crate) fn notification_sounds_enabled(&self) -> bool {
+        self.session().is_none_or(|s| s.inapp_sounds_enabled)
+    }
+
+    pub(crate) fn set_inapp_sounds_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.inapp_sounds_enabled = on;
             if let Err(err) = live.driver.save_inapp_sounds_enabled() {
@@ -239,6 +262,7 @@ impl QuillApp {
             // Parity slice: in-app notification sounds (tdesktop "Play
             // sounds") — the client-side toggle gating
             // `Session::notification_sound_for`.
+            body = body.child(this.desktop_notifications_section(cx));
             body = body.child(this.inapp_sounds_section(cx));
             let footer = div().flex().justify_end().gap_2().children([
                 Button::new("reset-all-notif-settings")
@@ -374,6 +398,37 @@ impl QuillApp {
     /// as a single kit Switch row in the notification defaults dialog.
     /// Toggling writes through to `prefs.json` and updates the Session
     /// mirror so the next notification's sound decision sees it.
+    /// tdesktop "Desktop notifications" switch.
+    pub(super) fn desktop_notifications_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = self.desktop_notifications_enabled();
+        div()
+            .id("desktop-notifications-section")
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child("Desktop notifications"),
+            )
+            .child(
+                Switch::new("desktop-notifications-toggle")
+                    .checked(enabled)
+                    .accessibility_label("Desktop notifications")
+                    .on_click(cx.listener(move |this, &on, _, cx| {
+                        this.set_desktop_notifications(on, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn inapp_sounds_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let enabled = self
             .session()
