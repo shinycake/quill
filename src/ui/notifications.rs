@@ -246,7 +246,18 @@ impl QuillApp {
             .and_then(|live| live.driver.session.message_link_result.take())
         {
             cx.write_to_clipboard(ClipboardItem::new_string(link));
-            self.status_note = "message link copied".into();
+            // Telegram Desktop `CopyPostLink`: a public link says so; a
+            // private one warns that only members can open it.
+            let public = self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.driver.session.message_link_public);
+            self.status_note = if public {
+                "Link copied to clipboard."
+            } else {
+                "This link will only work for members of this chat."
+            }
+            .into();
             progressed = true;
         }
         // `parity:platform-deep-links`: drive the launch-link flow —
@@ -315,6 +326,16 @@ impl QuillApp {
             .and_then(|live| live.driver.session.invite_link_error.take())
         {
             self.status_note = err;
+            progressed = true;
+        }
+        // Ban / delete-all / report-spam from the delete box, and "Save to
+        // Profile": their outcome lands in the status note.
+        if let Some(note) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.message_action_note.take())
+        {
+            self.status_note = note;
             progressed = true;
         }
         // Slice CL3: a `reportChat` outcome arrived — surface it in the

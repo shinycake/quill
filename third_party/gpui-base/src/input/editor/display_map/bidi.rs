@@ -24,7 +24,8 @@
 //! shaped run.
 use std::ops::Range;
 
-use unicode_bidi::{BidiClass, ParagraphBidiInfo, bidi_class};
+use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
+use unicode_segmentation::UnicodeSegmentation as _;
 
 /// Two x positions closer than this are the same place.
 const EPS: f32 = 0.01;
@@ -96,17 +97,30 @@ impl<'a> Paragraph<'a> {
         if range.is_empty() {
             return Vec::new();
         }
-        let (levels, runs) = self.info.visual_runs(range);
-        let mut out = Vec::with_capacity(runs.len());
-        for run in runs {
-            if run.is_empty() {
-                continue;
+        // Level runs are cut on grapheme boundaries only: a cluster (an emoji with its variation
+        // selector, skin tone or ZWJ parts, a flag, a keycap, a letter with its marks) takes the
+        // level of its first character and is shaped in one piece, or the shaper cannot pick the
+        // colour emoji font for it.
+        let levels = self.info.reordered_levels(range.clone());
+        let text = self.info.text;
+        let mut logical: Vec<(Range<usize>, Level)> = Vec::new();
+        for (i, cluster) in text[range.clone()].grapheme_indices(true) {
+            let start = range.start + i;
+            let level = levels[start];
+            match logical.last_mut() {
+                Some((run, run_level)) if *run_level == level => run.end = start + cluster.len(),
+                _ => logical.push((start..start + cluster.len(), level)),
             }
-            if levels[run.start].is_rtl() {
-                out.extend(split_rtl_run(self.info.text, run));
+        }
+        let run_levels: Vec<Level> = logical.iter().map(|(_, level)| *level).collect();
+        let mut out = Vec::with_capacity(logical.len());
+        for index in ParagraphBidiInfo::reorder_visual(&run_levels) {
+            let (run, level) = &logical[index];
+            if level.is_rtl() {
+                out.extend(split_rtl_run(text, run.clone()));
             } else {
                 out.push(VisualRun {
-                    range: run,
+                    range: run.clone(),
                     rtl: false,
                 });
             }
@@ -129,11 +143,11 @@ fn split_rtl_run(text: &str, run: Range<usize>) -> Vec<VisualRun> {
     let slice = &text[run.clone()];
     let first = slice.char_indices().find(|&(_, c)| is_rtl_letter(c));
     let single = |start: usize, end: usize| -> Vec<VisualRun> {
-        // One piece per character, visually reversed.
+        // One piece per grapheme cluster, visually reversed.
         text[start..end]
-            .char_indices()
-            .map(|(i, c)| VisualRun {
-                range: start + i..start + i + c.len_utf8(),
+            .grapheme_indices(true)
+            .map(|(i, g)| VisualRun {
+                range: start + i..start + i + g.len(),
                 rtl: true,
             })
             .rev()
@@ -804,6 +818,85 @@ mod tests {
         // Visually the close bracket comes first (leftmost).
         let at = |ix: usize| runs.iter().position(|r| r.range.start == ix).unwrap();
         assert!(at(close) < at(open));
+    }
+
+    /// Every run starts and ends on a grapheme cluster boundary.
+    fn assert_clusters_whole(text: &str, runs: &[VisualRun]) {
+        let boundaries: Vec<usize> = text
+            .grapheme_indices(true)
+            .map(|(i, _)| i)
+            .chain(std::iter::once(text.len()))
+            .collect();
+        for run in runs {
+            assert!(
+                boundaries.contains(&run.range.start) && boundaries.contains(&run.range.end),
+                "run {:?} cuts a cluster of {text:?}",
+                run.range
+            );
+        }
+        // And the runs still cover the text exactly once.
+        let mut covered: Vec<_> = runs.iter().map(|r| r.range.clone()).collect();
+        covered.sort_by_key(|r| r.start);
+        let mut at = 0;
+        for r in covered {
+            assert_eq!(r.start, at);
+            at = r.end;
+        }
+        assert_eq!(at, text.len());
+    }
+
+    const EMOJI: [&str; 5] = [
+        "\u{261D}\u{FE0F}",
+        "\u{1F44D}\u{1F3FD}",
+        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+        "\u{1F1EE}\u{1F1F1}",
+        "1\u{FE0F}\u{20E3}",
+    ];
+
+    #[test]
+    fn emoji_sequences_are_never_cut_by_a_run() {
+        for emoji in EMOJI {
+            // At the end, at the start, in the middle, and next to Latin text.
+            for text in [
+                format!("שלום עולם {emoji}"),
+                format!("{emoji} שלום עולם"),
+                format!("שלום {emoji} עולם"),
+                format!("שלום עולם abc {emoji}"),
+                format!("abc {emoji} שלום"),
+                format!("שלום{emoji}"),
+            ] {
+                let p = Paragraph::analyze(&text).unwrap();
+                assert_clusters_whole(&text, &p.visual_runs(0..text.len()));
+            }
+        }
+    }
+
+    #[test]
+    fn a_trailing_emoji_is_one_run_at_the_left_of_an_rtl_paragraph() {
+        let emoji = EMOJI[0];
+        let text = format!("שלום עולם {emoji}");
+        let p = Paragraph::analyze(&text).unwrap();
+        let runs = p.visual_runs(0..text.len());
+        let at = text.find(emoji).unwrap();
+        // The emoji resolves to the right-to-left level (between a Hebrew letter and the
+        // end of the paragraph) and is the first run from the left, in one piece.
+        assert_eq!(runs[0].range, at..text.len());
+        assert!(runs[0].rtl);
+    }
+
+    #[test]
+    fn a_flag_or_keycap_inside_hebrew_stays_in_one_run() {
+        for emoji in ["\u{1F1EE}\u{1F1F1}", "1\u{FE0F}\u{20E3}"] {
+            let text = format!("שלום {emoji} עולם");
+            let p = Paragraph::analyze(&text).unwrap();
+            let runs = p.visual_runs(0..text.len());
+            let at = text.find(emoji).unwrap();
+            let run = runs
+                .iter()
+                .find(|r| r.range.contains(&at))
+                .expect("the emoji is in a run");
+            assert!(run.range.end >= at + emoji.len(), "{emoji:?}: {run:?}");
+        }
     }
 
     #[test]

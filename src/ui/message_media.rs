@@ -1619,7 +1619,9 @@ pub(super) fn audio_row(
         .and_then(|file| file.usable_path())
         .and_then(|path| sandboxed_display_path(path, media_roots));
     let play = cx.listener(move |this, _, _, cx| {
-        this.toggle_audio_playback(message_id, file_id, audio_duration, cx);
+        if let Some(chat_id) = this.open_chat_id() {
+            this.toggle_audio_playback(chat_id, message_id, file_id, audio_duration, cx);
+        }
     });
     // Album art, when there is one, carries the play glyph on a scrim;
     // otherwise the plain accent disc.

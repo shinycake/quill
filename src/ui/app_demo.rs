@@ -391,6 +391,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — audio file playback".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyPlayerBar => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — player bar".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyVideoSend => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -601,6 +607,13 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — RTL polish".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyMessageMenu => (
+            Some(super::message_menu_demo::seed_ready_message_menu_session
+                as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — message menu".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyServiceMessages => (
@@ -1805,6 +1818,7 @@ impl QuillApp {
             call_ended_at: None,
             call_sounds: super::call_sounds::CallSounds::new(audio_output.clone()),
             call_sound_marks: Default::default(),
+            player: Default::default(),
             playing_voice: None,
             playing_audio: None,
             pending_audio_play: None,
@@ -1866,6 +1880,7 @@ impl QuillApp {
             restrict_dialog: None,
             group_confirm_dialog: None,
             message_menu_selection: None,
+            message_menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             media_viewer: MediaViewer::closed(),
             photo_editor: None,
             viewer_zoom: ViewerZoom::new(),
@@ -1985,6 +2000,9 @@ impl QuillApp {
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
+        if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
+            app.demo_setup_message_menu(window, cx);
+        }
 
         let menu_app = cx.weak_entity();
         cx.intercept_keystrokes(move |event, window, cx| {

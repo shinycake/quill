@@ -393,6 +393,7 @@ fn message_interaction_info_and_update_are_typed() {
                     recent_senders: Vec::new(),
                 }],
                 are_tags: false,
+                can_get_added_reactions: false,
             }),
             ..MessageInteractionInfo::default()
         }),

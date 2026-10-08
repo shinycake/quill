@@ -166,6 +166,8 @@ pub enum ScreenshotDemo {
     ReadyVideoNote,
     /// Music file bubble with title, performer, cover, and Play/Pause.
     ReadyAudio,
+    /// The top "now playing" bar over a music chat (audio, repeat all, shuffle).
+    ReadyPlayerBar,
     /// Composer video attach chip plus an own-sent video playing in history.
     ReadyVideoSend,
     /// Composer video-note attach chip plus an own-sent round note in history.
@@ -304,6 +306,13 @@ pub enum ScreenshotDemo {
     /// channel and an imported message; "via @bot"; and the footer's
     /// "edited" / pin / views / "imported" marks.
     ReadyBubbleHeaders,
+    /// The message context menu over every kind of message (injected, no
+    /// live Telegram). `QUILL_DEMO_MENU` picks the scenario: photo,
+    /// document, downloading, video, gif, sticker, audio, audio-save-to,
+    /// voice-private, uploading, group, group-audience, channel,
+    /// protected, report-pick, report-sub, report-text, report-done,
+    /// sticker-set, moderate.
+    ReadyMessageMenu,
     /// Poll demo (injected, no live Telegram): an open regular poll with a
     /// voted option (percentage bars + counts, tapping an option flips the
     /// chosen mark locally) and a closed poll (results, no voting
