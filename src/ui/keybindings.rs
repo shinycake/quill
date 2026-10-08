@@ -569,6 +569,28 @@ fn claim_defaults(ra: &RebindableAction, claimed: &mut Vec<Keystroke>) -> Vec<St
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys(default_bindings());
+    trace_keys(cx);
+}
+
+/// `QUILL_TRACE_KEYS=1`: log every keystroke the window receives (what GPUI
+/// made of the OS event) and the action it resolved to, to stderr. For
+/// finding the real spelling of a chord on a given keyboard layout.
+fn trace_keys(cx: &mut App) {
+    if std::env::var_os("QUILL_TRACE_KEYS").is_none() {
+        return;
+    }
+    cx.observe_keystrokes(|event, _, _| {
+        let ks = &event.keystroke;
+        eprintln!(
+            "key: {} key={:?} key_char={:?} mods={:?} action={}",
+            ks.unparse(),
+            ks.key,
+            ks.key_char,
+            ks.modifiers,
+            event.action.as_ref().map_or("none", |action| action.name())
+        );
+    })
+    .detach();
 }
 
 /// Parity slice (platform-custom-keybindings): rebuild the keymap from
