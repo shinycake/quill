@@ -527,6 +527,7 @@ impl QuillApp {
         });
         let top = part.top();
         let dust = top.then(|| self.vanish_overlay()).flatten();
+        let player_bar = top.then(|| self.player_bar(cx)).flatten();
         let call_bar = top
             .then(|| self.call_bar(cx).or_else(|| self.group_call_bar(cx)))
             .flatten();
@@ -537,6 +538,7 @@ impl QuillApp {
             .flex_col()
             .when(top, |this| this.flex_1().min_h_0())
             .min_w_0()
+            .children(player_bar)
             .children(call_bar)
             .children(capture_notice)
             .when(top, |this| this.child(history))
@@ -1289,12 +1291,16 @@ impl QuillApp {
                             row_chrome(&message, continues);
                         // Phase 4.6: audio/voice rows get a seek-bar view model.
                         let seek_bar = match &message.content {
-                            MessageContent::VoiceNote(note) => {
-                                Some(self.seek_bar_view(message.id, f64::from(note.duration)))
-                            }
-                            MessageContent::Audio(audio) => {
-                                Some(self.seek_bar_view(message.id, f64::from(audio.duration)))
-                            }
+                            MessageContent::VoiceNote(note) => Some(self.seek_bar_view(
+                                message.chat_id,
+                                message.id,
+                                f64::from(note.duration),
+                            )),
+                            MessageContent::Audio(audio) => Some(self.seek_bar_view(
+                                message.chat_id,
+                                message.id,
+                                f64::from(audio.duration),
+                            )),
                             _ => None,
                         };
                         let animation_playing = self.playing_animation == Some(message.id);
