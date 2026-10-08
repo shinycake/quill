@@ -274,6 +274,8 @@ impl Render for QuillApp {
             // Window-wide text selection: message text can be selected and
             // copied within a message (Telegram Desktop).
             .child(gpui_kit::base::TextSelectionLayer)
+            // Batch 4: input clock for the online/idle presence.
+            .child(super::presence::input_probe())
             // Capture phase: with message text selected, ⌘C copies it even
             // while the composer has focus.
             .capture_action(cx.listener(|_this, _: &CopyAction, window, cx| {
@@ -538,6 +540,7 @@ impl Render for QuillApp {
                 self.search_is_open(),
                 cx,
             ))
+            .children(self.unconfirmed_login_banner(cx))
             .when(
                 matches!(
                     self.update_state,

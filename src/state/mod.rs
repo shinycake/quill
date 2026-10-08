@@ -54,6 +54,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
+mod account_notices;
 mod call_types;
 mod chat_activity;
 mod chat_types;
@@ -93,6 +94,7 @@ mod shared_media_types;
 mod sticker_gif_types;
 mod story_types;
 
+pub use account_notices::*;
 pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;

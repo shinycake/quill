@@ -19,17 +19,16 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::table::{Table, TableBody, TableRow};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::data_settings::{
-    AutoDownloadNetSettings, DataStoragePrefs, NetworkKind, size_cap_label, top_chats_by_size,
+    AutoDownloadNetSettings, DataStoragePrefs, NetworkKind, size_cap_label,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
-fn format_storage_bytes(n: i64) -> String {
+pub(super) fn format_storage_bytes(n: i64) -> String {
     if n <= 0 {
         "0 B".to_string()
     } else if n < 1024 {
@@ -60,14 +59,14 @@ impl QuillApp {
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
         self.storage_usage_open = true;
         self.data_storage_editor = None;
-        self.data_storage_confirm_clear = false;
+        self.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.cache_cleared = false;
+            live.driver.session.storage_freed = None;
             let _ = live.driver.maybe_fetch_storage_statistics();
             let _ = live.driver.fetch_auto_download_presets();
         }
         if let Some(demo) = self.demo_session.as_mut() {
-            demo.cache_cleared = false;
+            demo.storage_freed = None;
         }
         cx.notify();
     }
@@ -114,7 +113,7 @@ impl QuillApp {
             QuillShell::on_close_kind(app, shell, DialogKind::StorageUsage, |this, _, cx| {
                 this.storage_usage_open = false;
                 this.data_storage_editor = None;
-                this.data_storage_confirm_clear = false;
+                this.storage_confirm = None;
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -379,101 +378,7 @@ impl QuillApp {
                 );
             }
             Some(stats) => {
-                // Phase 6: a static kit Table (was: hand-rolled
-                // justify-between rows).
-                let mut table_body = TableBody::new().child(
-                    TableRow::new()
-                        .child(Self::table_cell(
-                            div().font_semibold().text_sm().child("Total"),
-                        ))
-                        .child(
-                            Self::table_cell(
-                                div()
-                                    .text_sm()
-                                    .child(format_storage_bytes(stats.total_size)),
-                            )
-                            .text_right(),
-                        ),
-                );
-                for (label, size, count) in quill::telegram::envelope::storage_category_rows(&stats)
-                {
-                    table_body = table_body.child(
-                        TableRow::new()
-                            .child(Self::table_cell(div().text_sm().child(label)))
-                            .child(
-                                Self::table_cell(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!(
-                                            "{count} files · {}",
-                                            format_storage_bytes(size)
-                                        )),
-                                )
-                                .text_right(),
-                            ),
-                    );
-                }
-                body = body.child(
-                    Table::new()
-                        .with_ix(0)
-                        .accessibility_label("Storage by file type")
-                        .w_full()
-                        .child(table_body),
-                );
-                // Per-chat breakdown (largest first).
-                let chat_rows: Vec<(i64, i64, i32)> = stats
-                    .by_chat
-                    .iter()
-                    .map(|row| (row.chat_id, row.size, row.count))
-                    .collect();
-                let top: Vec<(String, i64, i32)> = top_chats_by_size(&chat_rows, 10)
-                    .into_iter()
-                    .map(|(chat_id, size, count)| {
-                        // Slice S4 fix-up: chat_id 0 is the schema's
-                        // "all other chats grouped" bucket, not a chat.
-                        let title = if chat_id == 0 {
-                            "Other chats".to_string()
-                        } else {
-                            session
-                                .as_ref()
-                                .and_then(|s| s.chats.get(&chat_id))
-                                .map(|c| c.title.clone())
-                                .unwrap_or_else(|| format!("Chat {chat_id}"))
-                        };
-                        (title, size, count)
-                    })
-                    .collect();
-                if !top.is_empty() {
-                    body = body.child(section_header("Chats"));
-                    let mut chat_body = TableBody::new();
-                    for (title, size, count) in top {
-                        chat_body = chat_body.child(
-                            TableRow::new()
-                                .child(Self::table_cell(div().text_sm().child(title)))
-                                .child(
-                                    Self::table_cell(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(format!(
-                                                "{count} files · {}",
-                                                format_storage_bytes(size)
-                                            )),
-                                    )
-                                    .text_right(),
-                                ),
-                        );
-                    }
-                    body = body.child(
-                        Table::new()
-                            .with_ix(1)
-                            .accessibility_label("Storage by chat")
-                            .w_full()
-                            .child(chat_body),
-                    );
-                }
-                body = body.child(self.data_storage_clear_cache_row(cx));
+                body = body.child(self.local_storage_section(cx, &stats));
             }
         }
         body
@@ -644,71 +549,6 @@ impl QuillApp {
                         cx.notify();
                     })),
             )
-    }
-
-    /// Slice S4: the "Clear cache" row — two-step confirm, then
-    /// `removeAllFilesFromDownloads`; the confirmed clear shows a note
-    /// until the dialog is reopened.
-    fn data_storage_clear_cache_row(&self, cx: &mut Context<Self>) -> Div {
-        let cleared = self.session().is_some_and(|s| s.cache_cleared);
-        let mut row = div().flex().flex_col().gap_2();
-        if cleared {
-            row = row.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Cache cleared."),
-            );
-        }
-        if self.data_storage_confirm_clear {
-            row = row.child(
-                div()
-                    .text_sm()
-                    .child("Clear all cached files? In-progress downloads are left alone."),
-            );
-            row = row.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("data-storage-clear-confirm")
-                            .label("Clear cache")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.data_storage_confirm_clear = false;
-                                if let Some(live) = this.live.as_mut() {
-                                    // Send failures land on
-                                    // `data_storage_error`, shown on this
-                                    // dialog (the S3 pattern).
-                                    let _ = live.driver.clear_download_cache();
-                                } else if let Some(demo) = this.demo_session.as_mut() {
-                                    demo.storage_stats = None;
-                                    demo.cache_cleared = true;
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("data-storage-clear-cancel")
-                            .label("Keep")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.data_storage_confirm_clear = false;
-                                cx.notify();
-                            })),
-                    ),
-            );
-        } else {
-            row = row.child(
-                Button::new("data-storage-clear")
-                    .label("Clear cache")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.data_storage_confirm_clear = true;
-                        cx.notify();
-                    })),
-            );
-        }
-        row
     }
 }
 

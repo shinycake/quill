@@ -449,6 +449,7 @@ pub(crate) fn session_fixture(id: i64, current: bool, pending: bool) -> ParsedSe
         id,
         is_current: current,
         is_password_pending: pending,
+        is_unconfirmed: false,
         can_accept_secret_chats: false,
         can_accept_calls: true,
         device_model: format!("Device {id}"),

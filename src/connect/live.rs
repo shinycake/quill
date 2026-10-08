@@ -29,6 +29,11 @@ pub fn wait_closed<S: JsonSender>(
     if matches!(driver.session.auth, AuthorizationState::Closed) {
         return true;
     }
+    // Like tdesktop on quit: announce going offline before the client
+    // closes (best effort — `close` follows on the same ordered queue).
+    if matches!(driver.session.auth, AuthorizationState::Ready) {
+        let _ = driver.set_online(false);
+    }
     let _ = driver.request_close();
     let deadline = Instant::now() + timeout;
     loop {
