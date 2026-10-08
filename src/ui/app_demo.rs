@@ -637,6 +637,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — bubble headers".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyShowcase => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — showcase".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyPoll => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

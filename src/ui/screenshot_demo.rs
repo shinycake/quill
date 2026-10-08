@@ -306,6 +306,10 @@ pub enum ScreenshotDemo {
     /// channel and an imported message; "via @bot"; and the footer's
     /// "edited" / pin / views / "imported" marks.
     ReadyBubbleHeaders,
+    /// README showcase scene: a populated account (generated avatars and
+    /// photos, a lively group conversation); `QUILL_DEMO_SHOWCASE` picks
+    /// the view.
+    ReadyShowcase,
     /// The message context menu over every kind of message (injected, no
     /// live Telegram). `QUILL_DEMO_MENU` picks the scenario: photo,
     /// document, downloading, video, gif, sticker, audio, audio-save-to,
