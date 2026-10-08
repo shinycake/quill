@@ -331,6 +331,11 @@ pub enum ScreenshotDemo {
     /// enabled — posting routes `sendMessage` with
     /// `topic_id = messageTopicForum` (parity slice 4).
     ReadyTopicPost,
+    /// Subsection-tabs demos (injected): a bot with topics
+    /// (`userTypeBot.has_topics`) with the tabs on Top / Bottom / Left.
+    ReadyBotTopics,
+    ReadyBotTopicsBottom,
+    ReadyBotTopicsLeft,
     /// Contacts demo (injected, no live Telegram): the sidebar shows the
     /// **Contacts** tab (three injected contacts: Ada online, Zed last
     /// seen within a week, Noor recently) and the user info panel is open

@@ -264,6 +264,7 @@ impl Session {
                     entry.loaded_complete = true;
                 }
                 entry.next_from_message_id = next_from_message_id;
+                entry.total_count = total_count.max(entry.messages.len() as i32);
             }
             return;
         }

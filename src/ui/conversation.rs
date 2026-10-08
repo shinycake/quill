@@ -25,6 +25,7 @@ use quill::poll::chat_allows_polls;
 use quill::state::{
     ChatSearchJump, ChatSummary, HistoryMessage, InfoPanelTarget, OutboxReceipt, Session,
 };
+use quill::subsection_tabs::SubsectionTabsMode;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender};
 use std::collections::HashMap;
@@ -111,8 +112,16 @@ impl QuillApp {
         let saved = actions.is_some_and(|(chat_id, _, _, _)| {
             self.session().is_some_and(|s| s.is_saved_messages(chat_id))
         });
+        // Subsection tabs: an open tab topic titles the header with its
+        // name and message count, as Telegram Desktop does.
+        let topic_header = actions.and_then(|(chat_id, _, _, _)| {
+            self.session()
+                .and_then(|s| s.subsection_topic_header(chat_id))
+        });
         let title_text = if saved {
             "Saved Messages".to_string()
+        } else if let Some((name, _)) = &topic_header {
+            name.clone()
         } else {
             title.to_string()
         };
@@ -192,6 +201,8 @@ impl QuillApp {
                 Some(activity_line.map_or_else(|| "typing".to_string(), |l| l.text)),
                 true,
             )
+        } else if let Some((_, line)) = topic_header.filter(|(_, line)| !line.is_empty()) {
+            (Some(line), false)
         } else if let Some(line) = secret_line {
             (Some(line), true)
         } else if let Some((line, online)) = presence {
@@ -515,6 +526,7 @@ impl QuillApp {
             .children(call_bar)
             .children(capture_notice)
             .child(history)
+            .children(self.subsection_tabs_strip(SubsectionTabsMode::Bottom, cx))
             // Phase C2i: busy-decline banner — the calls that arrived
             // while another call was active were declined with
             // `discardCall` (TDLib has no hold/swap API). Dismissible.
@@ -905,6 +917,12 @@ impl QuillApp {
         // Phase 5.1: forum supergroups render a topic list instead of the
         // general history; a selected topic renders its own history.
         let is_forum = chat.as_ref().is_some_and(|c| c.is_forum_chat());
+        // Subsection tabs: bots with topics and forums with tabs show "All"
+        // (the chat) plus topic tabs instead of the topic list.
+        let has_topics = open.is_some_and(|id| session.is_some_and(|s| s.chat_has_topics(id)));
+        let tabs_used =
+            open.is_some_and(|id| session.is_some_and(|s| s.subsection_tabs_used_for(id)));
+        let tabs_left = self.subsection_tabs_column(cx);
         let open_topic = session.and_then(|s| s.open_topic);
         let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
         let topic_history = match (open, open_topic) {
@@ -955,9 +973,10 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .child(self.conversation_header(&title, chat_actions, peer_typing, cx))
-            .when_some(topic_info.clone(), |this, info| {
+            .when_some(topic_info.clone().filter(|_| !tabs_used), |this, info| {
                 this.child(self.forum_topic_strip(&info, cx))
             })
+            .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
             .when(self.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
@@ -983,93 +1002,96 @@ impl QuillApp {
             .when(chat_search_open, |this| {
                 this.child(self.chat_search_bar(cx))
             })
-            .child(if let Some(reason) = gate {
-                if self.sponsored_demo {
-                    // Fixture/proof surface only: the demo channel renders its
-                    // sponsored rows. The live path renders history normally.
-                    self.sponsored_rows_pane(cx).into_any_element()
-                } else {
-                    pane_placeholder("Unsupported chat", reason, cx).into_any_element()
-                }
-            } else if open.is_none() {
-                pane_placeholder(
-                    "Select a chat",
-                    "Choose a conversation from the sidebar to start messaging.",
-                    cx,
-                )
-                .into_any_element()
-            } else if !supported {
-                pane_placeholder(
-                    "Unsupported chat",
-                    "This conversation type is not supported yet.",
-                    cx,
-                )
-                .into_any_element()
-            } else if is_forum && open_topic.is_none() {
-                // Phase 5.1: opening a forum supergroup shows its topics.
-                self.forum_topics_pane(open, cx).into_any_element()
-            } else if is_forum {
-                // Phase 5.1: per-topic history — same history component,
-                // fed from the topic history store (`searchChatMessages`
-                // with `topic_id`).
-                if topic_empty {
+            .child(super::subsection_tabs::with_left_column(
+                tabs_left,
+                if let Some(reason) = gate {
+                    if self.sponsored_demo {
+                        // Fixture/proof surface only: the demo channel renders its
+                        // sponsored rows. The live path renders history normally.
+                        self.sponsored_rows_pane(cx).into_any_element()
+                    } else {
+                        pane_placeholder("Unsupported chat", reason, cx).into_any_element()
+                    }
+                } else if open.is_none() {
                     pane_placeholder(
-                        "No messages in this topic yet",
-                        "No messages in this topic yet.",
+                        "Select a chat",
+                        "Choose a conversation from the sidebar to start messaging.",
                         cx,
                     )
                     .into_any_element()
+                } else if !supported {
+                    pane_placeholder(
+                        "Unsupported chat",
+                        "This conversation type is not supported yet.",
+                        cx,
+                    )
+                    .into_any_element()
+                } else if is_forum && open_topic.is_none() && !tabs_used {
+                    // Phase 5.1: opening a forum supergroup shows its topics.
+                    self.forum_topics_pane(open, cx).into_any_element()
+                } else if has_topics && open_topic.is_some() {
+                    // Phase 5.1: per-topic history — same history component,
+                    // fed from the topic history store (`searchChatMessages`
+                    // with `topic_id`).
+                    if topic_empty {
+                        pane_placeholder(
+                            "No messages in this topic yet",
+                            "No messages in this topic yet.",
+                            cx,
+                        )
+                        .into_any_element()
+                    } else {
+                        let list = self.history_message_list(
+                            "topic-history",
+                            topic_messages,
+                            chat.as_ref(),
+                            &sender_name,
+                            highlight_id,
+                            media_roots,
+                            cx,
+                        );
+                        self.history_rows_key = topic_key;
+                        list
+                    }
+                } else if main_empty {
+                    // Phase S1: an empty secret chat shows TGX's end-to-end
+                    // encryption explainer (MessagesHolder TYPE_SECRET_CHAT_INFO:
+                    // "Secret Chats" + EncryptedDescription1-4) instead of the
+                    // generic placeholder.
+                    let is_secret = chat
+                        .as_ref()
+                        .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
+                    // kit Phase 9: no history entry yet means the first
+                    // getChatHistory batch is still in flight — show skeleton
+                    // message rows instead of the empty placeholder.
+                    let history_loading =
+                        open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
+                    if history_loading {
+                        history_skeleton().into_any_element()
+                    } else if is_secret {
+                        self.secret_empty_explainer(cx).into_any_element()
+                    } else {
+                        pane_placeholder(
+                            "No messages yet",
+                            "History arrives via getChatHistory and updates.",
+                            cx,
+                        )
+                        .into_any_element()
+                    }
                 } else {
                     let list = self.history_message_list(
-                        "topic-history",
-                        topic_messages,
+                        "session-history",
+                        main_messages,
                         chat.as_ref(),
                         &sender_name,
                         highlight_id,
                         media_roots,
                         cx,
                     );
-                    self.history_rows_key = topic_key;
+                    self.history_rows_key = main_key;
                     list
-                }
-            } else if main_empty {
-                // Phase S1: an empty secret chat shows TGX's end-to-end
-                // encryption explainer (MessagesHolder TYPE_SECRET_CHAT_INFO:
-                // "Secret Chats" + EncryptedDescription1-4) instead of the
-                // generic placeholder.
-                let is_secret = chat
-                    .as_ref()
-                    .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
-                // kit Phase 9: no history entry yet means the first
-                // getChatHistory batch is still in flight — show skeleton
-                // message rows instead of the empty placeholder.
-                let history_loading =
-                    open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
-                if history_loading {
-                    history_skeleton().into_any_element()
-                } else if is_secret {
-                    self.secret_empty_explainer(cx).into_any_element()
-                } else {
-                    pane_placeholder(
-                        "No messages yet",
-                        "History arrives via getChatHistory and updates.",
-                        cx,
-                    )
-                    .into_any_element()
-                }
-            } else {
-                let list = self.history_message_list(
-                    "session-history",
-                    main_messages,
-                    chat.as_ref(),
-                    &sender_name,
-                    highlight_id,
-                    media_roots,
-                    cx,
-                );
-                self.history_rows_key = main_key;
-                list
-            })
+                },
+            ))
     }
 
     /// The part of the history row inputs that lives in the app rather than

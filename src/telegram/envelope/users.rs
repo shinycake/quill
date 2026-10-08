@@ -91,6 +91,15 @@ pub struct ParsedUser {
     /// whether the bot supports inline mode (`getInlineQueryResults`).
     /// False for non-bots and for bots without inline mode enabled.
     pub is_inline: bool,
+    /// Subsection tabs: `userTypeBot.has_topics` (schema 1.8.67, line
+    /// 816) — the private chat with this bot is split into forum topics
+    /// (`getForumTopics` works on it). False for non-bots.
+    pub has_topics: bool,
+    /// Subsection tabs: `userTypeBot.allows_users_to_create_topics`
+    /// (schema 1.8.67, line 816). When false the bot creates the topics
+    /// itself, and Telegram Desktop only shows the tabs once at least one
+    /// topic exists (`Data::IsBotCreatesTopics`, `displayAsForum`).
+    pub allows_users_to_create_topics: bool,
     pub status: UserStatusKind,
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
@@ -257,6 +266,16 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(|t| t.get("is_inline"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let bot_flag = |field: &str| {
+        value
+            .get("type")
+            .filter(|_| is_bot)
+            .and_then(|t| t.get(field))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    let has_topics = bot_flag("has_topics");
+    let allows_users_to_create_topics = bot_flag("allows_users_to_create_topics");
     let status = parse_user_status(value.get("status"));
     let photo_small_file_id = i32::try_from(int53_or_zero(
         value
@@ -296,6 +315,8 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_contact,
         is_bot,
         is_inline,
+        has_topics,
+        allows_users_to_create_topics,
         status,
         photo_small_file_id,
         accent_color_id,

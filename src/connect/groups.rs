@@ -183,12 +183,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        if !self
-            .session
-            .chats
-            .get(&chat_id.0)
-            .is_some_and(|chat| chat.is_forum_chat())
-        {
+        // Subsection tabs: bots with topics answer `getForumTopics` too.
+        if !self.session.chat_has_topics(chat_id) {
             return Ok(());
         }
         if self.session.forum_topics.contains_key(&chat_id.0) {
@@ -232,12 +228,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if !self
+        // A topic already in the loaded list is selectable whatever the
+        // chat kind (bots with topics, forums).
+        let known_topic = self
             .session
-            .chats
+            .forum_topics
             .get(&chat_id.0)
-            .is_some_and(|chat| chat.is_forum_chat())
-        {
+            .is_some_and(|topics| topics.iter().any(|t| t.forum_topic_id == forum_topic_id));
+        if !known_topic && !self.session.chat_has_topics(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.select_topic(chat_id, forum_topic_id);
@@ -1142,8 +1140,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Slice G2: gate shared by every forum-topic mutation — requires
     /// the viewer to hold `can_manage_topics` in a non-channel
     /// supergroup.
+    /// Subsection tabs: a bot chat with topics passes too — pin / unpin
+    /// and delete work there (schema 1.8.67, lines 12725 / 12736).
     fn forum_topic_gate(&self, chat_id: ChatId) -> bool {
-        self.forum_supergroup(chat_id).is_some() && self.session.chat_can_manage_topics(chat_id)
+        (self.forum_supergroup(chat_id).is_some() && self.session.chat_can_manage_topics(chat_id))
+            || self.session.bot_topics(chat_id).is_some()
     }
 
     /// Slice G2: `createForumTopic` (schema 1.8.67, line 12665).

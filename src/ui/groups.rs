@@ -1282,6 +1282,10 @@ impl QuillApp {
                         .driver
                         .set_gif_saved(file_id, false)
                         .map(|id| sent_note(id, "removing saved GIF…")),
+                    GroupConfirmAction::DeleteForumTopic { forum_topic_id } => live
+                        .driver
+                        .delete_forum_topic(dialog.chat_id, forum_topic_id)
+                        .map(|_| "deleting topic…".to_string()),
                     GroupConfirmAction::RemoveInstalledStickerSets => {
                         let ids: Vec<_> = live
                             .driver
@@ -1680,6 +1684,24 @@ impl QuillApp {
                         "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.".to_string(),
                         "Delete".to_string(),
                     ),
+                    GroupConfirmAction::DeleteForumTopic { forum_topic_id } => {
+                        let name = this
+                            .session()
+                            .and_then(|s| {
+                                s.forum_topics.get(&dialog_state.chat_id.0).and_then(|topics| {
+                                    topics
+                                        .iter()
+                                        .find(|t| t.forum_topic_id == forum_topic_id)
+                                        .map(|t| t.name.clone())
+                                })
+                            })
+                            .unwrap_or_else(|| "this topic".to_string());
+                        (
+                            "Delete topic".to_string(),
+                            format!("Delete {name} and all its messages? This cannot be undone."),
+                            "Delete".to_string(),
+                        )
+                    }
                     GroupConfirmAction::RemoveSavedGif { .. } => (
                         "Remove saved GIF".to_string(),
                         "Remove this GIF from your saved GIFs?".to_string(),
@@ -1710,6 +1732,7 @@ impl QuillApp {
                     | GroupConfirmAction::DeleteSyncedContacts
                     | GroupConfirmAction::ClearPaymentInfo
                     | GroupConfirmAction::RemoveSavedGif { .. }
+                    | GroupConfirmAction::DeleteForumTopic { .. }
                     | GroupConfirmAction::RemoveInstalledStickerSets
                     | GroupConfirmAction::RemoveStickerSet { .. }
                     | GroupConfirmAction::RemoveEmojiSet { .. }

@@ -7,6 +7,14 @@ impl Session {
     pub fn select_topic(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Option<ForumTopic> {
         self.open_topic = Some(forum_topic_id);
         self.view_generation.bump();
+        // Subsection tabs: rows seen in "All" were read as chat history;
+        // seen again in the topic they are read as topic history
+        // (`messageSourceForumTopicHistory`), which is what moves the
+        // topic's own read position in TDLib.
+        if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.viewed.clear();
+            history.visible.clear();
+        }
         self.open_topic_info(chat_id)
     }
 

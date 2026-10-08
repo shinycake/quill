@@ -460,6 +460,9 @@ pub struct Session {
     pub forum_topics: HashMap<i64, Vec<ForumTopic>>,
     /// Phase 5.1: per-topic histories keyed by `(chat_id, forum_topic_id)`.
     pub topic_histories: HashMap<(i64, i32), TopicHistory>,
+    /// Subsection tabs: supergroup ids with `supergroup.has_forum_tabs`
+    /// (schema 1.8.67, line 2746), from `updateSupergroup` / `getSupergroup`.
+    pub forum_tabs_supergroups: HashSet<i64>,
     /// `poll.id` → `(chat_id, message_id)` of rows loaded with that poll,
     /// so `updatePoll` (which carries no chat or message id) touches only
     /// its rows. Entries can be stale; `apply_update_poll` re-checks and
@@ -1112,6 +1115,7 @@ impl Session {
             pending_bot_period_secs: 30,
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
+            forum_tabs_supergroups: HashSet::new(),
             poll_messages: HashMap::new(),
             view_generation: ViewGeneration(1),
             requests: RequestRegistry::default(),

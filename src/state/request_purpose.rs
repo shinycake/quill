@@ -714,6 +714,23 @@ pub enum RequestPurpose {
         forum_topic_id: i32,
     },
     ToggleGeneralForumTopicHidden,
+    /// Subsection tabs: the tab menu's "Mark as read" — `viewMessages`
+    /// on the topic's last message (`messageSourceForumTopicHistory`,
+    /// schema 1.8.67 lines 13230 / 3213). Answers `ok`.
+    ReadForumTopic {
+        forum_topic_id: i32,
+    },
+    /// Subsection tabs: the tab menu's Mute / Unmute —
+    /// `setForumTopicNotificationSettings` (schema 1.8.67, line 12707).
+    SetForumTopicNotificationSettings {
+        forum_topic_id: i32,
+    },
+    /// Subsection tabs: `getForumTopic` (schema 1.8.67, line 12679) — one
+    /// topic's authoritative state (unread count, read position), answered
+    /// with `forumTopic`.
+    GetForumTopic {
+        forum_topic_id: i32,
+    },
     /// Slice G2: `getMessageThreadHistory` (schema 1.8.67, line 11839)
     /// — the channel-comments viewer. Response is `messages`;
     /// `message_id` identifies the channel post, correlated to the chat

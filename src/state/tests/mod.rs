@@ -18,4 +18,5 @@ mod sessions;
 mod shared_media;
 mod stickers;
 mod stories;
+mod subsection_tabs;
 mod users;

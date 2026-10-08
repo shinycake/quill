@@ -64,6 +64,7 @@ use super::sponsored::apply_ready_sponsored;
 use super::statistics::apply_ready_channel_stats;
 use super::story_composer::{apply_ready_story_edit, apply_ready_story_post};
 use super::story_viewer::{apply_ready_stories, apply_ready_story_viewers};
+use super::subsection_tabs::apply_ready_bot_topics;
 use super::*;
 use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, ForwardDraft};
@@ -71,6 +72,7 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::settings::ThemeChoice;
 use quill::state::{InfoPanelTarget, SearchStatus};
 use quill::story_composer::{StoryExpiry, StoryPrivacy};
+use quill::subsection_tabs::SubsectionTabsMode;
 use quill::telegram::envelope::UsernameCheckResult;
 use quill::telegram::requests::SelfDestructSend;
 use quill::voice::VoiceCapture;
@@ -620,6 +622,19 @@ impl QuillApp {
                 apply_ready_forum_topics(session, &self.demo_sink, &self.demo_seq);
             }
             self.status_note = "screenshot demo — forum topics list".into();
+        }
+        let bot_topics_mode = match demo {
+            Some(ScreenshotDemo::ReadyBotTopics) => Some(SubsectionTabsMode::Top),
+            Some(ScreenshotDemo::ReadyBotTopicsBottom) => Some(SubsectionTabsMode::Bottom),
+            Some(ScreenshotDemo::ReadyBotTopicsLeft) => Some(SubsectionTabsMode::Left),
+            _ => None,
+        };
+        if let Some(mode) = bot_topics_mode {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_bot_topics(session, &self.demo_sink, &self.demo_seq, mode);
+            }
+            self.status_note = "screenshot demo — bot topic tabs".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyTopicPost)) {
             if let Some(session) = self.demo_session.as_mut() {

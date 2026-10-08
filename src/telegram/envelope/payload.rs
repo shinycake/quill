@@ -1094,6 +1094,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .get("is_forum")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                has_forum_tabs: supergroup
+                    .get("has_forum_tabs")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 username: parse_first_active_username(supergroup.get("usernames")),
                 // Phase A1: own `chatMemberStatus*` (schema 1.8.67 line
                 // 2746); unknown/missing → `Unknown` (gated, no bypass).
@@ -1141,6 +1145,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             supergroup_id: int53(value.get("id"))?,
             is_forum: value
                 .get("is_forum")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_forum_tabs: value
+                .get("has_forum_tabs")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             username: parse_first_active_username(value.get("usernames")),
@@ -1202,6 +1210,19 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // Slice G2: `forumTopicInfo` — the `createForumTopic` answer
         // (schema 1.8.67, line 12665). Only the chat id is kept; the
         // topic list is refetched on success.
+        // Subsection tabs: live topic changes (schema 1.8.67, lines
+        // 10652 / 10665) — new topics, renames, pins, reads, mutes.
+        "updateForumTopicInfo" => value
+            .get("info")
+            .and_then(parse_forum_topic_info)
+            .map(EnvelopePayload::UpdateForumTopicInfo)
+            .ok_or(ParseError::MissingField),
+        "forumTopic" => parse_forum_topic(&value)
+            .map(EnvelopePayload::ForumTopicAnswer)
+            .ok_or(ParseError::MissingField),
+        "updateForumTopic" => parse_forum_topic_update(&value)
+            .map(EnvelopePayload::UpdateForumTopic)
+            .ok_or(ParseError::MissingField),
         "forumTopicInfo" => Ok(EnvelopePayload::ForumTopic {
             chat_id: value.get("chat_id").and_then(Value::as_i64).unwrap_or(0),
         }),

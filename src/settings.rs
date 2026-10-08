@@ -282,6 +282,12 @@ pub struct MediaPrefs {
     /// setting exists). Default: installed + recommended.
     #[serde(default)]
     pub sticker_suggest_mode: StickerSuggestMode,
+    /// Subsection tabs: per-chat tab layout (Telegram Desktop's
+    /// `subsectionTabsMode(peerId)` session setting), keyed by chat id.
+    /// Absent = Top, the Telegram Desktop default.
+    #[serde(default)]
+    pub subsection_tabs_modes:
+        std::collections::BTreeMap<i64, crate::subsection_tabs::SubsectionTabsMode>,
 }
 
 /// MED4: Instant View preference (TGX values 0/1/2).
@@ -323,6 +329,7 @@ impl Default for MediaPrefs {
             auto_download_channels: AUTO_DOWNLOAD_DEFAULT,
             instant_view_mode: InstantViewMode::default(),
             sticker_suggest_mode: StickerSuggestMode::default(),
+            subsection_tabs_modes: std::collections::BTreeMap::new(),
         }
     }
 }

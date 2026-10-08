@@ -635,6 +635,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — forum topics".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyBotTopics
+        | ScreenshotDemo::ReadyBotTopicsBottom
+        | ScreenshotDemo::ReadyBotTopicsLeft => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — bot topic tabs".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyTopicPost => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

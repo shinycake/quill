@@ -336,6 +336,9 @@ pub struct TopicHistory {
     pub messages: BTreeMap<i64, HistoryMessage>,
     pub next_from_message_id: MessageId,
     pub loaded_complete: bool,
+    /// Subsection tabs: `foundChatMessages.total_count` of the latest
+    /// page — the topic header's "N messages".
+    pub total_count: i32,
 }
 
 impl Default for TopicHistory {
@@ -344,6 +347,7 @@ impl Default for TopicHistory {
             messages: BTreeMap::new(),
             next_from_message_id: MessageId(0),
             loaded_complete: false,
+            total_count: 0,
         }
     }
 }
