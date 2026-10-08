@@ -102,6 +102,20 @@ pub enum ScreenshotDemo {
     /// Same, mid pinned-drag: the dragged row follows the pointer while
     /// the displaced one slides home.
     ReadyPinDrag,
+    /// Chat-row swipe: "Mira Cohen" held mid-swipe (ratio 0.6) with the
+    /// Mute action revealed; the list is long enough to scroll.
+    ReadySwipeMute,
+    /// "Noam Katz" with action Delete, held past the threshold (ratio 1.25) with the
+    /// reach circle fully grown.
+    ReadySwipeReached,
+    /// Stories strip expanded at the top of a long chat list, swipe action
+    /// Mute configured, nothing held (scripted gestures start here).
+    ReadyStoriesExpanded,
+    /// The list scrolled half the strip's height: the compact stack is
+    /// fading in beside the search field.
+    ReadyStoriesCollapsing,
+    /// The list scrolled past the strip: collapsed to the small stack.
+    ReadyStoriesCollapsed,
     /// Slice media-shared-gallery: per-chat shared-media gallery open on
     /// chat 11 — the Media tab shows its empty state, the Files tab two
     /// injected documents (injected `foundChatMessages` through the real

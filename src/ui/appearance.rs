@@ -793,7 +793,34 @@ impl QuillApp {
             self.appearance.chat_list_rich_preview,
             |a, on| a.chat_list_rich_preview = on,
         ));
+        body = body.child(self.appearance_swipe_action_section(cx));
         body.into_any_element()
+    }
+
+    /// tdesktop's "Chat list quick action" (Settings > Chats): what a
+    /// horizontal trackpad swipe on a chat row does. Disabled by default.
+    fn appearance_swipe_action_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        use quill::chat_swipe::SwipeAction;
+        let current = self.appearance.swipe_action;
+        let selected = SwipeAction::ALL.iter().position(|a| *a == current);
+        let control = RadioGroup::vertical("appearance-swipe-action")
+            .selected_index(selected)
+            .children(SwipeAction::ALL.iter().map(|action| {
+                Radio::new(("appearance-swipe-action", *action as usize))
+                    .label(action.settings_label())
+            }))
+            .on_click(cx.listener(|this, &ix: &usize, _, cx| {
+                if let Some(action) = SwipeAction::ALL.get(ix).copied() {
+                    this.set_appearance(cx, |a| a.swipe_action = action);
+                }
+            }));
+        self.appearance_section(
+            cx,
+            "Chat list quick action",
+            "Swipe a chat left with two fingers on a trackpad to run this action; \
+             past the threshold it runs when you lift your fingers.",
+            control.into_any_element(),
+        )
     }
 
     /// Send-key mode section (parity:settings-enter-send,
