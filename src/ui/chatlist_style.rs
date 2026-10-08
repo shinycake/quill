@@ -31,13 +31,13 @@ pub(crate) fn chat_list_preview_line(
 }
 
 /// [`chat_list_preview_line`] whose decoded animated emoji (`layered`)
-/// are painted by the chat list's animation layer (`app_slice`).
+/// are painted by the chat list's animation layer (`anim_layer`).
 pub(crate) fn chat_list_preview_line_layered(
     icon: Option<&str>,
     preview: &str,
     entities: &[TextEntity],
     emoji: &std::collections::HashMap<i64, ImageSource>,
-    layered: &std::collections::HashMap<i64, super::app_slice::LayeredFrames>,
+    layered: &std::collections::HashMap<i64, super::anim_layer::LayeredClip>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // One line, as in Telegram Desktop: line breaks read as spaces (same
@@ -66,8 +66,9 @@ pub(crate) fn chat_list_preview_line_layered(
         if run.text.is_empty() {
             continue;
         }
-        if let Some(frames) = run.custom_emoji_id.and_then(|id| layered.get(&id)) {
-            parts.push((false, div().child(frames.clone().size(px(14.)).flex_none())));
+        if let Some(clip) = run.custom_emoji_id.and_then(|id| layered.get(&id)) {
+            let frames = super::anim_layer::frames(clip.clone(), 30);
+            parts.push((false, div().child(frames.size(px(14.)).flex_none())));
             continue;
         }
         if let Some(source) = run.custom_emoji_id.and_then(|id| emoji.get(&id)) {

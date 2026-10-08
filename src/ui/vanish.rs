@@ -486,12 +486,16 @@ impl Element for CutLeft {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        self.child.prepaint(window, cx);
+        // Also while prepainting: animated content reports its clip to the
+        // conversation's animation layer then (`anim_layer`).
+        window.with_content_mask(Some(self.kept(bounds)), |window| {
+            self.child.prepaint(window, cx);
+        });
     }
 
     fn paint(
@@ -504,14 +508,22 @@ impl Element for CutLeft {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let right = bounds.right().max(self.front);
-        let kept = Bounds::from_corners(
-            point(self.front, bounds.top() - px(1000.)),
-            point(right + px(1000.), bounds.bottom() + px(1000.)),
-        );
-        window.with_content_mask(Some(ContentMask { bounds: kept }), |window| {
+        window.with_content_mask(Some(self.kept(bounds)), |window| {
             self.child.paint(window, cx);
         });
+    }
+}
+
+impl CutLeft {
+    /// What still shows: everything right of the front.
+    fn kept(&self, bounds: Bounds<Pixels>) -> ContentMask<Pixels> {
+        let right = bounds.right().max(self.front);
+        ContentMask {
+            bounds: Bounds::from_corners(
+                point(self.front, bounds.top() - px(1000.)),
+                point(right + px(1000.), bounds.bottom() + px(1000.)),
+            ),
+        }
     }
 }
 

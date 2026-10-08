@@ -603,4 +603,8 @@ pub enum ScreenshotDemo {
     /// reference dialog open over the demo chat list (injected, no live
     /// Telegram).
     ReadyShortcuts,
+    /// Avatar click in a group (injected, no live Telegram): a member's
+    /// profile open as the modal layer over the group history, as after
+    /// clicking the avatar next to their message.
+    ReadyAvatarProfile,
 }

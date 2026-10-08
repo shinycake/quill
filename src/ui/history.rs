@@ -140,6 +140,47 @@ pub(super) fn history_skeleton() -> impl IntoElement {
         )
 }
 
+/// A sender avatar's click target (tdesktop `Element::fromLink`): opens
+/// the sender's profile. Built beside the row, wrapped around the kit
+/// avatar by [`AvatarLink::wrap`].
+struct AvatarLink {
+    id: u64,
+    on_click: Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+}
+
+impl AvatarLink {
+    fn wrap(self, avatar: AnyElement) -> AnyElement {
+        div()
+            .id(("sender-avatar", self.id))
+            .size(px(32.))
+            .flex_none()
+            .cursor_pointer()
+            .child(avatar)
+            .on_click(self.on_click)
+            .into_any_element()
+    }
+}
+
+/// Link for a row's avatar; `None` for spacers (rows continuing a sender
+/// run), outgoing rows and senders TDLib did not name.
+fn avatar_link(
+    sender_avatar: &Option<(String, Option<PathBuf>)>,
+    message: &HistoryMessage,
+    cx: &mut Context<QuillApp>,
+) -> Option<AvatarLink> {
+    let (name, _) = sender_avatar.as_ref()?;
+    if name.is_empty() {
+        return None;
+    }
+    let sender = message.sender?;
+    Some(AvatarLink {
+        id: message.id.0 as u64,
+        on_click: Box::new(cx.listener(move |this, _, window, cx| {
+            this.open_avatar_profile(sender, window, cx);
+        })),
+    })
+}
+
 pub(super) fn album_history_row(
     album_id: i64,
     messages: &[&HistoryMessage],
@@ -216,7 +257,11 @@ pub(super) fn album_history_row(
     // Media-led like single photos: the mosaic sits on a thin inset and,
     // without a caption, the time rides on the picture.
     let has_caption = caption.is_some();
+    let avatar_link = avatar_link(&sender_avatar, first, cx);
     let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending);
+    if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link) {
+        chrome.avatar = Some(link.wrap(avatar));
+    }
     chrome.media_led = true;
     chrome.footer_overlay = !has_caption;
     chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx).into_any_element());
@@ -477,9 +522,9 @@ pub(super) fn session_history_row(
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
     animation_frame: Option<Arc<RenderImage>>,
-    sticker_frame: Option<Arc<RenderImage>>,
+    sticker_frame: Option<super::sticker_playback::AnimatedVisual>,
     // Decoded animations of the message's custom emoji (by custom emoji id).
-    animated_emoji: HashMap<i64, Arc<RenderImage>>,
+    animated_emoji: HashMap<i64, super::sticker_playback::AnimatedVisual>,
     video_playing: bool,
     video_frame: Option<PathBuf>,
     // The row's clip playing inline (muted autoplay), if any.
@@ -1154,6 +1199,7 @@ pub(super) fn session_history_row(
                 look.font,
                 // Captions don't resolve custom emoji in this slice (text fallback).
                 &HashMap::new(),
+                &HashMap::new(),
                 (below && reserve_footer).then(|| footer_reserve(message.is_outgoing)),
                 cx,
             )
@@ -1176,55 +1222,59 @@ pub(super) fn session_history_row(
             .flatten(),
     ) {
         (Some(media), Some(cover_opacity)) => {
-            let cover = match effective_content(&message.content, message.ephemeral.as_ref()) {
-                MessageContent::Photo(photo) if photo.has_spoiler => {
-                    let (frame_w, frame_h) = photo
-                        .largest_size()
-                        .or_else(|| photo.thumb_size())
-                        .map(|size| media_frame(size.width, size.height))
-                        .unwrap_or_else(|| media_frame(0, 0));
-                    Some(spoiler_cover(
-                        message.id.0 as u64,
-                        message.chat_id,
-                        message.id,
-                        photo.minithumbnail.as_ref(),
-                        None,
-                        frame_w,
-                        frame_h,
-                        corners,
-                        cx,
-                    ))
+            // Built outside the animation layer: the cover fades under an
+            // opacity the layer can't apply, so the slice draws its specks.
+            let cover = super::anim_layer::with_layer(None, || {
+                match effective_content(&message.content, message.ephemeral.as_ref()) {
+                    MessageContent::Photo(photo) if photo.has_spoiler => {
+                        let (frame_w, frame_h) = photo
+                            .largest_size()
+                            .or_else(|| photo.thumb_size())
+                            .map(|size| media_frame(size.width, size.height))
+                            .unwrap_or_else(|| media_frame(0, 0));
+                        Some(spoiler_cover(
+                            message.id.0 as u64,
+                            message.chat_id,
+                            message.id,
+                            photo.minithumbnail.as_ref(),
+                            None,
+                            frame_w,
+                            frame_h,
+                            corners,
+                            cx,
+                        ))
+                    }
+                    MessageContent::Video(video) if video.has_spoiler => {
+                        let (frame_w, frame_h) = media_frame(video.width, video.height);
+                        Some(spoiler_cover(
+                            message.id.0 as u64,
+                            message.chat_id,
+                            message.id,
+                            None,
+                            None,
+                            frame_w,
+                            frame_h,
+                            corners,
+                            cx,
+                        ))
+                    }
+                    MessageContent::Animation(animation) if animation.has_spoiler => {
+                        let (frame_w, frame_h) = media_frame(animation.width, animation.height);
+                        Some(spoiler_cover(
+                            message.id.0 as u64,
+                            message.chat_id,
+                            message.id,
+                            None,
+                            None,
+                            frame_w,
+                            frame_h,
+                            corners,
+                            cx,
+                        ))
+                    }
+                    _ => None,
                 }
-                MessageContent::Video(video) if video.has_spoiler => {
-                    let (frame_w, frame_h) = media_frame(video.width, video.height);
-                    Some(spoiler_cover(
-                        message.id.0 as u64,
-                        message.chat_id,
-                        message.id,
-                        None,
-                        None,
-                        frame_w,
-                        frame_h,
-                        corners,
-                        cx,
-                    ))
-                }
-                MessageContent::Animation(animation) if animation.has_spoiler => {
-                    let (frame_w, frame_h) = media_frame(animation.width, animation.height);
-                    Some(spoiler_cover(
-                        message.id.0 as u64,
-                        message.chat_id,
-                        message.id,
-                        None,
-                        None,
-                        frame_w,
-                        frame_h,
-                        corners,
-                        cx,
-                    ))
-                }
-                _ => None,
-            };
+            });
             Some(match cover {
                 Some(cover) => div()
                     .relative()
@@ -1301,6 +1351,7 @@ pub(super) fn session_history_row(
                 })
         );
     let mut more_btn = Some(more_btn);
+    let mut avatar_link = avatar_link(&sender_avatar, message, cx);
     let mut chrome = |footer_inline: bool| {
         let mut chrome = message_chrome(
             sender.clone(),
@@ -1309,6 +1360,9 @@ pub(super) fn session_history_row(
             message.date,
             message.pending,
         );
+        if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link.take()) {
+            chrome.avatar = Some(link.wrap(avatar));
+        }
         if views.is_some() || signature.is_some() {
             chrome.footer = message_footer_meta(
                 message.date,
@@ -1324,6 +1378,12 @@ pub(super) fn session_history_row(
         }
         chrome.footer_inline = footer_inline;
         chrome.footer_overlay = footer_overlay;
+        if footer_overlay && chrome.footer.is_some() {
+            let (date, pending, signature) = (message.date, message.pending, signature.clone());
+            chrome.footer_rebuild = Some(std::rc::Rc::new(move || {
+                message_footer_meta(date, pending, receipt, views, signature.clone())
+            }));
+        }
         chrome.media_led = media_led;
         chrome.actions = more_btn.take().map(IntoElement::into_any_element);
         chrome

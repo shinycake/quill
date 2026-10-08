@@ -45,6 +45,20 @@ impl Session {
         }
     }
 
+    /// Telegram Desktop's `Element::fromLink` (history_view_element.cpp):
+    /// clicking a sender's userpic shows that peer's profile. A user
+    /// (bot or not, yourself included) opens the user profile; a
+    /// `messageSenderChat` sender (an anonymous admin posting as the
+    /// group itself, a channel posting into its discussion group) opens
+    /// that chat's profile. `None` when the chat is unknown or has no
+    /// profile panel (the click then does nothing).
+    pub fn avatar_profile_target(&self, sender: MessageSender) -> Option<InfoPanelTarget> {
+        match sender {
+            MessageSender::User { user_id } => Some(InfoPanelTarget::User(user_id)),
+            MessageSender::Chat { chat_id } => self.info_panel_target_for_chat(ChatId(chat_id)),
+        }
+    }
+
     /// Phase 6: info-panel target for a chat header — the peer user for a
     /// private chat, the supergroup for a group/channel chat, the chat
     /// partner for a secret chat (Phase B2: their panel hosts the
