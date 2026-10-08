@@ -787,7 +787,7 @@ impl QuillApp {
                 apply_ready_voice(session, &self.demo_sink, &self.demo_seq);
                 apply_ready_audio(session, &self.demo_sink, &self.demo_seq);
             }
-            // Fake an in-progress playback without spawning ffplay: voice
+            // Fake an in-progress playback without starting audio: voice
             // note 90 (12 s) playing from 5.0 s — the tick advances it —
             // and the music track 801 (214 s) paused with a remembered
             // 1:27 position, so both rows show seek bars.
@@ -1656,10 +1656,40 @@ impl QuillApp {
                         "שלום עולם, מה שלומך היום? זו הודעה ארוכה יותר כדי לראות את הטקסט נשבר לשורות בתוך הבועה.",
                     ),
                     (902, true, "היי, ההזמנה 12345 מוכנה ב-Telegram Desktop"),
+                    (904, false, "מחכה לעוד עדכונים ממנה"),
+                    (
+                        903,
+                        false,
+                        "קישור https://example.com/he בתוך הודעה ארוכה עם מילה מודגשת וקוד לשורות נוספות בבועה",
+                    ),
                 ] {
+                    // Entities by needle: a link, a bold word and inline code.
+                    let entity = |needle: &str, kind: &str| -> Option<String> {
+                        let start = body.find(needle)?;
+                        let from = quill::text::utf8_to_utf16_offset(body, start).ok()?;
+                        let to =
+                            quill::text::utf8_to_utf16_offset(body, start + needle.len()).ok()?;
+                        Some(format!(
+                            r#"{{"@type":"textEntity","offset":{from},"length":{},"type":{{"@type":"{kind}"}}}}"#,
+                            to - from
+                        ))
+                    };
+                    let entities = if id == 903 {
+                        [
+                            entity("https://example.com/he", "textEntityTypeUrl"),
+                            entity("מודגשת", "textEntityTypeBold"),
+                            entity("וקוד", "textEntityTypeCode"),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(",")
+                    } else {
+                        String::new()
+                    };
                     let body = serde_json::to_string(body).unwrap_or_default();
                     let json = format!(
-                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[]}}}}}}}}"#,
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[{entities}]}}}}}}}}"#,
                         chat.0
                     );
                     if let Some(owned) =
@@ -1742,8 +1772,8 @@ impl QuillApp {
             // playback, not faked: the clock keeps ticking and the 125 ms
             // refresh shows the frame for the current clock position.
             // `viewer_demo_sync_frames` suppresses the async extraction that
-            // `open_media_viewer` would otherwise start. The ffplay
-            // subprocess is skipped (demo), like the audio slice.
+            // `open_media_viewer` would otherwise start. The audio
+            // engine is skipped (demo), like the audio slice.
             self.viewer_demo_sync_frames = true;
             self.open_media_viewer(ChatId(11), MessageId(204), cx);
             if let Some(item) = self.media_viewer.current().cloned()

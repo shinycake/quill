@@ -32,18 +32,21 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             if live.driver.update_sticker_suggestions(text).is_err() {
                 self.status_note = "could not load sticker suggestions".into();
+                cx.notify();
             }
         }
-        cx.notify();
+        // The suggestions row is part of the composer.
+        self.notify_composer(cx);
     }
 
     pub(super) fn sync_animated_emoji_suggestion(&mut self, text: &str, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.update_animated_emoji_suggestion(text).is_err() {
                 self.status_note = "could not load animated emoji suggestion".into();
+                cx.notify();
             }
         }
-        cx.notify();
+        self.notify_composer(cx);
     }
 
     pub(super) fn animated_emoji_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

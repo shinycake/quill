@@ -540,7 +540,6 @@ pub struct QuillApp {
     pub(super) notifications_confirm: Option<NotificationsConfirm>,
     /// Parity slice: in-flight notification-sound workers; capped so a
     /// message burst cannot stack players.
-    pub(super) notify_sound_inflight: Arc<AtomicUsize>,
     /// tdesktop `VoiceRecordBar` (click the record button to record in the
     /// current mode; Cancel / Esc asks for confirmation first).
     pub(super) voice_capture: Option<VoiceCapture>,
@@ -590,11 +589,13 @@ pub struct QuillApp {
     /// Play was tapped before the track was local. Resume when `downloadFile` finishes.
     pub(super) pending_audio_play: Option<(MessageId, FileId, f64)>,
     pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
-    pub(super) voice_player: Option<Child>,
+    /// In-process player for the active voice note / audio file.
+    pub(super) audio: super::audio::AudioEngine,
+    pub(super) notification_sounds: super::audio::NotificationSounds,
     /// Active audio/voice track's playback clock (playing or paused-with-offset).
     /// `Some` exactly when `playing_voice` or `playing_audio` is `Some` (Phase 4.6).
     pub(super) playback_clock: Option<PlaybackClock>,
-    /// Sandbox-checked local path of the active track, for ffplay restarts on seek.
+    /// Sandbox-checked local path of the active track, for restarting the sound on seek.
     pub(super) playback_path: Option<PathBuf>,
     /// Interactive seek slider bound to the active row (Phase 4.6).
     pub(super) seek_slider: Option<Entity<SliderState>>,
@@ -718,15 +719,15 @@ pub struct QuillApp {
     /// left button is held over the zoomed visual.
     pub(super) viewer_drag: Option<(f32, f32)>,
     /// Parity slice 5: message whose video clip is playing in the viewer
-    /// (ffplay child alive) or paused (clock frozen, no child).
+    /// (sound playing) or paused (clock frozen, sound paused).
     pub(super) viewer_video: Option<MessageId>,
     pub(super) pip_window: Option<WindowHandle<gpui_kit::component::Root>>,
-    /// Sandbox-checked local path of the viewer's clip, for pause/resume
-    /// ffplay restarts.
+    /// Sandbox-checked local path of the viewer's clip, for pause/resume:
+    /// the sound restarts.
     pub(super) viewer_video_path: Option<PathBuf>,
-    /// The viewer's ffplay child (audio-only `-nodisp`; the video frames
-    /// render in-viewer). Killed when the viewer closes, steps, or pauses.
-    pub(super) viewer_player: Option<Child>,
+    /// The viewer clip's audio engine (sound only; the video frames
+    /// render in-viewer). Stopped when the viewer closes, steps, or pauses.
+    pub(super) viewer_audio: super::audio::AudioEngine,
     /// Playback clock for the viewer's clip (elapsed/total + pause freeze).
     pub(super) viewer_clock: Option<PlaybackClock>,
     /// Whether the main window is currently excluded from screen capture.
@@ -740,7 +741,7 @@ pub struct QuillApp {
     /// extraction + decode finish; the thumbnail shows meanwhile.
     pub(super) viewer_video_frames: Vec<Arc<RenderImage>>,
     /// The native player (AVFoundation on macOS) for the viewer clip; when
-    /// set it replaces ffplay audio and the extracted frames.
+    /// set it replaces the soundtrack engine and the extracted frames.
     pub(super) viewer_native: Option<super::native_video::NativeVideo>,
     /// The last status note printed by `QUILL_TRACE_STATUS`.
     pub(super) status_traced: String,
@@ -804,14 +805,14 @@ pub struct QuillApp {
     /// MED1: true while the viewer volume thumb is being dragged.
     pub(super) viewer_volume_scrubbing: bool,
     /// MED1: playback speed multiplier, 0.5–2.0 (TGX `PlaybackSpeed*`;
-    /// applied via ffplay `atempo` + the playback clock rate).
+    /// applied by the pitch-preserving tempo stretcher + the playback clock rate).
     pub(super) playback_speed: f64,
-    /// MED1: playback volume 0.0–1.0 (ffplay `-volume`); 0 is muted.
+    /// MED1: playback volume 0.0–1.0 (player volume); 0 is muted.
     pub(super) playback_volume: f32,
     /// MED1: last non-zero volume, restored by the mute toggle.
     pub(super) playback_unmuted_volume: f32,
     /// MED1: honest playback error for the active track — set instead of
-    /// the old silent failure (e.g. ffplay missing, unsupported format).
+    /// the old silent failure (e.g. unsupported format, no output device).
     pub(super) playback_error: Option<String>,
     /// MED1: composer "group media" override for 2+ attachments; `None`
     /// follows `media_prefs.default_grouping()`.

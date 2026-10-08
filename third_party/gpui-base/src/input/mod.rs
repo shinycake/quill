@@ -25,6 +25,7 @@ mod decorations;
 mod diagnostics;
 #[path = "editor/display_map/mod.rs"]
 mod display_map;
+pub mod bidi_paragraph;
 mod editor;
 #[path = "base/element.rs"]
 mod element;
