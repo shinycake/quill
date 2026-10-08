@@ -41,7 +41,7 @@ For every `.exe`/`.dll` in the package, `dumpbin /dependents` (static and delay-
 ## CI (all non-required; required checks `linux-fmt-clippy-test` and `macos-ui-build` are unchanged)
 
 - `windows-build` (windows-latest): `cargo build --release --features ui --locked`, then `cargo test --no-default-features --locked` (the same core + replay set Linux runs). Uploads `quill.exe`.
-- `windows-native` (windows-latest, MSVC dev environment via `ilammy/msvc-dev-cmd`): TDLib and rlottie restored/saved with `actions/cache` (TDLib keyed on `src/pins.rs`, the build scripts and `native/patches/*`), ntgcalls vendored with its pinned checksum. Runs in parallel with `windows-build`; uploads the DLL set.
+- `windows-native` and `windows-rlottie` (windows-latest, MSVC dev environment via `ilammy/msvc-dev-cmd`, separate jobs so they run in parallel): TDLib and rlottie restored/saved with `actions/cache` (TDLib keyed on `src/pins.rs`, the build scripts and `native/patches/*`), ntgcalls vendored with its pinned checksum. Runs in parallel with `windows-build`; uploads the DLL set.
 - `windows-package`: downloads both, packages, runs the checker (plus negative test), extracts the zip, runs `quill.exe --version` and `--build-info` from the extracted copy, the load check, and uploads `quill-windows-x86_64`.
 
 ## Verified vs not

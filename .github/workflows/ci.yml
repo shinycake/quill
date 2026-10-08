@@ -177,6 +177,27 @@ jobs:
         with:
           path: native/prefix
           key: tdlib-windows-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
+      - name: vendor ntgcalls (checksum pinned)
+        shell: bash
+        run: bash scripts/vendor-ntgcalls.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-native
+          path: |
+            native/prefix/bin/*.dll
+            vendor/ntgcalls/lib/Release/ntgcalls.dll
+          retention-days: 3
+          if-no-files-found: error
+
+  windows-rlottie:
+    name: windows-rlottie
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
       - name: restore rlottie build
         id: rlottie-cache
         uses: actions/cache/restore@v4
@@ -193,23 +214,17 @@ jobs:
         with:
           path: vendor/rlottie/prefix
           key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1') }}
-      - name: vendor ntgcalls (checksum pinned)
-        shell: bash
-        run: bash scripts/vendor-ntgcalls.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: quill-windows-native
-          path: |
-            native/prefix/bin/*.dll
-            vendor/rlottie/prefix/bin/rlottie.dll
-            vendor/ntgcalls/lib/Release/ntgcalls.dll
+          name: quill-windows-rlottie
+          path: vendor/rlottie/prefix/bin/rlottie.dll
           retention-days: 3
           if-no-files-found: error
 
   windows-package:
     name: windows-package
     runs-on: windows-latest
-    needs: [windows-build, windows-native]
+    needs: [windows-build, windows-native, windows-rlottie]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -224,6 +239,10 @@ jobs:
         with:
           name: quill-windows-native
           path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-rlottie
+          path: vendor/rlottie/prefix/bin
       - name: package
         shell: pwsh
         run: scripts/windows-package.ps1
