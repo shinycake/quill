@@ -821,8 +821,14 @@ impl LineLayout {
             };
 
             if matches {
-                let x = line.x_for_index(offset.saturating_sub(acc_len))
-                    + self.sub_line_offset(i, last_layout)
+                let local = offset.saturating_sub(acc_len);
+                // With affinity the caret hangs on the character before the offset: at a
+                // wrapped row's end, or at a direction change inside a bidi row.
+                let x = if line_end_affinity {
+                    line.x_for_index_trailing(local)
+                } else {
+                    line.x_for_index(local)
+                } + self.sub_line_offset(i, last_layout)
                     + self.line_indent(i);
                 return Some(point(x, offset_y));
             }
@@ -836,21 +842,53 @@ impl LineLayout {
         None
     }
 
-    /// The offset one caret step visually left (`left`) or right of `offset`, a local byte
-    /// index in this line layout. `None` when the visual row holding `offset` has no bidi
+    /// The caret stop one step visually left (`left`) or right of the stop `(offset,
+    /// trailing)`, local byte indexes in this line layout. `trailing` is the caret affinity:
+    /// the caret hangs on the character before `offset` (the end of a wrapped row, or the other
+    /// side of a direction change). `None` when the visual row holding the stop has no bidi
     /// content or the caret is already at its visual edge; the caller then steps logically.
-    pub(crate) fn visual_step(&self, offset: usize, left: bool) -> Option<usize> {
+    pub(crate) fn visual_step(
+        &self,
+        offset: usize,
+        trailing: bool,
+        left: bool,
+    ) -> Option<(usize, bool)> {
+        let (i, acc_len) = self.row_of_stop(offset, trailing)?;
+        self.wrapped_lines[i]
+            .visual_step(offset - acc_len, trailing, left)
+            .map(|(ix, trailing)| (ix + acc_len, trailing))
+    }
+
+    /// The row a caret stop is drawn on, with the offset the row starts at.
+    fn row_of_stop(&self, offset: usize, trailing: bool) -> Option<(usize, usize)> {
         let mut acc_len = 0;
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let is_last = i + 1 == self.wrapped_lines.len();
-            if offset >= acc_len && (offset < acc_len + line.len || is_last) {
-                return line
-                    .visual_step(offset - acc_len, left)
-                    .map(|ix| ix + acc_len);
+            let inside = if trailing && offset > acc_len {
+                offset <= acc_len + line.len
+            } else {
+                offset >= acc_len && (offset < acc_len + line.len || is_last)
+            };
+            if inside {
+                return Some((i, acc_len));
             }
             acc_len += line.len;
         }
         None
+    }
+
+    /// Steps over the characters between two stops: the character the caret passes going
+    /// from `from` to `to`, both `(offset, trailing)` stops of this layout.
+    pub(crate) fn char_between_stops(
+        &self,
+        from: (usize, bool),
+        to: (usize, bool),
+    ) -> Option<char> {
+        let (i, acc_len) = self.row_of_stop(from.0, from.1)?;
+        let line = &self.wrapped_lines[i];
+        let a = line.stop_x(from.0 - acc_len, from.1);
+        let b = line.stop_x(to.0.checked_sub(acc_len)?, to.1);
+        line.char_between(a, b)
     }
 
     /// Get the closest index for the given x in this line layout.
@@ -915,8 +953,10 @@ impl LineLayout {
     ) -> Option<(usize, bool)> {
         let (i, offset, x) = self.wrapped_line_at(pos, last_layout)?;
         let line = &self.wrapped_lines[i];
-        let ix = line.closest_index_for_x(x);
-        let line_end_affinity = i + 1 < self.wrapped_lines.len() && ix == line.len;
+        let (ix, trailing) = line.closest_stop_for_x(x);
+        // The same flag serves a bidi direction change: the caret hangs on the character
+        // before the offset, at the end of a wrapped row or on the near side of a run.
+        let line_end_affinity = (i + 1 < self.wrapped_lines.len() && ix == line.len) || trailing;
 
         Some((offset + ix, line_end_affinity))
     }

@@ -425,10 +425,66 @@ impl BidiLine {
         }
     }
 
+    /// x of the caret at `offset` seen from the character *before* it: that character's
+    /// trailing edge. Equal to [`Self::x_for_index`] unless the two characters around `offset`
+    /// sit in runs of different directions, where an offset has two places on screen.
+    pub(crate) fn x_for_index_trailing(&self, offset: usize) -> f32 {
+        if offset == 0 || offset > self.len {
+            return self.x_for_index(offset);
+        }
+        match self
+            .fragments
+            .iter()
+            .find(|f| f.range.start < offset && offset <= f.range.end)
+        {
+            Some(f) => f.x + f.pos(offset - f.range.start),
+            None => self.x_for_index(offset),
+        }
+    }
+
+    /// Whether `offset` is drawn in two different places: after the character before it and
+    /// before the character after it (a direction boundary).
+    pub(crate) fn has_two_stops(&self, offset: usize) -> bool {
+        offset > 0
+            && offset < self.len
+            && (self.x_for_index(offset) - self.x_for_index_trailing(offset)).abs() > STEP_EPS
+    }
+
+    /// x of a caret stop: `trailing` is the edge of the character before `offset`.
+    pub(crate) fn stop_x(&self, offset: usize, trailing: bool) -> f32 {
+        if trailing {
+            self.x_for_index_trailing(offset)
+        } else {
+            self.x_for_index(offset)
+        }
+    }
+
+    /// The fragment a caret stop hangs on: the one holding the character before a trailing
+    /// stop, else the one holding the character after it (the last one at the end).
+    fn stop_owner(&self, offset: usize, trailing: bool) -> Option<usize> {
+        if trailing {
+            self.fragments
+                .iter()
+                .position(|f| f.range.start < offset && offset <= f.range.end)
+        } else {
+            self.fragments
+                .iter()
+                .position(|f| f.range.start <= offset && offset < f.range.end)
+                .or_else(|| self.fragments.iter().position(|f| f.range.end == offset))
+        }
+    }
+
     /// The character boundary closest to `x`.
     pub(crate) fn closest_index_for_x(&self, x: f32) -> usize {
+        self.closest_stop_for_x(x).0
+    }
+
+    /// The caret stop closest to `x`: the boundary offset and whether it is the trailing edge
+    /// of the character before it. The stop belongs to the fragment under `x`, so a click at a
+    /// direction boundary lands on the side that was clicked.
+    pub(crate) fn closest_stop_for_x(&self, x: f32) -> (usize, bool) {
         let Some(first) = self.fragments.first() else {
-            return 0;
+            return (0, false);
         };
         // The fragment under `x`, clamping to the outermost ones.
         let fragment = if x < first.x {
@@ -443,10 +499,12 @@ impl BidiLine {
             .boundaries()
             .map(|local| {
                 let at = fragment.x + fragment.pos(local);
-                (fragment.range.start + local, (at - x).abs())
+                let offset = fragment.range.start + local;
+                let trailing = local > 0 && local == fragment.len() && self.has_two_stops(offset);
+                ((offset, trailing), (at - x).abs())
             })
             .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map_or(0, |(offset, _)| offset)
+            .map_or((0, false), |(stop, _)| stop)
     }
 
     /// The character under `x`, as the byte offset it starts at; `None` past
@@ -491,18 +549,32 @@ impl BidiLine {
         rects
     }
 
-    /// The character boundary one caret step visually left (`left`) or right
-    /// of `offset`; `None` at the visual edge of the line.
-    pub(crate) fn visual_step(&self, offset: usize, left: bool) -> Option<usize> {
-        let here = self.x_for_index(offset);
-        let mut best: Option<(usize, f32)> = None;
-        for f in &self.fragments {
+    /// The caret stop one step visually left (`left`) or right of the stop `(offset,
+    /// trailing)`; `None` at the visual edge of the line.
+    ///
+    /// Where a boundary offset has two places on screen both are stops, and a place that
+    /// several offsets share (the end of a run and the start of its neighbour touch) resolves
+    /// to the stop of the run the caret is travelling in, so a caret walking right through
+    /// "ab" + Hebrew visits the end of "ab" as offset 2 and later the other side of that
+    /// offset, instead of jumping to the end of the Hebrew run.
+    pub(crate) fn visual_step_stop(
+        &self,
+        offset: usize,
+        trailing: bool,
+        left: bool,
+    ) -> Option<(usize, bool)> {
+        let here = self.stop_x(offset, trailing);
+        let owner = self.stop_owner(offset, trailing);
+        let mut best: Option<((usize, bool), f32, bool)> = None;
+        for (fi, f) in self.fragments.iter().enumerate() {
             for local in f.boundaries() {
                 let boundary = f.range.start + local;
-                if boundary == offset {
+                let stop_trailing =
+                    local > 0 && local == f.len() && self.has_two_stops(boundary);
+                if (boundary, stop_trailing) == (offset, trailing) {
                     continue;
                 }
-                let at = self.x_for_index(boundary);
+                let at = f.x + f.pos(local);
                 let ahead = if left {
                     at < here - STEP_EPS
                 } else {
@@ -511,21 +583,48 @@ impl BidiLine {
                 if !ahead {
                     continue;
                 }
+                let same_owner = Some(fi) == owner;
                 let better = match best {
                     None => true,
-                    Some((b, bx)) => {
+                    Some(((b, bt), bx, b_same)) => {
                         let nearer = if left { at > bx + EPS } else { at < bx - EPS };
                         let tie = (at - bx).abs() <= EPS
-                            && boundary.abs_diff(offset) < b.abs_diff(offset);
+                            && ((same_owner && !b_same)
+                                || (same_owner == b_same
+                                    && (boundary.abs_diff(offset) < b.abs_diff(offset)
+                                        || (boundary == b && bt && !stop_trailing))));
                         nearer || tie
                     }
                 };
                 if better {
-                    best = Some((boundary, at));
+                    best = Some(((boundary, stop_trailing), at, same_owner));
                 }
             }
         }
-        best.map(|(boundary, _)| boundary)
+        best.map(|(stop, ..)| stop)
+    }
+
+    /// The boundary one caret step visually left (`left`) or right of `offset`; `None` at the
+    /// visual edge of the line.
+    #[cfg(test)]
+    pub(crate) fn visual_step(&self, offset: usize, left: bool) -> Option<usize> {
+        self.visual_step_stop(offset, false, left).map(|(o, _)| o)
+    }
+
+    /// The character the caret passes over going from x `a` to x `b` (any order): the first
+    /// character of the cluster that lies between them.
+    pub(crate) fn char_between(&self, a: f32, b: f32) -> Option<char> {
+        let mid = (a + b) / 2.;
+        let f = self
+            .fragments
+            .iter()
+            .find(|f| mid >= f.x && mid <= f.x + f.width)?;
+        let local = mid - f.x;
+        let cluster = f
+            .clusters
+            .iter()
+            .find(|c| local >= c.left && local <= c.right)?;
+        f.text[cluster.range.clone()].chars().next()
     }
 }
 
@@ -878,11 +977,11 @@ mod tests {
         let (_, line) = mixed_line();
         // Starting at the visual left edge and stepping right must visit
         // strictly increasing x and terminate at the right edge.
-        let mut at = line.closest_index_for_x(0.);
-        let mut x = line.x_for_index(at);
+        let mut at = line.closest_stop_for_x(0.);
+        let mut x = line.stop_x(at.0, at.1);
         let mut steps = 0;
-        while let Some(next) = line.visual_step(at, false) {
-            let nx = line.x_for_index(next);
+        while let Some(next) = line.visual_step_stop(at.0, at.1, false) {
+            let nx = line.stop_x(next.0, next.1);
             assert!(nx > x, "x must increase: {x} -> {nx}");
             at = next;
             x = nx;
@@ -891,13 +990,89 @@ mod tests {
         }
         assert!(steps >= 5);
         // And the other way back.
-        while let Some(next) = line.visual_step(at, true) {
-            assert!(line.x_for_index(next) < x);
-            x = line.x_for_index(next);
+        while let Some(next) = line.visual_step_stop(at.0, at.1, true) {
+            assert!(line.stop_x(next.0, next.1) < x);
+            x = line.stop_x(next.0, next.1);
             at = next;
             steps -= 1;
             assert!(steps >= -64);
         }
+    }
+
+    /// "abשג" at 10px a glyph: a Latin run and a Hebrew run side by side. Offset 2 sits
+    /// between them and has two places on screen: x=20 (after "b") and x=40 (before the
+    /// Hebrew "ש", the run's right edge).
+    fn ab_hebrew() -> BidiLine {
+        BidiLine::new(
+            6,
+            vec![
+                chars_fragment("ab", false, 0, 0., 10.),
+                chars_fragment("שג", true, 2, 20., 10.),
+            ],
+        )
+    }
+
+    fn walk(line: &BidiLine, from: (usize, bool), left: bool) -> Vec<(usize, bool)> {
+        let mut stops = vec![from];
+        while let Some(next) =
+            line.visual_step_stop(stops.last().unwrap().0, stops.last().unwrap().1, left)
+        {
+            stops.push(next);
+            assert!(stops.len() < 64);
+        }
+        stops
+    }
+
+    #[test]
+    fn a_direction_boundary_has_two_places() {
+        let line = ab_hebrew();
+        assert!(line.has_two_stops(2));
+        assert_eq!(line.x_for_index(2), 40.);
+        assert_eq!(line.x_for_index_trailing(2), 20.);
+        // Inside a run, and at the ends, there is only one.
+        assert!(!line.has_two_stops(1));
+        assert!(!line.has_two_stops(4));
+        assert!(!line.has_two_stops(0));
+        assert!(!line.has_two_stops(6));
+        assert_eq!(line.x_for_index_trailing(1), line.x_for_index(1));
+    }
+
+    #[test]
+    fn walking_right_visits_both_places_of_the_boundary_offset() {
+        let line = ab_hebrew();
+        // Offset 2 first after "b" (hanging on it), then before the Hebrew letter.
+        assert_eq!(
+            walk(&line, (0, false), false),
+            vec![(0, false), (1, false), (2, true), (4, false), (2, false)]
+        );
+    }
+
+    #[test]
+    fn walking_left_goes_back_through_the_hebrew_run() {
+        let line = ab_hebrew();
+        assert_eq!(
+            walk(&line, (2, false), true),
+            vec![(2, false), (4, false), (6, false), (1, false), (0, false)]
+        );
+    }
+
+    #[test]
+    fn clicks_pick_the_side_of_the_boundary() {
+        let line = ab_hebrew();
+        // Just left of the join is "b": the caret hangs on it.
+        assert_eq!(line.closest_stop_for_x(19.), (2, true));
+        // Right edge of the line: before the first Hebrew letter.
+        assert_eq!(line.closest_stop_for_x(41.), (2, false));
+        // Mid-letter picks the nearer edge of that letter.
+        assert_eq!(line.closest_stop_for_x(33.), (4, false));
+    }
+
+    #[test]
+    fn the_character_between_two_stops_is_the_one_in_the_gap() {
+        let line = ab_hebrew();
+        assert_eq!(line.char_between(10., 20.), Some('b'));
+        assert_eq!(line.char_between(30., 40.), Some('ש'));
+        assert_eq!(line.char_between(20., 30.), Some('ג'));
     }
 
     #[test]

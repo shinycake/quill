@@ -48,7 +48,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             .is_some_and(|(line, _)| line.is_rtl())
     }
 
-    /// One arrow-key step from `offset`, `left` or right of it on screen.
+    /// One arrow-key step from the caret stop `(offset, trailing)`, `left` or right of it on
+    /// screen. `trailing` is the caret affinity (see [`Self::line_end_affinity_for`]): at a
+    /// direction change an offset has two places on screen, and the step starts from, and may
+    /// land on, either of them.
     ///
     /// Like Qt's visual cursor navigation (Telegram Desktop's input field), a caret in a
     /// paragraph that holds right-to-left text follows the glyphs: it moves to the caret
@@ -56,13 +59,21 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// row it stays put, except at the logical end of the paragraph where it crosses into the
     /// neighbouring paragraph the way the text flows. Plain left-to-right paragraphs step
     /// logically, as always.
-    pub(super) fn step_horizontally(&self, offset: usize, left: bool) -> usize {
+    pub(super) fn step_horizontally(
+        &self,
+        offset: usize,
+        trailing: bool,
+        left: bool,
+    ) -> (usize, bool) {
         let logical = |forward: bool| {
-            if forward {
-                self.next_boundary(offset)
-            } else {
-                self.previous_boundary(offset)
-            }
+            (
+                if forward {
+                    self.next_boundary(offset)
+                } else {
+                    self.previous_boundary(offset)
+                },
+                false,
+            )
         };
         let Some((line, line_start)) = self.laid_out_paragraph(offset) else {
             return logical(!left);
@@ -71,8 +82,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             return logical(!left);
         }
         let column = offset - line_start;
-        if let Some(column) = line.visual_step(column, left) {
-            return line_start + column;
+        if let Some((column, trailing)) = line.visual_step(column, trailing, left) {
+            return (line_start + column, trailing);
         }
         // At the visual edge of the row: cross a paragraph boundary only from the logical
         // end the arrow points at.
@@ -82,7 +93,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         } else {
             column == 0
         };
-        if at_edge { logical(forward) } else { offset }
+        if at_edge {
+            logical(forward)
+        } else {
+            (offset, trailing)
+        }
     }
 
     /// Where a collapsing Left (`left`) or Right press lands for a non-empty selection.
@@ -94,14 +109,89 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
     }
 
-    /// The word step for Ctrl/Alt+Left (`left`) or Right: a right-to-left paragraph reads the
-    /// other way, so the word to the left is the next one logically.
-    pub(super) fn step_word_horizontally(&self, offset: usize, left: bool) -> usize {
-        if left != self.is_rtl_paragraph_at(offset) {
+    /// The word step for Ctrl/Alt+Left (`left`) or Right from the caret stop
+    /// `(offset, trailing)`.
+    ///
+    /// In a paragraph that holds right-to-left text the caret walks the glyphs like the arrow
+    /// keys do and stops at the end of the word it enters, so the direction is that of the run
+    /// the caret is in: Left through a Hebrew word in a Latin paragraph runs forward in typing
+    /// order, and the step carries on into the neighbouring run on screen. Other paragraphs
+    /// move logically; a right-to-left one reads the other way.
+    pub(super) fn step_word_horizontally(
+        &self,
+        offset: usize,
+        trailing: bool,
+        left: bool,
+    ) -> (usize, bool) {
+        if let Some(step) = self.visual_word_step(offset, trailing, left) {
+            return step;
+        }
+        let rtl = self.is_rtl_paragraph_at(offset);
+        if let Some((line, line_start)) = self.laid_out_paragraph(offset)
+            && line.has_bidi()
+        {
+            // On screen the caret is at the edge of its row, so there is no word to step to;
+            // only the logical end the key points at flows on into the next paragraph.
+            let column = offset - line_start;
+            let forward = left == rtl;
+            return if forward && column == line.len() {
+                (self.next_end_of_word_at(offset), false)
+            } else if !forward && column == 0 {
+                (self.previous_start_of_word_at(offset), false)
+            } else {
+                (offset, trailing)
+            };
+        }
+        let target = if left != rtl {
             self.previous_start_of_word_at(offset)
         } else {
             self.next_end_of_word_at(offset)
+        };
+        (target, false)
+    }
+
+    /// The word step on screen: spaces are passed over, then the characters of one kind (a
+    /// word or a run of punctuation). `None` when the caret cannot move on screen, or the
+    /// paragraph is not laid out with bidi runs.
+    fn visual_word_step(&self, offset: usize, trailing: bool, left: bool) -> Option<(usize, bool)> {
+        #[derive(PartialEq, Clone, Copy)]
+        enum Kind {
+            Space,
+            Word,
+            Other,
         }
+        let kind = |c: char| {
+            if c.is_whitespace() {
+                Kind::Space
+            } else if c.is_alphanumeric() || c == '_' {
+                Kind::Word
+            } else {
+                Kind::Other
+            }
+        };
+        if self.masked {
+            return None;
+        }
+        let (line, line_start) = self.laid_out_paragraph(offset)?;
+        if !line.has_bidi() {
+            return None;
+        }
+        let mut stop = (offset - line_start, trailing);
+        let mut word: Option<Kind> = None;
+        let mut moved = false;
+        while let Some(next) = line.visual_step(stop.0, stop.1, left) {
+            if let Some(c) = line.char_between_stops(stop, next) {
+                match (word, kind(c)) {
+                    (None, Kind::Space) => {}
+                    (None, k) => word = Some(k),
+                    (Some(w), k) if w == k => {}
+                    _ => break,
+                }
+            }
+            stop = next;
+            moved = true;
+        }
+        moved.then_some((line_start + stop.0, stop.1))
     }
 
     /// The line-end affinity that applies to `sel`. Only the active cursor
@@ -370,7 +460,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         // paragraph the caret sits at offset 0 and Left still has somewhere to go.
         if self.selections.is_single()
             && self.active_selection().is_empty()
-            && self.step_horizontally(self.cursor(), true) == self.cursor()
+            && self.step_horizontally(self.cursor(), self.cursor_line_end_affinity, true)
+                == (self.cursor(), self.cursor_line_end_affinity)
         {
             cx.propagate();
             return;
@@ -378,12 +469,19 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         self.move_all_cursors(
             |s, sel| {
-                let offset = if sel.is_empty() {
-                    s.step_horizontally(sel.cursor_offset(), true)
+                if sel.is_empty() {
+                    let affinity = s.line_end_affinity_for(sel);
+                    let (offset, trailing) =
+                        s.step_horizontally(sel.cursor_offset(), affinity, true);
+                    (
+                        offset,
+                        s.preferred_column_for_with_affinity(offset, trailing),
+                        trailing,
+                    )
                 } else {
-                    s.collapse_selection_target(sel, true)
-                };
-                (offset, s.preferred_column_for(offset), false)
+                    let offset = s.collapse_selection_target(sel, true);
+                    (offset, s.preferred_column_for(offset), false)
+                }
             },
             None,
             window,
@@ -396,7 +494,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         // move, so let the keystroke bubble to an ancestor.
         if self.selections.is_single()
             && self.active_selection().is_empty()
-            && self.step_horizontally(self.cursor(), false) == self.cursor()
+            && self.step_horizontally(self.cursor(), self.cursor_line_end_affinity, false)
+                == (self.cursor(), self.cursor_line_end_affinity)
         {
             cx.propagate();
             return;
@@ -404,12 +503,19 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         self.move_all_cursors(
             |s, sel| {
-                let offset = if sel.is_empty() {
-                    s.step_horizontally(sel.cursor_offset(), false)
+                if sel.is_empty() {
+                    let affinity = s.line_end_affinity_for(sel);
+                    let (offset, trailing) =
+                        s.step_horizontally(sel.cursor_offset(), affinity, false);
+                    (
+                        offset,
+                        s.preferred_column_for_with_affinity(offset, trailing),
+                        trailing,
+                    )
                 } else {
-                    s.collapse_selection_target(sel, false)
-                };
-                (offset, s.preferred_column_for(offset), false)
+                    let offset = s.collapse_selection_target(sel, false);
+                    (offset, s.preferred_column_for(offset), false)
+                }
             },
             None,
             window,
@@ -510,8 +616,16 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         self.move_all_cursors(
             |s, sel| {
-                let offset = s.step_word_horizontally(sel.cursor_offset(), true);
-                (offset, s.preferred_column_for(offset), false)
+                let (offset, trailing) = s.step_word_horizontally(
+                    sel.cursor_offset(),
+                    s.line_end_affinity_for(sel),
+                    true,
+                );
+                (
+                    offset,
+                    s.preferred_column_for_with_affinity(offset, trailing),
+                    trailing,
+                )
             },
             None,
             window,
@@ -527,8 +641,16 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         self.move_all_cursors(
             |s, sel| {
-                let offset = s.step_word_horizontally(sel.cursor_offset(), false);
-                (offset, s.preferred_column_for(offset), false)
+                let (offset, trailing) = s.step_word_horizontally(
+                    sel.cursor_offset(),
+                    s.line_end_affinity_for(sel),
+                    false,
+                );
+                (
+                    offset,
+                    s.preferred_column_for_with_affinity(offset, trailing),
+                    trailing,
+                )
             },
             None,
             window,
