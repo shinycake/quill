@@ -66,6 +66,23 @@ Replaces the parity:platform-spellcheck "ABC n" badge + corrections panel
   ones go to the system dictionary.
 - Removed: the "ABC n" badge and the corrections panel.
 
+### Fix: right-click crash (review round 1)
+
+Live test: right-clicking a misspelled word aborted the app (`cannot read
+InputBaseState<TextareaMode> while it is already being updated`). The kit
+calls a Textarea's `context_menu` builder from `handle_right_click_menu`
+via `cx.defer_in`, i.e. still inside the input entity's update, and the
+builder read the composer state. Now the builder returns an empty menu
+(`NativeMenu::show` ignores it) and `deferred_input_menu` builds and shows
+the real one at the click position with `Window::defer`, after that update.
+UI integration test `right_click_menu_reads_the_input_after_its_update`
+(gpui-kit test harness: type, right-click, assert the builder read the
+text) — it fails with the same panic when the read is made synchronous
+again. Runs with `cargo test --features demo-capture --bin quill
+spellcheck_ui` (needs gpui-kit `test-support`). Audited the other reads:
+the underline canvas paints as a sibling of the Textarea and the action
+handlers run from menu dispatch, neither inside the input's update.
+
 ### Not done / differences
 
 - No per-word language recognition (tdesktop uses CLD3); a word passes if

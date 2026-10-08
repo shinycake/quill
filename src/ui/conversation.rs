@@ -720,9 +720,11 @@ impl QuillApp {
                                                 // misspelled word.
                                                 .context_menu({
                                                     let owner = cx.entity().downgrade();
-                                                    move |menu, _, cx| {
+                                                    move |_, window, cx| {
                                                         QuillApp::composer_context_menu(
-                                                            &owner, menu, cx,
+                                                            owner.clone(),
+                                                            window,
+                                                            cx,
                                                         )
                                                     }
                                                 }),

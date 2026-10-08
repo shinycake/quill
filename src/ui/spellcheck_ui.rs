@@ -149,12 +149,21 @@ impl QuillApp {
     }
 
     /// The composer's right-click menu (replaces the kit default, so the
-    /// edit items are rebuilt here).
+    /// edit items are rebuilt here). Use as the Textarea's
+    /// `context_menu` builder: see [`deferred_input_menu`] for why it
+    /// returns an empty menu and shows the real one a moment later.
     pub(super) fn composer_context_menu(
-        owner: &WeakEntity<Self>,
-        menu: NativeMenu,
-        cx: &App,
+        owner: WeakEntity<Self>,
+        window: &mut Window,
+        cx: &mut App,
     ) -> NativeMenu {
+        deferred_input_menu(window, cx, move |cx| Self::build_composer_menu(&owner, cx))
+    }
+
+    /// The menu itself; reads the composer, so only call it outside the
+    /// composer's own update (see [`deferred_input_menu`]).
+    fn build_composer_menu(owner: &WeakEntity<Self>, cx: &App) -> NativeMenu {
+        let menu = NativeMenu::new();
         let Some(app) = owner.upgrade() else {
             return edit_menu_items(menu, false);
         };
@@ -251,6 +260,26 @@ impl QuillApp {
             .into_any_element(),
         )
     }
+}
+
+/// A Textarea `context_menu` builder that may read the input's state.
+///
+/// The kit calls the builder from inside the input entity's own update
+/// (`handle_right_click_menu` → `cx.defer_in`, which still holds the
+/// entity), so reading the `TextareaState` there panics ("already being
+/// updated"). Instead: hand the kit an empty menu (it shows nothing) and
+/// build + show the real one at the click position once that update is
+/// over. Right-click has already moved the caret to the clicked word.
+pub(super) fn deferred_input_menu(
+    window: &mut Window,
+    cx: &mut App,
+    build: impl FnOnce(&App) -> NativeMenu + 'static,
+) -> NativeMenu {
+    let position = window.mouse_position();
+    window.defer(cx, move |window, cx| {
+        build(cx).show(position, window, cx);
+    });
+    NativeMenu::new()
 }
 
 /// Suggestions, then Add to Dictionary / Ignore, for the misspelled word
@@ -396,4 +425,79 @@ fn paint_underlines(
             }
         }
     });
+}
+
+// UI integration test (needs gpui-kit `test-support`, enabled by the
+// `demo-capture` feature): `cargo test --features demo-capture --bin quill
+// spellcheck_ui`.
+#[cfg(all(test, feature = "demo-capture"))]
+mod tests {
+    use super::deferred_input_menu;
+    use gpui_kit::component::Root;
+    use gpui_kit::component::input::{Textarea, TextareaState};
+    use gpui_kit::component::native_menu::NativeMenu;
+    use gpui_kit::test::{TestSupportExt, TestWindowExt};
+    use gpui_kit::{
+        AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
+        Styled, TestAppContext, Window, div, px, size,
+    };
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    type Seen = Rc<RefCell<Option<(String, usize)>>>;
+
+    /// A Textarea whose context-menu builder reads its own state, the way
+    /// the composer's spelling menu does.
+    struct Composer {
+        input: Entity<TextareaState>,
+        seen: Seen,
+    }
+
+    impl Render for Composer {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let input = self.input.clone();
+            let seen = self.seen.clone();
+            div()
+                .size_full()
+                .p_4()
+                .child(div().id("composer").test_support().w(px(400.)).child(
+                    Textarea::new(&self.input).context_menu(move |_, window, cx| {
+                        let input = input.clone();
+                        let seen = seen.clone();
+                        deferred_input_menu(window, cx, move |cx| {
+                            let state = input.read(cx);
+                            *seen.borrow_mut() = Some((state.value().to_string(), state.cursor()));
+                            NativeMenu::new()
+                        })
+                    }),
+                ))
+        }
+    }
+
+    /// Regression: reading the TextareaState from the right-click menu
+    /// builder aborted the app ("already being updated").
+    #[gpui_kit::test]
+    fn right_click_menu_reads_the_input_after_its_update(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let seen: Seen = Rc::new(RefCell::new(None));
+        let handle = cx.open_window(size(px(640.), px(240.)), |window, cx| {
+            let input = cx.new(|cx| TextareaState::new(window, cx));
+            let seen = seen.clone();
+            let view = cx.new(|_| Composer { input, seen });
+            Root::new(view, window, cx)
+        });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("composer", cx);
+            window.input("teh speling", cx);
+            assert!(seen.borrow().is_none());
+            window.right_click("composer", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let seen = seen.borrow().clone();
+        let (text, cursor) = seen.expect("the menu builder ran");
+        assert_eq!(text, "teh speling");
+        assert!(cursor <= text.len());
+    }
 }
