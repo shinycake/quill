@@ -371,20 +371,29 @@ impl QuillApp {
                 }
             );
         }
-        // Slice G2: channel-post comment threads (`getMessageThreadHistory`,
-        // schema 1.8.67, line 11839). The dialog shows an honest error
-        // when the post has no discussion thread.
-        if is_channel_post && allows(false, |a| a.can_get_message_thread) {
+        // Channel-post comments and group reply threads: `getMessageThread`
+        // (schema 1.8.67, line 11566) gated by
+        // `messageProperties.can_get_message_thread`.
+        let has_replies = message
+            .interaction_info
+            .as_ref()
+            .and_then(|info| info.reply_info.as_ref())
+            .is_some_and(|reply| reply.reply_count > 0);
+        if (is_channel_post || has_replies) && allows(false, |a| a.can_get_message_thread) {
             item!(
                 15,
                 gpui_kit::assets::IconName::MessageSquare,
                 "menu-comments",
-                "View Comments",
+                if is_channel_post {
+                    "View Comments"
+                } else {
+                    "View Thread"
+                },
                 this,
                 window,
                 cx,
                 {
-                    this.open_comment_thread_dialog(chat_id, message_id, window, cx);
+                    this.open_thread_view(chat_id, message_id, window, cx);
                     this.message_menu = None;
                     cx.notify();
                 }

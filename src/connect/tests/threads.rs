@@ -176,7 +176,9 @@ fn comments_thread_open_load_send_and_close() {
     assert_eq!(send["reply_to"]["message_id"], 501);
 
     // 7. Typing goes into the thread.
-    driver.sync_outgoing_typing("typing", false, 10_000).unwrap();
+    driver
+        .sync_outgoing_typing("typing", false, 10_000)
+        .unwrap();
     let action = requests_of(&recorder, "sendChatAction");
     let action = action.last().unwrap();
     assert_eq!(action["chat_id"], 14);
@@ -266,7 +268,15 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
             text_message(80, 14, 40, "older"),
         ),
     );
-    assert!(!driver.session.thread.as_ref().unwrap().history.loaded_complete);
+    assert!(
+        !driver
+            .session
+            .thread
+            .as_ref()
+            .unwrap()
+            .history
+            .loaded_complete
+    );
     let older = driver.fetch_thread_history().unwrap().expect("older page");
     let history = requests_of(&recorder, "getMessageThreadHistory");
     assert_eq!(history.last().unwrap()["from_message_id"], 80);
@@ -278,7 +288,15 @@ fn group_reply_thread_pages_older_and_fails_with_retry() {
             text_message(80, 14, 40, "older"),
         ),
     );
-    assert!(driver.session.thread.as_ref().unwrap().history.loaded_complete);
+    assert!(
+        driver
+            .session
+            .thread
+            .as_ref()
+            .unwrap()
+            .history
+            .loaded_complete
+    );
     // Closing in the same chat needs no chat switch.
     assert_eq!(driver.close_thread(), None);
     let _ = std::fs::remove_dir_all(&dir);

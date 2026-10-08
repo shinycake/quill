@@ -615,6 +615,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — service messages".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyThreads => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — comments and threads".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBubbleHeaders => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1550,6 +1556,7 @@ impl QuillApp {
             history_window_active: false,
             history_shared: HistoryShared::default(),
             history_key: None,
+            thread_root_jump: false,
             history_ends: None,
             history_window_epoch: 0,
             history_anchor_pending: false,
@@ -1714,7 +1721,6 @@ impl QuillApp {
             pending_inline_bot_alert: None,
             inline_bot_alert_shown: false,
             forum_manage_dialog: None,
-            comment_thread_dialog: None,
             poll_voters_dialog: None,
             welcome_dialog: None,
             event_log_search: None,

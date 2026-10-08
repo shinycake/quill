@@ -24,6 +24,18 @@ impl Session {
             .filter(|thread| thread.chat_id == chat_id && thread.thread_id != 0)
     }
 
+    /// A thread is open but cannot show messages: still resolving, moving
+    /// to its chat, or failed to load.
+    pub fn thread_unavailable(&self) -> bool {
+        self.thread.as_ref().is_some_and(|thread| {
+            matches!(thread.status, ThreadStatus::Failed(_))
+                || self
+                    .open_chat
+                    .and_then(|chat| self.thread_for_chat(chat))
+                    .is_none()
+        })
+    }
+
     /// `message_thread_id` a send to `chat_id` is addressed to: `Some` while
     /// the open thread lives in that chat.
     pub fn thread_send_target(&self, chat_id: ChatId) -> Option<(i64, MessageId)> {
@@ -59,8 +71,7 @@ impl Session {
             thread.reply_count = reply.reply_count;
             thread.last_read_inbox_message_id = reply.last_read_inbox_message_id;
         }
-        thread.unread_anchor = (thread.unread_count > 0
-            && thread.last_read_inbox_message_id > 0)
+        thread.unread_anchor = (thread.unread_count > 0 && thread.last_read_inbox_message_id > 0)
             .then_some(MessageId(thread.last_read_inbox_message_id));
         thread.status = ThreadStatus::LoadingHistory;
         thread.needs_chat_switch = open_chat != Some(info.chat_id);
@@ -81,7 +92,8 @@ impl Session {
         messages: Vec<ParsedMessage>,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(RequestPurpose::GetMessageThreadHistory { message_id }) = pending.map(|p| p.purpose)
+        let Some(RequestPurpose::GetMessageThreadHistory { message_id }) =
+            pending.map(|p| p.purpose)
         else {
             return;
         };

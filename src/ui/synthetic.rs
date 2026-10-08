@@ -225,6 +225,8 @@ pub(crate) struct MessageChrome {
     /// Hover-revealed control in the bubble's top-right corner (message
     /// actions). Right-click opens the same menu.
     pub actions: Option<AnyElement>,
+    /// Full-width bar under the footer (the comments / replies bar).
+    pub bottom_bar: Option<AnyElement>,
 }
 
 /// Width the time/receipt footer needs inside a bubble (`21:44 ✓✓` at
@@ -318,6 +320,7 @@ fn message_bubble_with_quote(
         footer_rebuild,
         media_led,
         actions,
+        bottom_bar,
     } = chrome;
     let group: SharedString = format!("message-row-{}", row.id).into();
     let alignment = if row.outgoing {
@@ -437,6 +440,9 @@ fn message_bubble_with_quote(
             }
             Some(footer) => this.child(div().flex().justify_end().mt_0p5().child(footer)),
             None => this,
+        })
+        .when_some(bottom_bar, |this, bar| {
+            this.child(div().when(media_led, |bar| bar.px_2()).child(bar))
         });
     let mut bubble = component::bubble::Bubble::new()
         .alignment(alignment)

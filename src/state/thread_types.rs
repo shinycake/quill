@@ -69,9 +69,16 @@ impl ThreadView {
         self.chat_id != self.origin_chat_id
     }
 
-    /// The rows in chronological order.
+    /// The rows in chronological order. The root post joins the rows once
+    /// the replies are loaded down to it; until then it stays in the
+    /// pinned bar, so older pages prepend to the list cleanly.
     pub fn ordered(&self) -> Vec<&HistoryMessage> {
-        self.history.ordered()
+        let complete = self.history.loaded_complete;
+        self.history
+            .messages
+            .values()
+            .filter(|message| complete || !self.root_ids.contains(&message.id.0))
+            .collect()
     }
 
     /// The root post, when it is loaded.
@@ -125,11 +132,10 @@ pub fn comments_bar_label(count: i32) -> String {
     }
 }
 
-/// The label of the replies link under a group message (tdesktop
-/// `lng_replies_view*`).
+/// The label of the replies link under a group message.
 pub fn replies_link_label(count: i32) -> String {
     match count {
-        1 => "View 1 reply".to_owned(),
-        n => format!("View {n} replies"),
+        1 => "1 reply".to_owned(),
+        n => format!("{n} replies"),
     }
 }

@@ -446,6 +446,8 @@ impl QuillApp {
     /// dispatch newly queued notifications on worker threads. Runs from
     /// `render`, which is the only UI path with a `&mut Window`.
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A resolved comment thread moves the view into its discussion group.
+        self.advance_thread(window, cx);
         let clicks: Vec<ChatId> = self
             .notify_clicks
             .lock()

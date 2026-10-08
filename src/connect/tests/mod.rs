@@ -25,8 +25,8 @@ mod settings;
 mod sticker_tabs;
 mod stories;
 mod subsection_tabs;
-mod threads;
 mod support;
+mod threads;
 
 pub(crate) use calls::{READY_CALL_JSON, group_call_test_driver};
 pub(crate) use drafts_polls::{POLL_CLOSED_JSON, POLL_OPEN_JSON};

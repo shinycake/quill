@@ -3,7 +3,9 @@ use super::*;
 use crate::composer::DraftSaveClock;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{RequestPurpose, ThreadStatus};
-use crate::telegram::requests::{get_message_thread, get_message_thread_history, route_into_thread};
+use crate::telegram::requests::{
+    get_message_thread, get_message_thread_history, route_into_thread,
+};
 
 /// Page size of `getMessageThreadHistory` (TDLib may return fewer).
 const THREAD_PAGE: i32 = 50;

@@ -33,7 +33,10 @@ impl Session {
         }
         // Comment / reply thread page.
         if let Some(pending) = pending
-            && matches!(pending.purpose, RequestPurpose::GetMessageThreadHistory { .. })
+            && matches!(
+                pending.purpose,
+                RequestPurpose::GetMessageThreadHistory { .. }
+            )
         {
             self.apply_thread_history(messages, Some(pending));
             return;

@@ -1257,7 +1257,10 @@ impl Session {
             );
         }
         // A failed thread request marks the open thread view.
-        self.fail_thread(pending, call_request_error_line(&err, "Could not load comments"));
+        self.fail_thread(
+            pending,
+            call_request_error_line(&err, "Could not load comments"),
+        );
         // Slice CL: failed preview-history fetch — mark the peek
         // preview so it shows an error instead of a spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatPreview)
