@@ -111,18 +111,33 @@ impl Session {
             self.data_storage_error = None;
             self.data_storage_dirty = true;
         }
-        // Slice S4: a `removeAllFilesFromDownloads` ("Clear
-        // cache") succeeded — drop the cached stats so the driver
-        // refetches the post-clear numbers on this same ingest
-        // (the G2 stale pattern); the screen shows the
-        // confirmation until reopened.
+        // Batch 4: a `confirmSession` / `terminateSession` for the
+        // new-login alert succeeded.
+        if let Some(RequestPurpose::ReviewUnconfirmedSession { confirmed }) =
+            pending.map(|p| p.purpose)
+        {
+            self.finish_login_review(confirmed, None);
+        }
+        // Batch 4: terms accepted.
         if matches!(
             pending.map(|p| p.purpose),
-            Some(RequestPurpose::RemoveAllFilesFromDownloads)
+            Some(RequestPurpose::AcceptTermsOfService)
         ) {
-            self.storage_stats = None;
-            self.storage_stats_loading = false;
-            self.cache_cleared = true;
+            self.notices.terms = None;
+            self.notices.terms_in_flight = false;
+            self.notices.terms_error = None;
+        }
+        // Batch 6: a 2FA step answered `ok` (cancel reset, login email
+        // code check).
+        if let Some(RequestPurpose::PasswordStateOp { op }) = pending.map(|p| p.purpose) {
+            self.apply_password_op_ok(op);
+        }
+        // Batch 6: a storage limit option was accepted; TDLib echoes the
+        // value as `updateOption`.
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::SetStorageOption)
+        ) {
             self.data_storage_error = None;
         }
         // Slice A4: a `disconnectWebsite` /

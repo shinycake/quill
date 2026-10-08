@@ -56,6 +56,12 @@ pub enum RequestPurpose {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// `getRepliedMessage` for a bubble's reply strip; the `message`
+    /// answer lands in `Session::reply_targets`, not in the history.
+    GetRepliedMessage {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
     /// `sendMessageAlbum`. Response `messages` are pending until send-succeeded.
     SendMessageAlbum,
     OpenChat,
@@ -1229,10 +1235,24 @@ pub enum RequestPurpose {
         network: NetworkKind,
         settings: AutoDownloadNetSettings,
     },
-    /// Slice S4: `removeAllFilesFromDownloads` ("Clear cache").
-    /// Response is `ok`; the cached stats are dropped and refetched so
-    /// the screen shows the post-clear numbers.
-    RemoveAllFilesFromDownloads,
+    /// Batch 6: `optimizeStorage` ("Clear cache", per-type and per-chat
+    /// clears). Response is `storageStatistics` of the deleted files;
+    /// the cached usage stats are dropped and refetched so the screen
+    /// shows the post-clear numbers.
+    OptimizeStorage,
+    /// Batch 6: a `setOption` for a storage limit (`storage_max_*`,
+    /// `use_storage_optimizer`). Response is `ok`; TDLib echoes the new
+    /// value as `updateOption`.
+    SetStorageOption,
+    /// Batch 4: `setOption("online")`. Response is `ok`; nothing to apply.
+    SetOnline,
+    /// Batch 4: `confirmSession` / `terminateSession` for the
+    /// new-login alert ("Yes, it's me" / "No, it's not me!").
+    ReviewUnconfirmedSession {
+        confirmed: bool,
+    },
+    /// Batch 4: `acceptTermsOfService`.
+    AcceptTermsOfService,
     /// Slice S4: `getAutoDownloadSettingsPresets`. Response is
     /// `autoDownloadSettingsPresets`; seeds the local per-network
     /// settings once (TDLib has no getter for the current values).

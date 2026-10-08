@@ -111,6 +111,8 @@ impl QuillApp {
 
     pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) -> bool {
         self.poll_device_qr(cx);
+        self.sync_presence();
+        self.drain_account_notices();
         self.apply_pending_keybindings(cx);
         let Some(live) = self.live.as_mut() else {
             return false;

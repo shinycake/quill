@@ -1,8 +1,8 @@
 //! message history: loading, rows, albums, skeletons.
 
 use super::app::{PaneMode, QuillApp};
+use super::bubble_header::{forward_header_line, reply_header_strip, via_bot_line};
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
-use super::forward::forward_from_strip;
 use super::message_games::game_card;
 use super::message_media::{
     MediaCorners, file_is_downloading, media_frame, photo_display_path, spoiler_cover,
@@ -17,8 +17,8 @@ use super::message_payments::{
 };
 use super::message_poll::poll_body;
 use super::message_text::{
-    caption_above_media, message_chrome, message_footer_meta, message_rich_block,
-    message_text_block, reply_quote_strip, rich_text_reserving,
+    FooterMeta, caption_above_media, message_chrome, message_footer_meta, message_rich_block,
+    message_text_block, rich_text_reserving,
 };
 use super::pressable::PressableDiv;
 use super::synthetic::{BubbleLook, footer_reserve, session_bubble_quoted, session_bubble_rich};
@@ -34,9 +34,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{HistoryMessage, OutboxReceipt, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{
-    MessageContent, ParsedFile, chat_ttl_service_label, effective_content,
-};
+use quill::telegram::envelope::{MessageContent, ParsedFile, effective_content};
 use quill::text::TextEntity;
 use quill::voice::format_voice_duration;
 use std::collections::HashMap;
@@ -529,8 +527,9 @@ pub(super) fn session_history_row(
     sender: Option<SenderLabel>,
     receipt: OutboxReceipt,
     sender_avatar: Option<(String, Option<PathBuf>)>,
-    quote_preview: Option<String>,
-    forward_from: Option<String>,
+    reply_header: Option<quill::state::ReplyHeader>,
+    forward_header: Option<quill::state::ForwardHeader>,
+    via_bot: Option<String>,
     // Seek-bar view for audio/voice rows (`None` for other content).
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
@@ -545,7 +544,7 @@ pub(super) fn session_history_row(
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Phase B4: whether the row's chat is a secret chat — selects the
     // "Self-destruct" vs "Auto-delete" service-row wording.
-    is_secret: bool,
+    _is_secret: bool,
     // Phase C2i: session for `messageCall` peer resolution ("Call
     // again" only for 1:1 chats).
     session: Option<&Session>,
@@ -579,38 +578,11 @@ pub(super) fn session_history_row(
     } else {
         look
     };
-    // Phase B4: timer-change service rows (`messageChatSetMessageAutoDeleteTime`,
-    // schema 1.8.67 line 5387) render as a centered neutral notice — no
+    // Service actions (members, pins, gifts, topics…), timer changes and
+    // screenshots: Telegram Desktop's wording as a centered pill — no
     // bubble, no reply/react/edit/delete controls.
-    if let MessageContent::Service(text) = &message.content {
-        return service_pill(("service-message", message.id.0 as u64), text.clone(), cx)
-            .into_any_element();
-    }
-    if let MessageContent::ChatTtlChanged { secs } = &message.content {
-        return service_pill(
-            ("ttl-service-row", message.id.0 as u64),
-            chat_ttl_service_label(*secs, is_secret),
-            cx,
-        )
-        .into_any_element();
-    }
-    // Phase S1: `messageScreenshotTaken` service row (schema 1.8.67,
-    // line 5375) — centered neutral notice, attributed via
-    // `message.is_outgoing` (TGX `YouTookAScreenshot` /
-    // `XTookAScreenshot`).
-    if matches!(message.content, MessageContent::ScreenshotTaken) {
-        let text = if message.is_outgoing {
-            "You took a screenshot".to_string()
-        } else {
-            format!(
-                "{} took a screenshot",
-                sender
-                    .as_ref()
-                    .map_or("Someone", |label| label.name.as_str())
-            )
-        };
-        return service_pill(("screenshot-service-row", message.id.0 as u64), text, cx)
-            .into_any_element();
+    if super::service_row::is_service_row(&message.content) {
+        return super::service_row::service_message_row(message, session, files, media_roots, cx);
     }
     // Slice G9: community service rows (`messageChatAddedToCommunity`,
     // `messageChatRemovedFromCommunity`, `messageChatJoinFromCommunity`,
@@ -694,24 +666,39 @@ pub(super) fn session_history_row(
         )
         .into_any_element();
     }
-    let quote = message.reply_to.as_ref().and_then(|reply| {
-        let preview = quote_preview.clone()?;
-        Some(reply_quote_strip(message.id, reply.message_id, preview, cx))
+    let on_fill = message.is_outgoing && !look.plain;
+    let quote = reply_header.map(|header| {
+        let thumb = QuillApp::reply_thumb_path(&header, files, media_roots);
+        reply_header_strip(message.id, header, thumb, on_fill, cx)
     });
-    let forward_strip = forward_from.map(|label| forward_from_strip(message.id, label));
-    let header = match (forward_strip, quote) {
-        (Some(fwd), Some(reply)) => Some(
+    let has_forward = forward_header.is_some();
+    let forward_strip = forward_header.map(|header| {
+        let original = (header.original_date > 0 && message.forward_info.is_some()).then(|| {
+            format!(
+                "Original: {}",
+                super::message_text::format_unix_date_time(header.original_date.into())
+            )
+        });
+        forward_header_line(message.id, header, via_bot.clone(), original, on_fill, cx)
+    });
+    let via_strip = via_bot
+        .filter(|_| !has_forward)
+        .map(|bot| via_bot_line(message.id, bot, on_fill));
+    let header_parts: Vec<AnyElement> = [via_strip, forward_strip, quote]
+        .into_iter()
+        .flatten()
+        .collect();
+    let header = match header_parts.len() {
+        0 => None,
+        1 => header_parts.into_iter().next(),
+        _ => Some(
             div()
                 .id(("row-headers", message.id.0 as u64))
                 .flex()
                 .flex_col()
-                .child(fwd)
-                .child(reply)
+                .children(header_parts)
                 .into_any_element(),
         ),
-        (Some(fwd), None) => Some(fwd),
-        (None, Some(reply)) => Some(reply),
-        (None, None) => None,
     };
     let chat_id = message.chat_id;
     let message_id = message.id;
@@ -735,6 +722,7 @@ pub(super) fn session_history_row(
         .author_signature
         .clone()
         .filter(|_| message.forward_info.is_none());
+    let footer_meta = FooterMeta::of(message, receipt, views, signature.clone());
     let chips = message.reaction_chips();
     // Telegram Desktop shows who reacted (small avatars) instead of a
     // count when there are at most three known reactors, outside channels.
@@ -849,13 +837,7 @@ pub(super) fn session_history_row(
             );
         }
         // Telegram Desktop keeps the time on the reactions' line.
-        if let Some(footer) = message_footer_meta(
-            message.date,
-            message.pending,
-            receipt,
-            views,
-            signature.clone(),
-        ) {
+        if let Some(footer) = message_footer_meta(&footer_meta) {
             row = row.child(div().ml_auto().pl_2().child(footer));
         }
         row
@@ -1043,7 +1025,7 @@ pub(super) fn session_history_row(
         MessageContent::Venue(venue) => Some(venue_row(message.id.0 as u64, venue, cx)),
         MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
         MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
-        MessageContent::Service(_)
+        MessageContent::Action(_)
         | MessageContent::Text(_)
         | MessageContent::RichMessage(_)
         | MessageContent::Game(_)
@@ -1156,7 +1138,7 @@ pub(super) fn session_history_row(
             // Settings → Appearance: message font size.
             look.font,
             session.is_none_or(|s| s.media_prefs.big_emoji),
-            reserve_footer.then(|| footer_reserve(message.is_outgoing)),
+            reserve_footer.then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
             cx,
         )),
         // Slice bots-games: the game card is the message's primary
@@ -1213,7 +1195,8 @@ pub(super) fn session_history_row(
                 // Captions don't resolve custom emoji in this slice (text fallback).
                 &HashMap::new(),
                 &HashMap::new(),
-                (below && reserve_footer).then(|| footer_reserve(message.is_outgoing)),
+                (below && reserve_footer)
+                    .then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
                 cx,
             )
         });
@@ -1376,15 +1359,7 @@ pub(super) fn session_history_row(
         if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link.take()) {
             chrome.avatar = Some(link.wrap(avatar));
         }
-        if views.is_some() || signature.is_some() {
-            chrome.footer = message_footer_meta(
-                message.date,
-                message.pending,
-                receipt,
-                views,
-                signature.clone(),
-            );
-        }
+        chrome.footer = message_footer_meta(&footer_meta);
         if has_chips {
             // The reaction row carries the time.
             chrome.footer = None;
@@ -1392,10 +1367,8 @@ pub(super) fn session_history_row(
         chrome.footer_inline = footer_inline;
         chrome.footer_overlay = footer_overlay;
         if footer_overlay && chrome.footer.is_some() {
-            let (date, pending, signature) = (message.date, message.pending, signature.clone());
-            chrome.footer_rebuild = Some(std::rc::Rc::new(move || {
-                message_footer_meta(date, pending, receipt, views, signature.clone())
-            }));
+            let meta = footer_meta.clone();
+            chrome.footer_rebuild = Some(std::rc::Rc::new(move || message_footer_meta(&meta)));
         }
         chrome.media_led = media_led;
         chrome.actions = more_btn.take().map(IntoElement::into_any_element);

@@ -610,6 +610,18 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .map(|ids| ids.iter().filter_map(|id| int53(Some(id)).ok()).collect())
                 .unwrap_or_default(),
         }),
+        "updateUnconfirmedSession" => Ok(parse_unconfirmed_session_update(&value)),
+        "updateServiceNotification" => Ok(parse_service_notification(&value)),
+        "updateTermsOfService" => parse_terms_of_service(&value)
+            .map(|terms| EnvelopePayload::UpdateTermsOfService { terms })
+            .ok_or(ParseError::MissingField),
+        "emailAddressAuthenticationCodeInfo" => Ok(EnvelopePayload::EmailCodeInfo {
+            pattern: json_field_str(&value, "email_address_pattern"),
+            length: json_i32(value.get("length"), 0).max(0),
+        }),
+        "resetPasswordResultOk" | "resetPasswordResultPending" | "resetPasswordResultDeclined" => {
+            Ok(parse_reset_password_result(type_name, &value))
+        }
         "updateConnectionState" => Ok(EnvelopePayload::UpdateConnectionState(parse_connection(
             value.get("state"),
         ))),

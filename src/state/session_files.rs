@@ -137,6 +137,21 @@ impl Session {
                         ids.push(size.file_id);
                     }
                 }
+                // A chat-photo change / suggested profile photo shows its
+                // picture under the service row.
+                MessageContent::Action(action) => {
+                    if let crate::telegram::envelope::ServiceAction::ChatPhoto {
+                        photo: Some(photo),
+                    }
+                    | crate::telegram::envelope::ServiceAction::SuggestProfilePhoto {
+                        photo: Some(photo),
+                    } = action.as_ref()
+                        && let Some(size) = photo.thumb_size().or_else(|| photo.largest_size())
+                        && self.should_download(size.file_id)
+                    {
+                        ids.push(size.file_id);
+                    }
+                }
                 MessageContent::Text(text) => {
                     if let Some(preview) = &text.link_preview
                         && let Some(photo) = &preview.photo
@@ -261,6 +276,13 @@ impl Session {
                         ids.push(file_id);
                     }
                 }
+            }
+        }
+        // Thumbnails the reply strips draw (fetched originals, other-chat
+        // replies).
+        for file_id in self.reply_thumb_file_ids() {
+            if self.should_download(file_id) {
+                ids.push(file_id);
             }
         }
         ids.sort_by_key(|id| id.0);

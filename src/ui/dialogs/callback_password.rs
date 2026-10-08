@@ -15,6 +15,10 @@ pub(crate) enum TwofaView {
     Change,
     Disable,
     Email,
+    /// Batch 6: "Forgot password?" / reset with the waiting period.
+    Recover,
+    /// Batch 6: change the login email.
+    LoginEmail,
 }
 
 /// 2-step password with the button's callback `data` via

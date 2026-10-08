@@ -355,3 +355,45 @@ fn payment_recurring_request_shapes_match_1_8_67() {
     assert_eq!(v["@type"], "reuseStarSubscription");
     assert_eq!(v["subscription_id"], "sub2");
 }
+
+/// Batch 4 / 6: `setOption` (:15662) and `optimizeStorage` (:15799).
+#[test]
+fn b6_option_and_optimize_storage_shapes_match_1_8_67() {
+    let parse = |json: String| serde_json::from_str::<serde_json::Value>(&json).unwrap();
+    let v = parse(set_option_boolean(RequestId(1), "online", true));
+    assert_eq!(v["@type"], "setOption");
+    assert_eq!(v["name"], "online");
+    assert_eq!(
+        v["value"],
+        serde_json::json!({"@type": "optionValueBoolean", "value": true})
+    );
+    let v = parse(set_option_integer(
+        RequestId(2),
+        "storage_max_files_size",
+        Some(1024),
+    ));
+    assert_eq!(
+        v["value"],
+        serde_json::json!({"@type": "optionValueInteger", "value": "1024"})
+    );
+    let v = parse(set_option_integer(
+        RequestId(3),
+        "storage_max_files_size",
+        None,
+    ));
+    assert_eq!(v["value"]["@type"], "optionValueEmpty");
+
+    let v = parse(optimize_storage(
+        RequestId(4),
+        &OptimizeStorage::everything(50),
+    ));
+    assert_eq!(v["@type"], "optimizeStorage");
+    for key in ["size", "ttl", "count", "immunity_delay"] {
+        assert_eq!(v[key], 0, "{key}");
+    }
+    assert_eq!(v["file_types"], serde_json::json!([]));
+    assert_eq!(v["chat_ids"], serde_json::json!([]));
+    assert_eq!(v["exclude_chat_ids"], serde_json::json!([]));
+    assert_eq!(v["return_deleted_file_statistics"], true);
+    assert_eq!(v["chat_limit"], 50);
+}

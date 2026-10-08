@@ -1,4 +1,5 @@
 //! Connect-driver integration tests (TDLib JSON injection via `RecordingSender`).
+mod account_hygiene;
 mod ai_tools;
 mod bot_pending;
 mod bots;

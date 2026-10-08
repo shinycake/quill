@@ -307,6 +307,131 @@ pub fn cancel_recovery_email_address_verification(extra: RequestId) -> String {
     .to_string()
 }
 
+/// Batch 6: `checkRecoveryEmailAddressCode code:string = PasswordState;`
+/// (TDLib 1.8.67, `schema/td_api.tl:11461`): "Checks the 2-step
+/// verification recovery email address verification code". The code
+/// rides the JSON body only.
+pub fn check_recovery_email_address_code(extra: RequestId, code: &str) -> String {
+    json!({
+        "@type": "checkRecoveryEmailAddressCode",
+        "@extra": extra.as_extra(),
+        "code": code,
+    })
+    .to_string()
+}
+
+/// Batch 6: `requestPasswordRecovery = EmailAddressAuthenticationCodeInfo;`
+/// (TDLib 1.8.67, `schema/td_api.tl:11470`): sends a recovery code to the
+/// previously set up recovery email address (the signed-in counterpart of
+/// `requestAuthenticationPasswordRecovery`).
+pub fn request_password_recovery(extra: RequestId) -> String {
+    json!({
+        "@type": "requestPasswordRecovery",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Batch 6: `recoverPassword recovery_code:string new_password:string
+/// new_hint:string = PasswordState;` (TDLib 1.8.67,
+/// `schema/td_api.tl:11479`). An empty `new_password` removes the
+/// password. Callers must not log the code or the password.
+pub fn recover_password(
+    extra: RequestId,
+    recovery_code: &str,
+    new_password: &str,
+    new_hint: &str,
+) -> String {
+    json!({
+        "@type": "recoverPassword",
+        "@extra": extra.as_extra(),
+        "recovery_code": recovery_code,
+        "new_password": new_password,
+        "new_hint": new_hint,
+    })
+    .to_string()
+}
+
+/// Batch 6: `resetPassword = ResetPasswordResult;` (TDLib 1.8.67,
+/// `schema/td_api.tl:11482`): removes the password without the old one
+/// and without recovery email access; TDLib enforces the 7-day wait.
+pub fn reset_password(extra: RequestId) -> String {
+    json!({
+        "@type": "resetPassword",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Batch 6: `cancelPasswordReset = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:11485`); valid while `passwordState.pending_reset_date`
+/// is non-zero.
+pub fn cancel_password_reset(extra: RequestId) -> String {
+    json!({
+        "@type": "cancelPasswordReset",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Batch 6: `setLoginEmailAddress new_login_email_address:string =
+/// EmailAddressAuthenticationCodeInfo;` (TDLib 1.8.67,
+/// `schema/td_api.tl:11443`). The change is not applied until the code
+/// is confirmed with `checkLoginEmailAddressCode`.
+pub fn set_login_email_address(extra: RequestId, new_login_email_address: &str) -> String {
+    json!({
+        "@type": "setLoginEmailAddress",
+        "@extra": extra.as_extra(),
+        "new_login_email_address": new_login_email_address,
+    })
+    .to_string()
+}
+
+/// Batch 6: `resendLoginEmailAddressCode =
+/// EmailAddressAuthenticationCodeInfo;` (TDLib 1.8.67,
+/// `schema/td_api.tl:11446`).
+pub fn resend_login_email_address_code(extra: RequestId) -> String {
+    json!({
+        "@type": "resendLoginEmailAddressCode",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// Batch 6: `checkLoginEmailAddressCode code:EmailAddressAuthentication =
+/// Ok;` (TDLib 1.8.67, `schema/td_api.tl:11449`) with the plain
+/// `emailAddressAuthenticationCode code:string` variant.
+pub fn check_login_email_address_code(extra: RequestId, code: &str) -> String {
+    json!({
+        "@type": "checkLoginEmailAddressCode",
+        "@extra": extra.as_extra(),
+        "code": {"@type": "emailAddressAuthenticationCode", "code": code},
+    })
+    .to_string()
+}
+
+/// Batch 4: `confirmSession session_id:int64 = Ok;` (TDLib 1.8.67,
+/// `schema/td_api.tl:15111`): "Yes, it's me" for an unconfirmed session.
+pub fn confirm_session(extra: RequestId, session_id: i64) -> String {
+    json!({
+        "@type": "confirmSession",
+        "@extra": extra.as_extra(),
+        "session_id": session_id,
+    })
+    .to_string()
+}
+
+/// Batch 4: `acceptTermsOfService terms_of_service_id:string = Ok;`
+/// (TDLib 1.8.67, `schema/td_api.tl:16143`).
+pub fn accept_terms_of_service(extra: RequestId, terms_of_service_id: &str) -> String {
+    json!({
+        "@type": "acceptTermsOfService",
+        "@extra": extra.as_extra(),
+        "terms_of_service_id": terms_of_service_id,
+    })
+    .to_string()
+}
+
 pub fn close_request(extra: RequestId) -> String {
     json!({
         "@type": "close",

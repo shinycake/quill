@@ -583,12 +583,14 @@ impl QuillApp {
                 icon_button("ping", gpui_kit::assets::IconName::RotateCw, "Check status")
                     .on_click(cx.listener(move |this, _, _, cx| this.ping_proxy_entry(id, cx))),
             )
-            .when(shareable, |this| {
-                this.child(
+            // Unshareable (HTTP) rows keep an invisible slot so the icons align.
+            .child(
+                div().when(!shareable, |this| this.invisible()).child(
                     icon_button("copy", gpui_kit::assets::IconName::Copy, "Copy link")
+                        .disabled(!shareable)
                         .on_click(cx.listener(move |this, _, _, cx| this.copy_proxy_link(id, cx))),
-                )
-            })
+                ),
+            )
             .child(
                 icon_button("edit", gpui_kit::assets::IconName::Pencil, "Edit").on_click(
                     cx.listener(move |this, _, window, cx| {

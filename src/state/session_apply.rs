@@ -55,6 +55,7 @@ impl Session {
             // media-send captions); every other option parses but is
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
+                self.storage_limits.apply_option(&name, &value);
                 if name == "my_id"
                     && let OptionValue::Integer(id) = &value
                     && *id > 0
@@ -1336,14 +1337,16 @@ impl Session {
             EnvelopePayload::UpdateMessageEdited {
                 chat_id,
                 message_id,
+                edit_date,
                 reply_markup,
-                ..
             } => {
                 // Phase 3.2: bots edit inline keyboards via `updateMessageEdited`
                 // (schema 1.8.67 line 10431) — the new `reply_markup` (possibly
                 // None) replaces the message's keyboard.
+                // The same update stamps the edit date shown as "edited".
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.reply_markup = reply_markup.clone();
+                    message.extras.edit_date = edit_date;
                 });
             }
             EnvelopePayload::UpdatePoll { poll } => {
@@ -1696,6 +1699,14 @@ impl Session {
                 self.apply_messages(messages, pending, extra, seq)
             }
             EnvelopePayload::Message(message) => {
+                if let Some(RequestPurpose::GetRepliedMessage {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.accept_replied_message(chat_id, message_id, message);
+                    return;
+                }
                 // M1 fix-up: editing a scheduled send returns the edited
                 // `message` with `scheduling_state` set — refresh the
                 // scheduled-list entry instead of inserting a phantom row
@@ -2292,6 +2303,17 @@ impl Session {
                     });
                     self.storage_stats_loading = false;
                 }
+                // Batch 6: `optimizeStorage` answers with the statistics
+                // of the files it deleted. Drop the usage cache so the
+                // driver refetches the post-clear numbers on this same
+                // ingest.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
+                    self.storage_freed = Some(total_size);
+                    self.storage_clearing = false;
+                    self.storage_stats = None;
+                    self.storage_stats_loading = false;
+                    self.data_storage_error = None;
+                }
             }
             EnvelopePayload::AutoDownloadSettingsPresets { low, medium, high } => {
                 // Slice S4: `getAutoDownloadSettingsPresets` answer —
@@ -2309,6 +2331,37 @@ impl Session {
                     self.data_storage_error = None;
                 }
             }
+            EnvelopePayload::UpdateUnconfirmedSession { session, count } => {
+                self.apply_unconfirmed_session(session, count);
+            }
+            EnvelopePayload::UpdateServiceNotification { kind, text } => {
+                self.apply_service_notification(kind, text);
+            }
+            EnvelopePayload::UpdateTermsOfService { terms } => {
+                self.notices.terms = Some(terms);
+                self.notices.terms_error = None;
+            }
+            EnvelopePayload::EmailCodeInfo { pattern, .. } => {
+                // Batch 6: only our own in-flight 2FA step takes the
+                // answer (matched by `@extra`).
+                if let Some(RequestPurpose::PasswordStateOp { op }) = pending.map(|p| p.purpose) {
+                    self.password_state_loading = false;
+                    self.password_op_error = None;
+                    self.apply_email_code_info(op, pattern);
+                }
+            }
+            EnvelopePayload::ResetPasswordResult(outcome) => {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::PasswordStateOp {
+                        op: PasswordOp::ResetPassword
+                    })
+                ) {
+                    self.password_state_loading = false;
+                    self.password_op_error = None;
+                    self.apply_reset_password_result(outcome);
+                }
+            }
             EnvelopePayload::PasswordState { state } => {
                 // Slice A2: `passwordState` answer — only our own
                 // in-flight `PasswordStateOp` writes the cache (matched by
@@ -2322,6 +2375,10 @@ impl Session {
                     self.password_state = Some(state);
                     self.password_state_loading = false;
                     self.password_op_error = None;
+                    if let Some(RequestPurpose::PasswordStateOp { op }) = pending.map(|p| p.purpose)
+                    {
+                        self.apply_password_state_op(op);
+                    }
                 }
             }
             EnvelopePayload::DeviceLoginResult { result } => {
@@ -2349,6 +2406,7 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
+                    self.resolve_unconfirmed_entries(&sessions);
                     self.sessions = Some(sessions);
                     self.sessions_loading = false;
                     self.sessions_error = None;
@@ -2575,13 +2633,20 @@ impl Session {
         chat_id: ChatId,
         message: Option<&ParsedMessage>,
     ) {
+        // Service messages preview as their wording ("Dana pinned \"hi\""),
+        // computed before the chat is borrowed mutably.
+        let service_preview = message.and_then(|message| {
+            let content = effective_content(&message.content, message.ephemeral.as_ref());
+            self.service_text_for(chat_id, content, message.sender, message.is_outgoing)
+                .map(|text| text.plain())
+        });
         let chat = self
             .chats
             .entry(chat_id.0)
             .or_insert_with(|| placeholder_chat(chat_id));
         if let Some(message) = message {
             let content = effective_content(&message.content, message.ephemeral.as_ref());
-            chat.last_preview = content.preview();
+            chat.last_preview = service_preview.unwrap_or_else(|| content.preview());
             chat.last_preview_style = preview_style(content, &chat.last_preview);
             chat.last_preview_thumb = match content {
                 MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => photo
@@ -2591,11 +2656,15 @@ impl Session {
                     .map(std::sync::Arc::new),
                 _ => None,
             };
-            chat.last_preview_sender = preview_sender_name(
-                message.is_outgoing,
-                message.author_signature.as_deref(),
-                &chat.title,
-            );
+            chat.last_preview_sender = if chat.last_preview_style.service {
+                String::new()
+            } else {
+                preview_sender_name(
+                    message.is_outgoing,
+                    message.author_signature.as_deref(),
+                    &chat.title,
+                )
+            };
             chat.last_message = Some(ChatLastMessage {
                 id: message.id,
                 date: message.date,

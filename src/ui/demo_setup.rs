@@ -999,6 +999,113 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Batch 4: new-login alert fixture — an unconfirmed Android login
+        // resolved from the sessions list (injected, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadyNewLogin)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.notices.unconfirmed_count = 1;
+                session.notices.unconfirmed_entries = vec![quill::state::UnconfirmedEntry {
+                    id: 77,
+                    device: "Pixel 9".into(),
+                    location: "Berlin, Germany".into(),
+                }];
+            }
+        }
+        // Batch 4: "New Login Prevented" box (injected, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadyLoginPrevented)) {
+            self.login_prevented = Some(vec!["Berlin, Germany (Pixel 9)".into()]);
+        }
+        // Batch 4: server service notification popup (injected).
+        if matches!(demo, Some(ScreenshotDemo::ReadyServiceNotice)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.notices.service.push_back(quill::state::ServiceNotice {
+                    kind: String::new(),
+                    text: "Your Telegram Premium subscription ends in 3 days. Renew it to keep your extra features.".into(),
+                });
+            }
+        }
+        // Batch 4: terms of service prompt with the age check (injected).
+        if matches!(demo, Some(ScreenshotDemo::ReadyTerms)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.notices.terms = Some(quill::telegram::envelope::TermsOfService {
+                    id: "tos-2026".into(),
+                    text: "1. Telegram is a cloud service. Your messages, media and files are stored on our servers so you can reach them from any device.\n\n2. Do not use Telegram to spam, scam or harm others, and do not promote violence or sell illegal goods.\n\n3. We do not use your data for ad targeting. You can adjust how your data is used in Privacy & Security settings.\n\nBy continuing you accept these updated terms.".into(),
+                    min_user_age: 16,
+                    show_popup: true,
+                });
+            }
+        }
+        // Batch 6: local storage fixture — two ticked types with the clear
+        // confirmation open, limits applied (injected, no live Telegram).
+        if matches!(demo, Some(ScreenshotDemo::ReadyLocalStorage)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.storage_stats = Some(demo_storage_stats());
+                session.storage_stats_loading = false;
+                session.data_storage = demo_data_storage_prefs();
+                for (name, value) in quill::storage_limits::options_for(
+                    Some(2 * 1024 * 1024 * 1024),
+                    Some(31 * 86_400),
+                ) {
+                    session.storage_limits.apply_option(
+                        name,
+                        &match value {
+                            quill::storage_limits::StorageOptionValue::Boolean(on) => {
+                                quill::telegram::envelope::OptionValue::Boolean(on)
+                            }
+                            quill::storage_limits::StorageOptionValue::Integer(n) => {
+                                quill::telegram::envelope::OptionValue::Integer(n)
+                            }
+                        },
+                    );
+                }
+            }
+            self.storage_selected.insert("fileTypePhoto");
+            self.storage_selected.insert("fileTypeVideo");
+            self.storage_confirm = Some(StorageClear::Selected);
+            self.storage_usage_open = true;
+        }
+        // Batch 6: "Forgot password?" code step (injected).
+        if matches!(demo, Some(ScreenshotDemo::Ready2faForgot)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.password_state = Some(demo_password_state_manage());
+                session.password_state_loading = false;
+                session.twofa_flow.recovery_code_sent_to = Some("i***@example.com".into());
+            }
+            self.twofa_view = TwofaView::Recover;
+            self.twofa_open = true;
+        }
+        // Batch 6: reset waiting period (injected).
+        if matches!(demo, Some(ScreenshotDemo::Ready2faReset)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                let mut state = demo_password_state_manage();
+                state.has_recovery_email_address = false;
+                state.pending_reset_date =
+                    ((quill::state::unix_ms_now() / 1000) + 5 * 86_400 + 3_600) as i32;
+                session.password_state = Some(state);
+                session.password_state_loading = false;
+            }
+            self.twofa_view = TwofaView::Recover;
+            self.twofa_open = true;
+        }
+        // Batch 6: login email code step (injected).
+        if matches!(demo, Some(ScreenshotDemo::ReadyLoginEmail)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                let mut state = demo_password_state_manage();
+                state.login_email_address_pattern = "i***@example.com".into();
+                session.password_state = Some(state);
+                session.password_state_loading = false;
+                session.twofa_flow.login_email_code_sent_to = Some("m***@example.com".into());
+            }
+            self.twofa_view = TwofaView::LoginEmail;
+            self.twofa_open = true;
+        }
         // Phase B1: secret chat lifecycle fixture — a Ready secret chat
         // with Zed, opened with E2E history and the composer live.
         if matches!(demo, Some(ScreenshotDemo::ReadySecretChat)) {
@@ -1050,6 +1157,7 @@ impl QuillApp {
                 session.storage_stats = Some(demo_storage_stats());
                 session.storage_stats_loading = false;
                 session.data_storage = demo_data_storage_prefs();
+                session.storage_freed = Some(54_525_952);
             }
             self.storage_usage_open = true;
             self.status_note = "screenshot demo — data & storage".into();
@@ -1700,6 +1808,28 @@ impl QuillApp {
                 apply_ready_blockquote_expandable(session, &self.demo_sink, &self.demo_seq);
             }
             self.status_note = "screenshot demo — expandable block quotes".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyServiceMessages)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::service_demo::apply_ready_service_messages(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                );
+            }
+            self.status_note = "screenshot demo — service messages".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyBubbleHeaders)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::bubble_header_demo::apply_ready_bubble_headers(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                );
+            }
+            self.status_note = "screenshot demo — bubble headers".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyRtlPolish)) {
             let view = std::env::var("QUILL_DEMO_RTL_VIEW").unwrap_or_default();

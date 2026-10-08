@@ -230,9 +230,17 @@ pub struct Session {
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
     pub data_storage_error: Option<String>,
-    /// Slice S4: a `removeAllFilesFromDownloads` was confirmed — the
-    /// screen shows the "Cache cleared" confirmation until reopened.
-    pub cache_cleared: bool,
+    /// Batch 6: bytes the last confirmed `optimizeStorage` freed — the
+    /// screen shows "{size} freed on your device!" until reopened.
+    pub storage_freed: Option<i64>,
+    /// Batch 6: an `optimizeStorage` round trip is in flight.
+    pub storage_clearing: bool,
+    /// Batch 6: the local storage limits TDLib reports (`updateOption`).
+    pub storage_limits: crate::storage_limits::StorageLimits,
+    /// Batch 4: new-login alert, service popups and terms of service.
+    pub notices: AccountNotices,
+    /// Batch 6: two-step recovery / reset / login-email flow state.
+    pub twofa_flow: TwofaFlow,
     /// Slice A2: cached `getPasswordState` / `setPassword` /
     /// `setRecoveryEmailAddress` answer; drives the two-step
     /// verification overlay. Replaced only by our own
@@ -451,6 +459,9 @@ pub struct Session {
     /// `getGroupCall` fetch (queued from the `createVideoChat`
     /// `groupCallId` answer). Drained by the driver.
     pub group_call_fetch_queue: Vec<i32>,
+    /// Replied-to messages outside the loaded window, keyed by the
+    /// replying message `(chat_id, message_id)`.
+    pub reply_targets: HashMap<(i64, i64), ReplyTarget>,
     /// stories-live-play: the story viewer's "Join live" asked for this
     /// group call; the driver issues `join_video_chat` once the
     /// `getGroupCall` answer has created the unjoined tracker.
@@ -1054,7 +1065,11 @@ impl Session {
             data_storage_dirty: false,
             auto_download_presets_loading: false,
             data_storage_error: None,
-            cache_cleared: false,
+            storage_freed: None,
+            storage_clearing: false,
+            storage_limits: Default::default(),
+            notices: AccountNotices::default(),
+            twofa_flow: TwofaFlow::default(),
             password_state: None,
             password_state_loading: false,
             password_op_error: None,
@@ -1116,6 +1131,7 @@ impl Session {
             language_prefs: LanguagePrefs::default(),
             active_group_call: None,
             group_call_fetch_queue: Vec::new(),
+            reply_targets: HashMap::new(),
             pending_live_story_join: None,
             open_topic: None,
             pending_bot_messages: HashMap::new(),

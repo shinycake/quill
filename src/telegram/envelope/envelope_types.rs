@@ -864,6 +864,30 @@ pub enum EnvelopePayload {
         medium: AutoDownloadNetSettings,
         high: AutoDownloadNetSettings,
     },
+    /// Batch 4: `updateUnconfirmedSession` — the first unconfirmed login
+    /// (`None` when none is left) and how many there are.
+    UpdateUnconfirmedSession {
+        session: Option<UnconfirmedLogin>,
+        count: i32,
+    },
+    /// Batch 4: `updateServiceNotification` — a server popup.
+    UpdateServiceNotification {
+        kind: String,
+        text: String,
+    },
+    /// Batch 4: `updateTermsOfService` — terms that must be accepted.
+    UpdateTermsOfService {
+        terms: TermsOfService,
+    },
+    /// Batch 6: `emailAddressAuthenticationCodeInfo` — the answer of
+    /// `requestPasswordRecovery` / `setLoginEmailAddress` /
+    /// `resendLoginEmailAddressCode`.
+    EmailCodeInfo {
+        pattern: String,
+        length: i32,
+    },
+    /// Batch 6: `resetPasswordResult*` — the `resetPassword` answer.
+    ResetPasswordResult(ResetPasswordOutcome),
     /// Slice A2: `passwordState` — the `getPasswordState` /
     /// `setPassword` / `setRecoveryEmailAddress` /
     /// `resendRecoveryEmailAddressCode` /

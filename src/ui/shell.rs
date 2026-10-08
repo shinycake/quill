@@ -106,6 +106,8 @@ pub enum DialogKind {
     /// `parity:platform-deep-links`: TDLib's deep-link info / error text.
     DeepLinkInfo,
     DeepLinkInvite,
+    /// "Open this link?" for a hidden or look-alike message link.
+    OpenLink,
     PollVoters,
     ArchiveSettings,
     ArchivedStickers,
@@ -152,6 +154,9 @@ pub enum DialogKind {
     ProxyList,
     ProxyEdit,
     ProxyLink,
+    /// Batch 4: terms of service, server service popups and the
+    /// "New Login Prevented" follow-up.
+    AccountNotice,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -193,6 +198,7 @@ impl QuillShell {
             DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
             DialogKind::DeepLinkInfo => app.deep_link_dialog.is_some(),
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
+            DialogKind::OpenLink => app.open_link_confirm.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
             DialogKind::ArchivedStickers => app.sticker_settings_open,
             DialogKind::EmojiSets => app.session().is_some_and(|s| s.emoji.open),
@@ -230,6 +236,7 @@ impl QuillShell {
             DialogKind::ProxyList => app.proxy_ui.list_open,
             DialogKind::ProxyEdit => app.proxy_ui.editor.is_some(),
             DialogKind::ProxyLink => app.proxy_ui.link.is_some(),
+            DialogKind::AccountNotice => app.account_notice().is_some(),
         }
     }
 
@@ -245,6 +252,7 @@ impl QuillShell {
             DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
             DialogKind::DeepLinkInfo => QuillApp::build_deep_link_dialog,
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
+            DialogKind::OpenLink => QuillApp::build_open_link_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
             DialogKind::ArchiveSettings => QuillApp::build_archive_settings_dialog,
             DialogKind::ArchivedStickers => QuillApp::build_archived_stickers_dialog,
@@ -282,12 +290,15 @@ impl QuillShell {
             DialogKind::ProxyList => QuillApp::build_proxy_list_dialog,
             DialogKind::ProxyEdit => QuillApp::build_proxy_edit_dialog,
             DialogKind::ProxyLink => QuillApp::build_proxy_link_dialog,
+            DialogKind::AccountNotice => QuillApp::build_account_notice_dialog,
         }
     }
 
     /// All dialog kinds in a fixed order (matches the old overlay
     /// priority: first open flag wins when several are set).
     const KINDS: &[DialogKind] = &[
+        // Batch 4: what the server says about the account comes first.
+        DialogKind::AccountNotice,
         DialogKind::Scheduled,
         DialogKind::GroupCallStart,
         DialogKind::ArchiveSettings,
@@ -312,6 +323,7 @@ impl QuillShell {
         DialogKind::ProxyEdit,
         DialogKind::ProxyLink,
         DialogKind::ProxyList,
+        DialogKind::OpenLink,
         DialogKind::PaymentForm,
         DialogKind::PaymentReceipt,
         DialogKind::Subscriptions,

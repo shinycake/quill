@@ -29,6 +29,13 @@ impl Session {
         {
             self.adopt_supergroup_status_for_chat(chat_id);
         }
+        if let Some(RequestPurpose::GetRepliedMessage {
+            chat_id,
+            message_id,
+        }) = pending.map(|p| p.purpose)
+        {
+            self.reject_replied_message(chat_id, message_id);
+        }
         // Phase 9.3: a `postStory` / `canPostStory` error — the
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {
@@ -40,9 +47,30 @@ impl Session {
                     error_reason(&err)
                 ));
             }
-            Some(RequestPurpose::RemoveAllFilesFromDownloads) => {
+            Some(RequestPurpose::OptimizeStorage) => {
+                self.storage_clearing = false;
                 self.data_storage_error =
                     Some(format!("Couldn't clear the cache: {}", error_reason(&err)));
+            }
+            Some(RequestPurpose::SetStorageOption) => {
+                self.data_storage_error = Some(format!(
+                    "Couldn't save the storage limits: {}",
+                    error_reason(&err)
+                ));
+            }
+            // Batch 4: `setOption("online")` is fire-and-forget; the next
+            // presence check sends it again.
+            Some(RequestPurpose::SetOnline) => {}
+            Some(RequestPurpose::ReviewUnconfirmedSession { confirmed }) => {
+                self.finish_login_review(
+                    confirmed,
+                    Some(sessions_error_line("review the new login", &err)),
+                );
+            }
+            Some(RequestPurpose::AcceptTermsOfService) => {
+                self.notices.terms_in_flight = false;
+                self.notices.terms_error =
+                    Some(sessions_error_line("accept the terms of service", &err));
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
                 self.auto_download_presets_loading = false;

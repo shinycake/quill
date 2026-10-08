@@ -1176,6 +1176,7 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
         files: Vec::new(),
         reply_to: None,
         forward_info: None,
+        extras: Default::default(),
         interaction_info: None,
         reply_markup: None,
         self_destruct: None,

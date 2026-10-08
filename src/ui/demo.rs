@@ -903,6 +903,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             id: 987654321,
             is_current: true,
             is_password_pending: false,
+            is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: true,
             device_model: "ThinkPad X1 Carbon".into(),
@@ -918,6 +919,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             id: 123456789,
             is_current: false,
             is_password_pending: false,
+            is_unconfirmed: false,
             can_accept_secret_chats: true,
             can_accept_calls: false,
             device_model: "iPhone 15 Pro".into(),
@@ -933,6 +935,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             id: 555111222,
             is_current: false,
             is_password_pending: false,
+            is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: true,
             device_model: "Pixel 8".into(),
@@ -948,6 +951,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             id: 999888777,
             is_current: false,
             is_password_pending: true,
+            is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: false,
             device_model: "".into(),
@@ -1400,7 +1404,7 @@ impl QuillApp {
                         // Slice G9: the join-from-community service row
                         // carries no editable caption either.
                         | MessageContent::ChatJoinFromCommunity { .. }
-                        | MessageContent::Service(_) => {}
+                        | MessageContent::Action(_) => {}
                     }
                 }
             }

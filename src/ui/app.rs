@@ -375,6 +375,15 @@ pub struct QuillApp {
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.
     pub(super) window_active: std::cell::Cell<bool>,
+    /// Batch 4: the last `online` value sent to TDLib.
+    pub(super) presence: quill::presence::PresenceSync,
+    /// Batch 4: the attempts the user just terminated from the new-login
+    /// alert ("New Login Prevented" box), until acknowledged.
+    pub(super) login_prevented: Option<Vec<String>>,
+    /// Batch 4: terms of service prompt state (decline flow, age check).
+    pub(super) terms_step: TermsStep,
+    pub(super) terms_age_ok: bool,
+    pub(super) terms_age_error: bool,
     /// `media_display_roots`, computed once per frame (rows ask for it
     /// one by one, and it touches the file system).
     pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
@@ -458,7 +467,9 @@ pub struct QuillApp {
     pub(super) data_storage_editor: Option<(NetworkKind, AutoDownloadNetSettings)>,
     /// Slice S4: the "Clear cache" button is awaiting its second,
     /// confirming tap.
-    pub(super) data_storage_confirm_clear: bool,
+    pub(super) storage_confirm: Option<StorageClear>,
+    /// Batch 6: the file types ticked for "Clear selected".
+    pub(super) storage_selected: std::collections::BTreeSet<&'static str>,
     /// Slice A2: two-step verification overlay. `twofa_view` picks the
     /// status screen or one of the forms; the four textareas back the
     /// enable/change/disable/recovery-email forms. Passwords live in the
@@ -473,6 +484,10 @@ pub struct QuillApp {
     /// your current password") — the driver rejects doomed requests
     /// silently, so the form must speak before sending.
     pub(super) twofa_notice: Option<String>,
+    /// Batch 6: code entry (recovery email, password recovery, login
+    /// email) and the inline confirmation on the recovery screen.
+    pub(super) twofa_code: Entity<InputState>,
+    pub(super) twofa_confirm: Option<TwofaConfirm>,
     /// Slice A9: account lifecycle dialog (delete account + self-destruct
     /// TTL). Working state lives in the named module; this is the one
     /// field the dialog machinery reads.
@@ -680,6 +695,18 @@ pub struct QuillApp {
     /// `parity:platform-deep-links`: resolved chat + action waiting for
     /// render (which owns the `Window`) to open it.
     pub(super) pending_deep_link_open: Option<(ChatId, quill::state::DeepLinkAction)>,
+    /// A clicked message entity (mention, hashtag, link…) waiting for
+    /// render to act on it (`entity_links`).
+    pub(super) pending_link: Option<super::entity_links::PendingLink>,
+    /// The link under the latest right-press, and where it was pressed.
+    pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
+    /// The link the open message menu was opened over.
+    pub(super) message_menu_link: Option<quill::text::LinkTarget>,
+    pub(super) link_tooltip: Option<super::entity_links::LinkTooltip>,
+    /// The "Open this link?" box (`DialogKind::OpenLink`).
+    pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
+    /// The copy menu of a phone number, card number or date.
+    pub(super) link_popup: Option<super::entity_links::LinkPopup>,
     /// B1: one-time custom keyboards the user already tapped
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
@@ -788,6 +815,9 @@ pub struct QuillApp {
     pub(super) viewer_rotated: Option<(PathBuf, u8, Arc<RenderImage>)>,
     /// Counts viewer opens; keys the 200 ms fade-in so each open animates.
     pub(super) viewer_open_gen: u64,
+    /// A media-timestamp link opened this message's video; the viewer
+    /// starts it at the given second once the clip is ready.
+    pub(super) pending_viewer_seek: Option<(MessageId, f64)>,
     /// Last mouse movement over the viewer (controls auto-hide clock).
     pub(super) viewer_last_activity: std::time::Instant,
     /// Toolbar, arrows and caption are faded out (after the idle wait).

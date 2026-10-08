@@ -462,6 +462,26 @@ pub fn open_external_url(url: &str) -> bool {
     os_open(std::ffi::OsStr::new(url.trim()))
 }
 
+/// The `mailto:` URL for an email-address entity, or `None` when the text
+/// is not a plain address (whitespace, control characters, a second `@`,
+/// or characters that would add mail headers or change the URL).
+pub fn mailto_url(address: &str) -> Option<String> {
+    let (local, domain) = address.split_once('@')?;
+    let plain = |part: &str, extra: &str| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|c| c.is_alphanumeric() || extra.contains(c))
+    };
+    (plain(local, "._%+-") && plain(domain, ".-") && domain.contains('.'))
+        .then(|| format!("mailto:{address}"))
+}
+
+/// Open the mail client on a new message to `address`.
+pub fn open_mailto(address: &str) -> bool {
+    mailto_url(address).is_some_and(|url| os_open(std::ffi::OsStr::new(&url)))
+}
+
 /// Hand a URL or path to the OS default handler. macOS `open`, Linux
 /// `xdg-open` (argv, no shell). Windows calls `ShellExecuteW` directly:
 /// `cmd /C start` would re-parse `&`, `|` and `^` inside a link or file
@@ -544,6 +564,30 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mailto_accepts_plain_addresses_only() {
+        assert_eq!(
+            mailto_url("ann@example.com").as_deref(),
+            Some("mailto:ann@example.com")
+        );
+        assert_eq!(
+            mailto_url("a.b+c@sub.example.co").as_deref(),
+            Some("mailto:a.b+c@sub.example.co")
+        );
+        for bad in [
+            "ann@example",
+            "@example.com",
+            "ann@@example.com",
+            "ann@example.com?bcc=x@y.z",
+            "ann@exam ple.com",
+            "ann@example.com\n",
+            "ann@example.com#frag",
+            "javascript:alert(1)",
+        ] {
+            assert_eq!(mailto_url(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn does_not_mint_key_when_database_already_exists() {

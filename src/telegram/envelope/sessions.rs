@@ -19,6 +19,9 @@ pub struct ParsedSession {
     pub id: i64,
     pub is_current: bool,
     pub is_password_pending: bool,
+    /// Batch 4: `is_unconfirmed` — a login the user has not confirmed
+    /// from another device (the new-login alert).
+    pub is_unconfirmed: bool,
     /// Slice A4: `can_accept_secret_chats` (schema 1.8.67, line 9144)
     /// — the `toggleSessionCanAcceptSecretChats` target state.
     pub can_accept_secret_chats: bool,
@@ -79,6 +82,7 @@ pub(crate) fn parse_session(value: &Value) -> Option<ParsedSession> {
         id,
         is_current: bool_field("is_current"),
         is_password_pending: bool_field("is_password_pending"),
+        is_unconfirmed: bool_field("is_unconfirmed"),
         can_accept_secret_chats: bool_field("can_accept_secret_chats"),
         can_accept_calls: bool_field("can_accept_calls"),
         device_model: str_field("device_model"),
