@@ -1488,6 +1488,14 @@ impl Loader {
         }
 
         if let Ok(exe) = std::env::current_exe() {
+            // Linux/Windows package layout: `<dir>/quill` + `<dir>/lib/<native lib>`.
+            if let Some(candidate) = exe
+                .parent()
+                .map(|dir| dir.join("lib").join(library_filename()))
+                .filter(|candidate| candidate.exists())
+            {
+                return Self::load(&candidate);
+            }
             for ancestor in exe
                 .parent()
                 .into_iter()
