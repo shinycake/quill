@@ -102,17 +102,21 @@ impl QuillApp {
             Some(ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel)
         ) {
             self.chat_prefs.spellcheck_enabled = true;
-            // Ignore persisted custom words so this fixture always shows typos.
-            self.spellchecker = quill::spellcheck::SpellChecker::new();
+            // Ignore persisted app words so this fixture always shows typos.
+            self.spellchecker = Self::new_spellchecker(false);
+            // `-panel`: a multi-line draft proving the skip rules — the
+            // link, mention, hashtag, command and code stay unmarked.
+            let draft = if matches!(demo, Some(ScreenshotDemo::ReadySpellcheckPanel)) {
+                "Teh quick brown fox has a speling error.\n\
+                 See https://exampel.com/tehh, ask @tehuser about #tehtag,\n\
+                 run /strat or `cargo biuld` \u{1F60A} and recieve it tomorow."
+            } else {
+                "Teh quick brown fox has a speling error"
+            };
             self.composer.update(cx, |input, cx| {
-                input.set_value("Teh quick brown fox has a speling error", window, cx);
+                input.set_value(draft, window, cx);
             });
-            let text = self.composer.read(cx).value().to_string();
-            self.sync_spellcheck(&text, cx);
-            self.spellcheck_open = matches!(demo, Some(ScreenshotDemo::ReadySpellcheckPanel));
-            if self.spellcheck_open {
-                self.refresh_spell_suggestions();
-            }
+            self.spellcheck_now(cx);
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyChatsComposer)) {
             self.composer.update(cx, |input, cx| {

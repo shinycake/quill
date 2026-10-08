@@ -415,9 +415,9 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
-    /// Ready chat draft with typos and the ABC badge, panel closed.
+    /// Ready chat draft with typos underlined (red wavy).
     ReadySpellcheck,
-    /// Same draft with the corrections panel and suggestions visible.
+    /// Multi-line draft: typos underlined; link, mention, hashtag, command and code skipped.
     ReadySpellcheckPanel,
     /// Appearance dialog with the Spelling / Check spelling row visible.
     ReadySpellcheckToggle,

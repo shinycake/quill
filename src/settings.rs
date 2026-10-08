@@ -578,7 +578,7 @@ pub fn save_contact_prefs(paths: &AccountPaths, prefs: &ContactPrefs) -> std::io
 ///   (`composer::SendKeyMode`; parity:settings-enter-send,
 ///   parity:settings-ctrlenter-send).
 /// - `spellcheck_enabled`: flag misspelled words in the composer
-///   (parity:platform-spellcheck; English wordlist, client-side only).
+///   (macOS: system NSSpellChecker; elsewhere an English wordlist).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatPrefs {
     #[serde(default)]

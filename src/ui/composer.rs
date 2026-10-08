@@ -50,10 +50,6 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // parity:platform-spellcheck: the draft is going away — session
-        // ignores don't carry to the next draft.
-        self.spellchecker.clear_ignored();
-        self.spellcheck_open = false;
         match self.pane_mode() {
             PaneMode::Connecting => {
                 self.status_note = "sign in before sending".into();

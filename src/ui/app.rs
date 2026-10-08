@@ -269,18 +269,18 @@ pub struct QuillApp {
     pub(super) composer_scheduling: ComposerScheduling,
     /// M1: the schedule picker popup above the composer.
     pub(super) schedule_popup_open: bool,
-    /// parity:platform-spellcheck: the spellcheck engine (wordlist +
-    /// user words, loaded once at startup).
-    pub(super) spellchecker: quill::spellcheck::SpellChecker,
-    /// parity:platform-spellcheck: misspellings in the current draft
-    /// (cheap check_words pass, refreshed on every composer input).
+    /// codex:spellcheck-native: the spellcheck engine (macOS: the system
+    /// NSSpellChecker; elsewhere the embedded English wordlist), shared
+    /// with background check tasks.
+    pub(super) spellchecker: std::sync::Arc<quill::spellcheck::SpellChecker>,
+    /// Misspellings underlined in the composer; byte ranges into
+    /// `spell_checked_text`.
     pub(super) spell_misspellings: Vec<quill::spellcheck::Misspelling>,
-    /// parity:platform-spellcheck: suggestions parallel to
-    /// `spell_misspellings`, computed when the panel opens (not per
-    /// keystroke — distance-2 generation is too slow for the input path).
-    pub(super) spell_suggestions: Vec<Vec<String>>,
-    /// parity:platform-spellcheck: the corrections panel above the composer.
-    pub(super) spellcheck_open: bool,
+    /// The composer text `spell_misspellings` refers to (shifted on every
+    /// edit, so underlines follow the text before the re-check lands).
+    pub(super) spell_checked_text: String,
+    /// The debounced background re-check (dropping it cancels it).
+    pub(super) spell_task: Option<Task<()>>,
     /// M1: the scheduled-messages dialog (view/delete).
     pub(super) scheduled_dialog_open: bool,
     /// M2: the rich editor is open — the composer textarea is interpreted

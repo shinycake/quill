@@ -872,12 +872,14 @@ impl QuillApp {
                 div()
                     .flex()
                     .flex_col()
+                    .flex_1()
+                    .min_w_0()
                     .child(div().text_sm().child("Check spelling"))
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Flag misspelled words in the message composer (English)."),
+                            .child(super::spellcheck_ui::SPELLCHECK_SETTING_HINT),
                     ),
             )
             .child(
