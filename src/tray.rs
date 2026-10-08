@@ -1,8 +1,8 @@
 //! System tray icon with an unread-count badge (parity:platform-tray-icon).
 //!
-//! The icon is drawn programmatically as 64x64 RGBA (no asset files): a blue
-//! rounded square with a white paper-plane glyph, plus a red pill badge with
-//! the unread count (capped at "99+") whenever any chat is unread.
+//! The icon is the Quill app icon at 64x64 RGBA (`assets/icons/tray-64.rgba`),
+//! plus a large red pill badge with the unread count (capped at "99+") in the
+//! top-right corner whenever any chat is unread.
 //!
 //! What counts is governed by [`BadgePrefs`]
 //! (parity:chatlist-badge-settings), edited in the notification defaults
@@ -63,76 +63,117 @@ pub fn badge_count(session: &Session, prefs: &BadgePrefs) -> u32 {
         .fold(0u32, u32::saturating_add)
 }
 
+/// The app icon downscaled to [`ICON_SIZE`] as straight (non-premultiplied)
+/// RGBA, generated from `assets/icons/quill-1024-fullbleed.png` with
+/// `magick quill-1024-fullbleed.png -resize 64x64 -depth 8 rgba:tray-64.rgba`.
+/// Raw bytes keep the core crate free of an image decoder.
+const BASE_ICON: &[u8; (ICON_SIZE * ICON_SIZE * 4) as usize] =
+    include_bytes!("../assets/icons/tray-64.rgba");
+
+const BADGE_RED: [u8; 4] = [0xFF, 0x3B, 0x30, 0xFF];
+const WHITE: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+
 /// Rendered icon: raw RGBA bytes plus `(width, height)`.
 pub fn render_tray_icon(unread: u32) -> (Vec<u8>, u32, u32) {
     let mut px = Pixels::new(ICON_SIZE);
-    // Blue rounded-square base.
-    px.rounded_rect(0, 0, ICON_SIZE, ICON_SIZE, 14, [0x22, 0x9E, 0xD9, 0xFF]);
-    // White paper-plane glyph with a subtle fold.
-    px.triangle((44, 15), (15, 31), (27, 47), [0xFF, 0xFF, 0xFF, 0xFF]);
-    px.triangle((44, 15), (27, 47), (31, 35), [0xD6, 0xEC, 0xF7, 0xFF]);
+    px.buf.copy_from_slice(BASE_ICON);
     if unread > 0 {
         draw_badge(&mut px, unread);
     }
     (px.buf, ICON_SIZE, ICON_SIZE)
 }
 
-/// 3x5 bitmap glyphs for the badge digits, rows top-to-bottom, bit 2 = left.
-fn glyph(ch: char) -> Option<[u8; 5]> {
+/// 5x7 bitmap glyphs for the badge digits, rows top-to-bottom, bit 4 = left.
+/// Strokes are two columns wide so the count stays legible when the menu bar
+/// or taskbar shrinks the 64 px icon to ~20 px.
+fn glyph(ch: char) -> Option<[u8; 7]> {
     Some(match ch {
-        '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
-        '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
-        '2' => [0b111, 0b001, 0b111, 0b100, 0b111],
-        '3' => [0b111, 0b001, 0b111, 0b001, 0b111],
-        '4' => [0b101, 0b101, 0b111, 0b001, 0b001],
-        '5' => [0b111, 0b100, 0b111, 0b001, 0b111],
-        '6' => [0b111, 0b100, 0b111, 0b101, 0b111],
-        '7' => [0b111, 0b001, 0b001, 0b010, 0b010],
-        '8' => [0b111, 0b101, 0b111, 0b101, 0b111],
-        '9' => [0b111, 0b101, 0b111, 0b001, 0b111],
-        '+' => [0b000, 0b010, 0b111, 0b010, 0b000],
+        '0' => [
+            0b01110, 0b11011, 0b11011, 0b11011, 0b11011, 0b11011, 0b01110,
+        ],
+        '1' => [
+            0b00110, 0b01110, 0b11110, 0b00110, 0b00110, 0b00110, 0b00110,
+        ],
+        '2' => [
+            0b01110, 0b11011, 0b00011, 0b00110, 0b01100, 0b11000, 0b11111,
+        ],
+        '3' => [
+            0b11110, 0b00011, 0b00011, 0b01110, 0b00011, 0b00011, 0b11110,
+        ],
+        '4' => [
+            0b00110, 0b01110, 0b11010, 0b11011, 0b11111, 0b00011, 0b00011,
+        ],
+        '5' => [
+            0b11111, 0b11000, 0b11110, 0b00011, 0b00011, 0b11011, 0b01110,
+        ],
+        '6' => [
+            0b01110, 0b11000, 0b11110, 0b11011, 0b11011, 0b11011, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00011, 0b00110, 0b00110, 0b01100, 0b01100, 0b01100,
+        ],
+        '8' => [
+            0b01110, 0b11011, 0b11011, 0b01110, 0b11011, 0b11011, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b11011, 0b11011, 0b01111, 0b00011, 0b00011, 0b01110,
+        ],
+        '+' => [
+            0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
+        ],
         _ => return None,
     })
 }
 
-fn draw_badge(px: &mut Pixels, unread: u32) {
-    let text = if unread > 99 {
+/// Text shown in the badge: the count, capped at "99+".
+fn badge_text(unread: u32) -> String {
+    if unread > 99 {
         "99+".to_string()
     } else {
         unread.to_string()
-    };
-    const SCALE: u32 = 3;
-    const ADVANCE: u32 = 3 * SCALE + 3; // glyph width + tracking
-    let text_w = text.len() as u32 * ADVANCE - 3;
-    let pill_w = text_w + 16;
-    let pill_h = 30;
-    // Top-right, clamped so the pill's right edge never leaves the icon.
-    let cx: u32 = 47;
-    let x0 = cx
-        .saturating_sub(pill_w / 2)
-        .min(ICON_SIZE.saturating_sub(pill_w));
-    let cy: u32 = 17;
-    let y0 = cy.saturating_sub(pill_h / 2);
-    px.rounded_rect(x0, y0, pill_w, pill_h, pill_h / 2, [0xFF, 0x3B, 0x30, 0xFF]);
+    }
+}
+
+/// Red pill in the top-right corner, sized to take up most of the icon so the
+/// count reads at menu-bar size: 4 px glyph cells for one or two characters,
+/// 3 px for "99+", with a white ring to separate it from the icon art.
+fn draw_badge(px: &mut Pixels, unread: u32) {
+    let text = badge_text(unread);
+    let n = text.len() as u32;
+    let scale: u32 = if n >= 3 { 3 } else { 4 };
+    let gap = scale;
+    let glyph_w = 5 * scale;
+    let text_w = n * glyph_w + (n - 1) * gap;
+    let text_h = 7 * scale;
+    let pill_h: u32 = 38;
+    let pill_w = (text_w + 14).max(pill_h).min(ICON_SIZE);
+    let ring: u32 = 2;
+    let x0 = ICON_SIZE - pill_w;
+    let y0 = 0;
+    px.rounded_rect(x0, y0, pill_w, pill_h, pill_h / 2, WHITE);
+    px.rounded_rect(
+        x0 + ring,
+        y0 + ring,
+        pill_w - 2 * ring,
+        pill_h - 2 * ring,
+        (pill_h - 2 * ring) / 2,
+        BADGE_RED,
+    );
     let gx = x0 + (pill_w - text_w) / 2;
-    let gy = y0 + (pill_h - 5 * SCALE) / 2;
+    let gy = y0 + (pill_h - text_h) / 2;
     for (i, ch) in text.chars().enumerate() {
-        draw_glyph(px, ch, gx + i as u32 * ADVANCE, gy, SCALE);
+        draw_glyph(px, ch, gx + i as u32 * (glyph_w + gap), gy, scale);
     }
 }
 
 fn draw_glyph(px: &mut Pixels, ch: char, x0: u32, y0: u32, scale: u32) {
-    let rows = glyph(ch).unwrap_or([0; 5]);
+    let rows = glyph(ch).unwrap_or([0; 7]);
     for (ry, row) in rows.iter().enumerate() {
-        for rx in 0..3 {
-            if (row >> (2 - rx)) & 1 == 1 {
+        for rx in 0..5 {
+            if (row >> (4 - rx)) & 1 == 1 {
                 for dy in 0..scale {
                     for dx in 0..scale {
-                        px.set(
-                            x0 + rx * scale + dx,
-                            y0 + ry as u32 * scale + dy,
-                            [0xFF, 0xFF, 0xFF, 0xFF],
-                        );
+                        px.set(x0 + rx * scale + dx, y0 + ry as u32 * scale + dy, WHITE);
                     }
                 }
             }
@@ -169,30 +210,6 @@ impl Pixels {
                 let dy = (y0 + r - y).max(0).max(y - (y0 + h - 1 - r));
                 if dx * dx + dy * dy <= r * r {
                     self.set(x as u32, y as u32, c);
-                }
-            }
-        }
-    }
-
-    fn triangle(&mut self, a: (u32, u32), b: (u32, u32), c: (u32, u32), col: [u8; 4]) {
-        let (ax, ay) = (a.0 as i64, a.1 as i64);
-        let (bx, by) = (b.0 as i64, b.1 as i64);
-        let (cx, cy) = (c.0 as i64, c.1 as i64);
-        let sign = |px: i64, py: i64, x1: i64, y1: i64, x2: i64, y2: i64| {
-            (px - x2) * (y1 - y2) - (x1 - x2) * (py - y2)
-        };
-        let minx = ax.min(bx).min(cx).max(0) as u32;
-        let maxx = ax.max(bx).max(cx).min(self.size as i64 - 1) as u32;
-        let miny = ay.min(by).min(cy).max(0) as u32;
-        let maxy = ay.max(by).max(cy).min(self.size as i64 - 1) as u32;
-        for y in miny..=maxy {
-            for x in minx..=maxx {
-                let (px, py) = (x as i64, y as i64);
-                let d1 = sign(px, py, ax, ay, bx, by);
-                let d2 = sign(px, py, bx, by, cx, cy);
-                let d3 = sign(px, py, cx, cy, ax, ay);
-                if (d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0) {
-                    self.set(x, y, col);
                 }
             }
         }
