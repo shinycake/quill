@@ -145,8 +145,11 @@ pub enum EnvelopePayload {
     /// chat list, marked-as-unread chats included (schema line 10886).
     UpdateUnreadChatCount {
         list: ChatList,
+        total_count: i32,
         unread_count: i32,
         unread_unmuted_count: i32,
+        marked_as_unread_count: i32,
+        marked_as_unread_unmuted_count: i32,
     },
     UpdateChatReadInbox {
         chat_id: ChatId,

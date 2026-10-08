@@ -857,6 +857,11 @@ impl Session {
                 unread_count,
                 unread_unmuted_count,
             } => {
+                if std::env::var_os("QUILL_TRACE_STATUS").is_some() {
+                    eprintln!(
+                        "status: unread totals messages list={list:?} unread_count={unread_count} unread_unmuted_count={unread_unmuted_count}"
+                    );
+                }
                 if let Some(totals) = self.unread_totals.list_mut(&list) {
                     totals.messages = Some(UnreadPair {
                         all: unread_count,
@@ -868,8 +873,15 @@ impl Session {
                 list,
                 unread_count,
                 unread_unmuted_count,
-                ..
+                total_count,
+                marked_as_unread_count,
+                marked_as_unread_unmuted_count,
             } => {
+                if std::env::var_os("QUILL_TRACE_STATUS").is_some() {
+                    eprintln!(
+                        "status: unread totals chats list={list:?} total_count={total_count} unread_count={unread_count} unread_unmuted_count={unread_unmuted_count} marked_as_unread_count={marked_as_unread_count} marked_as_unread_unmuted_count={marked_as_unread_unmuted_count}"
+                    );
+                }
                 if let Some(totals) = self.unread_totals.list_mut(&list) {
                     totals.chats = Some(UnreadPair {
                         all: unread_count,

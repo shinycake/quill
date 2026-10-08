@@ -68,6 +68,22 @@ pub fn badge_count(session: &Session, prefs: &BadgePrefs) -> u32 {
     main.saturating_add(archive)
 }
 
+/// `QUILL_TRACE_STATUS=1`: note (once per list/mode) that the badge fell
+/// back to summing loaded chats because TDLib's totals haven't arrived.
+fn trace_fallback(archive: bool, messages: bool) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static SEEN: AtomicU8 = AtomicU8::new(0);
+    let bit = 1u8 << (u8::from(archive) * 2 + u8::from(messages));
+    if std::env::var_os("QUILL_TRACE_STATUS").is_some()
+        && SEEN.fetch_or(bit, Ordering::Relaxed) & bit == 0
+    {
+        eprintln!(
+            "status: badge fallback to loaded-chat sum list={} count_messages={messages}",
+            if archive { "archive" } else { "main" }
+        );
+    }
+}
+
 fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
     let totals = if archive {
         &session.unread_totals.archive
@@ -88,6 +104,7 @@ fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
         };
         return value.max(0) as u32;
     }
+    trace_fallback(archive, prefs.count_messages);
     session
         .chats
         .values()

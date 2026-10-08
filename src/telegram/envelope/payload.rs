@@ -476,6 +476,9 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         }),
         "updateUnreadChatCount" => Ok(EnvelopePayload::UpdateUnreadChatCount {
             list: parse_chat_list(value.get("chat_list")),
+            total_count: unread_total(&value, "total_count"),
+            marked_as_unread_count: unread_total(&value, "marked_as_unread_count"),
+            marked_as_unread_unmuted_count: unread_total(&value, "marked_as_unread_unmuted_count"),
             unread_count: unread_total(&value, "unread_count"),
             unread_unmuted_count: unread_total(&value, "unread_unmuted_count"),
         }),
