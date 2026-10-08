@@ -329,6 +329,13 @@ pub struct QuillApp {
     /// Highest frame rate animated content asked for since the last
     /// clock tick (0: nothing animated rendered); see `frame_clock`.
     pub(super) animation_demand: std::cell::Cell<u32>,
+    /// Whether the main window is active this frame: like tdesktop
+    /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
+    /// stickers and emoji hold still while it isn't.
+    pub(super) window_active: std::cell::Cell<bool>,
+    /// `media_display_roots`, computed once per frame (rows ask for it
+    /// one by one, and it touches the file system).
+    pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
     /// Smooth reveal of a bot's streaming reply (`bot_stream`).
     pub(super) stream_reveal: std::cell::RefCell<super::bot_stream::StreamReveal>,
@@ -905,6 +912,15 @@ impl QuillApp {
     }
 
     pub(super) fn media_display_roots(&self) -> Vec<PathBuf> {
+        if let Some(roots) = self.media_roots_frame.borrow().as_ref() {
+            return roots.clone();
+        }
+        let roots = self.compute_media_display_roots();
+        *self.media_roots_frame.borrow_mut() = Some(roots.clone());
+        roots
+    }
+
+    fn compute_media_display_roots(&self) -> Vec<PathBuf> {
         let primary = if let Some(live) = self.live.as_ref() {
             live.driver.tdlib_media_roots()
         } else if self.demo_session.is_some() {

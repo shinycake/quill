@@ -450,7 +450,7 @@ impl QuillApp {
             };
             clip.frames.get(index).cloned()
         });
-        if animating {
+        if animating && app.window_active.get() {
             // Stickers are drawn large and play at their own rate (Lottie
             // runs at 60); small emoji look the same at 30.
             let fps = match size {

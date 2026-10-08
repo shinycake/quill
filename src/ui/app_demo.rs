@@ -1585,6 +1585,8 @@ impl QuillApp {
             pinned_list_open: false,
             inline_videos: Default::default(),
             animation_demand: Default::default(),
+            window_active: std::cell::Cell::new(true),
+            media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),
