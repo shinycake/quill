@@ -26,6 +26,15 @@ macro_rules! primary {
     };
 }
 
+/// Quote chord. On macOS GPUI reports Shift+. as the key ">" with Shift
+/// already consumed (gpui-pre-macos events.rs `parse_keystroke`), so the
+/// binding is `cmd->`. Other platforms get both spellings, since their
+/// backends may report either `.` + shift or `>`.
+#[cfg(target_os = "macos")]
+const QUOTE_CHORDS: &[&str] = &["cmd->"];
+#[cfg(not(target_os = "macos"))]
+const QUOTE_CHORDS: &[&str] = &["ctrl-shift-.", "ctrl->"];
+
 /// Key context of the composer's Textarea wrapper (see
 /// [`composer_bindings`]).
 pub(super) const COMPOSER_CONTEXT: &str = "QuillComposer";
@@ -163,7 +172,7 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "format-blockquote",
         label: "Quote",
-        defaults: &[primary!("shift-.")],
+        defaults: QUOTE_CHORDS,
     },
     RebindableAction {
         id: "format-spoiler",
@@ -627,7 +636,7 @@ fn row<A: Action>(
 /// share a label (e.g. `cmd-q` / `ctrl-q`) render as one entry with both
 /// chips.
 pub fn shortcut_rows() -> Vec<ShortcutRow> {
-    vec![
+    let mut rows = vec![
         // General.
         row("cmd-q", "Quit Quill", "General", QuitApp),
         row("ctrl-q", "Quit Quill", "General", QuitApp),
@@ -718,7 +727,7 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             "Composer",
             FormatMonospace,
         ),
-        row(primary!("shift-."), "Quote", "Composer", FormatBlockQuote),
+        // Quote rows are appended below (one per chord spelling).
         row(primary!("shift-p"), "Spoiler", "Composer", FormatSpoiler),
         row(
             primary!("shift-n"),
@@ -739,7 +748,13 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             "Composer",
             ComposerPastePlain,
         ),
-    ]
+    ];
+    rows.extend(
+        QUOTE_CHORDS
+            .iter()
+            .map(|chord| row(chord, "Quote", "Composer", FormatBlockQuote)),
+    );
+    rows
 }
 
 /// kit Phase 7: the application menus — File / Edit / View / Window / Help,
@@ -851,7 +866,10 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 46);
+        assert_eq!(
+            defaults.len(),
+            if cfg!(target_os = "macos") { 46 } else { 47 }
+        );
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
@@ -1168,18 +1186,50 @@ mod tests {
             ("u", false, "quill_ui::FormatUnderline"),
             ("x", true, "quill_ui::FormatStrikethrough"),
             ("m", true, "quill_ui::FormatMonospace"),
-            (".", true, "quill_ui::FormatBlockQuote"),
             ("p", true, "quill_ui::FormatSpoiler"),
             ("n", true, "quill_ui::FormatClear"),
             ("k", false, "quill_ui::ComposerEditLink"),
         ];
-        assert_eq!(expected.len(), COMPOSER_SHORTCUTS.len());
+        assert_eq!(expected.len() + 1, COMPOSER_SHORTCUTS.len());
         for (key, shift, action) in expected {
             let chord = primary(&format!("{}{key}", if shift { "shift-" } else { "" }));
             assert_eq!(
                 resolve(&chord, &["Workspace", "QuillComposer", "Input"]).as_deref(),
                 Some(action),
                 "{chord}"
+            );
+        }
+    }
+
+    /// GPUI on macOS reports Cmd+Shift+. as key ">" with Shift consumed
+    /// (events.rs `parse_keystroke`); Linux/Windows may report either form.
+    #[test]
+    fn quote_chord_matches_the_keystroke_each_platform_reports() {
+        let stack: Vec<gpui_kit::KeyContext> = ["QuillComposer", "Input"]
+            .iter()
+            .map(|c| gpui_kit::KeyContext::parse(c).unwrap())
+            .collect();
+        let reported = |key: &str, shift: bool, platform: bool| Keystroke {
+            modifiers: Modifiers {
+                shift,
+                platform,
+                control: !platform,
+                ..Modifiers::none()
+            },
+            key: key.into(),
+            key_char: None,
+        };
+        let forms: Vec<Keystroke> = if cfg!(target_os = "macos") {
+            vec![reported(">", false, true)]
+        } else {
+            vec![reported(".", true, false), reported(">", false, false)]
+        };
+        for form in forms {
+            let (found, _) = keymap().bindings_for_input(&[form.clone()], &stack);
+            assert_eq!(
+                found.first().map(|b| b.action().name()),
+                Some("quill_ui::FormatBlockQuote"),
+                "{form:?}"
             );
         }
     }
@@ -1238,7 +1288,15 @@ mod tests {
             "format-clear",
         ] {
             let action = REBINDABLE_ACTIONS.iter().find(|a| a.id == id).unwrap();
-            assert_eq!(action.defaults.len(), 1, "{id}");
+            assert_eq!(
+                action.defaults.len(),
+                if id == "format-blockquote" && !cfg!(target_os = "macos") {
+                    2
+                } else {
+                    1
+                },
+                "{id}"
+            );
             let wanted = if cfg!(target_os = "macos") {
                 "cmd-"
             } else {
