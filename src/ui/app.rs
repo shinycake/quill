@@ -347,6 +347,8 @@ pub struct QuillApp {
     /// one by one, and it touches the file system).
     pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
+    /// History motion: new-message reveal and selection-mode fades.
+    pub(super) motion: super::motion::MotionState,
     /// The composer's link dialog (Cmd/Ctrl+K on a selection).
     pub(super) composer_link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
     /// Cross-fade timeline of the round Send / Record / Save button.
