@@ -300,21 +300,12 @@ pub fn openable_http_url(url: &str) -> bool {
 }
 
 /// Whether `text` reads right to left: its first character with a strong
-/// direction is Hebrew, Arabic or another RTL script (the Unicode
-/// bidi "first strong" rule Telegram Desktop uses to align a paragraph).
+/// direction is Hebrew, Arabic or another RTL script (rules P2/P3 of the
+/// Unicode Bidirectional Algorithm, the "auto" direction Telegram Desktop's
+/// text and input field use to align a paragraph). Digits, punctuation and
+/// emoji are neutral, so a paragraph made only of them is left to right.
 pub fn is_rtl_text(text: &str) -> bool {
-    for c in text.chars() {
-        let code = c as u32;
-        let rtl = matches!(code,
-            0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF);
-        if rtl {
-            return true;
-        }
-        if c.is_alphabetic() {
-            return false;
-        }
-    }
-    false
+    unicode_bidi::get_base_direction_full(text) == unicode_bidi::Direction::Rtl
 }
 
 /// Direction of the last non-empty line of `text` (where a message's time
@@ -769,5 +760,28 @@ mod tests {
         assert!(is_rtl_text("مرحبا"));
         assert!(last_line_is_rtl("hello\nתודה דה\n"));
         assert!(!last_line_is_rtl("שלום\nok"));
+    }
+
+    #[test]
+    fn rtl_detection_skips_neutral_leading_characters() {
+        // Digits, punctuation, spaces and emoji carry no direction.
+        assert!(is_rtl_text("(123) - שלום"));
+        assert!(is_rtl_text("😀 שלום"));
+        assert!(is_rtl_text("  \"שלום\""));
+        // A paragraph with nothing strong is left to right, empty included.
+        assert!(!is_rtl_text(""));
+        assert!(!is_rtl_text("123 456"));
+        assert!(!is_rtl_text("... ?!"));
+        assert!(!is_rtl_text("😀"));
+    }
+
+    #[test]
+    fn rtl_detection_honours_explicit_direction_marks() {
+        // A right-to-left mark is a strong right-to-left character.
+        assert!(is_rtl_text("\u{200F}123"));
+        // Latin first wins over a later Hebrew word.
+        assert!(!is_rtl_text("a שלום"));
+        // Hebrew first wins over a later Latin word.
+        assert!(is_rtl_text("ש abc"));
     }
 }
