@@ -170,7 +170,8 @@ impl SecretStore for FileSecretStore {
         if !path.exists() {
             return Ok(None);
         }
-        let mut bytes = std::fs::read(&path).map_err(|_| SecretStoreError::Platform)?;
+        let stored = std::fs::read(&path).map_err(|_| SecretStoreError::Platform)?;
+        let mut bytes = unseal_key_bytes(stored)?;
         let key = DatabaseKey::from_bytes(bytes.clone());
         bytes.zeroize();
         Ok(Some(key?))
@@ -181,7 +182,10 @@ impl SecretStore for FileSecretStore {
         let parent = path.parent().ok_or(SecretStoreError::Platform)?;
         std::fs::create_dir_all(parent).map_err(|_| SecretStoreError::Platform)?;
         let tmp = path.with_extension("key.tmp");
-        write_key_file_0600(&tmp, key.as_bytes())?;
+        let mut sealed = seal_key_bytes(key.as_bytes())?;
+        let written = write_key_file_0600(&tmp, &sealed);
+        sealed.zeroize();
+        written?;
         std::fs::rename(&tmp, &path).map_err(|_| SecretStoreError::Platform)?;
         set_mode_0600(&path)?;
         Ok(())
@@ -194,6 +198,97 @@ impl SecretStore for FileSecretStore {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(_) => Err(SecretStoreError::Platform),
         }
+    }
+}
+
+/// On-disk form of the key. Unix keeps the raw bytes in a 0600 file. Windows
+/// has no 0600, so the bytes are sealed with DPAPI (`CryptProtectData`,
+/// current-user scope): another user or machine can't decrypt the file.
+#[cfg(not(windows))]
+fn seal_key_bytes(bytes: &[u8]) -> Result<Vec<u8>, SecretStoreError> {
+    Ok(bytes.to_vec())
+}
+
+#[cfg(not(windows))]
+fn unseal_key_bytes(stored: Vec<u8>) -> Result<Vec<u8>, SecretStoreError> {
+    Ok(stored)
+}
+
+#[cfg(windows)]
+fn seal_key_bytes(bytes: &[u8]) -> Result<Vec<u8>, SecretStoreError> {
+    dpapi::protect(bytes).ok_or(SecretStoreError::Platform)
+}
+
+#[cfg(windows)]
+fn unseal_key_bytes(mut stored: Vec<u8>) -> Result<Vec<u8>, SecretStoreError> {
+    let plain = dpapi::unprotect(&stored).ok_or(SecretStoreError::Platform);
+    stored.zeroize();
+    plain
+}
+
+#[cfg(windows)]
+mod dpapi {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{
+        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
+    };
+
+    pub(super) fn protect(plain: &[u8]) -> Option<Vec<u8>> {
+        transform(plain, true)
+    }
+
+    pub(super) fn unprotect(sealed: &[u8]) -> Option<Vec<u8>> {
+        transform(sealed, false)
+    }
+
+    fn transform(input: &[u8], seal: bool) -> Option<Vec<u8>> {
+        let blob_in = CRYPT_INTEGER_BLOB {
+            cbData: u32::try_from(input.len()).ok()?,
+            pbData: input.as_ptr().cast_mut(),
+        };
+        let mut blob_out = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+        // SAFETY: `blob_in` points at `input`, which outlives the call; DPAPI
+        // only reads it. On success DPAPI allocates `blob_out.pbData` with
+        // LocalAlloc; it is copied out and freed with LocalFree below.
+        let ok = unsafe {
+            if seal {
+                CryptProtectData(
+                    &blob_in,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    CRYPTPROTECT_UI_FORBIDDEN,
+                    &mut blob_out,
+                )
+            } else {
+                CryptUnprotectData(
+                    &blob_in,
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    CRYPTPROTECT_UI_FORBIDDEN,
+                    &mut blob_out,
+                )
+            }
+        };
+        if ok == 0 || blob_out.pbData.is_null() {
+            return None;
+        }
+        // SAFETY: DPAPI returned `cbData` valid bytes at `pbData`.
+        let out = unsafe {
+            std::slice::from_raw_parts(blob_out.pbData, blob_out.cbData as usize).to_vec()
+        };
+        // SAFETY: wipe and release DPAPI's LocalAlloc buffer.
+        unsafe {
+            std::ptr::write_bytes(blob_out.pbData, 0, blob_out.cbData as usize);
+            LocalFree(blob_out.pbData.cast());
+        }
+        Some(out)
     }
 }
 
@@ -272,14 +367,15 @@ const ERR_SEC_INTERACTION_NOT_ALLOWED: i32 = -25308;
 const ERR_SEC_NOT_AVAILABLE: i32 = -25291;
 
 /// Secret store used by live connect (GPUI and `--connect-smoke`).
-/// macOS Keychain, Linux file store under the app data dir. Memory is only
-/// for hosts that are neither (not the Linux/macOS live path).
+/// macOS Keychain; Linux file store under the app data dir; Windows the same
+/// file store with the key sealed by DPAPI for the current user. Memory is
+/// only for any other host.
 pub fn live_secret_store() -> Box<dyn SecretStore> {
     #[cfg(target_os = "macos")]
     {
         Box::new(keychain::KeychainSecretStore)
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         // Fail closed: with no platform data directory there is no safe
         // home for the database key — every operation errors instead of
@@ -289,7 +385,7 @@ pub fn live_secret_store() -> Box<dyn SecretStore> {
             None => Box::new(UnavailableSecretStore),
         }
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         Box::new(MemorySecretStore::new())
     }
@@ -363,33 +459,55 @@ pub fn open_external_url(url: &str) -> bool {
     if !crate::text::openable_http_url(url) {
         return false;
     }
-    let url = url.trim();
-    let mut command = external_open_command(std::ffi::OsStr::new(url));
-    command.spawn().is_ok()
+    os_open(std::ffi::OsStr::new(url.trim()))
 }
 
-fn external_open_command(target: &std::ffi::OsStr) -> std::process::Command {
-    if cfg!(target_os = "macos") {
-        let mut command = std::process::Command::new("open");
-        command.arg(target);
-        command
-    } else if cfg!(target_os = "windows") {
-        let mut command = std::process::Command::new("cmd");
-        command.args(["/C", "start", ""]);
-        command.arg(target);
-        command
+/// Hand a URL or path to the OS default handler. macOS `open`, Linux
+/// `xdg-open` (argv, no shell). Windows calls `ShellExecuteW` directly:
+/// `cmd /C start` would re-parse `&`, `|` and `^` inside a link or file
+/// name and run whatever follows as a second command.
+#[cfg(not(windows))]
+fn os_open(target: &std::ffi::OsStr) -> bool {
+    let program = if cfg!(target_os = "macos") {
+        "open"
     } else {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(target);
-        command
-    }
+        "xdg-open"
+    };
+    std::process::Command::new(program)
+        .arg(target)
+        .spawn()
+        .is_ok()
+}
+
+#[cfg(windows)]
+fn os_open(target: &std::ffi::OsStr) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+    let file = wide(target);
+    let verb = wide(std::ffi::OsStr::new("open"));
+    // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive
+    // the call; null HWND, parameters and directory are allowed.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW reports success with a value greater than 32.
+    result as isize > 32
 }
 
 /// MED3: open a downloaded file with the system viewer (`xdg-open` /
 /// `open`). Reuses the same OS-open mechanism as URLs, without the
 /// http-scheme gate (a local path is the point here). No shell involved.
 pub fn open_local_file(path: &std::path::Path) -> bool {
-    external_open_command(path.as_os_str()).spawn().is_ok()
+    os_open(path.as_os_str())
 }
 
 /// MED3: reveal a file in the file manager — macOS `open -R` (selects the
@@ -400,12 +518,20 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
         let mut command = std::process::Command::new("open");
         return command.args(["-R"]).arg(path).spawn().is_ok();
     }
-    if cfg!(target_os = "windows") {
-        let mut command = std::process::Command::new("explorer");
-        let mut select = std::ffi::OsString::from("/select,");
+    #[cfg(windows)]
+    {
+        // explorer parses `/select,"<path>"` itself (no cmd involved);
+        // Windows paths can't contain `"`, so quoting the path is enough.
+        use std::os::windows::process::CommandExt;
+        let mut select = std::ffi::OsString::from("/select,\"");
         select.push(path.as_os_str());
-        return command.arg(select).spawn().is_ok();
+        select.push("\"");
+        std::process::Command::new("explorer")
+            .raw_arg(select)
+            .spawn()
+            .is_ok()
     }
+    #[cfg(not(windows))]
     match path.parent() {
         Some(dir) if !dir.as_os_str().is_empty() => std::process::Command::new("xdg-open")
             .arg(dir)
