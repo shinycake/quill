@@ -425,6 +425,18 @@ fn powershell_command(script: &str) -> SoundCommand {
     }
 }
 
+/// Windows MP3 player: WPF `MediaPlayer`; the path is a quoted literal, never
+/// code.
+#[cfg(any(windows, test))]
+fn windows_file_sound_command(path: &str) -> SoundCommand {
+    powershell_command(&format!(
+        "Add-Type -AssemblyName PresentationCore; \
+         $p = New-Object System.Windows.Media.MediaPlayer; \
+         $p.Open([uri]{}); $p.Play(); Start-Sleep -Seconds 6",
+        powershell_single_quoted(path)
+    ))
+}
+
 /// PowerShell single-quoted literal for `value`: every quote form PowerShell
 /// treats as a terminator (`'` and the typographic variants) is doubled.
 fn powershell_single_quoted(value: &str) -> String {
@@ -463,13 +475,7 @@ pub fn file_sound_command(path: &str) -> Option<SoundCommand> {
             args: vec!["--".to_string(), path.to_string()],
         })
     } else if cfg!(windows) {
-        // WPF MediaPlayer plays MP3; the path is a quoted literal, never code.
-        Some(powershell_command(&format!(
-            "Add-Type -AssemblyName PresentationCore; \
-             $p = New-Object System.Windows.Media.MediaPlayer; \
-             $p.Open([uri]{}); $p.Play(); Start-Sleep -Seconds 6",
-            powershell_single_quoted(path)
-        )))
+        Some(windows_file_sound_command(path))
     } else {
         None
     }
@@ -736,6 +742,18 @@ mod tests {
     }
 
     #[test]
+    fn windows_file_sound_embeds_the_path_as_one_literal() {
+        let command = windows_file_sound_command("C:\\snd\\it's;a.mp3");
+        assert_eq!(command.program, "powershell.exe");
+        let script = &command.args[5];
+        assert!(
+            script.contains("$p.Open([uri]'C:\\snd\\it''s;a.mp3')"),
+            "{script}"
+        );
+        assert!(script.starts_with("Add-Type -AssemblyName PresentationCore;"));
+    }
+
+    #[test]
     fn windows_sound_path_stays_inside_the_literal() {
         let command = powershell_command(&format!(
             "$p.Open([uri]{})",
@@ -849,6 +867,9 @@ mod tests {
 
     #[test]
     fn default_tone_command_is_shell_free() {
+        if cfg!(windows) {
+            return; // PowerShell script; covered by the windows_* tests.
+        }
         let Some(cmd) = default_tone_command() else {
             return; // Unsupported platform: silence is the contract.
         };
@@ -862,6 +883,9 @@ mod tests {
 
     #[test]
     fn file_sound_command_passes_path_verbatim() {
+        if cfg!(windows) {
+            return; // PowerShell script; covered by the windows_* tests.
+        }
         let Some(cmd) = file_sound_command("/tmp/odd;name.mp3") else {
             return;
         };
