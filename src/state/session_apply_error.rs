@@ -107,6 +107,32 @@ impl Session {
                     );
                 }
             }
+            // The message menu's Report flow and audience lists.
+            Some(RequestPurpose::ReportMessages) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.fail_message_report(
+                        chat_id,
+                        format!("Reporting failed: {}", error_reason(&err)),
+                    );
+                }
+            }
+            Some(
+                purpose @ (RequestPurpose::GetMessageViewers { .. }
+                | RequestPurpose::GetMessageReadDate { .. }
+                | RequestPurpose::GetMessageAddedReactions { .. }),
+            ) => self.fail_audience(purpose),
+            Some(RequestPurpose::DeleteChatMessagesBySender) => {
+                self.message_action_note = Some(format!(
+                    "could not delete the messages: {}",
+                    error_reason(&err)
+                ));
+            }
+            Some(RequestPurpose::ReportSupergroupSpam) => {
+                self.message_action_note = Some(format!(
+                    "could not report the spam: {}",
+                    error_reason(&err)
+                ));
+            }
             Some(RequestPurpose::ReportStory) => {
                 if let Some(pending) = pending {
                     self.fail_story_report(

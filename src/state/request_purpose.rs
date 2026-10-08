@@ -223,6 +223,28 @@ pub enum RequestPurpose {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// `reportChat` with message ids from the message menu; each answer
+    /// drives `Session::message_report` (reason list, details, done).
+    ReportMessages,
+    /// `getMessageViewers` for the menu's "N Seen" row.
+    GetMessageViewers {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
+    /// `getMessageReadDate` for the private-chat "Seen at" row.
+    GetMessageReadDate {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
+    /// `getMessageAddedReactions` for the menu's "N Reacted" row.
+    GetMessageAddedReactions {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
+    /// Admin moderation from the delete box: `deleteChatMessagesBySender`.
+    DeleteChatMessagesBySender,
+    /// Admin moderation from the delete box: `reportSupergroupSpam`.
+    ReportSupergroupSpam,
     /// MED4: `getWebPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:14794`).
     /// The URL rides `Session::instant_view_urls` keyed by `RequestId`
     /// (the purpose stays `Copy`). Success lands in

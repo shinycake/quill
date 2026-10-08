@@ -71,6 +71,9 @@ impl MessageReaction {
 pub struct MessageReactions {
     pub reactions: Vec<MessageReaction>,
     pub are_tags: bool,
+    /// `can_get_added_reactions`: the reactor list is available through
+    /// `getMessageAddedReactions` (the message menu's "N Reacted" row).
+    pub can_get_added_reactions: bool,
 }
 
 impl MessageReactions {
@@ -211,6 +214,10 @@ pub(crate) fn parse_message_reactions(value: Option<&Value>) -> Option<MessageRe
                 reactions,
                 are_tags: value
                     .get("are_tags")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                can_get_added_reactions: value
+                    .get("can_get_added_reactions")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
             })

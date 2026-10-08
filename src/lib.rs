@@ -35,6 +35,7 @@ pub mod local_time;
 pub mod marketplace;
 pub mod media_tools;
 pub mod media_viewer;
+pub mod message_menu;
 pub mod notify;
 pub mod peer_badge;
 pub mod pin_reorder;
