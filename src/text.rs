@@ -308,6 +308,21 @@ pub fn is_rtl_text(text: &str) -> bool {
     unicode_bidi::get_base_direction_full(text) == unicode_bidi::Direction::Rtl
 }
 
+/// Whether `text` holds a right-to-left character (or one that starts a
+/// right-to-left run), so it needs bidirectional layout: wrapping in typing
+/// order and visual reordering per row. Plain left-to-right text, ASCII
+/// included, does not.
+pub fn has_rtl_text(text: &str) -> bool {
+    use unicode_bidi::BidiClass::{AL, AN, FSI, R, RLE, RLI, RLO};
+    !text.is_ascii()
+        && text.chars().any(|c| {
+            matches!(
+                unicode_bidi::bidi_class(c),
+                R | AL | AN | RLE | RLO | RLI | FSI
+            )
+        })
+}
+
 /// Direction of the last non-empty line of `text` (where a message's time
 /// footer sits).
 pub fn last_line_is_rtl(text: &str) -> bool {
@@ -773,6 +788,15 @@ mod tests {
         assert!(!is_rtl_text("123 456"));
         assert!(!is_rtl_text("... ?!"));
         assert!(!is_rtl_text("😀"));
+    }
+
+    #[test]
+    fn bidi_layout_is_needed_only_for_right_to_left_text() {
+        assert!(!has_rtl_text("hello world"));
+        assert!(!has_rtl_text("héllo wörld 世界 😀"));
+        assert!(has_rtl_text("hello שלום"));
+        assert!(has_rtl_text("مرحبا"));
+        assert!(!has_rtl_text(""));
     }
 
     #[test]

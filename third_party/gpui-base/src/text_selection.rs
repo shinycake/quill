@@ -353,6 +353,58 @@ impl TextSelectionRegistration {
     }
 }
 
+/// Glyph geometry of laid-out text, as the selection machinery reads it. `TextLayout`
+/// implements it; text that does its own layout (bidirectional paragraphs, whose rows
+/// are not a left-to-right sequence of glyphs) supplies another implementation through
+/// [`TextSelectionRun::with_geometry`].
+pub trait RunGeometry {
+    /// Byte length of the laid-out text.
+    fn len(&self) -> usize;
+    /// Height of one row.
+    fn line_height(&self) -> Pixels;
+    /// Window-coordinate bounds of the text.
+    fn bounds(&self) -> Bounds<Pixels>;
+    /// Window position of the caret at byte offset `index`.
+    fn position_for_index(&self, index: usize) -> Option<Point<Pixels>>;
+    /// The byte offset under `position` (`Ok`), or the nearest one (`Err`).
+    fn index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize>;
+    /// The top of the first row and the bottom of the last, in window coordinates.
+    fn rows_extent(&self, line_height: Pixels) -> (Pixels, Pixels);
+    /// What a drag from `start` to `end` selects, when the geometry decides it itself
+    /// instead of leaving it to the left-to-right reading-order walk (text whose rows read
+    /// right to left selects the logical range between the two endpoints): `None` leaves
+    /// it to the walk, `Some(range)` is the answer (`Some(None)` selects nothing).
+    #[allow(clippy::option_option)]
+    fn selected_range(
+        &self,
+        _start: Point<Pixels>,
+        _end: Point<Pixels>,
+    ) -> Option<Option<Range<usize>>> {
+        None
+    }
+}
+
+impl RunGeometry for TextLayout {
+    fn len(&self) -> usize {
+        TextLayout::len(self)
+    }
+    fn line_height(&self) -> Pixels {
+        TextLayout::line_height(self)
+    }
+    fn bounds(&self) -> Bounds<Pixels> {
+        TextLayout::bounds(self)
+    }
+    fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        TextLayout::position_for_index(self, index)
+    }
+    fn index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize> {
+        TextLayout::index_for_position(self, position)
+    }
+    fn rows_extent(&self, line_height: Pixels) -> (Pixels, Pixels) {
+        text_rows_extent(self, line_height)
+    }
+}
+
 /// Laid-out text reported by a plain selection participant during paint.
 #[derive(Clone)]
 pub struct TextSelectionRun {
@@ -362,6 +414,8 @@ pub struct TextSelectionRun {
     text: SharedString,
     /// Laid-out glyph geometry in window coordinates.
     layout: TextLayout,
+    /// Geometry of text that lays itself out; replaces `layout` when set.
+    geometry: Option<Rc<dyn RunGeometry>>,
     /// The run's window-coordinate paint bounds.
     bounds: Bounds<Pixels>,
 }
@@ -373,7 +427,31 @@ impl TextSelectionRun {
             document_order: 0,
             text: text.into(),
             layout,
+            geometry: None,
             bounds,
+        }
+    }
+
+    /// Creates a run whose geometry comes from `geometry` instead of a `TextLayout`.
+    pub fn with_geometry(
+        text: impl Into<SharedString>,
+        geometry: Rc<dyn RunGeometry>,
+        bounds: Bounds<Pixels>,
+    ) -> Self {
+        Self {
+            document_order: 0,
+            text: text.into(),
+            layout: TextLayout::default(),
+            geometry: Some(geometry),
+            bounds,
+        }
+    }
+
+    /// The geometry the selection reads: the custom one, else the `TextLayout`.
+    fn geo(&self) -> &dyn RunGeometry {
+        match &self.geometry {
+            Some(geometry) => geometry.as_ref(),
+            None => &self.layout,
         }
     }
 
@@ -461,7 +539,7 @@ fn selection_range_for_run(
     selection_start: Point<Pixels>,
     selection_end: Point<Pixels>,
 ) -> Option<Range<usize>> {
-    if run.text.len() != run.layout.len() {
+    if run.text.len() != run.geo().len() {
         return None;
     }
 
@@ -469,12 +547,16 @@ fn selection_range_for_run(
         return None;
     }
 
-    let line_height = run.layout.line_height();
+    if let Some(decided) = run.geo().selected_range(selection_start, selection_end) {
+        return decided;
+    }
+
+    let line_height = run.geo().line_height();
     // Each character is tested with its row's top and height, so a run whose
     // rows all miss the band, or all lie strictly inside it with no endpoint
     // on any row, has the same answer for every character. Decide those
     // without the walk below, which scans the layout twice per character.
-    let (rows_top, rows_bottom) = text_rows_extent(&run.layout, line_height);
+    let (rows_top, rows_bottom) = run.geo().rows_extent(line_height);
     let band_top = selection_start.y.min(selection_end.y);
     let band_bottom = selection_start.y.max(selection_end.y);
     if rows_bottom <= band_top || rows_top > band_bottom {
@@ -487,12 +569,12 @@ fn selection_range_for_run(
     let mut range = None;
     for (offset, character) in run.text.char_indices() {
         let next_offset = offset + character.len_utf8();
-        let Some(position) = run.layout.position_for_index(offset) else {
+        let Some(position) = run.geo().position_for_index(offset) else {
             continue;
         };
 
         let char_width = run
-            .layout
+            .geo()
             .position_for_index(next_offset)
             .filter(|next| next.y == position.y)
             .map_or_else(|| line_height.half(), |next| next.x - position.x);
@@ -538,10 +620,10 @@ fn points_for_multi_click(
     click_count: usize,
 ) -> Option<(Point<Pixels>, Point<Pixels>)> {
     let run = runs.iter().find(|run| run.bounds.contains(&position))?;
-    if run.text.len() != run.layout.len() {
+    if run.text.len() != run.geo().len() {
         return None;
     }
-    let offset = run.layout.index_for_position(position).ok()?;
+    let offset = run.geo().index_for_position(position).ok()?;
     let range = match click_count {
         2 => word_range_at(&run.text, offset)?,
         3.. => line_range_at(&run.text, offset),
@@ -551,8 +633,8 @@ fn points_for_multi_click(
         return None;
     }
     Some((
-        run.layout.position_for_index(range.start)?,
-        run.layout.position_for_index(range.end)?,
+        run.geo().position_for_index(range.start)?,
+        run.geo().position_for_index(range.end)?,
     ))
 }
 
@@ -1654,8 +1736,8 @@ impl WindowSelectionState {
                 return;
             };
             let (Some(start), Some(end)) = (
-                first.layout.position_for_index(0),
-                last.layout.position_for_index(last.text.len()),
+                first.geo().position_for_index(0),
+                last.geo().position_for_index(last.text.len()),
             ) else {
                 return;
             };
@@ -1663,8 +1745,8 @@ impl WindowSelectionState {
             // land on text.
             let inset = px(1.);
             (
-                point(start.x + inset, start.y + first.layout.line_height() / 2.),
-                point(end.x - inset, end.y + last.layout.line_height() / 2.),
+                point(start.x + inset, start.y + first.geo().line_height() / 2.),
+                point(end.x - inset, end.y + last.geo().line_height() / 2.),
             )
         };
         let content_key_resolver = participant.read(cx).content_key_resolver.clone();

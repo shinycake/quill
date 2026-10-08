@@ -1055,6 +1055,7 @@ fn inline_paragraph(
         ));
     }
     let full: SharedString = text.clone().into();
+    let bidi_source = (highlights.clone(), mono.clone());
     let styled = StyledText::new(text)
         .with_highlights(highlights)
         .with_font_family_overrides(mono);
@@ -1064,6 +1065,7 @@ fn inline_paragraph(
         full,
         styled,
     )
+    .bidi(bidi_source.0, bidi_source.1)
     .selection_color(accent().opacity(0.35).into())
     .message(msg_key)
     // Messages read top to bottom by id; paragraphs within one in order.

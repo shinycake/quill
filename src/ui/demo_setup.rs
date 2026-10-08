@@ -1656,10 +1656,40 @@ impl QuillApp {
                         "שלום עולם, מה שלומך היום? זו הודעה ארוכה יותר כדי לראות את הטקסט נשבר לשורות בתוך הבועה.",
                     ),
                     (902, true, "היי, ההזמנה 12345 מוכנה ב-Telegram Desktop"),
+                    (904, false, "מחכה לעוד עדכונים ממנה"),
+                    (
+                        903,
+                        false,
+                        "קישור https://example.com/he בתוך הודעה ארוכה עם מילה מודגשת וקוד לשורות נוספות בבועה",
+                    ),
                 ] {
+                    // Entities by needle: a link, a bold word and inline code.
+                    let entity = |needle: &str, kind: &str| -> Option<String> {
+                        let start = body.find(needle)?;
+                        let from = quill::text::utf8_to_utf16_offset(body, start).ok()?;
+                        let to =
+                            quill::text::utf8_to_utf16_offset(body, start + needle.len()).ok()?;
+                        Some(format!(
+                            r#"{{"@type":"textEntity","offset":{from},"length":{},"type":{{"@type":"{kind}"}}}}"#,
+                            to - from
+                        ))
+                    };
+                    let entities = if id == 903 {
+                        [
+                            entity("https://example.com/he", "textEntityTypeUrl"),
+                            entity("מודגשת", "textEntityTypeBold"),
+                            entity("וקוד", "textEntityTypeCode"),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(",")
+                    } else {
+                        String::new()
+                    };
                     let body = serde_json::to_string(body).unwrap_or_default();
                     let json = format!(
-                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[]}}}}}}}}"#,
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{body},"entities":[{entities}]}}}}}}}}"#,
                         chat.0
                     );
                     if let Some(owned) =

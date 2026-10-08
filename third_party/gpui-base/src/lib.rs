@@ -185,7 +185,7 @@ pub use text::{
 pub use text_selection::{
     TextSelection, TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint,
     TextSelectionEvent, TextSelectionHandle, TextSelectionLayer, TextSelectionProjection,
-    TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId, TextSelectionSnapshot,
+    RunGeometry, TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId, TextSelectionSnapshot,
     TextSelectionWindowPoints, TouchHandleLayout,
 };
 pub use theme::{PlotTheme, ResizableTheme, ScrollbarTheme, Theme, ThemeAppearance};
