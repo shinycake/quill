@@ -334,3 +334,52 @@ fn a5_delete_profile_photo_shape_matches_1_8_67() {
     assert_eq!(v["@type"], "deleteProfilePhoto");
     assert_eq!(v["profile_photo_id"], 12345);
 }
+
+/// Batch 6: the recovery / reset / login-email request shapes against
+/// schema 1.8.67 (`checkRecoveryEmailAddressCode` :11461,
+/// `requestPasswordRecovery` :11470, `recoverPassword` :11479,
+/// `resetPassword` :11482, `cancelPasswordReset` :11485,
+/// `setLoginEmailAddress` :11443, `resendLoginEmailAddressCode` :11446,
+/// `checkLoginEmailAddressCode` :11449).
+#[test]
+fn b6_recovery_reset_and_login_email_shapes_match_1_8_67() {
+    let parse = |json: String| serde_json::from_str::<serde_json::Value>(&json).unwrap();
+    let v = parse(check_recovery_email_address_code(RequestId(1), "123456"));
+    assert_eq!(v["@type"], "checkRecoveryEmailAddressCode");
+    assert_eq!(v["code"], "123456");
+    let v = parse(request_password_recovery(RequestId(2)));
+    assert_eq!(v["@type"], "requestPasswordRecovery");
+    let v = parse(recover_password(RequestId(3), "654321", "new", "hint"));
+    assert_eq!(v["@type"], "recoverPassword");
+    assert_eq!(v["recovery_code"], "654321");
+    assert_eq!(v["new_password"], "new");
+    assert_eq!(v["new_hint"], "hint");
+    assert_eq!(parse(reset_password(RequestId(4)))["@type"], "resetPassword");
+    assert_eq!(
+        parse(cancel_password_reset(RequestId(5)))["@type"],
+        "cancelPasswordReset"
+    );
+    let v = parse(set_login_email_address(RequestId(6), "me@example.com"));
+    assert_eq!(v["@type"], "setLoginEmailAddress");
+    assert_eq!(v["new_login_email_address"], "me@example.com");
+    assert_eq!(
+        parse(resend_login_email_address_code(RequestId(7)))["@type"],
+        "resendLoginEmailAddressCode"
+    );
+    let v = parse(check_login_email_address_code(RequestId(8), "12345"));
+    assert_eq!(v["@type"], "checkLoginEmailAddressCode");
+    assert_eq!(v["code"]["@type"], "emailAddressAuthenticationCode");
+    assert_eq!(v["code"]["code"], "12345");
+}
+
+/// Batch 4: `confirmSession` (:15111) and `acceptTermsOfService` (:16143).
+#[test]
+fn b4_confirm_session_and_accept_terms_shapes_match_1_8_67() {
+    let parse = |json: String| serde_json::from_str::<serde_json::Value>(&json).unwrap();
+    let v = parse(confirm_session(RequestId(1), 77));
+    assert_eq!(v["@type"], "confirmSession");
+    assert_eq!(v["session_id"], 77);
+    let v = parse(accept_terms_of_service(RequestId(2), "tos-1"));
+    assert_eq!(v["@type"], "acceptTermsOfService");
+    assert_eq!(v["terms_of_service_id"], "tos-1");
+}

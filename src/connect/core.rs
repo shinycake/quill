@@ -466,16 +466,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .then_some(pending.community_id)
                     .flatten()
             });
-        // Slice S4: a confirmed `removeAllFilesFromDownloads` drops the
-        // cached storage stats (see `Session::apply`) — capture before
-        // apply so the post-apply refetch shows the post-clear numbers.
-        // A dropped cache is the success signal: on a TDLib error the
-        // cache stays and nothing refetches.
-        let cleared_download_cache = matches!(&owned.envelope.payload, EnvelopePayload::Ok)
-            && owned.envelope.extra.is_some_and(|id| {
-                self.session.requests.purpose(id)
-                    == Some(RequestPurpose::RemoveAllFilesFromDownloads)
-            });
+        // Batch 6: a confirmed `optimizeStorage` drops the cached storage
+        // stats (see `Session::apply`) — capture before apply so the
+        // post-apply refetch shows the post-clear numbers. A dropped
+        // cache is the success signal: on a TDLib error the cache stays
+        // and nothing refetches.
+        let cleared_download_cache =
+            matches!(&owned.envelope.payload, EnvelopePayload::StorageStatistics { .. })
+                && owned.envelope.extra.is_some_and(|id| {
+                    self.session.requests.purpose(id) == Some(RequestPurpose::OptimizeStorage)
+                });
         let used_emoji: Vec<_> = match &owned.envelope.payload {
             EnvelopePayload::UpdateMessageSendSucceeded { message, .. } if message.is_outgoing => {
                 if let crate::telegram::envelope::MessageContent::Text(text) = &message.content {
@@ -540,6 +540,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
+        }
+        // Batch 6: a finished reset / cancel / login-email step left the
+        // cached password state out of date.
+        if std::mem::take(&mut self.session.twofa_flow.refetch) {
+            let _ = self.refresh_password_state();
         }
         if let Some(chat_id) = unpinned_all {
             self.session.pinned_messages.insert(chat_id.0, Vec::new());

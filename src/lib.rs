@@ -40,6 +40,7 @@ pub mod pins;
 pub mod platform;
 pub mod playback;
 pub mod poll;
+pub mod presence;
 pub mod privacy;
 pub mod rich;
 pub mod row_fx;
@@ -48,6 +49,7 @@ pub mod send_button;
 pub mod settings;
 pub mod single_instance;
 pub mod spell_dict;
+pub mod storage_limits;
 #[cfg(windows)]
 pub mod spell_win;
 pub mod spellcheck;

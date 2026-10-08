@@ -1,3 +1,4 @@
+mod account_notices;
 mod auth;
 mod bots;
 mod calls;
@@ -76,6 +77,7 @@ mod tests_messages;
 mod tests_payments;
 
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
+pub use account_notices::*;
 pub use auth::*;
 pub use bots::*;
 pub use calls::*;
