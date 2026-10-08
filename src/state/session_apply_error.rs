@@ -23,6 +23,12 @@ impl Session {
         {
             self.send_permission_error = Some(notice.into());
         }
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::GetChatMember
+            && let Some(chat_id) = p.chat_id
+        {
+            self.adopt_supergroup_status_for_chat(chat_id);
+        }
         // Phase 9.3: a `postStory` / `canPostStory` error — the
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {

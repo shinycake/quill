@@ -300,6 +300,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — chat rows: drafts · send state · title badges".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyJoinBar
+        | ScreenshotDemo::ReadySearchPreviews
+        | ScreenshotDemo::ReadyMultilineRows => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — join bar · search and chat-row previews".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyTyping => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
