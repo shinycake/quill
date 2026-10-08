@@ -36,10 +36,19 @@ elif ! git -C "$SRC" diff | cmp -s - "$PATCH" || ! git -C "$SRC" diff --cached -
   exit 1
 fi
 
+# Linux: let libtdjson.so find bundled libssl/libcrypto/libz next to itself
+# ($ORIGIN) instead of only the system search path. No effect on macOS, where
+# scripts/macos-package-smoke.sh rewrites install names after the fact.
+EXTRA_CMAKE=()
+if [[ "$(uname -s)" == Linux ]]; then
+  EXTRA_CMAKE+=('-DCMAKE_INSTALL_RPATH=$ORIGIN' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON)
+fi
+
 cmake -S "$SRC" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DTD_ENABLE_LTO=ON
+  -DTD_ENABLE_LTO=ON \
+  ${EXTRA_CMAKE[@]+"${EXTRA_CMAKE[@]}"}
 
 cmake --build "$BUILD" --target install --parallel "${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}"
 

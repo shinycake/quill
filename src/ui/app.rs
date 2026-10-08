@@ -329,6 +329,13 @@ pub struct QuillApp {
     /// Highest frame rate animated content asked for since the last
     /// clock tick (0: nothing animated rendered); see `frame_clock`.
     pub(super) animation_demand: std::cell::Cell<u32>,
+    /// Whether the main window is active this frame: like tdesktop
+    /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
+    /// stickers and emoji hold still while it isn't.
+    pub(super) window_active: std::cell::Cell<bool>,
+    /// `media_display_roots`, computed once per frame (rows ask for it
+    /// one by one, and it touches the file system).
+    pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
     /// Smooth reveal of a bot's streaming reply (`bot_stream`).
     pub(super) stream_reveal: std::cell::RefCell<super::bot_stream::StreamReveal>,
@@ -671,6 +678,10 @@ pub struct QuillApp {
     pub(super) viewer_player: Option<Child>,
     /// Playback clock for the viewer's clip (elapsed/total + pause freeze).
     pub(super) viewer_clock: Option<PlaybackClock>,
+    /// Whether the main window is currently excluded from screen capture.
+    pub(super) capture_blocked: bool,
+    /// The "screenshots can't be blocked here" note was dismissed (Linux).
+    pub(super) capture_notice_dismissed: bool,
     /// Decoded frames for the viewer's clip, rendered in-place (parity
     /// slice 5). Pre-decoded `RenderImage` handles: `img()` resolves
     /// `ImageSource::Render` synchronously, so the 125 ms tick can cycle
@@ -710,13 +721,25 @@ pub struct QuillApp {
     /// Play was requested before the clip was local. Resumed from the poll
     /// loop when `downloadFile` finishes.
     pub(super) viewer_pending_play: Option<(MessageId, FileId)>,
-    /// MED1: photo rotation in quarter-turns clockwise (photos only;
-    /// reset on open/step). Rendered from `viewer_rotated`.
-    pub(super) viewer_rotation: u8,
-    /// MED1: rotated render of the viewer photo, keyed
-    /// `(path, quarter-turns)`; decoded eagerly by the Rotate button so
-    /// the overlay render stays allocation-free.
+    /// MED1: photo rotation and mirror flips (photos only; reset on
+    /// open/step). Rendered from `viewer_rotated`.
+    pub(super) viewer_orientation: quill::media_viewer::ViewerOrientation,
+    /// MED1: re-oriented render of the viewer photo, keyed
+    /// `(path, orientation code)`; decoded eagerly by Rotate/Flip so the
+    /// overlay render stays allocation-free.
     pub(super) viewer_rotated: Option<(PathBuf, u8, Arc<RenderImage>)>,
+    /// Counts viewer opens; keys the 200 ms fade-in so each open animates.
+    pub(super) viewer_open_gen: u64,
+    /// Last mouse movement over the viewer (controls auto-hide clock).
+    pub(super) viewer_last_activity: std::time::Instant,
+    /// Toolbar, arrows and caption are faded out (after the idle wait).
+    pub(super) viewer_controls_hidden: bool,
+    /// Bumped on every show/hide flip; keys the 150 ms controls fade.
+    pub(super) viewer_controls_gen: u64,
+    /// The pointer rests on a control, so they must not auto-hide.
+    pub(super) viewer_over_controls: bool,
+    /// A hide-timer task is already waiting.
+    pub(super) viewer_hide_timer: bool,
     /// MED1: seek slider for the viewer video transport (created in
     /// `begin_viewer_video`, cleared in `stop_viewer_video`).
     pub(super) viewer_seek_slider: Option<Entity<SliderState>>,
@@ -905,6 +928,15 @@ impl QuillApp {
     }
 
     pub(super) fn media_display_roots(&self) -> Vec<PathBuf> {
+        if let Some(roots) = self.media_roots_frame.borrow().as_ref() {
+            return roots.clone();
+        }
+        let roots = self.compute_media_display_roots();
+        *self.media_roots_frame.borrow_mut() = Some(roots.clone());
+        roots
+    }
+
+    fn compute_media_display_roots(&self) -> Vec<PathBuf> {
         let primary = if let Some(live) = self.live.as_ref() {
             live.driver.tdlib_media_roots()
         } else if self.demo_session.is_some() {

@@ -702,10 +702,11 @@ impl Session {
                 sender,
                 action,
             } => {
+                let name = self.sender_first_name(sender);
                 self.chats
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
-                    .set_sender_action(sender, action);
+                    .set_sender_action(sender, action, name);
             }
             // Phase B1: secret chat lifecycle (schema 1.8.67, lines
             // 10741 / 2816). `updateSecretChat` may arrive before any

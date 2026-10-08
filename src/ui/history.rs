@@ -5,11 +5,13 @@ use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::forward::forward_from_strip;
 use super::message_games::game_card;
 use super::message_media::{
+    MediaCorners, file_is_downloading, media_frame, photo_display_path, spoiler_cover,
+};
+use super::message_media::{
     animation_attachment, audio_row, contact_row, dice_row, document_chip, location_row,
     photo_attachment, sticker_attachment, venue_row, video_attachment, video_note_attachment,
     voice_note_row,
 };
-use super::message_media::{file_is_downloading, media_frame, photo_display_path, spoiler_cover};
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,
 };
@@ -173,13 +175,34 @@ pub(super) fn album_history_row(
         .relative()
         .w(px(box_w as f32))
         .h(px(box_h as f32))
-        .overflow_hidden()
-        .rounded_md();
+        .overflow_hidden();
+    let album_has_caption = messages.iter().any(|message| match &message.content {
+        MessageContent::Photo(photo) => !photo.caption.is_empty(),
+        MessageContent::Video(video) => !video.caption.is_empty(),
+        _ => false,
+    });
+    let corner_base = MediaCorners::in_bubble(
+        cx,
+        first.is_outgoing,
+        look.plain,
+        true,
+        sender.is_none(),
+        !album_has_caption,
+    );
     for (index, message) in messages.iter().enumerate() {
         let Some(part) = layout.get(index) else {
             continue;
         };
-        let tile = album_tile(message, part, files, downloading, media_roots, cx);
+        let tile = album_tile(
+            message,
+            part,
+            (box_w, box_h),
+            corner_base,
+            files,
+            downloading,
+            media_roots,
+            cx,
+        );
         mosaic = mosaic.child(tile);
     }
     let caption = messages.iter().rev().find_map(|message| {
@@ -204,7 +227,7 @@ pub(super) fn album_history_row(
         .gap_1()
         .child(mosaic)
         .when_some(caption, |this, text| {
-            this.child(div().px_2().pt_1().text_sm().child(text))
+            this.child(div().px_2().py_1().text_sm().child(text))
         })
         .into_any_element();
     session_bubble_quoted(
@@ -253,12 +276,20 @@ fn message_actions_button(
 pub(super) fn album_tile(
     message: &HistoryMessage,
     part: &quill::album::AlbumRect,
+    mosaic: (i32, i32),
+    mosaic_corners: MediaCorners,
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message.id.0 as u64;
+    let corners = mosaic_corners.tile(
+        part.x <= 0,
+        part.y <= 0,
+        part.x + part.width >= mosaic.0,
+        part.y + part.height >= mosaic.1,
+    );
     let chat_id = message.chat_id;
     let message_id = message.id;
     // Parity slice 5: tiles open the fullscreen media viewer. The Play
@@ -272,6 +303,7 @@ pub(super) fn album_tile(
         .top(px(part.y as f32))
         .w(px(part.width as f32))
         .h(px(part.height as f32))
+        .map(|this| corners.round(this))
         .overflow_hidden()
         .role(gpui_kit::Role::Button)
         .aria_label("Open album media")
@@ -290,10 +322,12 @@ pub(super) fn album_tile(
                             .w(px(part.width as f32))
                             .h(px(part.height as f32))
                             .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
+                            .map(|this| corners.round(this))
                             .object_fit(ObjectFit::Cover)
-                            .with_fallback(|| {
+                            .with_fallback(move || {
                                 div()
                                     .size_full()
+                                    .map(|this| corners.round(this))
                                     .bg(fill_muted())
                                     .flex()
                                     .items_center()
@@ -346,12 +380,20 @@ pub(super) fn album_tile(
                     .w(px(part.width as f32))
                     .h(px(part.height as f32))
                     .aspect_ratio(part.width.max(1) as f32 / part.height.max(1) as f32)
+                    .map(|this| corners.round(this))
                     .object_fit(ObjectFit::Cover)
-                    .with_fallback(|| div().size_full().bg(success_bg()).into_any_element())
+                    .with_fallback(move || {
+                        div()
+                            .size_full()
+                            .map(|this| corners.round(this))
+                            .bg(success_bg())
+                            .into_any_element()
+                    })
                     .into_any_element()
             } else {
                 div()
                     .size_full()
+                    .map(|this| corners.round(this))
                     .bg(success_bg())
                     .flex()
                     .items_center()
@@ -778,6 +820,34 @@ pub(super) fn session_history_row(
     // the plain media it is.
     let media_revealed =
         revealed.contains(&(message.chat_id.0, message.id.0 as u64, u64::MAX, false));
+    // Media corners follow the bubble (Telegram Desktop `BubbleRounding`): a
+    // picture that leads the bubble takes its radius on the edges that are
+    // free of the sender name, a caption above/below, badges or reactions.
+    let corners = {
+        let media_led = header.is_none()
+            && matches!(
+                effective_content(&message.content, message.ephemeral.as_ref()),
+                MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_)
+            );
+        let has_caption = match &message.content {
+            MessageContent::Photo(photo) => !photo.caption.is_empty(),
+            MessageContent::Video(video) => !video.caption.is_empty(),
+            MessageContent::Animation(animation) => !animation.caption.is_empty(),
+            _ => false,
+        };
+        let caption_above = has_caption && caption_above_media(&message.content);
+        let caption_below = has_caption && !caption_above;
+        let badges = message.self_destruct_badge(unix_ms_now()).is_some()
+            || message.auto_delete_chip(unix_ms_now()).is_some();
+        MediaCorners::in_bubble(
+            cx,
+            message.is_outgoing,
+            look.plain,
+            media_led,
+            sender.is_none() && !caption_above,
+            !caption_below && !badges && !has_chips,
+        )
+    };
     let extra_media = match effective_content(&message.content, message.ephemeral.as_ref()) {
         MessageContent::Photo(photo) if photo.has_spoiler && !media_revealed => {
             let (frame_w, frame_h) = photo
@@ -793,16 +863,17 @@ pub(super) fn session_history_row(
                 photo.open_file_id(),
                 frame_w,
                 frame_h,
+                corners,
                 cx,
             ))
         }
         MessageContent::Video(video) if video.has_spoiler && !media_revealed => {
             let (frame_w, frame_h) = media_frame(video.width, video.height);
-            Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, cx))
+            Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, corners, cx))
         }
         MessageContent::Animation(animation) if animation.has_spoiler && !media_revealed => {
             let (frame_w, frame_h) = media_frame(animation.width, animation.height);
-            Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, cx))
+            Some(spoiler_cover(message.id.0 as u64, message.chat_id, message.id, None, None, frame_w, frame_h, corners, cx))
         }
         MessageContent::Photo(photo) => {
             let unveiled;
@@ -823,6 +894,7 @@ pub(super) fn session_history_row(
                 media_roots,
                 None,
                 Some((message.chat_id, message.id)),
+                corners,
                 cx,
             ))
         }
@@ -880,6 +952,7 @@ pub(super) fn session_history_row(
             animation_frame,
             inline,
             None,
+            corners,
             cx,
         )),
         MessageContent::Video(video) => Some(video_attachment(
@@ -893,6 +966,7 @@ pub(super) fn session_history_row(
             inline,
             None,
             Some((message.chat_id, message.id)),
+            corners,
             cx,
         )),
         MessageContent::VideoNote(note) => Some(video_note_attachment(
@@ -1130,6 +1204,7 @@ pub(super) fn session_history_row(
                         None,
                         frame_w,
                         frame_h,
+                        corners,
                         cx,
                     ))
                 }
@@ -1143,6 +1218,7 @@ pub(super) fn session_history_row(
                         None,
                         frame_w,
                         frame_h,
+                        corners,
                         cx,
                     ))
                 }
@@ -1156,6 +1232,7 @@ pub(super) fn session_history_row(
                         None,
                         frame_w,
                         frame_h,
+                        corners,
                         cx,
                     ))
                 }
@@ -1191,7 +1268,7 @@ pub(super) fn session_history_row(
     let footer_overlay = media_led && caption_below_el.is_none() && reserve_footer;
     let caption_below_el = caption_below_el.map(|caption| {
         if media_led {
-            div().px_2().pt_1().child(caption).into_any_element()
+            div().px_2().py_1().child(caption).into_any_element()
         } else {
             caption
         }

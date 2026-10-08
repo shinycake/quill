@@ -5,8 +5,8 @@ use super::actions::{
     FormatBold, FormatItalic, FormatUnderline, LoadOlder, MinimizeWindow, NextChat, OpenChatSearch,
     OpenHelp, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, QuitApp, SpellingIgnore,
     SpellingLearn, SpellingReplace, SpellingUnlearn, SubmitCode, SubmitPassword, SubmitPhone,
-    ToggleFullscreen, ToggleTheme, ViewerNext, ViewerPrev, ViewerZoomIn, ViewerZoomOut,
-    ViewerZoomReset, ZoomWindow,
+    ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical,
+    ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -22,8 +22,12 @@ use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, StoryPostOutcome, connection_indicator};
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_capture_block(window);
         // Rows the history list painted last frame are what the user saw.
         self.report_visible_history(window.is_window_active(), cx);
+        self.inline_videos.borrow_mut().frame_start();
+        self.window_active.set(window.is_window_active());
+        self.media_roots_frame.borrow_mut().take();
         // Spoiler specks painted last frame keep drifting.
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
@@ -400,6 +404,34 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &ViewerZoomOut, _, cx| {
                 if this.media_viewer.is_open() {
                     this.viewer_zoom_step(false, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerFlipHorizontal, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.flip_viewer_horizontal(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerFlipVertical, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.flip_viewer_vertical(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerCopy, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.copy_viewer_photo(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ViewerSave, _, cx| {
+                if this.media_viewer.is_open() {
+                    this.save_viewer_media(cx);
                 } else {
                     cx.propagate();
                 }

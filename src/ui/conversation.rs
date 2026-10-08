@@ -125,17 +125,17 @@ impl QuillApp {
                 .and_then(|s| s.chats.get(&chat_id.0))
                 .and_then(|chat| chat.ttl_status_line())
         });
-        // Slice S17: peer activity label — "choosing a sticker…" wins over
-        // "typing…" while a peer picks a sticker (`chatActionChoosingSticker`,
-        // schema 1.8.67 line 6380).
-        let activity_label: Option<&'static str> = actions.and_then(|(chat_id, _, _, _)| {
-            self.session()
-                .and_then(|s| s.chats.get(&chat_id.0))
-                .and_then(|chat| chat.peer_activity_label())
-        });
-        // S17: widen the gate — sticker-picking sets no typing senders, so
-        // `typing` alone would hide the "choosing a sticker…" label.
-        let typing = typing || activity_label.is_some();
+        // Peer activity line: typing wins over other actions, as in
+        // tdesktop's `SendActionPainter`.
+        let activity_line: Option<quill::state::ActivityLine> =
+            actions.and_then(|(chat_id, _, _, _)| {
+                self.session()
+                    .and_then(|s| s.chats.get(&chat_id.0))
+                    .and_then(|chat| chat.peer_activity())
+            });
+        // Non-typing activity (recording, uploading...) sets no typing
+        // senders, so `typing` alone would hide it.
+        let typing = typing || activity_line.is_some();
         // One identity block for every chat kind: avatar, title, and a
         // single status line — activity wins, then secret-chat state, then
         // presence or member count, then the muted / timer notes.
@@ -175,8 +175,23 @@ impl QuillApp {
             (!meta.is_empty()).then(|| meta.join(" · "))
         });
         let secret_line = self.secret_pending_subtitle(chat_id);
+        if typing {
+            self.request_animation_tick(12, cx);
+        }
+        let status_indicator = if typing {
+            Some(
+                activity_line
+                    .as_ref()
+                    .map_or(quill::state::ActivityIndicator::Dots, |l| l.indicator),
+            )
+        } else {
+            None
+        };
         let (status_line, status_accent): (Option<String>, bool) = if typing {
-            (Some(activity_label.unwrap_or("typing…").to_string()), true)
+            (
+                Some(activity_line.map_or_else(|| "typing".to_string(), |l| l.text)),
+                true,
+            )
         } else if let Some(line) = secret_line {
             (Some(line), true)
         } else if let Some((line, online)) = presence {
@@ -207,14 +222,22 @@ impl QuillApp {
                         this.child(
                             div()
                                 .id("conversation-status")
+                                .flex()
+                                .items_center()
                                 .text_xs()
-                                .truncate()
                                 .text_color(if status_accent {
                                     cx.theme().primary
                                 } else {
                                     muted_fg
                                 })
-                                .child(line),
+                                .when_some(status_indicator, |this, indicator| {
+                                    this.child(super::activity_indicator::activity_indicator(
+                                        indicator,
+                                        cx.theme().primary,
+                                        "header-activity".into(),
+                                    ))
+                                })
+                                .child(div().min_w_0().truncate().child(line)),
                         )
                     }),
             )
@@ -481,6 +504,7 @@ impl QuillApp {
         });
         let dust = self.vanish_overlay();
         let call_bar = self.call_bar(cx).or_else(|| self.group_call_bar(cx));
+        let capture_notice = self.capture_notice(cx);
         div()
             .relative()
             .flex()
@@ -489,6 +513,7 @@ impl QuillApp {
             .min_w_0()
             .min_h_0()
             .children(call_bar)
+            .children(capture_notice)
             .child(history)
             // Phase C2i: busy-decline banner — the calls that arrived
             // while another call was active were declined with
@@ -1542,6 +1567,11 @@ impl QuillApp {
         }
         self.history_shared = HistoryShared { media_roots };
         let count = self.history_rows.len();
+        let corner_buttons = self.jump_corner_buttons(
+            chat.as_ref().map_or(0, |c| c.unread_mention_count),
+            chat.as_ref().map_or(0, |c| c.unread_reaction_count),
+            cx,
+        );
         // kit Phase 3: only visible rows render. Row 0 becoming visible
         // pages older history (the driver dedupes in-flight requests and
         // reports exhaustion; the loader notifies only when a request was
@@ -1556,6 +1586,7 @@ impl QuillApp {
                 .flex_col()
                 .flex_1()
                 .min_h_0()
+                .relative()
                 // kit Phase 7: screen-reader landmark for the message history.
                 .role(Role::Log)
                 .aria_label(format!("Message history — {sender_name}"))
@@ -1617,7 +1648,9 @@ impl QuillApp {
                     })
                     .size_full()
                     .min_h_0(),
-                ),
+                )
+                // tdesktop's corner "@" / heart buttons.
+                .children(corner_buttons),
         )
         .into_any_element()
     }
@@ -1660,7 +1693,13 @@ impl QuillApp {
             .when_some(row.day_label(), |this, label| {
                 this.child(day_separator(label, cx))
             })
-            .when(row.unread_divider(), |this| this.child(unread_divider(cx)))
+            .when(row.unread_divider(), |this| {
+                let unread_at_open = self
+                    .session()
+                    .and_then(|s| s.open_chat.and_then(|chat| s.histories.get(&chat.0)))
+                    .map_or(0, |h| h.unread_at_open);
+                this.child(unread_divider(unread_at_open, cx))
+            })
             .child(element)
             .into_any_element()
     }
@@ -1893,8 +1932,9 @@ impl QuillApp {
     }
 }
 
-/// Full-width "Unread messages" bar above the first unread message.
-fn unread_divider(cx: &App) -> impl IntoElement {
+/// Full-width "N Unread Messages" bar above the first unread message.
+fn unread_divider(count: i32, cx: &App) -> impl IntoElement {
+    let text = SharedString::from(quill::state::unread_bar_text(count));
     div()
         .id("unread-divider")
         .w_full()
@@ -1907,8 +1947,8 @@ fn unread_divider(cx: &App) -> impl IntoElement {
         .font_medium()
         .text_color(cx.theme().secondary_foreground)
         .role(Role::Heading)
-        .aria_label("Unread messages")
-        .child("Unread messages")
+        .aria_label(text.clone())
+        .child(text)
 }
 
 /// Centered local-day pill between history rows ("Today", "12 March").

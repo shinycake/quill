@@ -12,7 +12,13 @@ impl QuillApp {
     /// Ask for another frame within `1 / fps` seconds. Animated content
     /// calls this each time it renders; the clock stops after a tick in
     /// which nothing asked.
+    #[track_caller]
     pub(super) fn request_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
+        // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
+        // second per call site), to hunt idle redraws.
+        if trace_ticks() {
+            trace_caller(std::panic::Location::caller(), fps);
+        }
         self.animation_demand
             .set(self.animation_demand.get().max(fps.clamp(1, 60)));
         if self.frame_clock_running.get() {
@@ -43,4 +49,29 @@ impl QuillApp {
         })
         .detach();
     }
+}
+
+fn trace_ticks() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_TICKS").is_some())
+}
+
+fn trace_caller(caller: &'static std::panic::Location<'static>, fps: u32) {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::time::Instant;
+    thread_local! {
+        static LAST: RefCell<HashMap<(&'static str, u32), Instant>> = RefCell::new(HashMap::new());
+    }
+    LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        let key = (caller.file(), caller.line());
+        if last
+            .get(&key)
+            .is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
+        {
+            last.insert(key, Instant::now());
+            eprintln!("tick: {}:{} @{fps}fps", caller.file(), caller.line());
+        }
+    });
 }

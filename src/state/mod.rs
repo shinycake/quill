@@ -55,6 +55,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 mod call_types;
+mod chat_activity;
 mod chat_types;
 mod history_types;
 mod info_types;
@@ -92,6 +93,7 @@ mod sticker_gif_types;
 mod story_types;
 
 pub use call_types::*;
+pub use chat_activity::*;
 pub use chat_types::*;
 pub use history_types::*;
 pub use info_types::*;
