@@ -100,6 +100,8 @@ pub(super) struct InlineVideos {
     #[cfg(not(target_os = "macos"))]
     players: HashMap<Key, ()>,
     render: u64,
+    /// The history rendered (and swept the players) this frame.
+    swept: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -119,12 +121,25 @@ impl InlineVideos {
     /// Start a render pass; players whose rows didn't render in the last
     /// pass stop.
     pub(super) fn begin_render(&mut self) {
+        self.swept = true;
         self.render += 1;
         #[cfg(target_os = "macos")]
         {
             let render = self.render;
             self.players.retain(|_, slot| slot.seen + 1 >= render);
         }
+    }
+
+    /// Called at the start of every app frame: when the last frame
+    /// rendered no history (no chat open, Contacts, Calls…), nothing can
+    /// show a clip, so every player stops. Without this, a clip that was
+    /// playing when you left the chat kept decoding and kept the frame
+    /// clock at 30 fps forever.
+    pub(super) fn frame_start(&mut self) {
+        if !self.swept {
+            self.clear();
+        }
+        self.swept = false;
     }
 
     /// Whether any clip is playing: the frame clock keeps ticking, also
