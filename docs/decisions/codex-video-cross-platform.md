@@ -156,13 +156,23 @@ FFmpeg-based player including Telegram Desktop; noted in `THIRD_PARTY.md`.
 
 | What | macOS (this Mac) | Linux | Windows |
 | --- | --- | --- | --- |
-| Shim + pinned FFmpeg 8.1.3 build script | built (58 s) | CI `linux-package` | CI `windows-ffmpeg` |
-| Decoder tests on fixtures (H.264 High + AAC, VP9 WebM, rotation, seek, scaling, end-to-end player) | pass against 8.1.3 and Homebrew 9.0.2 | CI step "decoder tests against the built FFmpeg" | — (probe below) |
+| Shim + pinned FFmpeg 8.1.3 build script ("License: LGPL version 2.1 or later") | built, 58 s (arm64) | CI `linux-package`, ~1 m 45 s cold | CI `windows-ffmpeg`, ~7 min cold (MSYS2 UCRT64) |
+| Decoder tests on fixtures (H.264 High + AAC, VP9 WebM, rotation, seek, scaling, end-to-end player) | 23/23 against 8.1.3 and Homebrew 9.0.2 | 23/23 in CI against the built libraries | — (probe below) |
 | Pipeline tests (queue bounds, seek, sound clock, latency/sync math, end, detach) | pass | pass (required `linux-fmt-clippy-test`) | pass (`windows-build` core tests) |
-| Package checks (deps, loader, licences) | n/a | `check-bundle-elf.sh`, `check-bundle-dlopen.py` | `check-bundle-pe.ps1`, `check-bundle-load.ps1` |
-| `quill --video-probe` from the package | built binary | packaged tarball | extracted zip |
-| UI: inline GIF loop, viewer playback with transport, round video loop and click-to-sound (seek ring, countdown) | demo captures with `QUILL_VIDEO_BACKEND=ffmpeg`; colours within ±3/255 of AVPlayer | build only | build only |
+| UI build with the FFmpeg backend | `cargo build --features ui`, macOS UI build workflow | `linux-package` release build | `windows-build` release build |
+| Package checks (deps, loader, licences) | n/a | `check-bundle-elf.sh` (12 ELF files), `check-bundle-dlopen.py` (FFmpeg maps from the package) | `check-bundle-pe.ps1` (16 PE files, system imports only), `check-bundle-load.ps1` |
+| `quill --video-probe` from the package | built binary | `video=h264 96x64 frames=10 audio=aac samples=48128`, `video=vp9 64x48 frames=10` | same output from the extracted zip |
+| UI: inline GIF loop, viewer playback with transport, round video loop and click-to-sound (seek ring, countdown) | demo captures with `QUILL_VIDEO_BACKEND=ffmpeg`; colours within ±3/255 of AVPlayer | — | — |
 | AVPlayer path (default on macOS) still plays | round video demo capture; code moved verbatim into `native_video::avplayer` | — | — |
+
+Package size: Linux tarball artifact 80.2 → 83.1 MB (+2.9 MB compressed),
+Windows zip artifact 43.2 → 47.3 MB (+4.2 MB). The FFmpeg libraries are
+~7 MB uncompressed per platform.
+
+The first Windows run caught `avutil-60.dll` importing
+`libwinpthread-1.dll` (MinGW backs `clock_gettime`/`nanosleep` with it);
+`-static` in FFmpeg's link flags fixed it, and the PE checker now proves
+the DLLs import only UCRT/KERNEL32/bcrypt.
 
 Not verified: real-time behaviour on actual Linux/Windows desktops (frame
 pacing under the wgpu/DirectX atlas upload, WASAPI/ALSA latency against the
