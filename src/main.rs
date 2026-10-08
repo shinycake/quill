@@ -855,10 +855,14 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     )
                     .expect("failed to open screenshot demo window");
 
-                let _ = demo_window.update(cx, |_, window, cx| {
-                    cx.activate(true);
-                    window.activate_window();
-                });
+                // `QUILL_DEMO_BACKGROUND=1`: leave the window behind the
+                // frontmost app (inactive), to measure the inactive path.
+                if std::env::var_os("QUILL_DEMO_BACKGROUND").is_none() {
+                    let _ = demo_window.update(cx, |_, window, cx| {
+                        cx.activate(true);
+                        window.activate_window();
+                    });
+                }
 
                 // Allow a couple of frames to paint, then signal the capture script.
                 cx.background_executor()
@@ -973,6 +977,25 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     }
                 }
                 let _ = std::fs::write(&marker_for_spawn, b"ready\n");
+                // `QUILL_DEMO_DEACTIVATE=1`: once ready, a second (blank)
+                // window takes key status, so the demo window goes from
+                // active to inactive, as when another app comes forward.
+                if std::env::var_os("QUILL_DEMO_DEACTIVATE").is_some() {
+                    cx.update(|cx| {
+                        if let Ok(other) = cx.open_window(
+                            WindowOptions {
+                                window_bounds: Some(WindowBounds::Windowed(Bounds {
+                                    origin: point(px(40.), px(40.)),
+                                    size: size(px(200.), px(120.)),
+                                })),
+                                ..Default::default()
+                            },
+                            |_, cx| cx.new(|_| EmptyView),
+                        ) {
+                            let _ = other.update(cx, |_, window, _| window.activate_window());
+                        }
+                    });
+                }
                 // Performance fixture:
                 // `QUILL_DEMO_AUTOSCROLL=<x>,<y>[,<dy>[,<steps>]]` scrolls
                 // whatever sits under that window point with synthetic wheel

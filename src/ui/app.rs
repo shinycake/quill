@@ -344,6 +344,9 @@ pub struct QuillApp {
     /// What asked for the next tick: cached slices by entity id, `None`
     /// for `QuillApp` itself (see `frame_clock`).
     pub(super) animation_targets: std::cell::RefCell<std::collections::HashSet<Option<EntityId>>>,
+    /// The next tick serves media playing with sound (allowed while the
+    /// window is inactive).
+    pub(super) animation_sound: std::cell::Cell<bool>,
     /// Whether the main window is active this frame: like tdesktop
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.

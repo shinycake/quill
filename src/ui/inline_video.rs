@@ -148,6 +148,35 @@ impl InlineVideos {
         !self.players.is_empty()
     }
 
+    /// The window became active or inactive: muted loops pause behind
+    /// another app (tdesktop pauses GIFs and round loops there) and resume
+    /// on return; a clip playing with sound keeps playing.
+    pub(super) fn set_window_active(&mut self, active: bool) {
+        #[cfg(target_os = "macos")]
+        for slot in self.players.values_mut() {
+            if slot.sound || slot.paused {
+                continue;
+            }
+            if active {
+                slot.video.play();
+            } else {
+                slot.video.pause();
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = active;
+    }
+
+    /// Whether a clip plays with sound (it keeps drawing in the background).
+    pub(super) fn sounding(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.players.values().any(|slot| slot.sound && !slot.paused)
+        }
+        #[cfg(not(target_os = "macos"))]
+        false
+    }
+
     /// Stop everything (viewer opened, autoplay turned off).
     pub(super) fn clear(&mut self) {
         self.players.clear();
@@ -410,7 +439,12 @@ impl QuillApp {
             let videos = self.inline_videos.borrow();
             if videos.active() {
                 // Seek rings spring in and out more smoothly at 60.
-                self.request_animation_tick(if videos.seek_animating() { 60 } else { 30 }, cx);
+                let fps = if videos.seek_animating() { 60 } else { 30 };
+                if videos.sounding() {
+                    self.request_media_tick(fps, cx);
+                } else {
+                    self.request_animation_tick(fps, cx);
+                }
             }
         }
         // Masks over the video blend into the history behind it.

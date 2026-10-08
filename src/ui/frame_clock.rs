@@ -22,6 +22,14 @@ impl QuillApp {
         self.request_animation_tick_for(self.slices.current(), fps, cx);
     }
 
+    /// [`Self::request_animation_tick`] for media playing with sound, which
+    /// keeps drawing while the window is in the background (tdesktop only
+    /// pauses muted GIFs, stickers and loops there).
+    #[track_caller]
+    pub(super) fn request_media_tick(&self, fps: u32, cx: &mut Context<Self>) {
+        self.request_tick(self.slices.current(), fps, true, cx);
+    }
+
     /// [`Self::request_animation_tick`] for an explicit target: a slice or
     /// the chat list's animation layer by entity id, `None` for the app.
     #[track_caller]
@@ -31,14 +39,39 @@ impl QuillApp {
         fps: u32,
         cx: &mut Context<Self>,
     ) {
+        self.request_tick(target, fps, false, cx);
+    }
+
+    #[track_caller]
+    fn request_tick(
+        &self,
+        target: Option<EntityId>,
+        fps: u32,
+        plays_sound: bool,
+        cx: &mut Context<Self>,
+    ) {
+        // Like tdesktop (`isGifPausedAtLeastFor` → `!widget()->isActive()`),
+        // nothing animates behind another app; activation redraws and the
+        // content asks again (`observe_window_activation`).
+        if !tick_wanted(self.window_active.get(), plays_sound) {
+            return;
+        }
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
         // second per call site), to hunt idle redraws.
         if trace_ticks() {
-            trace_caller(std::panic::Location::caller(), fps, target);
+            trace_caller(
+                std::panic::Location::caller(),
+                fps,
+                target,
+                self.window_active.get(),
+            );
         }
         self.animation_demand
             .set(self.animation_demand.get().max(fps.clamp(1, 60)));
         self.animation_targets.borrow_mut().insert(target);
+        if plays_sound {
+            self.animation_sound.set(true);
+        }
         if self.frame_clock_running.get() {
             return;
         }
@@ -53,7 +86,8 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         let demand = this.animation_demand.replace(0);
                         let targets = std::mem::take(&mut *this.animation_targets.borrow_mut());
-                        if demand > 0 {
+                        let sound = this.animation_sound.replace(false);
+                        if demand > 0 && tick_wanted(this.window_active.get(), sound) {
                             if targets.contains(&None) {
                                 cx.notify();
                             } else {
@@ -76,6 +110,12 @@ impl QuillApp {
         })
         .detach();
     }
+}
+
+/// Whether a frame-clock tick may run: always while the window is active,
+/// and in the background only for media playing with sound.
+fn tick_wanted(window_active: bool, plays_sound: bool) -> bool {
+    window_active || plays_sound
 }
 
 /// `QUILL_ASSUME_ACTIVE=1`: animate as if the window had focus, so CPU can
@@ -120,6 +160,7 @@ fn trace_caller(
     caller: &'static std::panic::Location<'static>,
     fps: u32,
     target: Option<EntityId>,
+    active: bool,
 ) {
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -137,10 +178,26 @@ fn trace_caller(
             last.insert(key, Instant::now());
             let target = target.map_or_else(|| "app".to_string(), |id| format!("slice {id:?}"));
             eprintln!(
-                "tick: {}:{} @{fps}fps for {target}",
+                "tick: {}:{} @{fps}fps for {target} (window active: {active})",
                 caller.file(),
                 caller.line()
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tick_wanted;
+
+    #[test]
+    fn nothing_ticks_behind_another_app() {
+        assert!(tick_wanted(true, false));
+        assert!(!tick_wanted(false, false));
+    }
+
+    #[test]
+    fn media_with_sound_keeps_playing_in_the_background() {
+        assert!(tick_wanted(false, true));
+    }
 }

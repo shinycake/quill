@@ -146,6 +146,39 @@ Idle footprints of the small fixtures are unchanged (83 MB / 123 MB); the
 user's 527 MB comes from a live account's images, which this bounds the
 same way.
 
+## Inactive window (follow-up to the live test)
+
+The live test found idle CPU higher with Quill behind another app than in
+front (Saved Messages: ~28% active, 35–38% inactive). Only the
+sticker/emoji requesters checked `window_active`; inline video loops,
+round videos, GIF autoplay, the date pill, jump highlight, typing dots and
+the other fades kept ticking, the muted AVPlayer loops kept decoding, and
+GIF autoplay notified the whole app at its own frame rate. Now:
+
+- One gate in the frame clock (`tick_wanted`): no tick is requested or
+  delivered while the window is inactive, except for media playing with
+  sound (`request_media_tick`, a round video or clip the user unmuted).
+- `observe_window_activation` updates the gate as soon as the window
+  changes state and redraws, so content asks for ticks again on return.
+- Muted inline loops pause behind another app and resume on return
+  (`InlineVideos::set_window_active`); GIF autoplay stops redrawing there.
+- Fixtures: `QUILL_DEMO_DEACTIVATE=1` (a second window takes key status
+  once the demo is ready, so the window goes active → inactive) and
+  `QUILL_DEMO_BACKGROUND=1` (never activate). `QUILL_TRACE_TICKS` lines
+  now include the window's active state.
+
+Release build, `QUILL_ASSUME_ACTIVE` unset, CPU over 6 samples:
+
+| Fixture | Active | Inactive before this fix | Inactive after |
+| --- | --- | --- | --- |
+| Round video note autoplaying | 8.1–10.9% | 7.5–10.7% | 1.1–1.9% |
+| GIF autoplay | 3.9–4.7% | 5.2–9.2% | 0.3–0.4% |
+| Animated stickers in history | 7.7–8.9% | — | 0.4–0.5% |
+| Animated emoji in a chat row (300 chats) | 2.9–3.6% | — | 0.4–0.5% |
+
+In every inactive run the tick trace goes quiet within a second of
+deactivation.
+
 ## Risks
 
 - A slice that reads state of an entity rendered outside it would replay

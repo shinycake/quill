@@ -1597,12 +1597,13 @@ impl QuillApp {
             inline_videos: Default::default(),
             animation_demand: Default::default(),
             row_fx: Default::default(),
+            animation_targets: Default::default(),
+            animation_sound: Default::default(),
             window_active: std::cell::Cell::new(true),
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
             composer_link_dialog: None,
             send_morph: Default::default(),
-            animation_targets: Default::default(),
             slices: Default::default(),
             stream_reveal: Default::default(),
             vanishing: Default::default(),
@@ -1947,6 +1948,15 @@ impl QuillApp {
         // tick is free when idle.
         app.apply_appearance(cx);
         app.init_slices(cx);
+        // Animations stop behind another app and resume on activation:
+        // update the gate now and redraw (the content asks for ticks again).
+        cx.observe_window_activation(window, |this, window, cx| {
+            let active = window.is_window_active() || super::frame_clock::assume_active();
+            this.window_active.set(active);
+            this.inline_videos.borrow_mut().set_window_active(active);
+            cx.notify();
+        })
+        .detach();
         // Remember the window's geometry when the user moves or resizes it.
         cx.observe_window_bounds(window, |this, window, cx| {
             this.schedule_window_state_save(window, cx);

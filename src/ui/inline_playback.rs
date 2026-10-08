@@ -270,7 +270,9 @@ impl QuillApp {
                         }
                         let playing =
                             this.playing_animation.is_some() && this.animation_frames.len() > 1;
-                        if playing {
+                        // Muted GIFs hold still behind another app, like
+                        // tdesktop; activation redraws.
+                        if playing && this.window_active.get() {
                             let elapsed = this
                                 .animation_started_at
                                 .map(|t| t.elapsed().as_secs_f64())
