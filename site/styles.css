@@ -130,16 +130,46 @@ h1 .accent {
 .chrome i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; }
 .chrome i:nth-child(2) { background: #febc2e; }
 .chrome i:nth-child(3) { background: #28c840; }
-.hero-shot {
-  margin: 56px 0 0; border-radius: 12px; overflow: hidden; background: #0d0d0f;
-  box-shadow: var(--shadow), 0 40px 120px -40px color-mix(in srgb, var(--accent) 45%, transparent);
-  transform: perspective(1800px) rotateX(6deg); transform-origin: top center;
+/* A generic laptop drawn in CSS; the clip plays on its screen. */
+.laptop {
+  --lid: #1b1c20; --lid-edge: #3a3c42; --base-top: #4a4d55; --base-bottom: #2a2c31; --groove: #1f2126;
+  margin: 64px auto 0; width: min(1080px, 100%); position: relative;
 }
-.hero-shot video { display: block; width: 100%; height: auto; aspect-ratio: 14 / 9; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .laptop {
+    --lid: #16171a; --lid-edge: #c9ccd2; --base-top: #e6e8ec; --base-bottom: #b9bdc5; --groove: #a7abb3;
+  }
+}
+.laptop-lid {
+  position: relative; margin: 0 4.5%; padding: 1.7% 1.7% 2.2%;
+  background: var(--lid); border-radius: 2.4% / 3.8%;
+  box-shadow: 0 0 0 1px var(--lid-edge), inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 50px 120px -40px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.laptop-screen { position: relative; overflow: hidden; border-radius: 0.6% / 1%; background: #0b0d14; aspect-ratio: 16 / 9; }
+.laptop-screen video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.laptop-notch {
+  position: absolute; top: 1.7%; left: 50%; transform: translateX(-50%);
+  width: 11%; height: 2.6%; background: var(--lid); border-radius: 0 0 9px 9px;
+}
+.laptop-notch::after {
+  content: ""; position: absolute; top: 34%; left: 50%; width: 6px; height: 6px; margin-left: -3px;
+  border-radius: 50%; background: #262a33; box-shadow: inset 0 0 0 1.5px #11141b;
+}
+.laptop-base {
+  position: relative; height: 0; padding-bottom: 2.6%; margin-top: -0.4%;
+  background: linear-gradient(180deg, var(--base-top), var(--base-bottom));
+  border-radius: 0 0 50% 50% / 0 0 100% 100%;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 30px 50px -20px rgba(0, 0, 0, 0.55);
+}
+.laptop-groove {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 15%; height: 42%; background: var(--groove); border-radius: 0 0 12px 12px;
+}
 @media (prefers-reduced-motion: no-preference) {
-  .hero-shot { animation: rise 1s cubic-bezier(.2,.7,.2,1) both .1s; }
-  @keyframes rise { from { opacity: 0; transform: perspective(1800px) rotateX(14deg) translateY(40px); } }
+  .laptop { animation: rise 1s cubic-bezier(.2,.7,.2,1) both .1s; }
 }
+@keyframes rise { from { opacity: 0; transform: translateY(40px); } }
 
 /* Notice */
 .notice { margin-top: 48px; }

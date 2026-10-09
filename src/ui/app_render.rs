@@ -652,9 +652,12 @@ impl Render for QuillApp {
                     )
                 },
             )
-            // Screenshot demos keep their caption as a fixed footer line.
+            // Screenshot demos keep their caption as a fixed footer line
+            // (`QUILL_DEMO_HIDE_STATUS=1` hides it, for recordings).
             .when(
-                self.live.is_none() && !self.status_note.is_empty(),
+                self.live.is_none()
+                    && !self.status_note.is_empty()
+                    && std::env::var_os("QUILL_DEMO_HIDE_STATUS").is_none(),
                 |this| {
                     this.child(
                         div()

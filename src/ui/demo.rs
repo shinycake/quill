@@ -1175,7 +1175,13 @@ impl QuillApp {
             return;
         };
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        let id = -(session.view_generation.0 as i64);
+        // After the newest loaded message, so the send lands at the bottom
+        // and repeated sends don't replace each other.
+        let id = session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.keys().next_back().copied())
+            .map_or(1, |last| last.max(0) + 1);
         let caption = text.trim();
         let reply_json = reply
             .filter(|r| r.chat_id == chat_id)
