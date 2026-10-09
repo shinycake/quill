@@ -56,6 +56,7 @@ impl Session {
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
                 self.storage_limits.apply_option(&name, &value);
+                self.apply_privacy_option(&name, &value);
                 if name == "disable_top_chats"
                     && let OptionValue::Boolean(off) = &value
                 {
@@ -418,7 +419,7 @@ impl Session {
             }
             // Slice (communities backend core): `communityId` (schema 1.8.67,
             // line 2264) is the `createCommunity` response — the driver
-            // chains it into `loadCommunityFullInfo`; nothing to reduce.
+            // chains it into `getCommunityFullInfo`; nothing to reduce.
             EnvelopePayload::CommunityId { .. } => {}
             // Slice (communities backend core): `updateCommunity` (schema
             // 1.8.67, line 10726) — create-on-first-sight, like chat
@@ -435,6 +436,16 @@ impl Session {
                 full_info,
             } => {
                 self.community_full_infos.insert(community_id, full_info);
+            }
+            // TDLib 1.8.68: the direct `getCommunityFullInfo` answer has
+            // no community id; the pending request carries it.
+            EnvelopePayload::CommunityFullInfo { full_info } => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetCommunityFullInfo
+                    && let Some(community_id) = pending.community_id
+                {
+                    self.community_full_infos.insert(community_id, full_info);
+                }
             }
             // Slice G2: welcome-message pack (`updateChatWelcomeMessages`,
             // schema 1.8.67, line 10649) — the full pack replaces the
@@ -2890,7 +2901,16 @@ impl Session {
             }
             EnvelopePayload::AddedProxy { .. } => self.apply_added_proxy(pending),
             EnvelopePayload::Seconds { seconds } => self.apply_proxy_ping(pending, seconds),
-            EnvelopePayload::Sessions { sessions } => {
+            payload @ (EnvelopePayload::NewChatPrivacySettings(_)
+            | EnvelopePayload::NetworkStatistics(_)
+            | EnvelopePayload::RecoveryEmailAddress
+            | EnvelopePayload::UpdateSuggestedActions { .. }) => {
+                self.apply_privacy_data_payload(&payload, pending);
+            }
+            EnvelopePayload::Sessions {
+                sessions,
+                inactive_session_ttl_days,
+            } => {
                 // Slice A3: `getActiveSessions` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
                 // The answer is authoritative: it replaces the list and
@@ -2899,6 +2919,9 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
                     self.resolve_unconfirmed_entries(&sessions);
                     self.sessions = Some(sessions);
+                    if inactive_session_ttl_days.is_some() {
+                        self.privacy_data.inactive_session_ttl_days = inactive_session_ttl_days;
+                    }
                     self.sessions_loading = false;
                     self.sessions_error = None;
                     self.sessions_stale = false;

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/shinycake/quill/actions/workflows/ci.yml/badge.svg)](https://github.com/shinycake/quill/actions/workflows/ci.yml)
 ![Rust 1.92](https://img.shields.io/badge/rust-1.92-orange)
-![TDLib 1.8.67](https://img.shields.io/badge/TDLib-1.8.67-blue)
+![TDLib 1.8.68](https://img.shields.io/badge/TDLib-1.8.68-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 Quill is an independent, unofficial Telegram desktop client written in Rust. It uses Telegram's official [TDLib](https://core.telegram.org/tdlib) library for everything that talks to Telegram, and draws its interface with [GPUI](https://www.gpui.rs).
@@ -79,7 +79,7 @@ Without credentials, `cargo run --features ui` opens a synthetic demo chat. To s
 
 On Linux, building the UI also needs the GTK 3 and ALSA development packages (`libgtk-3-dev` and `libasound2-dev` on Debian and Ubuntu).
 
-Toolchain: Rust 1.98.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.0. TDLib: 1.8.67.
+Toolchain: Rust 1.98.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.0. TDLib: 1.8.68.
 
 ## Status
 
@@ -534,10 +534,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Welcome message setup: Welcome-message row in the group/channel info panel opens the pack editor dialog (src/ui/mod.rs) <!-- parity:groups-welcome-setup -->
 - [x] Communities: create a community (createCommunity exists in TDLib 1.8.67; backend — builder + driver + state sync — plus "New community" dialog UI: name field, base-chat picker, hide-chat option) <!-- parity:communities-create -->
 - [x] Communities: browse and manage owned communities (backend — builders + drivers + state sync for create/loadFullInfo/setName — plus Communities hub dialog listing owned communities with per-row info buttons) <!-- parity:communities-hub -->
-- [ ] Communities: toggle community chat visibility (blocked: no TDLib 1.8.67 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
+- [ ] Communities: toggle community chat visibility (blocked: no TDLib 1.8.68 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
 - [x] Communities: community chat-list mode (view a community's chats as a filtered chat list) <!-- parity:communities-chatlist-mode -->
-- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.67 method) <!-- parity:communities-add-chat -->
-- [ ] Communities: admin-rights management (blocked: no TDLib 1.8.67 method) <!-- parity:communities-admin-rights -->
+- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.68 method) <!-- parity:communities-add-chat -->
+- [ ] Communities: admin-rights management (blocked: no TDLib 1.8.68 method) <!-- parity:communities-admin-rights -->
+- [x] Communities: members can edit the chat list switch (setCommunityPermissions, TDLib 1.8.68) <!-- parity:communities-permissions -->
+- [x] Communities: delete a community, owner only, with confirmation (deleteCommunity, TDLib 1.8.68) <!-- parity:communities-delete -->
 - [x] Communities: info panel (backend — loadFullInfo/setName builders + drivers + state sync — plus community info panel UI: name with edit prompt, admin/banned/request counts, chat list with hidden badges) <!-- parity:communities-info -->
 - [x] Communities: "chat added to community" service message (`messageChatAddedToCommunity`; TGX `ActionChatAddedToCommunity`/`ActionChatAddedToCommunityUnknown` verbatim — `This chat was added to community "NAME"` with the name from the session `updateCommunity` cache, nameless fallback when unknown) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:groups-added-to-community -->
 - [x] Communities: "chat removed from community" service message (`messageChatRemovedFromCommunity`; TGX `ActionChatRemovedFromCommunity` verbatim — `This chat was removed from community`) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:groups-removed-from-community -->
@@ -1022,21 +1024,21 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 ### Settings: privacy & security
 
-- [ ] More privacy settings: bio, date of birth, voice messages, gifts, who can message me, saved music, find me by phone <!-- parity:settings-privacy-extra-keys -->
-- [ ] Privacy rule types: Premium users, bots and chat members in exceptions <!-- parity:settings-privacy-rule-types -->
+- [x] More privacy settings: bio, date of birth, voice messages, gifts, who can message me, saved music, find me by phone <!-- parity:settings-privacy-extra-keys -->
+- [x] Privacy rule types: Premium users, bots and chat members in exceptions <!-- parity:settings-privacy-rule-types -->
 - [ ] Editable call privacy exceptions <!-- parity:settings-privacy-call-exceptions -->
 - [x] Local passcode with auto-lock, lock screen and biometric unlock <!-- parity:settings-passcode -->
 - [x] Enter the recovery email confirmation code <!-- parity:settings-recovery-email-code -->
 - [x] Forgot password in Settings and password reset with a waiting period <!-- parity:settings-password-reset -->
 - [x] Set or change the login email <!-- parity:settings-login-email -->
-- [ ] "Do you still remember your password?" check <!-- parity:settings-password-remember -->
-- [ ] Terminate old sessions if inactive for a chosen time <!-- parity:settings-inactive-sessions -->
+- [x] "Do you still remember your password?" check <!-- parity:settings-password-remember -->
+- [x] Terminate old sessions if inactive for a chosen time <!-- parity:settings-inactive-sessions -->
 - [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
 - [ ] Session details box and rename this device <!-- parity:settings-session-details -->
 - [x] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
 - [ ] Bots and websites: mini-app permissions and delete cloud drafts <!-- parity:settings-bots-websites -->
-- [ ] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
-- [ ] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
+- [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
+- [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
 - [ ] Passkeys (blocked: Telegram only allows passkeys in its signed apps) <!-- parity:settings-passkeys -->
 - [ ] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
 
@@ -1071,8 +1073,8 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Clear cache removes TDLib cached files <!-- parity:data-clear-cache-real -->
 - [ ] Storage limits: total size, media cache, clear older than <!-- parity:data-storage-limits -->
 - [ ] Clear storage per file type and per chat from the breakdown <!-- parity:data-clear-per-type -->
-- [ ] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
-- [ ] Network usage statistics with reset <!-- parity:data-network-usage -->
+- [x] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
+- [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
 - [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip <!-- parity:data-proxy-extras -->
 - [ ] Try IPv6 option <!-- parity:data-ipv6 -->

@@ -466,6 +466,8 @@ pub struct QuillApp {
     pub(super) appearance_applied: Option<(ThemeMode, u32, bool)>,
     /// Slice S3: Privacy settings overlay (TGX Settings → Privacy).
     pub(super) privacy_open: bool,
+    /// B13: transient state of the privacy / security extras.
+    pub(super) privacy_ui: super::privacy_extra::PrivacyUi,
     /// Slice S3: per-rule editor overlay target (Privacy screen).
     pub(super) privacy_editor: Option<PrivacyEditorTarget>,
     /// Slice S3: exception list overlay — the rule and always/never kind.

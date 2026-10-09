@@ -208,6 +208,7 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
         last_active_date: 1758900000,
         ip_address: "5.6.7.8".into(),
         location: "Tel Aviv, Israel".into(),
+        ..Default::default()
     }]);
     session.sessions_mutating = true;
     let extra = session.request(RequestPurpose::TerminateSession { session_id: 22 }, None);
@@ -551,6 +552,7 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
         last_active_date: 1758900000,
         ip_address: "5.6.7.8".into(),
         location: "Tel Aviv, Israel".into(),
+        ..Default::default()
     }]);
     session.sessions_mutating = true;
     let extra = session.request(RequestPurpose::ToggleSessionCalls { session_id: 22 }, None);

@@ -318,6 +318,25 @@ impl Session {
             ) => {
                 self.fail_story_page_op(purpose, error_reason(&err).to_string());
             }
+            // TDLib 1.8.68 community management: surface refusals
+            // ("Have not enough rights", a missing community) in the
+            // status note.
+            Some(
+                purpose @ (RequestPurpose::SetCommunityName
+                | RequestPurpose::SetCommunityPhoto
+                | RequestPurpose::SetCommunityPermissions
+                | RequestPurpose::DeleteCommunity),
+            ) => {
+                let action = match purpose {
+                    RequestPurpose::SetCommunityName => "Could not rename the community",
+                    RequestPurpose::SetCommunityPhoto => "Could not change the community photo",
+                    RequestPurpose::SetCommunityPermissions => {
+                        "Could not change the community permissions"
+                    }
+                    _ => "Could not delete the community",
+                };
+                self.community_error = Some(format!("{action}: {}", error_reason(&err)));
+            }
             _ => {}
         }
         // Slice G1: roll back optimistic mutations the server
@@ -1201,6 +1220,16 @@ impl Session {
                 | RequestPurpose::PingProxy { .. }
                 | RequestPurpose::SetPreferIpv6 { .. }),
             ) => self.apply_proxy_error(purpose, &err),
+            Some(
+                purpose @ (RequestPurpose::GetNewChatPrivacy
+                | RequestPurpose::SetNewChatPrivacy { .. }
+                | RequestPurpose::SetGiftSettings
+                | RequestPurpose::SetInactiveSessionTtl
+                | RequestPurpose::SetSensitiveContent
+                | RequestPurpose::GetNetworkStatistics
+                | RequestPurpose::ResetNetworkStatistics
+                | RequestPurpose::CheckRememberedPassword),
+            ) => self.apply_privacy_data_error(purpose, &err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;
                 self.sessions_stale = false;

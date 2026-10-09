@@ -655,6 +655,14 @@ pub enum ScreenshotDemo {
     /// Slice S3: Privacy overlay (Settings → Privacy) — five rules,
     /// read-date setting, blocked list (injected, no live Telegram).
     ReadyPrivacy,
+    /// B13: the Gifts privacy editor — who can show gifts, the gift icon
+    /// switch and the accepted gift types (injected, no live Telegram).
+    ReadyPrivacyGifts,
+    /// B13: the session details view (application, system, IP address,
+    /// location) with Terminate (injected, no live Telegram).
+    ReadySessionDetails,
+    /// B13: the warning before opening an executable file.
+    ReadyFileOpenConfirm,
     /// Slice A2: two-step verification overlay — password set with
     /// recovery email (injected `passwordState`, no live Telegram).
     Ready2faManage,

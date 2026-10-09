@@ -637,6 +637,12 @@ pub fn saved_note(dest: &std::path::Path, downloads: Option<&std::path::Path>) -
 /// The user's downloads folder (`XDG_DOWNLOAD_DIR`, else the platform's,
 /// else `~/Downloads`).
 pub fn downloads_dir() -> Option<std::path::PathBuf> {
+    crate::file_prefs::configured_download_dir().or_else(os_downloads_dir)
+}
+
+/// The operating system's downloads folder (`XDG_DOWNLOAD_DIR`, else the
+/// platform's, else `~/Downloads`), ignoring the in-app choice.
+pub fn os_downloads_dir() -> Option<std::path::PathBuf> {
     std::env::var("XDG_DOWNLOAD_DIR")
         .map(std::path::PathBuf::from)
         .ok()

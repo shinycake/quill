@@ -1291,6 +1291,30 @@ pub enum RequestPurpose {
     SetPrivacyRules {
         key: PrivacySettingKey,
     },
+    /// B13: `getNewChatPrivacySettings`. Response is
+    /// `newChatPrivacySettings`.
+    GetNewChatPrivacy,
+    /// B13: `setNewChatPrivacySettings`. Response is `ok`; applied
+    /// optimistically at send time.
+    SetNewChatPrivacy {
+        previous_allow: bool,
+    },
+    /// B13: `setGiftSettings`. Response is `ok`; applied optimistically.
+    SetGiftSettings,
+    /// B13: `setInactiveSessionTtl`. Response is `ok`; applied
+    /// optimistically.
+    SetInactiveSessionTtl,
+    /// B13: `setOption(ignore_sensitive_content_restrictions)`. The truth
+    /// arrives as `updateOption`.
+    SetSensitiveContent,
+    /// B13: `getNetworkStatistics`. Response is `networkStatistics`.
+    GetNetworkStatistics,
+    /// B13: `resetNetworkStatistics`. Response is `ok`.
+    ResetNetworkStatistics,
+    /// B13: `getRecoveryEmailAddress` used to verify a typed password.
+    CheckRememberedPassword,
+    /// B13: `hideSuggestedAction(suggestedActionCheckPassword)`.
+    HideCheckPasswordSuggestion,
     /// Slice S3: `getReadDatePrivacySettings`. Response is
     /// `readDatePrivacySettings`.
     GetReadDatePrivacy,
@@ -1516,16 +1540,25 @@ pub enum RequestPurpose {
     },
     /// Slice (communities backend core): `createCommunity` (schema 1.8.67,
     /// line 11806). Response is `communityId`; the driver chains it into
-    /// `loadCommunityFullInfo`.
+    /// `getCommunityFullInfo`.
     CreateCommunity,
-    /// Slice (communities backend core): `loadCommunityFullInfo` (schema
-    /// 1.8.67, line 11799). Response is `ok`; the pack arrives as
-    /// `updateCommunityFullInfo`.
-    LoadCommunityFullInfo,
+    /// `getCommunityFullInfo` (TDLib 1.8.68; replaced
+    /// `loadCommunityFullInfo`). Response is `communityFullInfo`,
+    /// correlated through `PendingRequest::community_id`.
+    GetCommunityFullInfo,
     /// Slice (communities backend core): `setCommunityName` (schema 1.8.67,
     /// line 11811). Response is `ok`; the pack is reloaded on success and
     /// the new name arrives via `updateCommunity`.
     SetCommunityName,
+    /// `setCommunityPhoto` (TDLib 1.8.68). Response is `ok`; the new
+    /// photo arrives via `updateCommunity` / `updateCommunityFullInfo`.
+    SetCommunityPhoto,
+    /// `setCommunityPermissions` (TDLib 1.8.68). Response is `ok`; the
+    /// new permissions arrive via `updateCommunity`.
+    SetCommunityPermissions,
+    /// `deleteCommunity` (TDLib 1.8.68). Response is `ok`; the state
+    /// drops the community and its full-info pack.
+    DeleteCommunity,
     /// Slice A7: `getAccountTtl`. Response is `accountTtl`, stored in
     /// `Session::account_ttl_days`.
     GetAccountTtl,

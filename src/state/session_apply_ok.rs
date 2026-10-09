@@ -16,6 +16,7 @@ impl Session {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
         self.apply_proxy_ok(pending);
+        self.apply_privacy_data_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::EditMessageSchedulingState {
                 message_id,
@@ -326,6 +327,16 @@ impl Session {
             // name itself arrives via `updateCommunity`.
             Some(RequestPurpose::SetCommunityName) => {
                 if let Some(community_id) = pending.and_then(|p| p.community_id) {
+                    self.community_full_infos.remove(&community_id);
+                }
+            }
+            // TDLib 1.8.68: a deleted community is gone for everyone —
+            // drop it and its pack. (TDLib pushes the resulting
+            // `updateCommunity` before this `ok`; a later one with
+            // `have_access = false` is filtered out of the hub.)
+            Some(RequestPurpose::DeleteCommunity) => {
+                if let Some(community_id) = pending.and_then(|p| p.community_id) {
+                    self.communities.remove(&community_id);
                     self.community_full_infos.remove(&community_id);
                 }
             }

@@ -280,10 +280,10 @@ impl QuillApp {
                     None => Ok(()),
                 },
                 // Slice G10: community full info (cached + deduped by
-                // the driver); arrives as `updateCommunityFullInfo`.
+                // the driver); the answer is the `communityFullInfo` pack.
                 InfoPanelTarget::Community(community_id) => live
                     .driver
-                    .load_community_full_info(community_id)
+                    .get_community_full_info(community_id)
                     .map(|_| ()),
             };
             if let Err(err) = fetch {

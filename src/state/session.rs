@@ -280,6 +280,9 @@ pub struct Session {
     pub storage_clearing: bool,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
     pub storage_limits: crate::storage_limits::StorageLimits,
+    /// B13: new-chat privacy, inactive-session TTL, 18+ option, network
+    /// usage and the remember-password check.
+    pub privacy_data: PrivacyData,
     /// Batch 4: new-login alert, service popups and terms of service.
     pub notices: AccountNotices,
     /// Batch 6: two-step recovery / reset / login-email flow state.
@@ -809,9 +812,14 @@ pub struct Session {
     /// create-on-first-sight.
     pub communities: HashMap<i64, ParsedCommunity>,
     /// Slice (communities backend core): `communityFullInfo` cache, keyed
-    /// by community id, fed by `updateCommunityFullInfo` (schema 1.8.67,
-    /// line 10753). Presence records "fetched".
+    /// by community id, fed by the `getCommunityFullInfo` answer and
+    /// `updateCommunityFullInfo` (TDLib 1.8.68). Presence records
+    /// "fetched".
     pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
+    /// TDLib 1.8.68 community management: one-shot; set when
+    /// `setCommunityName` / `setCommunityPhoto` / `setCommunityPermissions`
+    /// / `deleteCommunity` errors. The UI drains it into the status note.
+    pub community_error: Option<String>,
     /// Phase D2: `getChatStatistics` fetch state, keyed by chat id.
     pub chat_statistics: HashMap<i64, ChatStatisticsFetch>,
     /// Phase D3a: `getChatInviteLinks` fetch state, keyed by chat id.
@@ -1209,6 +1217,7 @@ impl Session {
             storage_freed: None,
             storage_clearing: false,
             storage_limits: Default::default(),
+            privacy_data: Default::default(),
             notices: AccountNotices::default(),
             twofa_flow: TwofaFlow::default(),
             password_state: None,
@@ -1380,6 +1389,7 @@ impl Session {
             supergroup_full_infos: HashMap::new(),
             communities: HashMap::new(),
             community_full_infos: HashMap::new(),
+            community_error: None,
             chat_statistics: HashMap::new(),
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),

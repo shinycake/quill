@@ -1829,14 +1829,42 @@ impl QuillApp {
     ) {
         // Slice S3: Privacy overlay with injected rules, the read-date
         // setting, and the blocked list (no live Telegram).
-        if matches!(demo, Some(ScreenshotDemo::ReadyPrivacy)) {
+        if matches!(
+            demo,
+            Some(ScreenshotDemo::ReadyPrivacy | ScreenshotDemo::ReadyPrivacyGifts)
+        ) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_privacy(session, &self.demo_sink, &self.demo_seq);
             }
             self.privacy_open = true;
+            if matches!(demo, Some(ScreenshotDemo::ReadyPrivacyGifts)) {
+                self.privacy_editor = Some(PrivacyEditorTarget::Rule(
+                    quill::telegram::requests_privacy::PrivacySettingKey::AutosaveGifts,
+                ));
+            }
             self.status_note =
                 "screenshot demo — privacy settings (injected, no live Telegram)".into();
+        }
+        // B13: session details view and the file-open warning.
+        if matches!(demo, Some(ScreenshotDemo::ReadySessionDetails)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                session.sessions = Some(demo_sessions());
+                session.sessions_loading = false;
+                session.sessions_error = None;
+                session.privacy_data.inactive_session_ttl_days = Some(180);
+            }
+            self.sessions_open = true;
+            self.privacy_ui.session_details = Some(123456789);
+            self.status_note = "screenshot demo — session details".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyFileOpenConfirm)) {
+            self.privacy_ui.file_open = Some(super::privacy_extra::FileOpenConfirm {
+                path: std::path::PathBuf::from("invoice-2026.bin"),
+                warning: quill::file_prefs::OpenWarning::Executable,
+            });
+            self.status_note = "screenshot demo — file open warning".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideoSend)) {
             self.composer.update(cx, |input, cx| {

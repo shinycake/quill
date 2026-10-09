@@ -7,11 +7,12 @@
 //! unblocks, TGX `Tdlib.unblockSender`).
 
 use crate::ids::RequestId;
+use crate::telegram::requests::PrivacyWho;
 use serde_json::{Value, json};
 
-/// Slice S3 (privacy screen): the `UserPrivacySetting` constructors the
-/// Privacy screen edits (schema 1.8.67, :8981-:9003). Call settings keep
-/// the pre-existing `CallPrivacySetting` / `call_privacy_*` plumbing
+/// Slice S3 (privacy screen) + B13: the `UserPrivacySetting` constructors
+/// the Privacy screen edits (schema 1.8.67, :8981-:9021). Call settings
+/// keep the pre-existing `CallPrivacySetting` / `call_privacy_*` plumbing
 /// (Phase C2i) — the screen reads those fields directly instead of
 /// re-plumbing them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,11 +22,26 @@ pub enum PrivacySettingKey {
     ShowProfilePhoto,
     ShowLinkInForwardedMessages,
     AllowChatInvites,
+    /// B13: `userPrivacySettingShowBio` (tdesktop "Bio").
+    ShowBio,
+    /// B13: `userPrivacySettingShowBirthdate` (tdesktop "Date of birth").
+    ShowBirthdate,
+    /// B13: `userPrivacySettingShowProfileAudio` (tdesktop "Saved Music").
+    ShowProfileAudio,
+    /// B13: `userPrivacySettingAllowFindingByPhoneNumber` (tdesktop's
+    /// "Who can find me by my number" under Phone Number).
+    AllowFindingByPhoneNumber,
+    /// B13: `userPrivacySettingAllowPrivateVoiceAndVideoNoteMessages`
+    /// (tdesktop "Voice Messages").
+    AllowVoiceMessages,
+    /// B13: `userPrivacySettingAutosaveGifts` (tdesktop "Gifts": who can
+    /// display gifts on the profile).
+    AutosaveGifts,
 }
 
 impl PrivacySettingKey {
     /// Verbatim `UserPrivacySetting` constructor names (schema 1.8.67,
-    /// :8982 / :8991 / :8985 / :8988 / :9003).
+    /// :8982-:9021).
     pub fn td_type(self) -> &'static str {
         match self {
             PrivacySettingKey::ShowStatus => "userPrivacySettingShowStatus",
@@ -35,12 +51,20 @@ impl PrivacySettingKey {
                 "userPrivacySettingShowLinkInForwardedMessages"
             }
             PrivacySettingKey::AllowChatInvites => "userPrivacySettingAllowChatInvites",
+            PrivacySettingKey::ShowBio => "userPrivacySettingShowBio",
+            PrivacySettingKey::ShowBirthdate => "userPrivacySettingShowBirthdate",
+            PrivacySettingKey::ShowProfileAudio => "userPrivacySettingShowProfileAudio",
+            PrivacySettingKey::AllowFindingByPhoneNumber => {
+                "userPrivacySettingAllowFindingByPhoneNumber"
+            }
+            PrivacySettingKey::AllowVoiceMessages => {
+                "userPrivacySettingAllowPrivateVoiceAndVideoNoteMessages"
+            }
+            PrivacySettingKey::AutosaveGifts => "userPrivacySettingAutosaveGifts",
         }
     }
 
-    /// Screen row labels (TGX `SettingsPrivacyKeyController.getName`
-    /// strings: LastSeen / PhoneNumber / PrivacyPhotoTitle /
-    /// PrivacyForwardLinkTitle / GroupsAndChannels).
+    /// Screen row labels (tdesktop `lng_settings_*` privacy rows).
     pub fn label(self) -> &'static str {
         match self {
             PrivacySettingKey::ShowStatus => "Last Seen & Online",
@@ -48,22 +72,140 @@ impl PrivacySettingKey {
             PrivacySettingKey::ShowProfilePhoto => "Profile Photos",
             PrivacySettingKey::ShowLinkInForwardedMessages => "Forwarded Messages",
             PrivacySettingKey::AllowChatInvites => "Groups & Channels",
+            PrivacySettingKey::ShowBio => "Bio",
+            PrivacySettingKey::ShowBirthdate => "Date of Birth",
+            PrivacySettingKey::ShowProfileAudio => "Saved Music",
+            PrivacySettingKey::AllowFindingByPhoneNumber => "Who can find me by my number",
+            PrivacySettingKey::AllowVoiceMessages => "Voice Messages",
+            PrivacySettingKey::AutosaveGifts => "Gifts",
         }
     }
 
-    /// Slice S3: the five privacy-screen rules (TGX
-    /// `SettingsPrivacyController`). The two call settings
-    /// (`userPrivacySettingAllowCalls`,
+    /// Every rule key the screen fetches and keeps in sync. The call
+    /// settings (`userPrivacySettingAllowCalls`,
     /// `userPrivacySettingAllowPeerToPeerCalls`) keep their Phase C2i
     /// plumbing and are edited separately.
-    pub const fn all() -> [PrivacySettingKey; 5] {
+    pub const fn all() -> [PrivacySettingKey; 11] {
         [
             PrivacySettingKey::ShowStatus,
             PrivacySettingKey::ShowPhoneNumber,
             PrivacySettingKey::ShowProfilePhoto,
             PrivacySettingKey::ShowLinkInForwardedMessages,
             PrivacySettingKey::AllowChatInvites,
+            PrivacySettingKey::ShowBio,
+            PrivacySettingKey::ShowBirthdate,
+            PrivacySettingKey::ShowProfileAudio,
+            PrivacySettingKey::AllowFindingByPhoneNumber,
+            PrivacySettingKey::AllowVoiceMessages,
+            PrivacySettingKey::AutosaveGifts,
         ]
+    }
+
+    /// Rows of the "Who can see my..." block, in tdesktop's order.
+    pub const fn visibility_rows() -> [PrivacySettingKey; 8] {
+        [
+            PrivacySettingKey::ShowPhoneNumber,
+            PrivacySettingKey::ShowStatus,
+            PrivacySettingKey::ShowProfilePhoto,
+            PrivacySettingKey::ShowBio,
+            PrivacySettingKey::ShowBirthdate,
+            PrivacySettingKey::AutosaveGifts,
+            PrivacySettingKey::ShowProfileAudio,
+            PrivacySettingKey::ShowLinkInForwardedMessages,
+        ]
+    }
+
+    /// Rows of the "Who can contact me" block (the call rows and the
+    /// new-chat row sit between them in the UI).
+    pub const fn contact_rows() -> [PrivacySettingKey; 2] {
+        [
+            PrivacySettingKey::AllowVoiceMessages,
+            PrivacySettingKey::AllowChatInvites,
+        ]
+    }
+
+    /// The editor's radio header (tdesktop `lng_edit_privacy_*_header`).
+    pub fn header(self) -> &'static str {
+        match self {
+            PrivacySettingKey::ShowStatus => "Who can see my last seen time",
+            PrivacySettingKey::ShowPhoneNumber => "Who can see my phone number",
+            PrivacySettingKey::ShowProfilePhoto => "Who can see my profile photos",
+            PrivacySettingKey::ShowLinkInForwardedMessages => {
+                "Who can add a link to my account when forwarding my messages"
+            }
+            PrivacySettingKey::AllowChatInvites => "Who can add me to groups and channels",
+            PrivacySettingKey::ShowBio => "Who can see my bio",
+            PrivacySettingKey::ShowBirthdate => "Who can see my date of birth",
+            PrivacySettingKey::ShowProfileAudio => "Who can see my saved music in profile",
+            PrivacySettingKey::AllowFindingByPhoneNumber => "Who can find me by my number",
+            PrivacySettingKey::AllowVoiceMessages => "Who can send me voice messages",
+            PrivacySettingKey::AutosaveGifts => "Who can display gifts on my profile",
+        }
+    }
+
+    /// The note under the exception rows (tdesktop
+    /// `lng_edit_privacy_*_exceptions`).
+    pub fn exceptions_note(self) -> &'static str {
+        match self {
+            PrivacySettingKey::ShowPhoneNumber => {
+                "Add users or groups to override the settings above."
+            }
+            PrivacySettingKey::ShowBio => {
+                "These users will or will not be able to see your profile bio regardless of the settings above."
+            }
+            PrivacySettingKey::ShowBirthdate => {
+                "These users will or will not be able to see your date of birth regardless of the settings above."
+            }
+            PrivacySettingKey::AutosaveGifts => {
+                "Choose whether gifts from specific senders need your approval before they're visible to others on your profile."
+            }
+            PrivacySettingKey::ShowProfileAudio => {
+                "These users will or will not be able to see your saved music regardless of the settings above."
+            }
+            PrivacySettingKey::AllowVoiceMessages => {
+                "These users will or will not be able to send voice and video messages to you regardless of the settings above."
+            }
+            _ => "Add users or groups to override the settings above.",
+        }
+    }
+
+    /// Radio choices the key supports. tdesktop's "find me by number"
+    /// offers only Everybody / My contacts.
+    pub fn options(self) -> &'static [PrivacyWho] {
+        match self {
+            PrivacySettingKey::AllowFindingByPhoneNumber => {
+                &[PrivacyWho::Everybody, PrivacyWho::Contacts]
+            }
+            _ => &[
+                PrivacyWho::Everybody,
+                PrivacyWho::Contacts,
+                PrivacyWho::Nobody,
+            ],
+        }
+    }
+
+    /// Whether the key takes exception lists at all (the find-by-number
+    /// rule is a plain two-way choice).
+    pub fn has_exceptions(self) -> bool {
+        self != PrivacySettingKey::AllowFindingByPhoneNumber
+    }
+
+    /// tdesktop `allowPremiumsToggle`: only the Always list of
+    /// "Groups & Channels" offers the Premium users row.
+    pub fn allows_premium_exception(self, always: bool) -> bool {
+        always && self == PrivacySettingKey::AllowChatInvites
+    }
+
+    /// tdesktop `allowMiniAppsToggle`: both lists of "Gifts" offer the
+    /// Mini Apps (bots) row.
+    pub fn allows_bots_exception(self) -> bool {
+        self == PrivacySettingKey::AutosaveGifts
+    }
+
+    /// tdesktop `VoicesPrivacyController::premiumClickedCallback`:
+    /// restricting who can send voice messages needs Premium.
+    pub fn restriction_needs_premium(self) -> bool {
+        self == PrivacySettingKey::AllowVoiceMessages
     }
 }
 
@@ -129,11 +271,108 @@ pub fn get_blocked_message_senders(extra: RequestId, offset: i32, limit: i32) ->
     .to_string()
 }
 
+/// B13: `getNewChatPrivacySettings` (schema 1.8.67, :15632 — "Returns
+/// privacy settings for new chats").
+pub fn get_new_chat_privacy_settings(extra: RequestId) -> String {
+    json!({
+        "@type": "getNewChatPrivacySettings",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// B13: `setNewChatPrivacySettings` (schema 1.8.67, :15629).
+/// `newChatPrivacySettings allow_new_chats_from_unknown_users:Bool
+/// incoming_paid_message_star_count:int53` (:9033). The star count is
+/// sent back unchanged (the paid-messages price slider is not part of
+/// this screen).
+pub fn set_new_chat_privacy_settings(
+    extra: RequestId,
+    allow_from_unknown: bool,
+    incoming_paid_message_star_count: i64,
+) -> String {
+    json!({
+        "@type": "setNewChatPrivacySettings",
+        "@extra": extra.as_extra(),
+        "settings": {
+            "@type": "newChatPrivacySettings",
+            "allow_new_chats_from_unknown_users": allow_from_unknown,
+            "incoming_paid_message_star_count": incoming_paid_message_star_count,
+        },
+    })
+    .to_string()
+}
+
+/// B13: `setGiftSettings` (schema 1.8.67, :15293 — "Changes settings for
+/// gift receiving for the current user").
+pub fn set_gift_settings(extra: RequestId, settings: Value) -> String {
+    json!({
+        "@type": "setGiftSettings",
+        "@extra": extra.as_extra(),
+        "settings": settings,
+    })
+    .to_string()
+}
+
+/// B13: `setInactiveSessionTtl` (schema 1.8.67, :15120 — "Changes the
+/// period of inactivity after which sessions will automatically be
+/// terminated"). `inactive_session_ttl_days` is 1-366.
+pub fn set_inactive_session_ttl(extra: RequestId, days: i32) -> String {
+    json!({
+        "@type": "setInactiveSessionTtl",
+        "@extra": extra.as_extra(),
+        "inactive_session_ttl_days": days,
+    })
+    .to_string()
+}
+
+/// B13: `getRecoveryEmailAddress` (schema 1.8.67) — TDLib documents it as
+/// the way to verify a password the user typed, which is how the
+/// "Do you still remember your password?" check works.
+pub fn get_recovery_email_address(extra: RequestId, password: &str) -> String {
+    json!({
+        "@type": "getRecoveryEmailAddress",
+        "@extra": extra.as_extra(),
+        "password": password,
+    })
+    .to_string()
+}
+
+/// B13: `hideSuggestedAction` (schema 1.8.67, :12971) for a
+/// `suggestedActionCheckPassword`.
+pub fn hide_check_password_suggestion(extra: RequestId) -> String {
+    json!({
+        "@type": "hideSuggestedAction",
+        "@extra": extra.as_extra(),
+        "action": {"@type": "suggestedActionCheckPassword"},
+    })
+    .to_string()
+}
+
+/// B13: `getNetworkStatistics` (schema 1.8.67, :15808). `only_current`
+/// false = everything since the last reset.
+pub fn get_network_statistics(extra: RequestId) -> String {
+    json!({
+        "@type": "getNetworkStatistics",
+        "@extra": extra.as_extra(),
+        "only_current": false,
+    })
+    .to_string()
+}
+
+/// B13: `resetNetworkStatistics` (schema 1.8.67, :15814).
+pub fn reset_network_statistics(extra: RequestId) -> String {
+    json!({
+        "@type": "resetNetworkStatistics",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::privacy::PrivacyRuleDetail;
-    use crate::telegram::requests::PrivacyWho;
     use crate::telegram::requests::set_message_sender_block_list;
 
     #[test]
@@ -199,5 +438,98 @@ mod tests {
         assert_eq!(v["sender_id"]["@type"], "messageSenderUser");
         assert_eq!(v["sender_id"]["user_id"], 42);
         assert!(v["block_list"].is_null());
+    }
+}
+
+#[cfg(test)]
+mod b13_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn parse(json: String) -> Value {
+        serde_json::from_str(&json).unwrap()
+    }
+
+    #[test]
+    fn new_keys_use_the_schema_constructor_names() {
+        let names: Vec<&str> = PrivacySettingKey::all()
+            .iter()
+            .map(|k| k.td_type())
+            .collect();
+        for expected in [
+            "userPrivacySettingShowBio",
+            "userPrivacySettingShowBirthdate",
+            "userPrivacySettingShowProfileAudio",
+            "userPrivacySettingAllowFindingByPhoneNumber",
+            "userPrivacySettingAllowPrivateVoiceAndVideoNoteMessages",
+            "userPrivacySettingAutosaveGifts",
+        ] {
+            assert!(names.contains(&expected), "{expected} missing");
+        }
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len());
+        // Every key has a place on the screen: the two blocks, plus the
+        // find-by-number choice that lives inside the phone number editor.
+        assert_eq!(
+            PrivacySettingKey::visibility_rows().len()
+                + PrivacySettingKey::contact_rows().len()
+                + 1,
+            names.len()
+        );
+    }
+
+    #[test]
+    fn rule_types_follow_tdesktop_per_key() {
+        use PrivacySettingKey as K;
+        assert!(K::AllowChatInvites.allows_premium_exception(true));
+        assert!(!K::AllowChatInvites.allows_premium_exception(false));
+        assert!(!K::ShowStatus.allows_premium_exception(true));
+        assert!(K::AutosaveGifts.allows_bots_exception());
+        assert!(!K::AllowChatInvites.allows_bots_exception());
+        assert!(K::AllowVoiceMessages.restriction_needs_premium());
+        assert!(!K::ShowBio.restriction_needs_premium());
+        assert_eq!(
+            K::AllowFindingByPhoneNumber.options(),
+            [PrivacyWho::Everybody, PrivacyWho::Contacts]
+        );
+        assert!(!K::AllowFindingByPhoneNumber.has_exceptions());
+        assert_eq!(K::ShowBirthdate.options().len(), 3);
+    }
+
+    #[test]
+    fn b13_request_shapes_match_1_8_67() {
+        let v = parse(set_new_chat_privacy_settings(RequestId(1), false, 12));
+        assert_eq!(v["@type"], "setNewChatPrivacySettings");
+        assert_eq!(v["settings"]["@type"], "newChatPrivacySettings");
+        assert_eq!(v["settings"]["allow_new_chats_from_unknown_users"], false);
+        assert_eq!(v["settings"]["incoming_paid_message_star_count"], 12);
+        assert_eq!(
+            parse(get_new_chat_privacy_settings(RequestId(2)))["@type"],
+            "getNewChatPrivacySettings"
+        );
+        let v = parse(set_gift_settings(
+            RequestId(3),
+            json!({"@type": "giftSettings", "show_gift_button": true}),
+        ));
+        assert_eq!(v["@type"], "setGiftSettings");
+        assert_eq!(v["settings"]["show_gift_button"], true);
+        let v = parse(set_inactive_session_ttl(RequestId(4), 90));
+        assert_eq!(v["@type"], "setInactiveSessionTtl");
+        assert_eq!(v["inactive_session_ttl_days"], 90);
+        let v = parse(get_network_statistics(RequestId(5)));
+        assert_eq!(v["@type"], "getNetworkStatistics");
+        assert_eq!(v["only_current"], false);
+        assert_eq!(
+            parse(reset_network_statistics(RequestId(6)))["@type"],
+            "resetNetworkStatistics"
+        );
+        let v = parse(get_recovery_email_address(RequestId(7), "pw"));
+        assert_eq!(v["@type"], "getRecoveryEmailAddress");
+        assert_eq!(v["password"], "pw");
+        let v = parse(hide_check_password_suggestion(RequestId(8)));
+        assert_eq!(v["@type"], "hideSuggestedAction");
+        assert_eq!(v["action"]["@type"], "suggestedActionCheckPassword");
     }
 }

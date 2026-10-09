@@ -91,6 +91,7 @@ mod session_history_window;
 mod session_members;
 mod session_message_menu;
 mod session_notifications;
+mod session_privacy_data;
 mod session_profile_panels;
 mod session_proxy;
 mod session_reply;
@@ -138,6 +139,7 @@ pub use session_message_menu::{
     Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
     StickerSetViewStage, reaction_filter_key,
 };
+pub use session_privacy_data::{PasswordCheck, PrivacyData};
 pub use session_proxy::LINK_PING_ID;
 pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,

@@ -85,11 +85,15 @@ impl QuillApp {
             .and_then(|s| s.files.get(&file_id.0))
             .and_then(|f| f.usable_path())
             .map(PathBuf::from);
-        self.status_note = match path {
-            Some(path) if quill::platform::open_local_file(&path) => "opened file".into(),
-            _ => "could not open the file".into(),
-        };
-        cx.notify();
+        match path {
+            // B13: tdesktop asks before running executables, unknown types
+            // and files that may reveal the IP address.
+            Some(path) => self.open_file_guarded(path, cx),
+            None => {
+                self.status_note = "could not open the file".into();
+                cx.notify();
+            }
+        }
     }
 
     /// MED3: reveal a downloaded file in the file manager

@@ -519,7 +519,7 @@ mod dispatch_tests {
             Root::new(shell, window, cx)
         });
         let app: Entity<QuillApp> = slot.borrow().clone().unwrap();
-        let flags: [(&str, fn(&mut QuillApp), fn(&QuillApp) -> bool); 3] = [
+        let flags: [(&str, fn(&mut QuillApp), fn(&QuillApp) -> bool); 4] = [
             (
                 "proxy list",
                 |a| a.proxy_ui.list_open = true,
@@ -534,6 +534,16 @@ mod dispatch_tests {
                 "passcode settings",
                 |a| a.passcode_ui.open = true,
                 |a| a.passcode_ui.open,
+            ),
+            (
+                "file open warning",
+                |a| {
+                    a.privacy_ui.file_open = Some(crate::ui::privacy_extra::FileOpenConfirm {
+                        path: std::path::PathBuf::from("setup.bin"),
+                        warning: quill::file_prefs::OpenWarning::Executable,
+                    });
+                },
+                |a| a.privacy_ui.file_open.is_some(),
             ),
         ];
         for (name, set, get) in flags {

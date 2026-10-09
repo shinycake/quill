@@ -26,6 +26,7 @@ mod message_ops;
 mod messaging;
 mod payments;
 mod polls_checklists;
+mod privacy_data;
 mod profile_panels;
 mod proxy;
 mod reactions_live;

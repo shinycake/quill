@@ -19,6 +19,10 @@ fn community_updates_parsed() {
                     have_access: true,
                     name: "Rustaceans".to_string(),
                     date: 1759000000,
+                    is_owner: true,
+                    can_change_info: true,
+                    can_ban_members: true,
+                    members_can_edit_chat_list: true,
                 }
             );
         }
@@ -52,12 +56,63 @@ fn community_updates_parsed() {
     }
     // `communityId` (schema line 2264) is the `createCommunity`
     // response (line 11806) — the driver chains it into
-    // `loadCommunityFullInfo`.
+    // `getCommunityFullInfo`.
     let env = parse_envelope(r#"{"@type":"communityId","id":42}"#).unwrap();
     match env.payload {
         EnvelopePayload::CommunityId { id } => assert_eq!(id, 42),
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn community_full_info_answer_parsed() {
+    // TDLib 1.8.68: `getCommunityFullInfo` answers `communityFullInfo`
+    // directly (no `community_id`; the reducer correlates it through the
+    // pending request).
+    let env = parse_envelope(
+            r#"{"@type":"communityFullInfo","@extra":"9","photo":null,"chats":[{"@type":"communityChat","chat_id":7,"can_view_history":false,"is_hidden":true}],"administrator_count":2,"banned_count":0,"add_chat_request_count":5}"#,
+        )
+        .unwrap();
+    match env.payload {
+        EnvelopePayload::CommunityFullInfo { full_info } => {
+            assert_eq!(full_info.administrator_count, 2);
+            assert_eq!(full_info.add_chat_request_count, 5);
+            assert_eq!(full_info.chats.len(), 1);
+            assert!(full_info.chats[0].is_hidden);
+            assert!(!full_info.chats[0].can_view_history);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn community_status_rights_parsed() {
+    // `communityMemberStatusAdministrator` (schema 1.8.68, line 2593)
+    // carries `communityAdministratorRights` (line 2583); members and
+    // admins without the right get no management rights.
+    let parse = |status: &str, permissions: &str| {
+        let json = format!(
+            r#"{{"@type":"updateCommunity","community":{{"@type":"community","id":42,"have_access":true,"name":"R","date":1,"status":{status},"permissions":{permissions}}}}}"#
+        );
+        match parse_envelope(&json).unwrap().payload {
+            EnvelopePayload::UpdateCommunity { community } => community,
+            other => panic!("{other:?}"),
+        }
+    };
+    let admin = parse(
+        r#"{"@type":"communityMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"communityAdministratorRights","can_manage_community":true,"can_change_info":false,"can_edit_chat_list":true,"can_promote_members":false,"can_ban_members":true}}"#,
+        r#"{"@type":"communityPermissions","can_edit_chat_list":false}"#,
+    );
+    assert!(!admin.is_owner);
+    assert!(!admin.can_change_info);
+    assert!(admin.can_ban_members);
+    assert!(!admin.members_can_edit_chat_list);
+    let member = parse(
+        r#"{"@type":"communityMemberStatusMember"}"#,
+        r#"{"@type":"communityPermissions","can_edit_chat_list":true}"#,
+    );
+    assert!(!member.is_owner && !member.can_change_info && !member.can_ban_members);
+    assert!(member.members_can_edit_chat_list);
 }
 
 #[test]

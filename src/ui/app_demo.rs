@@ -1111,10 +1111,16 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyPrivacy => (
+        ScreenshotDemo::ReadyPrivacy | ScreenshotDemo::ReadyPrivacyGifts => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — privacy settings (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadySessionDetails | ScreenshotDemo::ReadyFileOpenConfirm => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — security settings (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
     }
@@ -1749,6 +1755,7 @@ impl QuillApp {
             credentials,
             // Slice S3: privacy screen state.
             privacy_open: false,
+            privacy_ui: super::privacy_extra::PrivacyUi::new(window, cx),
             privacy_editor: None,
             privacy_exceptions: None,
             exception_picker_open: false,

@@ -7,6 +7,7 @@ pub(crate) mod community;
 pub(crate) mod confirm;
 pub(crate) mod contacts;
 pub(crate) mod create_chat;
+pub(crate) mod data_extra;
 pub(crate) mod data_storage;
 pub(crate) mod edit_profile;
 pub(crate) mod folder;

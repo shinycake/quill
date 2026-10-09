@@ -81,7 +81,9 @@ jobs:
       # Incremental state (sources + objects) so a failure late in the cold
       # build does not cost another 45 minutes. Saved even when the build fails.
       # The "-mt-" prefix keeps the old dynamic-CRT build tree (stale cached
-      # OpenSSL paths) from being restored.
+      # OpenSSL paths) from being restored, and the pin hash keeps a tree
+      # checked out at an older TDLib commit from being restored after a pin
+      # bump (build-tdlib-windows.ps1 refuses a source tree at another commit).
       - name: restore TDLib work tree
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
@@ -89,8 +91,8 @@ jobs:
           path: |
             native/td
             native/build
-          key: tdlib-windows-mt-work-${{ github.run_id }}
-          restore-keys: tdlib-windows-mt-work-
+          key: tdlib-windows-mt-work-${{ hashFiles('src/pins.rs', 'native/patches/*') }}-${{ github.run_id }}
+          restore-keys: tdlib-windows-mt-work-${{ hashFiles('src/pins.rs', 'native/patches/*') }}-
       - name: build TDLib
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
         shell: pwsh
@@ -102,7 +104,7 @@ jobs:
           path: |
             native/td
             native/build
-          key: tdlib-windows-mt-work-${{ github.run_id }}
+          key: tdlib-windows-mt-work-${{ hashFiles('src/pins.rs', 'native/patches/*') }}-${{ github.run_id }}
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
