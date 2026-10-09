@@ -282,6 +282,10 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // B10: open a profile photo gallery that was waiting for its list.
+        if self.pump_profile_gallery(cx) {
+            progressed = true;
+        }
         // Slice CL1: a refused chat-list action (`toggleChatIsPinned`,
         // `toggleChatIsMarkedAsUnread`, `deleteChatHistory`) surfaces
         // here instead of silently doing nothing.

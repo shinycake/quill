@@ -18,7 +18,10 @@ pub fn parse_birthday(
     year: &str,
     current_year: i32,
 ) -> Result<BirthdayParts, &'static str> {
-    let day: u8 = day.trim().parse().map_err(|_| "Enter the day as a number.")?;
+    let day: u8 = day
+        .trim()
+        .parse()
+        .map_err(|_| "Enter the day as a number.")?;
     let month: u8 = month
         .trim()
         .parse()

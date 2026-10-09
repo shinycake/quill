@@ -1602,6 +1602,9 @@ pub struct UserProfileExtras {
     pub personal_chat_id: i64,
     /// B10: the private `note` added to the contact (plain text).
     pub note: String,
+    /// B10: `need_phone_number_privacy_exception` — the edit-contact box
+    /// then offers "Share my phone number" (tdesktop `NeedContactsException`).
+    pub need_phone_exception: bool,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -1662,6 +1665,10 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .and_then(|v| super::json_helpers::int53(Some(v)).ok())
             .unwrap_or(0),
         note: super::message_content::parse_formatted_text(info.get("note")),
+        need_phone_exception: info
+            .get("need_phone_number_privacy_exception")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
