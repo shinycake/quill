@@ -304,6 +304,13 @@ impl QuillApp {
             progressed = true;
             need = RedrawNeed::Now;
         }
+        // Q1/R5: re-send rate-limited reads whose wait is over and sweep
+        // requests whose answer never came (no timers of their own; the
+        // poll loop already ticks).
+        if live.driver.request_tick(std::time::Instant::now()) {
+            progressed = true;
+            need = RedrawNeed::Now;
+        }
         // `parity:proxy-settings`: first `getProxies` + auto-switch.
         if live.driver.proxy_tick(quill::state::unix_ms_now()) {
             progressed = true;
@@ -447,6 +454,12 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // Saved Messages: load the sublists and tags while it is open.
+        self.pump_saved_messages();
+        // B7: a basic group became a supergroup: leave the old chat.
+        if self.pump_chat_upgrades(cx) {
+            progressed = true;
+        }
         // B10: open a profile photo gallery that was waiting for its list.
         if self.pump_profile_gallery(cx) {
             progressed = true;
@@ -523,6 +536,11 @@ impl QuillApp {
             self.status_note = note;
             progressed = true;
         }
+        // The transfer-ownership dialog: a finished transfer closes it
+        // (and leaves, for "appoint and leave").
+        if self.finish_ownership_transfer_ui(cx) {
+            progressed = true;
+        }
         // Slice CL3: a `reportChat` outcome arrived — surface it in the
         // status bar alongside the other async error drains.
         if let Some(note) = self
@@ -597,6 +615,14 @@ impl QuillApp {
             .live
             .as_mut()
             .and_then(|live| live.driver.session.send_permission_error.take())
+        {
+            self.status_note = notice;
+            progressed = true;
+        }
+        if let Some(notice) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.flood_notice.take())
         {
             self.status_note = notice;
             progressed = true;

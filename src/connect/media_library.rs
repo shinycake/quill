@@ -177,6 +177,39 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// Settings, "Quick reaction": `setDefaultReactionType`. The shown
+    /// choice updates at once; TDLib confirms with
+    /// `updateDefaultReactionType`.
+    pub fn set_default_reaction(
+        &mut self,
+        choice: &ReactionChoice,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let value = match choice {
+            ReactionChoice::Emoji(emoji) => reaction_type_emoji(emoji),
+            ReactionChoice::CustomEmoji(id) => reaction_type_custom_emoji(*id),
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::SetDefaultReactionType, None);
+        match self
+            .sender
+            .send_json(&crate::telegram::requests::set_default_reaction_type(
+                extra, value,
+            )) {
+            Ok(()) => {
+                self.session.default_reaction = Some(choice.clone());
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
     /// Add `choice` to the message, or remove it when it's already ours.
     pub fn toggle_reaction_choice(
         &mut self,

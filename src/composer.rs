@@ -364,6 +364,7 @@ impl ComposerEdit {
             MessageContent::VideoNote(_)
             | MessageContent::Sticker(_)
             | MessageContent::Poll(_)
+            | MessageContent::Checklist(_)
             | MessageContent::Location(_)
             | MessageContent::Venue(_)
             | MessageContent::Contact(_)

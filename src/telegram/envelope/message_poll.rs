@@ -65,6 +65,15 @@ pub struct Poll {
     /// `vote_restriction_reason` (schema line 711): why the current user
     /// can't vote; `None` when the user can vote.
     pub vote_restriction_reason: Option<PollVoteRestrictionReason>,
+    /// `can_see_results` (schema line 711): false while the creator hid
+    /// the results until the poll closes (`hide_results_until_closes`).
+    pub can_see_results: bool,
+    /// `members_only` (schema line 711): only subscribers can vote.
+    pub members_only: bool,
+    /// `open_period` (seconds the poll stays open) and `close_date`
+    /// (absolute unix time it closes); 0 when the poll has no deadline.
+    pub open_period: i32,
+    pub close_date: i32,
 }
 
 impl Poll {
@@ -93,6 +102,9 @@ impl Poll {
 pub struct PollContent {
     pub poll: Poll,
     pub description: String,
+    /// `messagePoll.can_add_option` (schema line 5240): the user may add
+    /// an option with `addPollOption`.
+    pub can_add_option: bool,
 }
 
 /// `pollOption` (TDLib 1.8.67, `schema/td_api.tl:456`).
@@ -220,6 +232,20 @@ pub(crate) fn parse_poll(value: Option<&Value>) -> Option<Poll> {
         vote_restriction_reason: parse_poll_vote_restriction_reason(
             value.get("vote_restriction_reason"),
         ),
+        // Older payloads omit `can_see_results`; default to visible.
+        can_see_results: value
+            .get("can_see_results")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        members_only: value
+            .get("members_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        open_period: value
+            .get("open_period")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        close_date: value.get("close_date").and_then(Value::as_i64).unwrap_or(0) as i32,
     })
 }
 
@@ -230,6 +256,10 @@ pub(crate) fn parse_message_poll(value: &Value) -> (MessageContent, Vec<ParsedFi
             MessageContent::Poll(PollContent {
                 poll,
                 description: parse_formatted_text(value.get("description")),
+                can_add_option: value
+                    .get("can_add_option")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             }),
             Vec::new(),
         ),

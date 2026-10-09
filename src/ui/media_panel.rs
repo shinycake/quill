@@ -122,6 +122,8 @@ pub(super) struct MediaPanel {
     pub hovered: Option<FileId>,
     /// The sticker search query last sent to TDLib.
     pub searched: String,
+    /// The emoji query `getKeywordEmojis` last went out for.
+    pub keyword_searched: String,
 }
 
 impl Default for MediaPanel {
@@ -137,6 +139,7 @@ impl Default for MediaPanel {
             active_section: 0,
             hovered: None,
             searched: String::new(),
+            keyword_searched: String::new(),
         }
     }
 }
@@ -412,6 +415,13 @@ impl QuillApp {
         self.media_panel.rows = rows;
         self.media_panel.sections = sections;
         self.media_panel.key = Some(key);
+        // Emoji search adds TDLib's keyword matches (all typed languages).
+        if self.media_panel.tab == PanelTab::Emoji && query != self.media_panel.keyword_searched {
+            self.media_panel.keyword_searched = query.clone();
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.search_keyword_emojis(&query);
+            }
+        }
         // Sticker search goes to TDLib (by emoji or keyword).
         if self.media_panel.tab == PanelTab::Stickers && query != self.media_panel.searched {
             self.media_panel.searched = query.clone();
@@ -431,14 +441,24 @@ impl QuillApp {
                 label: "Search results".into(),
                 set_id: None,
             });
-            push_grid(
-                &mut rows,
-                quill::emoji_catalog::search(None, query)
-                    .filter(|entry| !has_skin_tone(entry.emoji))
-                    .map(|entry| PanelCell::Emoji(SharedString::new_static(entry.emoji))),
-                EMOJI_COLS,
-                false,
-            );
+            // Catalog matches first, then `getKeywordEmojis` matches the
+            // catalog's names missed (other languages, synonyms).
+            let mut cells: Vec<PanelCell> = quill::emoji_catalog::search(None, query)
+                .filter(|entry| !has_skin_tone(entry.emoji))
+                .map(|entry| PanelCell::Emoji(SharedString::new_static(entry.emoji)))
+                .collect();
+            if let Some(session) = self.session() {
+                let mut seen: std::collections::HashSet<String> =
+                    quill::emoji_catalog::search(None, query)
+                        .map(|entry| entry.emoji.replace('\u{fe0f}', ""))
+                        .collect();
+                for emoji in &session.emoji.keyword_emojis {
+                    if !has_skin_tone(emoji) && seen.insert(emoji.replace('\u{fe0f}', "")) {
+                        cells.push(PanelCell::Emoji(SharedString::from(emoji.clone())));
+                    }
+                }
+            }
+            push_grid(&mut rows, cells, EMOJI_COLS, false);
             return (rows, sections);
         }
         let session = self.session();
@@ -528,6 +548,7 @@ impl QuillApp {
         let matches: Option<std::collections::HashSet<String>> = (!query.is_empty()).then(|| {
             quill::emoji_catalog::search(None, query)
                 .map(|entry| strip(entry.emoji))
+                .chain(session.emoji.keyword_emojis.iter().map(|e| strip(e)))
                 .collect()
         });
         let wanted = |emoji: &str| {
@@ -721,7 +742,12 @@ impl QuillApp {
                                 if let Some(file) = item.display_file_id() {
                                     need_files.push(file);
                                 }
-                                self.panel_sticker_cell(id, item, cx)
+                                self.panel_sticker_cell(
+                                    id,
+                                    item,
+                                    matches!(source, StickerSource::Recent),
+                                    cx,
+                                )
                             }
                             None => placeholder_cell(STICKER_CELL, cx),
                         },
@@ -749,7 +775,15 @@ impl QuillApp {
     }
 
     fn emoji_cell(&self, id: u64, emoji: SharedString, cx: &mut Context<Self>) -> AnyElement {
-        div()
+        // A recently used emoji offers "Reset recent emoji" (the list is
+        // local; tdesktop clears it from the same section).
+        let in_recent = self.media_panel.reaction.is_none()
+            && self
+                .session()
+                .is_some_and(|s| s.media_prefs.recent_emoji.iter().any(|e| *e == *emoji));
+        let owner = cx.entity().downgrade();
+        let this_emoji = emoji.to_string();
+        let cell = div()
             .id(("panel-emoji", id))
             .size(px(EMOJI_CELL))
             .flex()
@@ -765,8 +799,34 @@ impl QuillApp {
                 let emoji = emoji.clone();
                 move |this, _, window, cx| this.insert_panel_emoji(emoji.clone(), window, cx)
             }))
-            .child(emoji)
-            .into_any_element()
+            .child(emoji);
+        if !in_recent {
+            return cell.into_any_element();
+        }
+        cell.context_menu(move |menu, _, _| {
+            let reset_owner = owner.clone();
+            let remove_owner = owner.clone();
+            let emoji = this_emoji.clone();
+            menu.item(
+                PopupMenuItem::new("Remove from recent").on_click(move |_, _, cx| {
+                    let emoji = emoji.clone();
+                    let _ = remove_owner.update(cx, |this, cx| {
+                        this.set_media_pref(
+                            move |prefs| prefs.recent_emoji.retain(|e| *e != emoji),
+                            cx,
+                        );
+                        this.media_panel.key = None;
+                        cx.notify();
+                    });
+                }),
+            )
+            .item(
+                PopupMenuItem::new("Reset recent emoji").on_click(move |_, _, cx| {
+                    let _ = reset_owner.update(cx, |this, cx| this.reset_recent_emoji(cx));
+                }),
+            )
+        })
+        .into_any_element()
     }
 
     fn custom_emoji_cell(&self, id: u64, item: StickerItem, cx: &mut Context<Self>) -> AnyElement {
@@ -822,6 +882,7 @@ impl QuillApp {
         &mut self,
         id: u64,
         item: StickerItem,
+        recent_section: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let hovered = self.media_panel.hovered == Some(item.file_id);
@@ -837,6 +898,10 @@ impl QuillApp {
         let favorite = self
             .session()
             .is_some_and(|s| s.stickers.favorites.iter().any(|f| f.file_id == file_id));
+        let in_recent = recent_section
+            && self
+                .session()
+                .is_some_and(|s| s.stickers.recent.iter().any(|r| r.file_id == file_id));
         let owner = cx.entity().downgrade();
         let (emoji, width, height) = (item.emoji.clone(), item.width, item.height);
         let thumb = item
@@ -869,22 +934,39 @@ impl QuillApp {
                 this.close_media_panel(cx);
             }))
             .context_menu(move |menu, _, _| {
-                let owner = owner.clone();
-                menu.item(
+                let favorite_owner = owner.clone();
+                let recent_owner = owner.clone();
+                let menu = menu.item(
                     PopupMenuItem::new(if favorite {
                         "Remove from favorites"
                     } else {
                         "Add to favorites"
                     })
                     .on_click(move |_, _, cx| {
-                        let _ = owner.update(cx, |this, cx| {
+                        let _ = favorite_owner.update(cx, |this, cx| {
                             if let Some(live) = this.live.as_mut() {
                                 let _ = live.driver.set_favorite_sticker(file_id, !favorite);
                             }
                             cx.notify();
                         });
                     }),
-                )
+                );
+                if in_recent {
+                    menu.item(
+                        PopupMenuItem::new("Remove from recent").on_click(move |_, _, cx| {
+                            let _ = recent_owner.update(cx, |this, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    let _ = live.driver.remove_recent_sticker(file_id);
+                                } else if let Some(session) = this.demo_session.as_mut() {
+                                    session.stickers.recent.retain(|s| s.file_id != file_id);
+                                }
+                                cx.notify();
+                            });
+                        }),
+                    )
+                } else {
+                    menu
+                }
             })
             .child(match source {
                 // GPUI advances an animated image's frames only for an
@@ -901,6 +983,19 @@ impl QuillApp {
                     .into_any_element(),
             })
             .into_any_element()
+    }
+
+    /// "Reset recent emoji": clear the local recently-used lists.
+    pub(super) fn reset_recent_emoji(&mut self, cx: &mut Context<Self>) {
+        self.set_media_pref(
+            |prefs| {
+                prefs.recent_emoji.clear();
+                prefs.recent_custom_emoji_ids.clear();
+            },
+            cx,
+        );
+        self.media_panel.key = None;
+        cx.notify();
     }
 
     fn insert_panel_emoji(

@@ -57,6 +57,12 @@ pub enum ScreenshotDemo {
     ReadyEditDelete,
     /// Forward select + dest picker + success (injected, no live Telegram).
     ReadyForward,
+    /// B4: the share box with two destinations ticked and a comment.
+    ReadyShareBox,
+    /// B4: the forward bar above the destination chat's composer.
+    ReadyForwardBar,
+    /// B4: the composer's "send as" identity list.
+    ReadySendAs,
     /// Message selection mode: check circles, selection tint and the
     /// Forward N / Delete N / Cancel header (injected, no live Telegram).
     ReadySelectMode,
@@ -309,6 +315,11 @@ pub enum ScreenshotDemo {
     /// bars, `thread` a post's comment thread in its discussion group,
     /// `group` a group message with replies.
     ReadyThreads,
+    /// Forums and Saved Messages sublists (injected, no live Telegram):
+    /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
+    /// sublist list, one sublist, a tag filter, or the forum topic editor
+    /// with its icon picker (default `sublists`).
+    ReadyForumsSaved,
     /// Bubble headers and footer (injected, no live Telegram): replies with
     /// a colored sender name, a quote, a media thumbnail, a reply from another
     /// chat and a deleted original; forwards from a user, a hidden account, a
@@ -320,6 +331,10 @@ pub enum ScreenshotDemo {
     /// settings. `QUILL_DEMO_TRANSLATE_VIEW=bar|translated|box|rtl|selection|chooser|settings|skip`
     /// (default `bar`).
     ReadyTranslate,
+    /// A bot chat whose reply keyboard comes from `updateChatReplyMarkup`
+    /// (message outside the window), with request buttons and the share
+    /// dialogs. `QUILL_DEMO_KEYBOARD_VIEW=keyboard|hidden|phone|users|chat|confirm`.
+    ReadyReplyKeyboard,
     /// README showcase scene: a populated account (generated avatars and
     /// photos, a lively group conversation); `QUILL_DEMO_SHOWCASE` picks
     /// the view.
@@ -686,6 +701,14 @@ pub enum ScreenshotDemo {
     /// edit-contact|birthday|channel|share|gallery|similar`; injected data,
     /// no live Telegram).
     ReadyProfilePanels,
+    /// Member moderation (`QUILL_DEMO_MODERATION=members|restrict|ban|
+    /// remove|delete|leave|pick|confirm|blocked`; injected data, no live
+    /// Telegram).
+    ReadyMemberModeration,
+    /// B7: group and channel settings dialog
+    /// (`QUILL_DEMO_GROUP_ADMIN=group|channel|basic|reactions|discussion|
+    /// linked|confirm`; injected data, no live Telegram).
+    ReadyGroupAdminSettings,
     /// Slice A5: like `ReadyProfileEdit`, but the username field holds a
     /// freshly-checked value with a seeded `checkChatUsernameResultOk`
     /// verdict — intended for a taller capture

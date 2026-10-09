@@ -41,6 +41,16 @@ impl Session {
             self.apply_thread_history(messages, Some(pending));
             return;
         }
+        // Saved Messages sublist page.
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::GetSavedMessagesTopicHistory { .. }
+            )
+        {
+            self.apply_saved_topic_history(messages, Some(pending));
+            return;
+        }
         // Slice CL: chat-list peek preview — cache the latest
         // messages for the previewed (unopened) chat.
         if let Some(pending) = pending
@@ -232,6 +242,13 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::SearchSavedMessages { .. })
+        ) {
+            self.apply_saved_tag_page(messages, total_count, next_from_message_id, pending);
+            return;
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopicHistory) {
             // Phase 5.1: per-topic history page. Correlated by chat +
             // topic; stored separately from the chat's general history.

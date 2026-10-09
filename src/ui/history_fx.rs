@@ -44,6 +44,43 @@ pub(crate) fn jump_fade_active(elapsed: Duration) -> bool {
     elapsed < JUMP_FADE_IN + JUMP_FADE_OUT
 }
 
+/// How long a reaction takes to fly up from its message.
+pub(crate) const REACTION_FLY_DURATION: Duration = Duration::from_millis(520);
+
+/// A reaction just added to a message (the fly animation).
+#[derive(Clone, Debug)]
+pub(crate) struct ReactionFly {
+    pub chat_id: i64,
+    pub message_id: i64,
+    pub glyph: SharedString,
+    pub started: Instant,
+}
+
+/// One frame of the fly: glyph scale, rise in px and opacity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ReactionFlyFrame {
+    pub scale: f32,
+    pub rise: f32,
+    pub alpha: f32,
+}
+
+/// The fly at `elapsed` (tdesktop `ReactionFlyAnimation`: the reaction
+/// pops out bigger, drifts up and fades). `None` once finished, so the
+/// frame clock stops. Reduced motion skips it entirely.
+pub(crate) fn reaction_fly_frame(elapsed: Duration, reduced: bool) -> Option<ReactionFlyFrame> {
+    if reduced || elapsed >= REACTION_FLY_DURATION {
+        return None;
+    }
+    let t = elapsed.as_secs_f32() / REACTION_FLY_DURATION.as_secs_f32();
+    let pop = super::motion::ease_out_circ((t / 0.35).min(1.));
+    let fade = ((1. - t) / 0.45).clamp(0., 1.);
+    Some(ReactionFlyFrame {
+        scale: 0.6 + 0.9 * pop,
+        rise: 56. * super::motion::ease_out_circ(t),
+        alpha: fade,
+    })
+}
+
 /// Reads the painted height of freshly arrived rows for the reveal.
 pub(crate) struct RevealProbe {
     first_row: Option<usize>,
@@ -169,6 +206,24 @@ impl QuillApp {
         Some(jump_fade(elapsed) * JUMP_PEAK_ALPHA)
     }
 
+    /// The fly of a reaction just added to this message, if it runs
+    /// (asks for frames only while it does; none for reduced motion).
+    pub(super) fn reaction_fly_for(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<(SharedString, ReactionFlyFrame)> {
+        let fly = self
+            .reaction_fly
+            .as_ref()
+            .filter(|fly| fly.chat_id == chat_id && fly.message_id == message_id)?;
+        let elapsed = super::motion::elapsed_since(fly.started, Instant::now());
+        let frame = reaction_fly_frame(elapsed, cx.reduce_motion())?;
+        self.request_animation_tick(60, cx);
+        Some((fly.glyph.clone(), frame))
+    }
+
     /// The reveal of new bottom rows at render time: `(shift, extra)` while
     /// it runs (asking for frames), `None` once settled, when the user
     /// scrolled away, or when the window is inactive.
@@ -289,5 +344,27 @@ mod tests {
         date.scrolled(t0, true);
         assert_eq!(date.opacity(t0 + ms(2500)), 1.);
         assert_eq!(date.opacity(t0 + ms(3000)), 0.);
+    }
+}
+
+#[cfg(test)]
+mod fly_tests {
+    use crate::ui::history_fx::{REACTION_FLY_DURATION, reaction_fly_frame};
+    use std::time::Duration;
+
+    #[test]
+    fn reaction_fly_rises_fades_and_ends() {
+        let start = reaction_fly_frame(Duration::ZERO, false).unwrap();
+        assert!(start.scale < 1. && start.alpha >= 1. - 1e-4 && start.rise == 0.);
+        let mid = reaction_fly_frame(Duration::from_millis(200), false).unwrap();
+        assert!(mid.scale > 1. && mid.rise > start.rise);
+        let late = reaction_fly_frame(Duration::from_millis(500), false).unwrap();
+        assert!(late.alpha < mid.alpha);
+        assert_eq!(reaction_fly_frame(REACTION_FLY_DURATION, false), None);
+    }
+
+    #[test]
+    fn reaction_fly_is_skipped_for_reduced_motion() {
+        assert_eq!(reaction_fly_frame(Duration::ZERO, true), None);
     }
 }

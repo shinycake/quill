@@ -44,6 +44,10 @@ impl Session {
             self.search.close();
             self.chat_search.close();
             self.in_flight_forward = None;
+            self.queued_forward_flights.clear();
+            self.chat_message_sender.clear();
+            self.send_as_options.clear();
+            self.share_search = ShareSearch::default();
             self.last_forward = None;
         }
         if matches!(state, AuthorizationState::LoggingOut) {
@@ -219,6 +223,26 @@ impl Session {
         {
             edit(message);
             found = true;
+        }
+        if self.my_user_id == Some(chat_id.0) {
+            if let Some(message) = self
+                .saved
+                .sublist
+                .as_mut()
+                .and_then(|view| view.history.messages.get_mut(&message_id.0))
+            {
+                edit(message);
+                found = true;
+            }
+            if let Some(message) = self
+                .saved
+                .tag_search
+                .as_mut()
+                .and_then(|search| search.history.messages.get_mut(&message_id.0))
+            {
+                edit(message);
+                found = true;
+            }
         }
         found
     }

@@ -988,6 +988,9 @@ impl QuillApp {
     ) -> impl IntoElement {
         let owner = cx.entity().downgrade();
         let gifs_open = self.gif_panel_open();
+        // B15: "Checklist" is offered only to Premium accounts in chats
+        // where checklists can be sent (`PeerData::canCreateTodoLists`).
+        let checklists_allowed = self.checklist_creation_allowed();
         Button::new("composer-attach")
             .icon(IconName::Paperclip)
             .ghost()
@@ -1026,31 +1029,41 @@ impl QuillApp {
                         }),
                 );
                 let poll_owner = owner.clone();
+                let checklist_owner = owner.clone();
                 let gif_owner = owner.clone();
-                menu.separator()
-                    .item(
-                        PopupMenuItem::new(if polls_allowed {
-                            "Poll"
-                        } else {
-                            "Polls are restricted here"
-                        })
-                        .icon(IconName::ChartBar)
-                        .disabled(!polls_allowed)
-                        .on_click(move |_, window, cx| {
-                            let _ =
-                                poll_owner.update(cx, |this, cx| this.open_poll_dialog(window, cx));
-                        }),
-                    )
-                    .item(
-                        PopupMenuItem::new("GIFs")
-                            .icon(IconName::SquarePlay)
-                            .checked(gifs_open)
-                            .on_click(move |_, _, cx| {
-                                let _ = gif_owner.update(cx, |this, cx| {
-                                    this.toggle_media_panel(super::media_panel::PanelTab::Gifs, cx)
-                                });
+                let mut menu = menu.separator();
+                if checklists_allowed {
+                    menu = menu.item(
+                        PopupMenuItem::new("Checklist")
+                            .icon(IconName::CircleCheck)
+                            .on_click(move |_, window, cx| {
+                                let _ = checklist_owner
+                                    .update(cx, |this, cx| this.open_checklist_dialog(window, cx));
                             }),
-                    )
+                    );
+                }
+                menu.item(
+                    PopupMenuItem::new(if polls_allowed {
+                        "Poll"
+                    } else {
+                        "Polls are restricted here"
+                    })
+                    .icon(IconName::ChartBar)
+                    .disabled(!polls_allowed)
+                    .on_click(move |_, window, cx| {
+                        let _ = poll_owner.update(cx, |this, cx| this.open_poll_dialog(window, cx));
+                    }),
+                )
+                .item(
+                    PopupMenuItem::new("GIFs")
+                        .icon(IconName::SquarePlay)
+                        .checked(gifs_open)
+                        .on_click(move |_, _, cx| {
+                            let _ = gif_owner.update(cx, |this, cx| {
+                                this.toggle_media_panel(super::media_panel::PanelTab::Gifs, cx)
+                            });
+                        }),
+                )
             })
     }
 

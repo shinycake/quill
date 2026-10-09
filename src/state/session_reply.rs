@@ -160,7 +160,10 @@ impl Session {
         }
     }
 
-    fn origin_name_and_accent(&self, origin: &MessageOrigin) -> (Option<String>, Option<i32>) {
+    pub(crate) fn origin_name_and_accent(
+        &self,
+        origin: &MessageOrigin,
+    ) -> (Option<String>, Option<i32>) {
         match origin {
             MessageOrigin::User { user_id } => {
                 self.sender_name_and_accent(Some(MessageSender::User { user_id: user_id.0 }))

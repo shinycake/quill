@@ -494,3 +494,50 @@ pub(crate) fn parse_chat_administrator(value: Option<&Value>) -> Option<ChatAdmi
             .unwrap_or(false),
     })
 }
+
+/// `canTransferOwnershipResult*` (TDLib 1.8.67, `schema/td_api.tl:8568`):
+/// whether this session may transfer a chat's ownership. The `retry_after`
+/// values are seconds until the check can pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanTransferOwnershipResult {
+    Ok,
+    /// The account has no 2-step verification password.
+    PasswordNeeded,
+    /// The password was set less than 7 days ago.
+    PasswordTooFresh {
+        retry_after: i32,
+    },
+    /// This session logged in less than 24 hours ago.
+    SessionTooFresh {
+        retry_after: i32,
+    },
+}
+
+pub(crate) fn parse_can_transfer_ownership_result(
+    value: &Value,
+) -> Option<CanTransferOwnershipResult> {
+    let retry_after = || {
+        value
+            .get("retry_after")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .clamp(0, i64::from(i32::MAX)) as i32
+    };
+    match value.get("@type").and_then(Value::as_str)? {
+        "canTransferOwnershipResultOk" => Some(CanTransferOwnershipResult::Ok),
+        "canTransferOwnershipResultPasswordNeeded" => {
+            Some(CanTransferOwnershipResult::PasswordNeeded)
+        }
+        "canTransferOwnershipResultPasswordTooFresh" => {
+            Some(CanTransferOwnershipResult::PasswordTooFresh {
+                retry_after: retry_after(),
+            })
+        }
+        "canTransferOwnershipResultSessionTooFresh" => {
+            Some(CanTransferOwnershipResult::SessionTooFresh {
+                retry_after: retry_after(),
+            })
+        }
+        _ => None,
+    }
+}

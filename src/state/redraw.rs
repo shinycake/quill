@@ -90,6 +90,7 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
         | P::UpdateChatReadOutbox { chat_id, .. }
         | P::UpdateChatUnreadMentionCount { chat_id, .. }
         | P::UpdateChatUnreadReactionCount { chat_id, .. }
+        | P::UpdateChatUnreadPollVoteCount { chat_id, .. }
         | P::UpdateChatIsMarkedAsUnread { chat_id, .. }
         | P::UpdateChatDraftMessage { chat_id, .. }
         | P::UpdateChatNotificationSettings { chat_id, .. }

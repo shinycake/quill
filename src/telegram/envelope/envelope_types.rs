@@ -172,6 +172,18 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         unread_reaction_count: i32,
     },
+    /// B15: `updateChatUnreadPollVoteCount` (schema 1.8.67, line 10573) —
+    /// the row's poll-vote badge. `updateMessageContainsUnreadPollVotes`
+    /// (line 10457) carries the same new chat counter and folds into it.
+    UpdateChatUnreadPollVoteCount {
+        chat_id: ChatId,
+        unread_poll_vote_count: i32,
+    },
+    /// B15: `pollVoteStatistics` (schema 1.8.67, line 10263) — the
+    /// `getPollVoteStatistics` answer (line 12947).
+    PollVoteStatistics {
+        graph: StatisticalGraph,
+    },
     /// `messageAutoDeleteTime` — `getDefaultMessageAutoDeleteTime` response
     /// (schema 1.8.67, line 9057).
     MessageAutoDeleteTime {
@@ -269,14 +281,27 @@ pub enum EnvelopePayload {
         /// — the chat's content can't be saved, forwarded or copied.
         /// Refreshed by `updateChatHasProtectedContent` (line 10582).
         has_protected_content: bool,
+        /// `chat.available_reactions` (schema 1.8.67, line 3627); refreshed
+        /// by `updateChatAvailableReactions`. `None` when absent.
+        available_reactions: Option<ChatAvailableReactions>,
         /// `chat.has_scheduled_messages` (schema 1.8.67, line 3627) — the
         /// chat has scheduled messages; refreshed by
         /// `updateChatHasScheduledMessages`.
         has_scheduled_messages: bool,
+        /// `chat.message_sender_id` (schema 1.8.67, line 3627) — the "send
+        /// as" identity selected for the chat; `None` when the user can't
+        /// change it. Refreshed by `updateChatMessageSender`.
+        message_sender: Option<MessageSender>,
         /// `chat.is_translatable` (schema 1.8.67, lines 3599 / 3627) —
         /// translation of the chat's messages must be suggested.
         /// Refreshed by `updateChatIsTranslatable` (line 10585).
         is_translatable: bool,
+        /// `chat.view_as_topics` (schema 1.8.67, line 3627); `None` when the
+        /// field is absent. Refreshed by `updateChatViewAsTopics`.
+        view_as_topics: Option<bool>,
+        /// `chat.reply_markup_message_id` (schema 1.8.67, line 3624): the
+        /// message whose keyboard the chat shows; 0 for none.
+        reply_markup_message_id: MessageId,
         /// Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67, lines
         /// 3600 / 3627). Refreshed by `updateChatIsMarkedAsUnread`
         /// (schema line 10588).
@@ -289,6 +314,8 @@ pub enum EnvelopePayload {
         /// 3612 / 3627). Refreshed by `updateChatUnreadReactionCount`
         /// (schema line 10570).
         unread_reaction_count: i32,
+        /// B15: `chat.unread_poll_vote_count` (schema 1.8.67, line 3613).
+        unread_poll_vote_count: i32,
         /// Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines 3606 /
         /// 3627). Gates the row-menu Report item (`reportChat`, schema
         /// line 15693).
@@ -361,6 +388,28 @@ pub enum EnvelopePayload {
     UpdateChatNotificationSettings {
         chat_id: ChatId,
         notification_settings: ChatNotificationSettings,
+    },
+    /// `updateChatViewAsTopics` (schema 1.8.67, line 10591).
+    UpdateChatViewAsTopics {
+        chat_id: ChatId,
+        view_as_topics: bool,
+    },
+    /// `updateSavedMessagesTopic` (schema 1.8.67, line 10616): a Saved
+    /// Messages sublist appeared or changed.
+    UpdateSavedMessagesTopic(Box<SavedMessagesTopic>),
+    /// `updateSavedMessagesTopicCount` (schema line 10619).
+    UpdateSavedMessagesTopicCount {
+        topic_count: i32,
+    },
+    /// `updateSavedMessagesTags` (schema line 11015): the tags of all Saved
+    /// Messages (`saved_messages_topic_id` 0) or of one sublist.
+    UpdateSavedMessagesTags {
+        saved_messages_topic_id: i64,
+        tags: Vec<SavedMessagesTag>,
+    },
+    /// `savedMessagesTags` — the `getSavedMessagesTags` answer.
+    SavedMessagesTags {
+        tags: Vec<SavedMessagesTag>,
     },
     /// Slice CL1: `updateChatIsMarkedAsUnread` (schema 1.8.67, line
     /// 10588) — the chat was marked as unread or was read.
@@ -657,6 +706,17 @@ pub enum EnvelopePayload {
     UpdateBasicGroup {
         basic_group_id: i64,
         member_count: i32,
+        /// Own `basicGroup.status` (schema 1.8.67, line 2714); `Unknown`
+        /// when missing. Gates member moderation and ownership transfer.
+        status: ChannelMemberStatus,
+        can_restrict_members: bool,
+        can_promote_members: bool,
+        can_manage_tags: bool,
+        /// B7: `rights.can_change_info` of an administrator status.
+        can_change_info: Option<bool>,
+        /// B7: `basicGroup.is_active` - false once upgraded to a
+        /// supergroup.
+        is_active: bool,
     },
     /// `updateChatOnlineMemberCount` — sent for opened groups.
     UpdateChatOnlineMemberCount {
@@ -673,6 +733,9 @@ pub enum EnvelopePayload {
         /// line 2746) — a forum whose topics show as tabs, the way
         /// Telegram Desktop shows them (`ChannelData::useSubsectionTabs`).
         has_forum_tabs: bool,
+        /// `supergroup.has_automatic_translation` (schema 1.8.67, line
+        /// 2746): the channel shows its messages translated for everyone.
+        has_automatic_translation: bool,
         username: String,
         /// `supergroup.member_count` — may be 0 until full info is known.
         member_count: i32,
@@ -731,6 +794,9 @@ pub enum EnvelopePayload {
         /// 2746) — sender shown alongside the signature; only meaningful
         /// when `sign_messages` is true.
         show_message_sender: bool,
+        /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line
+        /// 2746) — discussion group members must join to write.
+        join_to_send_messages: bool,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
@@ -741,6 +807,9 @@ pub enum EnvelopePayload {
         /// Subsection tabs: `supergroup.has_forum_tabs` (schema 1.8.67,
         /// line 2746).
         has_forum_tabs: bool,
+        /// `supergroup.has_automatic_translation` (schema 1.8.67, line
+        /// 2746): the channel shows its messages translated for everyone.
+        has_automatic_translation: bool,
         username: String,
         status: ChannelMemberStatus,
         /// Phase A1: `rights.can_restrict_members` from own
@@ -786,6 +855,9 @@ pub enum EnvelopePayload {
         /// Slice G2: `supergroup.show_message_sender` (schema 1.8.67, line
         /// 2746).
         show_message_sender: bool,
+        /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line
+        /// 2746).
+        join_to_send_messages: bool,
     },
     /// `forumTopics` — `getForumTopics` response. Only the first page is
     /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
@@ -856,6 +928,10 @@ pub enum EnvelopePayload {
         sticker: Option<StickerItem>,
         files: Vec<ParsedFile>,
     },
+    /// `emojis` — `getKeywordEmojis` (schema 1.8.67, line 6435).
+    Emojis {
+        emojis: Vec<String>,
+    },
     /// Slice S10: `emojiKeywords` — `searchEmojis` answers for the picker.
     EmojiKeywords {
         keywords: Vec<EmojiKeyword>,
@@ -913,6 +989,24 @@ pub enum EnvelopePayload {
     UpdateInstalledStickerSets {
         sticker_set_ids: Vec<i64>,
         is_regular: bool,
+    },
+    /// `updateRecentStickers` (schema 1.8.67, line 10938): the recent
+    /// stickers changed (possibly on another device). The ids are not
+    /// used; the cache is refetched.
+    UpdateRecentStickers {
+        is_attached: bool,
+    },
+    /// `updateFavoriteStickers` (line 10941): the favorites changed.
+    UpdateFavoriteStickers,
+    /// `updateTrendingStickerSets` (line 10935): the trending list of a
+    /// sticker type changed. `is_regular` picks the sticker panel; other
+    /// types mark the emoji panel's trending stale.
+    UpdateTrendingStickerSets {
+        is_regular: bool,
+    },
+    /// `updateDefaultReactionType` (line 11007): the quick reaction.
+    UpdateDefaultReactionType {
+        reaction_type: ReactionType,
     },
     /// `notificationSounds` — `getSavedNotificationSounds` response.
     NotificationSounds {
@@ -1155,6 +1249,8 @@ pub enum EnvelopePayload {
         /// (schema 1.8.67, line 2792) — the group's custom-emoji set; 0
         /// when none.
         custom_emoji_sticker_set_id: i64,
+        /// B7: admin-toggle flags of `supergroupFullInfo`.
+        admin: SupergroupFullAdmin,
     },
     /// Slice (communities backend core): `updateCommunity` (schema 1.8.67,
     /// line 10726) — the update carries the full `community` object and is
@@ -1205,11 +1301,39 @@ pub enum EnvelopePayload {
         chat_id: i64,
         has_protected_content: bool,
     },
+    /// B7: `updateChatAvailableReactions` (schema 1.8.67, line 10532).
+    UpdateChatAvailableReactions {
+        chat_id: i64,
+        available_reactions: ChatAvailableReactions,
+    },
+    /// B7: `updateActiveEmojiReactions` (schema 1.8.67, line 10999) — the
+    /// emoji that can be used as reactions, in display order.
+    UpdateActiveEmojiReactions {
+        emojis: Vec<String>,
+    },
     /// `updateChatHasScheduledMessages` — the chat gained its first or lost
     /// its last scheduled message.
     UpdateChatHasScheduledMessages {
         chat_id: i64,
         has_scheduled_messages: bool,
+    },
+    /// `updateChatReplyMarkup` (schema 1.8.67, line 10558): the message
+    /// whose reply markup the chat shows changed. `message_id` is `None`
+    /// when the markup was removed; `reply_markup` is that message's markup.
+    UpdateChatReplyMarkup {
+        chat_id: ChatId,
+        message_id: Option<MessageId>,
+        reply_markup: Option<ReplyMarkup>,
+    },
+    /// `updateChatMessageSender` (schema 1.8.67, line 10546) — the "send as"
+    /// identity of the chat changed.
+    UpdateChatMessageSender {
+        chat_id: i64,
+        message_sender: Option<MessageSender>,
+    },
+    /// `chatMessageSenders` — answer of `getChatAvailableMessageSenders`.
+    ChatMessageSenders {
+        senders: Vec<AvailableMessageSender>,
     },
     /// `updateChatIsTranslatable` (schema 1.8.67, line 10585) — translation
     /// of the chat's messages was enabled or disabled.
@@ -1383,6 +1507,8 @@ pub enum EnvelopePayload {
         can_set_sticker_set: bool,
         sticker_set_id: i64,
         custom_emoji_sticker_set_id: i64,
+        /// B7: admin-toggle flags of `supergroupFullInfo`.
+        admin: SupergroupFullAdmin,
     },
     /// `botCommands` — `getCommands` response (TDLib 1.8.67,
     /// `schema/td_api.tl:829`): the bot's commands for the requested scope
@@ -1544,6 +1670,11 @@ pub enum EnvelopePayload {
     CanPostStoryResult {
         result: CanPostStoryResult,
     },
+    /// `canTransferOwnership` answer (TDLib 1.8.67, `schema/td_api.tl:8568`);
+    /// honored only for the pending `CanTransferOwnership` purpose.
+    CanTransferOwnershipResult {
+        result: CanTransferOwnershipResult,
+    },
     Unknown(UnknownKind),
 }
 
@@ -1627,6 +1758,8 @@ pub struct MessageActions {
     pub can_delete_reactions: bool,
     /// A scheduled message may be rescheduled or sent now.
     pub can_edit_scheduling_state: bool,
+    /// B15: `getPollVoteStatistics` works (poll creator / admin view).
+    pub can_get_poll_vote_statistics: bool,
 }
 
 impl MessageActions {
@@ -1722,4 +1855,18 @@ pub struct CalendarDay {
     pub total_count: i32,
     pub message_id: MessageId,
     pub date: i32,
+}
+
+/// B7: the `supergroupFullInfo` flags behind the group admin toggles
+/// (schema 1.8.67, line 2792).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SupergroupFullAdmin {
+    /// `can_hide_members` — `toggleSupergroupHasHiddenMembers` may be used.
+    pub can_hide_members: bool,
+    /// `has_hidden_members` — non-admins can't list the members.
+    pub has_hidden_members: bool,
+    /// `is_all_history_available` — new members see older messages.
+    pub is_all_history_available: bool,
+    /// `can_enable_paid_reaction` — channels only.
+    pub can_enable_paid_reaction: bool,
 }

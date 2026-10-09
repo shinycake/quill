@@ -133,7 +133,12 @@ impl QuillApp {
             self.session()
                 .and_then(|s| s.subsection_topic_header(chat_id))
         });
+        // Saved Messages: a sublist titles the header with its source chat,
+        // a tag filter with the tag.
+        let saved_header = self.saved_header();
         let title_text = if let Some((name, _, _)) = &thread_header {
+            name.clone()
+        } else if let Some((name, _)) = &saved_header {
             name.clone()
         } else if saved {
             "Saved Messages".to_string()
@@ -221,6 +226,8 @@ impl QuillApp {
             )
         } else if let Some((_, line, _)) = thread_header.clone() {
             (Some(line), false)
+        } else if let Some((_, line)) = saved_header.clone() {
+            (Some(line), false)
         } else if let Some((_, line)) = topic_header.filter(|(_, line)| !line.is_empty()) {
             (Some(line), false)
         } else if let Some(line) = secret_line {
@@ -306,6 +313,9 @@ impl QuillApp {
                     .min_w_0()
                     .when(thread_header.is_some(), |this| {
                         this.child(self.thread_back_button(cx))
+                    })
+                    .when(saved_header.is_some(), |this| {
+                        this.child(self.saved_back_button(cx))
                     })
                     .child(identity),
             )
@@ -501,6 +511,8 @@ impl QuillApp {
                 let in_topic = session.is_some_and(|s| s.open_topic.is_some());
                 let can_post = match (chat, topic) {
                     (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
+                    // Saved sublists and tag filters are read-only views.
+                    (Some(_), None) if self.saved_readonly() => false,
                     (Some(c), None) if !in_topic => c.can_post(),
                     // In a topic whose info hasn't loaded yet: hide the
                     // composer until it arrives (the note says "Loading
@@ -520,8 +532,9 @@ impl QuillApp {
                         .and_then(|s| s.chats.get(&id.0).map(|c| c.is_channel()))
                         .unwrap_or(false)
                 });
-                if is_channel {
-                    // The join/leave footer replaces the plain note for channels.
+                if is_channel || self.saved_readonly() {
+                    // The join/leave footer replaces the plain note for
+                    // channels; Saved sublists and tag filters need none.
                     None
                 } else if in_topic {
                     // Parity slice 4: closed topics and a missing send
@@ -608,6 +621,7 @@ impl QuillApp {
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
                 let sendable = !show_attach
+                    || self.forward_bar_here()
                     || !self.pending_attachments.is_empty()
                     || !self.composer.read(cx).value().trim().is_empty();
                 this.child(
@@ -674,6 +688,7 @@ impl QuillApp {
                         .when(
                             self.pending_forward.is_some()
                                 && !self.forward_picker_open
+                                && !self.forward_bar_here()
                                 // Selecting here: the header carries the buttons.
                                 && !self
                                     .session()
@@ -685,6 +700,10 @@ impl QuillApp {
                                 })
                             },
                         )
+                        .when(self.forward_bar_here(), |this| {
+                            this.child(self.forward_bar(cx))
+                        })
+                        .when(self.send_as_open, |this| this.child(self.send_as_panel(cx)))
                         .when_some(self.pending_delete.clone(), |this, _| {
                             this.child(self.delete_confirm_banner(cx))
                         })
@@ -711,6 +730,14 @@ impl QuillApp {
                         })
                         // Phase 4.2: poll creation dialog above the composer.
                         .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))
+                        // B15: checklist composer / "Add Tasks" and the poll
+                        // "Add an Option" row above the composer.
+                        .when_some(self.checklist_dialog_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
+                        .when_some(self.poll_add_option_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         // Phase D3a: invite-link creation dialog above the composer.
                         .when_some(self.invite_link_dialog_panel(cx), |this, panel| {
                             this.child(panel)
@@ -844,6 +871,13 @@ impl QuillApp {
                                 .when_some(self.scheduled_messages_button(cx), |row, button| {
                                     row.child(button)
                                 })
+                                // Show / hide the bot's reply keyboard.
+                                .when_some(self.keyboard_toggle_button(cx), |row, button| {
+                                    row.child(button)
+                                })
+                                // "Send as" identity of the chat
+                                // (`chat.message_sender_id`).
+                                .when_some(self.send_as_button(cx), |row, button| row.child(button))
                                 // Telegram Desktop's round button: the mic
                                 // while there's nothing to send, Send once
                                 // there is, Save when editing, the slow-mode
@@ -941,6 +975,9 @@ impl QuillApp {
         let thread_messages: Option<Vec<HistoryMessage>> =
             thread_open.map(|thread| thread.ordered().into_iter().cloned().collect());
         let thread_pending = session.is_some_and(Session::thread_unavailable);
+        // Saved Messages: the sublist list, one sublist or a tag filter.
+        let saved_mode = self.saved_mode();
+        let saved_rows = self.saved_rows();
         // Rebuild the history rows only when something that feeds them
         // changed; otherwise skip snapshotting the messages altogether.
         let ui_hash = self.history_rows_ui_hash();
@@ -992,6 +1029,7 @@ impl QuillApp {
                 this.child(self.forum_topic_strip(&info, cx))
             })
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
+            .children(self.saved_tags_bar(cx))
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
             .when(self.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
@@ -1039,6 +1077,22 @@ impl QuillApp {
                         cx,
                     )
                     .into_any_element()
+                } else if saved_mode == Some(super::saved_sublists::SavedMode::Sublists) {
+                    self.saved_sublists_pane(cx)
+                } else if let Some(rows) = saved_rows {
+                    let list = self.history_message_list(
+                        "saved-history",
+                        Some(rows),
+                        chat.as_ref(),
+                        &sender_name,
+                        highlight_id,
+                        media_roots,
+                        cx,
+                    );
+                    // Saved sublist and tag views rebuild their rows every
+                    // frame, like topics and threads.
+                    self.history_rows_key = None;
+                    list
                 } else if thread_pending {
                     self.thread_status_pane(cx)
                 } else if let Some(rows) = thread_messages {
@@ -1062,7 +1116,11 @@ impl QuillApp {
                         .children(self.thread_root_bar(cx))
                         .child(list)
                         .into_any_element()
-                } else if is_forum && open_topic.is_none() && !tabs_used {
+                } else if is_forum
+                    && open_topic.is_none()
+                    && !tabs_used
+                    && open.is_some_and(|id| session.is_some_and(|s| s.chat_views_as_topics(id)))
+                {
                     // Phase 5.1: opening a forum supergroup shows its topics.
                     self.forum_topics_pane(open, cx).into_any_element()
                 } else if has_topics && open_topic.is_some() {
@@ -1102,10 +1160,40 @@ impl QuillApp {
                     // message rows instead of the empty placeholder.
                     let history_loading =
                         open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
-                    if history_loading {
+                    // R5: the first page failed or timed out — a Retry row
+                    // instead of an endless skeleton or a false "No messages".
+                    let history_failed =
+                        open.is_some_and(|id| session.is_some_and(|s| s.history_load_failed(id)));
+                    if history_failed {
+                        div()
+                            .id("history-load-failed")
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .p_6()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Couldn’t load messages ·"),
+                            )
+                            .child(
+                                Button::new("history-retry")
+                                    .label("Retry")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.retry_history_load(cx);
+                                    })),
+                            )
+                            .into_any_element()
+                    } else if history_loading {
                         history_skeleton().into_any_element()
                     } else if is_secret {
                         self.secret_empty_explainer(cx).into_any_element()
+                    } else if let Some(intro) = self.greeting_intro(chat.as_ref(), cx) {
+                        intro
                     } else {
                         pane_placeholder(
                             "No messages yet",
@@ -1680,6 +1768,7 @@ impl QuillApp {
         let corner_buttons = self.jump_corner_buttons(
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
             chat.as_ref().map_or(0, |c| c.unread_reaction_count),
+            chat.as_ref().map_or(0, |c| c.unread_poll_vote_count),
             cx,
         );
         // kit Phase 3: only visible rows render. Row 0 becoming visible
@@ -2036,8 +2125,32 @@ impl QuillApp {
                             {
                                 this.begin_reply_from_message(chat_id, message_id, window, cx);
                             }
+                            // B11: double-click reacts with the quick
+                            // reaction (tdesktop `toggleFavoriteReaction`);
+                            // on selected text it selects the word instead.
+                            if event.click_count == 2
+                                && !this.selecting_in(row_chat)
+                                && !gpui_kit::base::TextSelection::has_selection(window, cx)
+                            {
+                                this.quick_react(row_chat, row_msg, cx);
+                            }
                             cx.notify();
                         }),
+                    )
+                    .when_some(
+                        self.reaction_fly_for(row_chat.0, row_msg.0, cx),
+                        |this, (glyph, frame)| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .bottom(px(12. + frame.rise))
+                                    .when(outgoing, |this| this.right(px(56.)))
+                                    .when(!outgoing, |this| this.left(px(64.)))
+                                    .opacity(frame.alpha)
+                                    .text_size(px(26. * frame.scale))
+                                    .child(glyph),
+                            )
+                        },
                     )
                     // Selecting slides an outgoing bubble aside for the check.
                     .child(if outgoing && selection_slide > 0. {
@@ -2078,6 +2191,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.session.open_topic.is_none()
             && live.driver.session.thread.is_none()
+            && live.driver.session.saved.sublist.is_none()
+            && live.driver.session.saved.tag_search.is_none()
             && live.driver.fetch_history_newer().ok().flatten().is_some()
         {
             cx.notify();
@@ -2111,10 +2226,25 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The "Couldn't load messages · Retry" row: ask for the first page
+    /// again.
+    pub(super) fn retry_history_load(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.retry_history().is_err()
+        {
+            self.status_note = "could not load history".into();
+        }
+        cx.notify();
+    }
+
     pub(super) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.
-            let sent = if live.driver.session.thread.is_some() {
+            let sent = if live.driver.session.saved.tag_search.is_some() {
+                live.driver.fetch_saved_tag_page()
+            } else if live.driver.session.saved.sublist.is_some() {
+                live.driver.fetch_saved_sublist_history()
+            } else if live.driver.session.thread.is_some() {
                 live.driver.fetch_thread_history()
             } else if live.driver.session.open_topic.is_some() {
                 live.driver.fetch_topic_history()

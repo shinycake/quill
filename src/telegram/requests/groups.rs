@@ -1075,3 +1075,67 @@ pub fn get_forum_topic(extra: RequestId, chat_id: ChatId, forum_topic_id: i32) -
     })
     .to_string()
 }
+
+/// `banChatMember chat_id:int53 member_id:MessageSender
+/// banned_until_date:int32 revoke_messages:Bool = Ok` (TDLib 1.8.67,
+/// `schema/td_api.tl:13605`). Telegram Desktop's "Remove from group" in a
+/// basic group (`messages.deleteChatUser`): the only removal TDLib offers
+/// there, since `setChatMemberStatus` cannot ban in basic groups.
+pub fn ban_chat_member(
+    extra: RequestId,
+    chat_id: i64,
+    user_id: i64,
+    banned_until_date: i32,
+    revoke_messages: bool,
+) -> String {
+    json!({
+        "@type": "banChatMember",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "member_id": { "@type": "messageSenderUser", "user_id": user_id },
+        "banned_until_date": banned_until_date,
+        "revoke_messages": revoke_messages,
+    })
+    .to_string()
+}
+
+/// `canTransferOwnership = CanTransferOwnershipResult` (schema line 13608):
+/// whether this session may hand a chat over (2-step verification on for
+/// 7 days, session older than 24 hours).
+pub fn can_transfer_ownership(extra: RequestId) -> String {
+    json!({
+        "@type": "canTransferOwnership",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// `transferChatOwnership chat_id:int53 user_id:int53 password:string = Ok`
+/// (schema line 13614). `password` is the user's 2-step verification
+/// password; callers must not log the returned JSON.
+pub fn transfer_chat_ownership(
+    extra: RequestId,
+    chat_id: i64,
+    user_id: i64,
+    password: &str,
+) -> String {
+    json!({
+        "@type": "transferChatOwnership",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "password": password,
+    })
+    .to_string()
+}
+
+/// `getChatOwnerAfterLeaving chat_id:int53 = User` (schema line 13619):
+/// who inherits a chat when its owner leaves.
+pub fn get_chat_owner_after_leaving(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "getChatOwnerAfterLeaving",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+    })
+    .to_string()
+}

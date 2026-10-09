@@ -39,6 +39,9 @@ pub type MessageTranslationKey = (i64, i64, String);
 pub struct TranslateState {
     /// Chats with `chat.is_translatable` set.
     pub translatable_chats: HashSet<i64>,
+    /// Supergroups with `supergroup.has_automatic_translation` (channels
+    /// that show their messages translated for everyone).
+    pub auto_translate_supergroups: HashSet<i64>,
     pub jobs: HashMap<u64, TranslateJob>,
     pub next_job: u64,
     pub messages: HashMap<MessageTranslationKey, Translation>,
@@ -57,6 +60,25 @@ impl Session {
         } else {
             self.translate.translatable_chats.remove(&chat_id);
         }
+    }
+
+    /// Record `supergroup.has_automatic_translation`.
+    pub(crate) fn set_supergroup_auto_translate(&mut self, supergroup_id: i64, on: bool) {
+        if on {
+            self.translate
+                .auto_translate_supergroups
+                .insert(supergroup_id);
+        } else {
+            self.translate
+                .auto_translate_supergroups
+                .remove(&supergroup_id);
+        }
+    }
+
+    /// `PeerData::autoTranslation`: a channel with automatic translation.
+    pub fn chat_auto_translate(&self, chat_id: ChatId) -> bool {
+        self.chat_supergroup(chat_id)
+            .is_some_and(|id| self.translate.auto_translate_supergroups.contains(&id))
     }
 
     /// `chat.is_translatable`: TDLib suggests translating this chat.

@@ -120,11 +120,20 @@ impl Session {
     /// Photo thumbs in the open chat that are not secret/spoiler and still need a download.
     pub fn thumb_file_ids_to_download(&self) -> Vec<FileId> {
         let mut ids = Vec::new();
+        // The open Saved Messages sublist / tag filter keeps its own rows.
+        let saved_rows = self
+            .saved
+            .sublist
+            .iter()
+            .map(|view| &view.history)
+            .chain(self.saved.tag_search.iter().map(|search| &search.history))
+            .flat_map(|history| history.messages.values());
         for message in self
             .open_chat
             .and_then(|id| self.histories.get(&id.0))
             .into_iter()
             .flat_map(|history| history.messages.values())
+            .chain(saved_rows)
         {
             match &message.content {
                 MessageContent::Photo(photo) => {

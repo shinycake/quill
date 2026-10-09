@@ -82,6 +82,7 @@ pub(crate) fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         is_marked_as_unread: false,
         unread_mention_count: 0,
         unread_reaction_count: 0,
+        unread_poll_vote_count: 0,
         can_be_reported: false,
         blocked: false,
         // Phase B1: unknown until `updateSecretChat` / `getSecretChat`
@@ -330,6 +331,12 @@ pub struct HistoryState {
     /// A newer-page request failed; stop auto-loading until the window is
     /// reset, so a persistent error can't re-send on every render.
     pub newer_failed: bool,
+    /// The window's page load failed or timed out (error answer or the
+    /// pending-request sweep) while the window is empty: the UI shows
+    /// "Couldn't load messages · Retry" instead of the skeleton. Cleared by
+    /// `ConnectDriver::retry_history`, a window reset, or any message
+    /// landing in the window.
+    pub load_failed: bool,
     /// The chat's last read incoming message when it was opened with unread
     /// messages: the window loads around it and the UI draws the "Unread
     /// messages" divider after it. Cleared by jumping to the latest.
@@ -373,6 +380,7 @@ impl HistoryState {
         self.loaded_complete = false;
         self.has_newer = false;
         self.newer_failed = false;
+        self.load_failed = false;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
 
@@ -387,6 +395,7 @@ impl HistoryState {
             self.latest_seen = self.latest_seen.max(message.id.0);
         }
         self.messages.insert(message.id.0, message);
+        self.load_failed = false;
     }
 
     pub(crate) fn remove(&mut self, id: MessageId, permanent: bool) {

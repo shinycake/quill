@@ -144,8 +144,13 @@ pub enum DialogKind {
     Permissions,
     Username,
     Restrict,
+    /// Transfer ownership / the owner's leave box.
+    Ownership,
     GroupConfirm,
+    /// B7: group and channel settings (topics, history, reactions, ...).
+    GroupSettings,
     ForumManage,
+    SavedTagName,
     Welcome,
     Appearance,
     /// Slice A9: account lifecycle (delete account + self-destruct TTL).
@@ -174,6 +179,8 @@ pub enum DialogKind {
     Translate,
     /// Local passcode settings.
     Passcode,
+    /// A bot keyboard's share-phone / share-users / share-chat request.
+    RequestShare,
 }
 
 /// Builder for one dialog kind: `(app, shell, dialog, cx) -> dialog`.
@@ -217,6 +224,7 @@ impl QuillShell {
             DialogKind::Marketplace => app.marketplace_open,
             DialogKind::CallbackPassword => app.callback_password_dialog.is_some(),
             DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
+            DialogKind::RequestShare => app.request_share.is_some(),
             DialogKind::DeepLinkInfo => app.deep_link_dialog.is_some(),
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
             DialogKind::DeepLinkShare => app.share_link_text.is_some(),
@@ -249,8 +257,11 @@ impl QuillShell {
             DialogKind::Permissions => app.permissions_dialog.is_some(),
             DialogKind::Username => app.username_dialog.is_some(),
             DialogKind::Restrict => app.restrict_dialog.is_some(),
+            DialogKind::Ownership => app.ownership_dialog.is_some(),
             DialogKind::GroupConfirm => app.group_confirm_dialog.is_some(),
+            DialogKind::GroupSettings => app.group_settings_dialog.is_some(),
             DialogKind::ForumManage => app.forum_manage_dialog.is_some(),
+            DialogKind::SavedTagName => app.saved_tag_dialog.is_some(),
             DialogKind::Welcome => app.welcome_dialog.is_some(),
             DialogKind::Appearance => app.appearance_open,
             DialogKind::AccountLifecycle => app.account_lifecycle.open,
@@ -279,6 +290,7 @@ impl QuillShell {
             DialogKind::Marketplace => QuillApp::build_marketplace_dialog,
             DialogKind::CallbackPassword => QuillApp::build_callback_password_dialog,
             DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
+            DialogKind::RequestShare => QuillApp::build_request_share_dialog,
             DialogKind::DeepLinkInfo => QuillApp::build_deep_link_dialog,
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
             DialogKind::DeepLinkShare => QuillApp::build_deep_link_share_dialog,
@@ -311,8 +323,11 @@ impl QuillShell {
             DialogKind::Permissions => QuillApp::build_permissions_dialog,
             DialogKind::Username => QuillApp::build_username_dialog,
             DialogKind::Restrict => QuillApp::build_restrict_dialog,
+            DialogKind::Ownership => QuillApp::build_ownership_dialog,
             DialogKind::GroupConfirm => QuillApp::build_group_confirm_dialog,
+            DialogKind::GroupSettings => QuillApp::build_group_settings_dialog,
             DialogKind::ForumManage => QuillApp::build_forum_manage_dialog,
+            DialogKind::SavedTagName => QuillApp::build_saved_tag_dialog,
             DialogKind::Welcome => QuillApp::build_welcome_dialog,
             DialogKind::Appearance => QuillApp::build_appearance_dialog,
             DialogKind::AccountLifecycle => QuillApp::build_account_lifecycle_dialog,
@@ -353,6 +368,7 @@ impl QuillShell {
         DialogKind::FolderManage,
         DialogKind::CallbackPassword,
         DialogKind::LoginUrlConfirm,
+        DialogKind::RequestShare,
         // `parity:platform-deep-links`: link info sits with the other
         // low-priority informational dialogs.
         DialogKind::DeepLinkInfo,
@@ -372,10 +388,13 @@ impl QuillShell {
         DialogKind::Permissions,
         DialogKind::Username,
         DialogKind::Restrict,
+        DialogKind::Ownership,
         DialogKind::GroupConfirm,
+        DialogKind::GroupSettings,
         DialogKind::ArchivedStickers,
         DialogKind::EmojiSets,
         DialogKind::ForumManage,
+        DialogKind::SavedTagName,
         DialogKind::PollVoters,
         DialogKind::MessageReport,
         DialogKind::StickerSet,

@@ -89,6 +89,25 @@ pub fn delete_chat_messages_by_sender(extra: RequestId, chat_id: ChatId, user_id
     .to_string()
 }
 
+/// `deleteMessageReactionsFromSender chat_id:int53 message_id:int53
+/// sender_id:MessageSender = Ok` (schema 1.8.67, line 12812): an admin
+/// removes one member's reactions from a message (`can_delete_reactions`).
+pub fn delete_message_reactions_from_sender(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    sender: &Value,
+) -> String {
+    json!({
+        "@type": "deleteMessageReactionsFromSender",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "sender_id": sender,
+    })
+    .to_string()
+}
+
 /// `reportSupergroupSpam supergroup_id:int53 message_ids:vector<int53> =
 /// Ok` (schema 1.8.67, line 15226): the admin "Report Spam" checkbox.
 pub fn report_supergroup_spam(

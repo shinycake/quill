@@ -39,6 +39,39 @@ pub fn translate_message_text(
     .to_string()
 }
 
+/// `toggleChatIsTranslatable` (schema 1.8.67, line 13516): whether the
+/// translate bar is offered in the chat (tdesktop's "Hide" in the bar
+/// menu, `messages.togglePeerTranslations`).
+pub fn toggle_chat_is_translatable(
+    extra: RequestId,
+    chat_id: ChatId,
+    is_translatable: bool,
+) -> String {
+    json!({
+        "@type": "toggleChatIsTranslatable",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "is_translatable": is_translatable,
+    })
+    .to_string()
+}
+
+/// `toggleSupergroupHasAutomaticTranslation` (schema 1.8.67, line 15202);
+/// requires `can_change_info` and the channel's boost level.
+pub fn toggle_supergroup_has_automatic_translation(
+    extra: RequestId,
+    supergroup_id: i64,
+    has_automatic_translation: bool,
+) -> String {
+    json!({
+        "@type": "toggleSupergroupHasAutomaticTranslation",
+        "@extra": extra.as_extra(),
+        "supergroup_id": supergroup_id,
+        "has_automatic_translation": has_automatic_translation,
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{translate_message_text, translate_text};

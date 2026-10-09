@@ -111,6 +111,8 @@ pub struct QuillApp {
     pub(super) last_highlight: Option<MessageId>,
     /// `(jump serial, start)` of the running jump-highlight fade.
     pub(super) highlight_fade: Option<(u64, std::time::Instant)>,
+    /// B11: the reaction that just flew from the message (message, glyph, start).
+    pub(super) reaction_fly: Option<super::history_fx::ReactionFly>,
     /// Floating date pill state (shown while scrolling the history).
     pub(super) scroll_date: super::history_fx::ScrollDate,
     /// Rows painted this frame: `(row, bounds, starts its day)`.
@@ -542,6 +544,15 @@ pub struct QuillApp {
     pub(super) selection_drag: Option<bool>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
     pub(super) forward_picker_open: bool,
+    /// Destinations ticked in the share box.
+    pub(super) share_selection: quill::share_box::ShareSelection,
+    /// The share box's optional comment, sent before the forwards.
+    pub(super) share_comment_input: Entity<TextareaState>,
+    /// The forward bar is showing above this chat's composer
+    /// (`pending_forward` follows the user into the destination).
+    pub(super) forward_bar_dest: Option<ChatId>,
+    /// The composer's "send as" identity list is open.
+    pub(super) send_as_open: bool,
     /// Last successful (or failed) `forwardMessages` result.
     pub(super) forward_result: Option<ForwardResult>,
     /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
@@ -747,18 +758,29 @@ pub struct QuillApp {
     /// B1: one-time custom keyboards the user already tapped
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
+    /// Keyboards the user hid with the composer's keyboard button.
+    pub(super) collapsed_keyboards: std::collections::HashSet<(i64, i64)>,
+    /// A bot request button's share dialog (`DialogKind::RequestShare`).
+    pub(super) request_share: Option<super::request_share::RequestShare>,
     /// Slice G1: default chat permissions editor.
     pub(super) permissions_dialog: Option<PermissionsDialog>,
     /// Slice G1: public username editor.
     pub(super) username_dialog: Option<UsernameDialog>,
     /// Slice G1: restrict/ban dialog.
     pub(super) restrict_dialog: Option<RestrictDialog>,
+    pub(super) ownership_dialog: Option<OwnershipDialog>,
     /// Slice G1: delete / leave / broadcast-upgrade / ban confirmations.
     pub(super) group_confirm_dialog: Option<GroupConfirmDialog>,
     /// Slice G2: forum-topic management dialog.
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
+    /// Saved Messages: "Add Name" / "Edit Name" for a tag.
+    pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
+    /// B15: the inline "Add an Option" panel (`addPollOption`).
+    pub(super) poll_add_option: Option<PollAddOption>,
+    /// B15: the checklist composer / "Add Tasks" box.
+    pub(super) checklist_dialog: Option<ChecklistDialog>,
     /// Slice G2: chat welcome-message editor.
     pub(super) welcome_dialog: Option<WelcomeDialog>,
     /// Slice G2: event-log search input for the info panel's
@@ -972,6 +994,9 @@ pub struct QuillApp {
     /// B10: edit-contact / birthday / personal-channel / share-contact
     /// dialog behind the profile panels.
     pub(super) profile_dialog: Option<ProfileDialog>,
+    /// B7: group / channel settings dialog (topics, history, reactions,
+    /// discussion group, ...).
+    pub(super) group_settings_dialog: Option<GroupSettingsDialog>,
     /// B10: a profile photo gallery whose list was requested; the viewer
     /// opens when it lands (checked by the poll loop).
     pub(super) pending_profile_gallery: Option<i64>,

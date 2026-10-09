@@ -26,9 +26,10 @@ impl QuillApp {
         &self,
         mentions: i32,
         reactions: i32,
+        poll_votes: i32,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if mentions <= 0 && reactions <= 0 {
+        if mentions <= 0 && reactions <= 0 && poll_votes <= 0 {
             return None;
         }
         let weak = cx.weak_entity();
@@ -49,7 +50,14 @@ impl QuillApp {
                     ))
                 })
                 .when(reactions > 0, |this| {
-                    this.child(corner_button(UnreadJumpKind::Reaction, reactions, weak))
+                    this.child(corner_button(
+                        UnreadJumpKind::Reaction,
+                        reactions,
+                        weak.clone(),
+                    ))
+                })
+                .when(poll_votes > 0, |this| {
+                    this.child(corner_button(UnreadJumpKind::PollVote, poll_votes, weak))
                 })
                 .into_any_element(),
         )
@@ -90,6 +98,18 @@ fn corner_button(kind: UnreadJumpKind, count: i32, owner: WeakEntity<QuillApp>) 
             "Next unread reaction",
             "Next unread reaction · right-click for more",
         ),
+        // tdesktop `lng_jump_to_poll_votes`.
+        UnreadJumpKind::PollVote => (
+            "jump-poll-vote",
+            IconName::ChartBar,
+            "Jump to poll votes",
+            "Jump to poll votes · right-click for more",
+        ),
+    };
+    // tdesktop `lng_context_mark_read_poll_votes_all` vs "Mark all as read".
+    let read_all_label = match kind {
+        UnreadJumpKind::PollVote => "Read all poll votes",
+        _ => "Mark all as read",
     };
     let jump_owner = owner.clone();
     div()
@@ -99,7 +119,7 @@ fn corner_button(kind: UnreadJumpKind, count: i32, owner: WeakEntity<QuillApp>) 
         .context_menu(move |menu, _, _| {
             let owner = owner.clone();
             menu.item(
-                PopupMenuItem::new("Mark all as read").on_click(move |_, _, cx| {
+                PopupMenuItem::new(read_all_label).on_click(move |_, _, cx| {
                     let _ = owner.update(cx, |this, cx| this.read_all_unread_markers(kind, cx));
                 }),
             )
@@ -171,6 +191,10 @@ mod tests {
         assert_eq!(
             UnreadJumpKind::Reaction.filter_constructor(),
             "searchMessagesFilterUnreadReaction"
+        );
+        assert_eq!(
+            UnreadJumpKind::PollVote.filter_constructor(),
+            "searchMessagesFilterUnreadPollVote"
         );
     }
 }
