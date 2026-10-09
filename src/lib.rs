@@ -41,6 +41,7 @@ pub mod media_session;
 pub mod media_tools;
 pub mod media_viewer;
 pub mod message_menu;
+pub mod moderation;
 pub mod mute_menu;
 pub mod notify;
 pub mod passcode;

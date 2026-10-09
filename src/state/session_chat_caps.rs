@@ -573,6 +573,12 @@ impl Session {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self.supergroup_can_promote_members(supergroup_id)
             }
+            ChatKind::BasicGroup { basic_group_id } => self
+                .basic_group_own
+                .get(&basic_group_id)
+                .is_some_and(|own| {
+                    own.status == ChannelMemberStatus::Creator || own.can_promote_members
+                }),
             _ => false,
         }
     }
@@ -600,6 +606,12 @@ impl Session {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
                     || self.supergroup_can_restrict_members(supergroup_id)
             }
+            ChatKind::BasicGroup { basic_group_id } => self
+                .basic_group_own
+                .get(&basic_group_id)
+                .is_some_and(|own| {
+                    own.status == ChannelMemberStatus::Creator || own.can_restrict_members
+                }),
             _ => false,
         }
     }
@@ -618,10 +630,10 @@ impl Session {
             ChatKind::Supergroup { supergroup_id, .. } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
             }
-            // B7: `updateBasicGroup.status`.
-            ChatKind::BasicGroup { basic_group_id } => {
-                self.basic_group_status.get(&basic_group_id) == Some(&ChannelMemberStatus::Creator)
-            }
+            ChatKind::BasicGroup { basic_group_id } => self
+                .basic_group_own
+                .get(&basic_group_id)
+                .is_some_and(|own| own.status == ChannelMemberStatus::Creator),
             _ => false,
         }
     }

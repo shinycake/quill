@@ -3,21 +3,24 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, InviteLinkFetch,
-    JoinRequestFetch, MemberListFilter, MemberStatusChange, RequestPurpose, RequestRollback,
-    SupergroupMembersFetch,
+    JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup, RequestPurpose,
+    RequestRollback, SupergroupMembersFetch,
 };
-use crate::telegram::envelope::{ChatAdminRights, ChatKind, ChatPermissions};
+use crate::telegram::envelope::{
+    CanTransferOwnershipResult, ChatAdminRights, ChatKind, ChatPermissions,
+};
 use crate::telegram::requests::{
-    ChatEventLogFilterSet, MessageSenderRef, add_chat_member, add_chat_members,
-    chat_member_status_administrator_json, chat_member_status_banned_json,
+    ChatEventLogFilterSet, MessageSenderRef, add_chat_member, add_chat_members, ban_chat_member,
+    can_transfer_ownership, chat_member_status_administrator_json, chat_member_status_banned_json,
     chat_member_status_member_json, chat_member_status_restricted_json, create_chat_invite_link,
     edit_chat_invite_link, get_basic_group_full_info, get_chat_administrators, get_chat_event_log,
-    get_chat_invite_links, get_chat_join_requests, get_chat_member, get_supergroup_members,
-    process_chat_join_request, replace_primary_chat_invite_link, revoke_chat_invite_link,
-    set_chat_member_status, set_chat_permissions, set_supergroup_username,
+    get_chat_invite_links, get_chat_join_requests, get_chat_member, get_chat_owner_after_leaving,
+    get_supergroup_members, process_chat_join_request, replace_primary_chat_invite_link,
+    revoke_chat_invite_link, set_chat_member_status, set_chat_permissions, set_supergroup_username,
     supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
     supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
     supergroup_members_filter_search_json, toggle_supergroup_join_by_request,
+    transfer_chat_ownership,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -921,6 +924,155 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id.0, &member_id, &status,
         )) {
             self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// "Remove from group" (tdesktop `kickParticipant`). A basic group uses
+    /// `banChatMember`; a supergroup or channel member is banned for good
+    /// (they show under Banned and cannot rejoin until unbanned), with no
+    /// automatic lift. Needs `can_restrict_members`.
+    pub fn remove_chat_member(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_restrict_members(chat_id) {
+            return Ok(None);
+        }
+        let basic = match self.session.chats.get(&chat_id.0).map(|c| &c.kind) {
+            Some(ChatKind::BasicGroup { .. }) => true,
+            Some(ChatKind::Supergroup { .. }) => false,
+            _ => return Ok(None),
+        };
+        let kind = if basic {
+            MemberStatusChange::Remove
+        } else {
+            MemberStatusChange::Ban
+        };
+        let purpose = RequestPurpose::SetChatMemberStatus { user_id, kind };
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let json = if basic {
+            ban_chat_member(extra, chat_id.0, user_id, 0, false)
+        } else {
+            let member_id = MessageSenderRef::User(user_id).to_value();
+            set_chat_member_status(
+                extra,
+                chat_id.0,
+                &member_id,
+                &chat_member_status_banned_json(0),
+            )
+        };
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// `canTransferOwnership`: the 2-step-verification and session-age
+    /// gate. Sent when the transfer dialog opens, never on a timer.
+    pub fn check_can_transfer_ownership(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.ownership.check_in_flight {
+            return Ok(None);
+        }
+        self.session.begin_ownership_check();
+        let extra = self
+            .session
+            .request(RequestPurpose::CanTransferOwnership, None);
+        if let Err(err) = self.sender.send_json(&can_transfer_ownership(extra)) {
+            self.session.requests.take(extra);
+            self.session.ownership.check_in_flight = false;
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// `transferChatOwnership` with the 2-step verification password. Only
+    /// the owner may call it, only after `canTransferOwnership` said Ok,
+    /// and not to a bot or yourself. The password goes to TDLib and
+    /// nowhere else: it is not stored, logged or kept in the purpose.
+    pub fn transfer_chat_ownership(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        password: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let allowed = matches!(
+            self.session.chats.get(&chat_id.0).map(|c| &c.kind),
+            Some(ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. })
+        ) && self.session.chat_is_owner(chat_id)
+            && self.session.ownership.can_transfer == Some(CanTransferOwnershipResult::Ok)
+            && self.session.ownership.transfer_in_flight.is_none()
+            && !password.is_empty()
+            && self.session.my_user_id != Some(user_id)
+            && !self.session.is_bot_user(user_id);
+        if !allowed {
+            return Ok(None);
+        }
+        self.session.begin_ownership_transfer(chat_id.0, user_id);
+        let extra = self.session.request(
+            RequestPurpose::TransferChatOwnership { user_id },
+            Some(chat_id),
+        );
+        if let Err(err) = self.sender.send_json(&transfer_chat_ownership(
+            extra, chat_id.0, user_id, password,
+        )) {
+            self.session.requests.take(extra);
+            self.session.ownership.transfer_in_flight = None;
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// `getChatOwnerAfterLeaving`: who inherits the chat if the owner
+    /// leaves. Owner-only; one lookup per chat until it is cleared.
+    pub fn fetch_chat_owner_after_leaving(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let supported = matches!(
+            self.session.chats.get(&chat_id.0).map(|c| &c.kind),
+            Some(ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. })
+        );
+        if !supported || !self.session.chat_is_owner(chat_id) {
+            return Ok(None);
+        }
+        if matches!(
+            self.session.ownership.owner_after_leaving.get(&chat_id.0),
+            Some(OwnerLookup::Loading | OwnerLookup::Loaded(_))
+        ) {
+            return Ok(None);
+        }
+        self.session.begin_owner_lookup(chat_id.0);
+        let extra = self
+            .session
+            .request(RequestPurpose::GetChatOwnerAfterLeaving, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&get_chat_owner_after_leaving(extra, chat_id.0))
+        {
+            self.session.requests.take(extra);
+            self.session
+                .ownership
+                .owner_after_leaving
+                .remove(&chat_id.0);
             return Err(err);
         }
         Ok(Some(extra))

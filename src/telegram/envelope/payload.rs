@@ -485,6 +485,15 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             let result = parse_can_post_story_result(&value).ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::CanPostStoryResult { result })
         }
+        // `canTransferOwnership` answer (schema 1.8.67, line 8568).
+        "canTransferOwnershipResultOk"
+        | "canTransferOwnershipResultPasswordNeeded"
+        | "canTransferOwnershipResultPasswordTooFresh"
+        | "canTransferOwnershipResultSessionTooFresh" => {
+            let result =
+                parse_can_transfer_ownership_result(&value).ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::CanTransferOwnershipResult { result })
+        }
         "updateUnreadMessageCount" => Ok(EnvelopePayload::UpdateUnreadMessageCount {
             list: parse_chat_list(value.get("chat_list")),
             unread_count: unread_total(&value, "unread_count"),
@@ -1305,6 +1314,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 status: parse_channel_member_status(group.get("status"))
                     .map(|(status, _)| status)
                     .unwrap_or(ChannelMemberStatus::Unknown),
+                can_restrict_members: parse_restrict_members_right(group.get("status"))
+                    .unwrap_or(false),
+                can_promote_members: parse_promote_members_right(group.get("status"))
+                    .unwrap_or(false),
+                can_manage_tags: parse_manage_tags_right(group.get("status")).unwrap_or(false),
                 can_change_info: parse_change_info_right(group.get("status")),
                 is_active: group
                     .get("is_active")

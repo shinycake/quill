@@ -1824,12 +1824,24 @@ impl Session {
                 basic_group_id,
                 member_count,
                 status,
+                can_restrict_members,
+                can_promote_members,
+                can_manage_tags,
                 can_change_info,
                 is_active,
             } => {
                 self.basic_group_member_counts
                     .insert(basic_group_id, member_count);
                 self.basic_group_status.insert(basic_group_id, status);
+                self.basic_group_own.insert(
+                    basic_group_id,
+                    BasicGroupOwn {
+                        status,
+                        can_restrict_members,
+                        can_promote_members,
+                        can_manage_tags,
+                    },
+                );
                 self.basic_group_change_info_right
                     .insert(basic_group_id, can_change_info.unwrap_or(false));
                 self.basic_group_active.insert(basic_group_id, is_active);
@@ -2235,9 +2247,19 @@ impl Session {
                     self.accept_sponsored_report(pending, result);
                 }
             }
+            EnvelopePayload::CanTransferOwnershipResult { result } => {
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::CanTransferOwnership) {
+                    self.accept_can_transfer_ownership(result);
+                }
+            }
             EnvelopePayload::Me { user_id } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
+                } else if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::GetChatOwnerAfterLeaving)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.accept_owner_after_leaving(chat_id.0, user_id);
                 } else if let Some(RequestPurpose::DeepLinkResolve { generation }) =
                     pending.map(|p| p.purpose)
                     && let Some(DeepLinkState::ResolvingChat {

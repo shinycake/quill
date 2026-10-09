@@ -368,6 +368,7 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
             properties.can_get_viewers = true;
             properties.can_be_deleted_for_all_users = true;
             properties.can_report_supergroup_spam = true;
+            properties.can_delete_reactions = true;
         }
         13 => {
             properties.can_get_link = true;

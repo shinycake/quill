@@ -567,6 +567,12 @@ pub(super) fn demo_seed_for(
             "Rich messages require Telegram Premium".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyMemberModeration => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — member moderation (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyGroupAdminSettings => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2004,6 +2010,7 @@ impl QuillApp {
             username_dialog: None,
             community_ui: CommunityUi::default(),
             restrict_dialog: None,
+            ownership_dialog: None,
             group_confirm_dialog: None,
             message_menu_selection: None,
             message_menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
@@ -2132,6 +2139,7 @@ impl QuillApp {
         app.demo_setup_bots_profile(demo, window, cx);
         app.demo_setup_proxy(demo, window, cx);
         app.demo_setup_profile_panels(demo, window, cx);
+        app.demo_setup_member_moderation(demo, window, cx);
         app.demo_setup_group_admin_settings(demo, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);

@@ -144,6 +144,8 @@ pub enum DialogKind {
     Permissions,
     Username,
     Restrict,
+    /// Transfer ownership / the owner's leave box.
+    Ownership,
     GroupConfirm,
     /// B7: group and channel settings (topics, history, reactions, ...).
     GroupSettings,
@@ -254,6 +256,7 @@ impl QuillShell {
             DialogKind::Permissions => app.permissions_dialog.is_some(),
             DialogKind::Username => app.username_dialog.is_some(),
             DialogKind::Restrict => app.restrict_dialog.is_some(),
+            DialogKind::Ownership => app.ownership_dialog.is_some(),
             DialogKind::GroupConfirm => app.group_confirm_dialog.is_some(),
             DialogKind::GroupSettings => app.group_settings_dialog.is_some(),
             DialogKind::ForumManage => app.forum_manage_dialog.is_some(),
@@ -318,6 +321,7 @@ impl QuillShell {
             DialogKind::Permissions => QuillApp::build_permissions_dialog,
             DialogKind::Username => QuillApp::build_username_dialog,
             DialogKind::Restrict => QuillApp::build_restrict_dialog,
+            DialogKind::Ownership => QuillApp::build_ownership_dialog,
             DialogKind::GroupConfirm => QuillApp::build_group_confirm_dialog,
             DialogKind::GroupSettings => QuillApp::build_group_settings_dialog,
             DialogKind::ForumManage => QuillApp::build_forum_manage_dialog,
@@ -381,6 +385,7 @@ impl QuillShell {
         DialogKind::Permissions,
         DialogKind::Username,
         DialogKind::Restrict,
+        DialogKind::Ownership,
         DialogKind::GroupConfirm,
         DialogKind::GroupSettings,
         DialogKind::ArchivedStickers,

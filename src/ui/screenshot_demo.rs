@@ -696,6 +696,10 @@ pub enum ScreenshotDemo {
     /// edit-contact|birthday|channel|share|gallery|similar`; injected data,
     /// no live Telegram).
     ReadyProfilePanels,
+    /// Member moderation (`QUILL_DEMO_MODERATION=members|restrict|ban|
+    /// remove|delete|leave|pick|confirm|blocked`; injected data, no live
+    /// Telegram).
+    ReadyMemberModeration,
     /// B7: group and channel settings dialog
     /// (`QUILL_DEMO_GROUP_ADMIN=group|channel|basic|reactions|discussion|
     /// linked|confirm`; injected data, no live Telegram).

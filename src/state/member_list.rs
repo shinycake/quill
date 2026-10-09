@@ -20,6 +20,8 @@ pub enum MemberStatusChange {
     /// Restricted/banned member → plain member
     /// (`chatMemberStatusMember`).
     Unban,
+    /// "Remove from group" in a basic group (`banChatMember`).
+    Remove,
 }
 
 /// Slice G1: which `getSupergroupMembers` filter backs one cached member

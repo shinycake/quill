@@ -303,6 +303,24 @@ pub enum RequestPurpose {
     DeleteChatMessagesBySender,
     /// Admin moderation from the delete box: `reportSupergroupSpam`.
     ReportSupergroupSpam,
+    /// Admin moderation: `deleteMessageReactionsFromSender` (the who-reacted
+    /// list's "Delete reaction" and the delete box's reactions checkbox).
+    DeleteMessageReactionsFromSender {
+        message_id: i64,
+        /// The member whose reactions go; 0 for a channel sender.
+        user_id: i64,
+    },
+    /// `canTransferOwnership`: the 2-step-verification / session-age gate
+    /// before a transfer. Answered into `Session::ownership`.
+    CanTransferOwnership,
+    /// `transferChatOwnership` to `user_id`. Response is `ok`; the
+    /// password never rides the purpose.
+    TransferChatOwnership {
+        user_id: i64,
+    },
+    /// `getChatOwnerAfterLeaving`: who inherits the chat when the owner
+    /// leaves. Response is a `user`; correlated via the chat id.
+    GetChatOwnerAfterLeaving,
     /// MED4: `getWebPageInstantView` (TDLib 1.8.67, `schema/td_api.tl:14794`).
     /// The URL rides `Session::instant_view_urls` keyed by `RequestId`
     /// (the purpose stays `Copy`). Success lands in

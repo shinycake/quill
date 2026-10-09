@@ -681,9 +681,12 @@ pub enum EnvelopePayload {
     UpdateBasicGroup {
         basic_group_id: i64,
         member_count: i32,
-        /// B7: the viewer's own `basicGroup.status` (schema 1.8.67, line
-        /// 2705) - owner and admin gates of the group settings.
+        /// Own `basicGroup.status` (schema 1.8.67, line 2714); `Unknown`
+        /// when missing. Gates member moderation and ownership transfer.
         status: ChannelMemberStatus,
+        can_restrict_members: bool,
+        can_promote_members: bool,
+        can_manage_tags: bool,
         /// B7: `rights.can_change_info` of an administrator status.
         can_change_info: Option<bool>,
         /// B7: `basicGroup.is_active` - false once upgraded to a
@@ -1611,6 +1614,11 @@ pub enum EnvelopePayload {
     /// only when the pending purpose is `CheckCanPostStory`.
     CanPostStoryResult {
         result: CanPostStoryResult,
+    },
+    /// `canTransferOwnership` answer (TDLib 1.8.67, `schema/td_api.tl:8568`);
+    /// honored only for the pending `CanTransferOwnership` purpose.
+    CanTransferOwnershipResult {
+        result: CanTransferOwnershipResult,
     },
     Unknown(UnknownKind),
 }

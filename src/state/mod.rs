@@ -23,9 +23,9 @@ use crate::story_page::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
-    CanPostStoryResult, ChannelMemberStatus, ChatAction, ChatActionBar, ChatActiveStoriesView,
-    ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec,
-    ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
+    CanPostStoryResult, CanTransferOwnershipResult, ChannelMemberStatus, ChatAction, ChatActionBar,
+    ChatActiveStoriesView, ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatFolderInfo,
+    ChatFolderSpec, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
     ChatPositionUpdate, ChatStatistics, ConnectionState, EnvelopePayload, EphemeralMessageContent,
     ErrorClass, ForumTopic, GameHighScore, GameInfo, InlineQueryResultSummary,
     InlineQueryResultsButton, InlineQueryResultsPage, InviteGroupCallParticipantResult,
@@ -63,6 +63,7 @@ mod history_types;
 mod info_types;
 mod media_library;
 mod member_list;
+mod ownership_types;
 mod redraw;
 mod request_purpose;
 mod requests;
@@ -117,6 +118,7 @@ pub use history_types::*;
 pub use info_types::*;
 pub use media_library::{MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, ReactionChoice};
 pub use member_list::*;
+pub use ownership_types::*;
 pub use redraw::{RedrawNeed, redraw_need};
 pub use request_purpose::*;
 pub use requests::*;

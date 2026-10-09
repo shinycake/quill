@@ -524,6 +524,11 @@ impl QuillApp {
             self.status_note = note;
             progressed = true;
         }
+        // The transfer-ownership dialog: a finished transfer closes it
+        // (and leaves, for "appoint and leave").
+        if self.finish_ownership_transfer_ui(cx) {
+            progressed = true;
+        }
         // Slice CL3: a `reportChat` outcome arrived — surface it in the
         // status bar alongside the other async error drains.
         if let Some(note) = self
