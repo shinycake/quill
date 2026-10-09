@@ -39,8 +39,10 @@ on:
 
 run-name: ${{ github.ref_type == 'tag' && format('release {0}', github.ref_name) || (inputs.release && format('release ({0})', github.ref_name) || format('release dry run ({0})', github.ref_name)) }}
 
+# Releases queue behind each other; dry runs have their own queue, so a slow
+# dry run never holds up a release.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ (github.ref_type == 'tag' || inputs.release) && 'publish' || format('dry-run-{0}', github.ref) }}
   cancel-in-progress: false
 
 permissions:
