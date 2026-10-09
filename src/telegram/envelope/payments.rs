@@ -592,7 +592,7 @@ pub(crate) fn parse_star_subscription(value: &Value) -> Option<StarSubscriptionD
 pub(crate) fn parse_star_subscriptions(value: &Value) -> Option<StarSubscriptionsData> {
     let star_amount = value
         .get("star_amount")
-        .and_then(|a| a.get("amount"))
+        .and_then(|a| a.get("star_count"))
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let subscriptions = value
