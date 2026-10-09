@@ -388,6 +388,22 @@ impl QuillApp {
                 }
             );
         }
+        // B7: one entry for the settings the viewer's rights allow
+        // (topics, history, reactions, discussion group, ...).
+        if session.is_some_and(|s| !s.group_admin_controls(chat_id).is_empty()) {
+            row!(
+                "b7-open-settings",
+                I::Settings,
+                if is_channel {
+                    "Channel settings"
+                } else {
+                    "Group settings"
+                },
+                |this, _window, cx| {
+                    this.open_group_settings_dialog(chat_id, cx);
+                }
+            );
+        }
         // Members / subscribers — everyone who can see the panel and
         // add or restrict may manage; plain members get a read-only
         // list through the dialog's All tab.
@@ -494,6 +510,21 @@ impl QuillApp {
                 }
             );
         }
+        // tdesktop `edit_peer_info_box` "Auto-translate messages": channels,
+        // `toggleSupergroupHasAutomaticTranslation` (needs can_change_info
+        // and boosts; TDLib's refusal rolls the switch back).
+        if is_channel && session.is_some_and(|session| session.chat_can_change_info(chat_id)) {
+            let auto = session.is_some_and(|session| session.chat_auto_translate(chat_id));
+            toggle_row!(
+                "tr-toggle-auto-translate",
+                I::Languages,
+                "Auto-translate messages",
+                auto,
+                |this, _window, cx| {
+                    this.set_auto_translate(chat_id, cx);
+                }
+            );
+        }
         // Slice G2: aggressive anti-spam toggle (supergroups only;
         // gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`).
         if !is_channel
@@ -591,14 +622,34 @@ impl QuillApp {
                 })),
             );
         }
+        // The owner hands the chat to someone else (password-confirmed).
+        if self.group_flavor(chat_id).is_some() && session.is_some_and(|s| s.chat_is_owner(chat_id))
+        {
+            row!(
+                "g1-transfer-ownership",
+                I::Crown,
+                if is_channel {
+                    "Transfer channel ownership"
+                } else {
+                    "Transfer group ownership"
+                },
+                |this, window, cx| {
+                    this.open_transfer_ownership(chat_id, window, cx);
+                }
+            );
+        }
         if is_member {
             let label = if is_channel {
                 "Leave channel"
             } else {
                 "Leave group"
             };
-            danger_row!("g1-leave-chat", I::LogOut, label, |this, _window, cx| {
-                this.open_group_confirm(chat_id, GroupConfirmAction::LeaveChat, cx);
+            danger_row!("g1-leave-chat", I::LogOut, label, |this, window, cx| {
+                // An owner sees who inherits first (tdesktop
+                // `select_future_owner_box`).
+                if !this.open_owner_leave(chat_id, window, cx) {
+                    this.open_group_confirm(chat_id, GroupConfirmAction::LeaveChat, cx);
+                }
             });
         }
         // `deleteChat` (schema 1.8.67, line 11850): TDLib deletes for

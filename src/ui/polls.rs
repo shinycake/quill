@@ -1,19 +1,22 @@
 //! poll dialogs, voting, voters.
 
 use super::app::QuillApp;
+use super::scheduled::poll_deadline_picker;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::date_picker::DatePicker;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::poll::{POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, chat_allows_polls, voter_count_label};
-use quill::state::{PollVotersFetch, Session};
+use quill::state::{PollStatsFetch, PollVotersFetch, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{MessageContent, MessageSender};
 use std::cell::RefCell;
@@ -24,7 +27,7 @@ pub(super) fn apply_ready_poll(session: &mut Session, sink: &Arc<MemorySink>, se
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let chat_id = 15;
     let chat_json = format!(
-        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo polls","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
+        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo polls","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0,"unread_poll_vote_count":3}}}}"#
     );
     let position_json = format!(
         r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"50","is_pinned":false}}}}"#
@@ -127,7 +130,62 @@ pub(super) fn apply_ready_poll(session: &mut Session, sink: &Arc<MemorySink>, se
         r#"{"@type":"pollVoteRestrictionReasonMembershipRequired","chat_id":15}"#,
     );
 
-    for json in [open_poll, closed_poll, restricted_poll] {
+    // B15: an open poll that lets participants add options, with a
+    // deadline and a subscribers-only note.
+    let addable_options = [
+        option("opt-tea", "Tea", 4, 40, false),
+        option("opt-coffee", "Coffee", 6, 60, false),
+    ]
+    .join(",");
+    let addable_question = formatted("Which drink should we stock?");
+    let close_date = quill::local_time::now_unix() + 3 * 3600 + 20 * 60;
+    let addable_poll = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":109,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePoll","poll":{{"@type":"poll","id":9004,"question":{addable_question},"options":[{addable_options}],"total_voter_count":10,"is_anonymous":false,"allows_multiple_answers":true,"allows_revoting":true,"members_only":true,"close_date":{close_date},"can_see_results":true,"is_closed":false,"vote_restriction_reason":null,"type":{{"@type":"pollTypeRegular"}}}},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":true}}}}}}"#
+    );
+    // B15: results hidden until the poll closes.
+    let hidden_options = [
+        option("opt-yes", "Yes", 0, 0, false),
+        option("opt-no", "No", 0, 0, false),
+    ]
+    .join(",");
+    let hidden_question = formatted("Ship it on Friday?");
+    let hidden_poll = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":110,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePoll","poll":{{"@type":"poll","id":9005,"question":{hidden_question},"options":[{hidden_options}],"total_voter_count":8,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"can_see_results":false,"is_closed":false,"vote_restriction_reason":null,"type":{{"@type":"pollTypeRegular"}}}},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":false}}}}}}"#
+    );
+    // B15: a group checklist — one task done by a teammate, one open.
+    let checklist = |message_id: i32, title: &str, tasks: &str| {
+        let title_json = formatted(title);
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageChecklist","list":{{"@type":"checklist","title":{title_json},"tasks":[{tasks}],"others_can_add_tasks":true,"can_add_tasks":true,"others_can_mark_tasks_as_done":true,"can_mark_tasks_as_done":true}}}}}}}}"#
+        )
+    };
+    let task = |id: i32, text: &str, done_by: Option<i64>| {
+        let text_json = formatted(text);
+        match done_by {
+            Some(user) => format!(
+                r#"{{"@type":"checklistTask","id":{id},"text":{text_json},"completed_by":{{"@type":"messageSenderUser","user_id":{user}}},"completion_date":1700000000}}"#
+            ),
+            None => format!(
+                r#"{{"@type":"checklistTask","id":{id},"text":{text_json},"completed_by":null,"completion_date":0}}"#
+            ),
+        }
+    };
+    let trip_tasks = [
+        task(1, "Book flights", Some(chat_id)),
+        task(2, "Reserve the hotel", None),
+        task(3, "Pack passports", None),
+    ]
+    .join(",");
+    let trip_checklist = checklist(111, "Weekend trip", &trip_tasks);
+
+    for json in [
+        open_poll,
+        closed_poll,
+        restricted_poll,
+        addable_poll,
+        hidden_poll,
+        trip_checklist,
+    ] {
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
@@ -206,8 +264,54 @@ impl QuillApp {
             chat_id,
             message_id,
             selected_option: None,
+            show_stats: false,
         });
         self.select_poll_voters_option(0, cx);
+    }
+
+    /// B15: "Poll Stats" (tdesktop `lng_polls_stats_title`): the vote
+    /// graph from `getPollVoteStatistics` plus the per-option voter lists
+    /// (with "Show more") when `getPollVoters` is available.
+    pub(super) fn open_poll_stats_dialog(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.demo_session.is_some() {
+            self.status_note = "poll stats are unavailable in demo mode".into();
+            cx.notify();
+            return;
+        }
+        let is_dark = super::chat_theme::is_dark_palette();
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .fetch_poll_vote_statistics(chat_id, message_id, is_dark)
+                .is_err()
+        {
+            self.status_note = "could not load poll stats".into();
+            cx.notify();
+            return;
+        }
+        self.poll_voters_dialog = Some(PollVotersDialog {
+            chat_id,
+            message_id,
+            selected_option: None,
+            show_stats: true,
+        });
+        let can_get_voters = self
+            .session()
+            .and_then(|session| session.histories.get(&chat_id.0))
+            .and_then(|history| history.messages.get(&message_id.0))
+            .is_some_and(|message| match &message.content {
+                MessageContent::Poll(content) => content.poll.can_get_voters,
+                _ => false,
+            });
+        if can_get_voters {
+            self.select_poll_voters_option(0, cx);
+        }
+        cx.notify();
     }
 
     pub(super) fn close_poll_voters_dialog(&mut self, cx: &mut Context<Self>) {
@@ -290,7 +394,10 @@ impl QuillApp {
                 _ => None,
             });
         let mut body = div().flex().flex_col().gap_1();
-        if let Some(poll) = &poll {
+        if dialog.show_stats {
+            body = body.child(self.poll_stats_section(chat_id, message_id, cx));
+        }
+        if let Some(poll) = poll.as_ref().filter(|poll| poll.can_get_voters) {
             for (index, option) in poll.options.iter().enumerate() {
                 let label = format!(
                     "{} · {}",
@@ -319,6 +426,8 @@ impl QuillApp {
                 .cloned()
         });
         body = match fetch {
+            // Stats-only view without a voters list (anonymous polls).
+            None if poll.as_ref().is_none_or(|poll| !poll.can_get_voters) => body,
             None => body.child(
                 div()
                     .text_xs()
@@ -372,9 +481,11 @@ impl QuillApp {
                     );
                 }
                 if voters.len() < total_count as usize {
+                    // tdesktop: `lng_polls_show_more` — "Show more (N)".
+                    let left = total_count as usize - voters.len();
                     list = list.child(
                         Button::new("poll-voters-more")
-                            .label("Load more")
+                            .label(format!("Show more ({left})"))
                             .ghost()
                             .text_color(accent())
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -386,6 +497,55 @@ impl QuillApp {
             }
         };
         body.into_any_element()
+    }
+
+    /// B15: the "Votes" graph row (or its loading / error state) at the top
+    /// of the poll stats dialog.
+    fn poll_stats_section(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let fetch = self
+            .session()
+            .and_then(|session| session.poll_stats.get(&(chat_id.0, message_id.0)))
+            .cloned();
+        let mut section = div().flex().flex_col().gap_1().pb_2();
+        section = match fetch {
+            None | Some(PollStatsFetch::Loading) => section.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(text_muted())
+                    .child(Spinner::new().small())
+                    .child("Loading stats…"),
+            ),
+            Some(PollStatsFetch::Failed(reason)) => section
+                .child(div().text_xs().text_color(danger()).child(reason))
+                .child(
+                    Button::new("poll-stats-retry")
+                        .label("Retry")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_poll_stats_dialog(chat_id, message_id, cx);
+                        })),
+                ),
+            Some(PollStatsFetch::Loaded(graph)) => {
+                match super::statistics::stats_graph_row("Votes over time", &graph, cx) {
+                    Some(row) => section.child(row),
+                    None => section.child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child("No vote statistics yet."),
+                    ),
+                }
+            }
+        };
+        section.into_any_element()
     }
 
     /// Phase 4.2: poll option tap → `setPollAnswer` through the live driver
@@ -484,7 +644,17 @@ impl QuillApp {
             let body = this.poll_voters_dialog_body(cx);
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Poll voters"))
+                .title(crate::ui::shell::dialog_title(
+                    if this
+                        .poll_voters_dialog
+                        .as_ref()
+                        .is_some_and(|dialog| dialog.show_stats)
+                    {
+                        "Poll Stats"
+                    } else {
+                        "Poll voters"
+                    },
+                ))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -763,13 +933,17 @@ impl QuillApp {
                 div()
                     .flex()
                     .gap_2()
-                    .child(
-                        div().flex_1().child(
+                    .child(match &dialog.deadline {
+                        // B15: an absolute deadline replaces the hours field.
+                        Some(picker) => div()
+                            .flex_1()
+                            .child(DatePicker::new(picker).placeholder("Pick a deadline")),
+                        None => div().flex_1().child(
                             Textarea::new(&dialog.duration_input)
-                                .aria_label("Poll open duration in seconds")
+                                .aria_label("Poll open duration in hours")
                                 .h(px(40.)),
                         ),
-                    )
+                    })
                     .child(
                         div().flex_1().child(
                             Textarea::new(&dialog.countries_input)
@@ -840,6 +1014,20 @@ impl QuillApp {
             ),
             None => (false, true, false, true, false),
         };
+        let (add_options, hide_results, subscribers, has_deadline) = match &self.poll_dialog {
+            Some(dialog) => (
+                dialog.allow_adding_options,
+                dialog.hide_results_until_closes,
+                dialog.members_only,
+                dialog.deadline.is_some(),
+            ),
+            None => (false, false, false, false),
+        };
+        // tdesktop offers "Restrict to Subscribers" in broadcast channels only.
+        let in_channel = self
+            .session()
+            .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
+            .is_some_and(|chat| chat.is_channel());
         // Phase 6: kit Checkbox (was: ghost buttons with ☑/☐ labels).
         // Controlled: the requested value is written, not flipped.
         let checkbox =
@@ -913,6 +1101,48 @@ impl QuillApp {
                         shuffle,
                         |dialog, on| dialog.shuffle_options = on,
                     )),
+            )
+            // B15: tdesktop's remaining creation switches.
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(checkbox(
+                        "poll-toggle-add-options",
+                        "Allow adding options",
+                        add_options && !is_quiz,
+                        |dialog, on| {
+                            // Quizzes have fixed options.
+                            if !dialog.is_quiz {
+                                dialog.allow_adding_options = on;
+                            }
+                        },
+                    ))
+                    .child(checkbox(
+                        "poll-toggle-hide-results",
+                        "Hide results until closed",
+                        hide_results,
+                        |dialog, on| dialog.hide_results_until_closes = on,
+                    ))
+                    .when(in_channel, |this| {
+                        this.child(checkbox(
+                            "poll-toggle-subscribers",
+                            "Subscribers only",
+                            subscribers,
+                            |dialog, on| dialog.members_only = on,
+                        ))
+                    }),
+            )
+            .child(
+                Checkbox::new("poll-toggle-deadline")
+                    .checked(has_deadline)
+                    .label("Close at a set date and time")
+                    .on_click(cx.listener(|this, &on: &bool, window, cx| {
+                        if let Some(dialog) = this.poll_dialog.as_mut() {
+                            dialog.deadline = on.then(|| poll_deadline_picker(window, cx));
+                        }
+                        cx.notify();
+                    })),
             )
     }
 }

@@ -335,6 +335,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     PollTypeSend::Regular
                 },
                 open_period: draft.open_period_secs(),
+                // B15: "Allow Adding Options" is a regular-poll flag.
+                allow_adding_options: draft.allow_adding_options && !draft.is_quiz,
+                hide_results_until_closes: draft.hide_results_until_closes,
+                members_only: draft.members_only,
+                close_date: draft.close_date.clamp(0, i64::from(i32::MAX)) as i32,
                 reply_to,
                 topic_id,
             },

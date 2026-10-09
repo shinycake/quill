@@ -2017,6 +2017,9 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — service messages".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyReplyKeyboard)) {
+            self.demo_setup_reply_keyboard(cx);
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyTranslate)) {
             self.demo_setup_translate(window, cx);
         }
@@ -2032,6 +2035,22 @@ impl QuillApp {
                 );
             }
             self.status_note = "screenshot demo — comments and threads".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyForumsSaved)) {
+            let view = std::env::var("QUILL_DEMO_FORUMS_SAVED_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::forums_saved_demo::apply_ready_forums_saved(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            if view == "editor" {
+                self.open_forum_topic_editor(ChatId(16), None, window, cx);
+            }
+            self.status_note = "screenshot demo — forums and saved sublists".into();
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyBubbleHeaders)) {
             if let Some(session) = self.demo_session.as_mut() {

@@ -101,7 +101,7 @@ impl QuillApp {
         Some(row.into_any_element())
     }
 
-    fn sticker_cell(
+    pub(super) fn sticker_cell(
         &self,
         sticker: &quill::telegram::envelope::StickerItem,
         prefix: &str,
@@ -198,6 +198,77 @@ impl QuillApp {
                 |cell| cell.child(div().text_xs().child("Premium")),
             )
             .into_any_element()
+    }
+
+    /// Telegram Desktop's start page of an empty private chat: "No
+    /// messages here yet..." with a random hello sticker
+    /// (`getGreetingStickers`) that sends itself when clicked
+    /// (`history_view_about_view.cpp`, `GenerateChatIntro`). `None` for
+    /// groups, bots, Saved Messages and while no greeting is known.
+    pub(super) fn greeting_intro(
+        &mut self,
+        chat: Option<&quill::state::ChatSummary>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let chat = chat?;
+        let quill::telegram::envelope::ChatKind::Private { user_id } = chat.kind else {
+            return None;
+        };
+        let session = self.session()?;
+        if session.my_user_id == Some(user_id.0) || session.is_bot_user(user_id.0) {
+            return None;
+        }
+        if !session.stickers.greeting_loaded {
+            let weak = cx.weak_entity();
+            cx.defer(move |cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    if let Some(live) = this.live.as_mut() {
+                        let _ = live.driver.fetch_greeting_stickers();
+                        cx.notify();
+                    }
+                });
+            });
+        }
+        let sticker = greeting_pick(&session.stickers.greeting, chat.id.0)?.clone();
+        if let Some(file) = sticker.display_file_id()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.ensure_media_files(&[file]);
+        }
+        let cell = self.sticker_cell(&sticker, "greeting", cx);
+        Some(
+            div()
+                .id("greeting-intro")
+                .flex()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_2()
+                        .px_4()
+                        .py_3()
+                        .rounded_lg()
+                        .bg(bg_subtle())
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child("No messages here yet..."),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(text_muted())
+                                .child("Send a message or click on the greeting below"),
+                        )
+                        .child(cell),
+                )
+                .into_any_element(),
+        )
     }
 
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
@@ -581,25 +652,42 @@ impl QuillApp {
             let file_id = sticker.file_id;
             let cell = self.sticker_cell(sticker, "pick", cx);
             let favorite = panel.favorites.iter().any(|item| item.file_id == file_id);
+            let in_recent = panel.tab == StickerTab::Recent
+                && panel.recent.iter().any(|item| item.file_id == file_id);
             let owner = cx.entity().downgrade();
             grid = grid.child(
                 div()
                     .id(format!("sticker-cell-{}-{}", sticker.set_id, sticker.id))
                     .child(cell)
                     .context_menu(move |menu, _, _| {
-                        let owner = owner.clone();
-                        menu.item(
+                        let favorite_owner = owner.clone();
+                        let recent_owner = owner.clone();
+                        let menu = menu.item(
                             PopupMenuItem::new(if favorite {
                                 "Remove from favorites"
                             } else {
                                 "Add to favorites"
                             })
                             .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| {
+                                let _ = favorite_owner.update(cx, |this, cx| {
                                     this.favorite_sticker(file_id, !favorite, cx)
                                 });
                             }),
-                        )
+                        );
+                        if in_recent {
+                            menu.item(PopupMenuItem::new("Remove from recent").on_click(
+                                move |_, _, cx| {
+                                    let _ = recent_owner.update(cx, |this, cx| {
+                                        if let Some(live) = this.live.as_mut() {
+                                            let _ = live.driver.remove_recent_sticker(file_id);
+                                        }
+                                        cx.notify();
+                                    });
+                                },
+                            ))
+                        } else {
+                            menu
+                        }
                     }),
             );
         }
@@ -800,5 +888,27 @@ impl Render for StickerSetDrag {
             .bg(cx.theme().accent.opacity(0.15))
             .text_sm()
             .child(self.title.clone())
+    }
+}
+
+/// The greeting a chat shows: stable per chat (tdesktop picks at random
+/// once per intro; keeping it by chat id avoids flicker on re-render).
+fn greeting_pick(
+    list: &[quill::telegram::envelope::StickerItem],
+    chat_id: i64,
+) -> Option<&quill::telegram::envelope::StickerItem> {
+    if list.is_empty() {
+        return None;
+    }
+    list.get(chat_id.unsigned_abs() as usize % list.len())
+}
+
+#[cfg(test)]
+mod greeting_tests {
+    use super::greeting_pick;
+
+    #[test]
+    fn no_greeting_without_stickers() {
+        assert!(greeting_pick(&[], 5).is_none());
     }
 }

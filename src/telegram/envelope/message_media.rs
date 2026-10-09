@@ -16,6 +16,9 @@ pub struct PhotoContent {
     pub sizes: Vec<PhotoSizeView>,
     pub is_secret: bool,
     pub has_spoiler: bool,
+    /// `photo.has_stickers`: stickers were added to the photo
+    /// (`getAttachedStickerSets` lists them).
+    pub has_stickers: bool,
     /// `photo.minithumbnail`: a tiny inline JPEG shown (scaled up, so
     /// soft) until a real size downloads. Never shown for secret or
     /// spoiler photos.
@@ -184,6 +187,10 @@ pub(crate) fn parse_message_photo(value: &Value) -> (MessageContent, Vec<ParsedF
     let (caption, caption_entities) = parse_caption(value.get("caption"));
     (
         MessageContent::Photo(PhotoContent {
+            has_stickers: photo
+                .and_then(|photo| photo.get("has_stickers"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             caption,
             caption_entities,
             show_caption_above_media: value

@@ -313,6 +313,94 @@ pub(crate) fn parse_reaction_type(value: Option<&Value>) -> Option<ReactionType>
     }
 }
 
+/// `ChatAvailableReactions` (TDLib 1.8.67, schema line 3547): which
+/// reactions a chat allows. "None" is `Some` with an empty list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatAvailableReactions {
+    /// `chatAvailableReactionsAll` — every active emoji reaction (paid and
+    /// custom ones excluded in channels).
+    All { max_reaction_count: i32 },
+    /// `chatAvailableReactionsSome` — only the listed reactions.
+    Some {
+        reactions: Vec<ReactionType>,
+        max_reaction_count: i32,
+    },
+}
+
+/// The per-message reaction limit TDLib uses when none is sent (1-11).
+pub const DEFAULT_MAX_REACTION_COUNT: i32 = 11;
+
+impl ChatAvailableReactions {
+    /// The "no reactions" setting.
+    pub fn none() -> Self {
+        Self::Some {
+            reactions: Vec::new(),
+            max_reaction_count: DEFAULT_MAX_REACTION_COUNT,
+        }
+    }
+
+    pub fn max_reaction_count(&self) -> i32 {
+        match self {
+            Self::All { max_reaction_count }
+            | Self::Some {
+                max_reaction_count, ..
+            } => *max_reaction_count,
+        }
+    }
+
+    /// True for `Some` with an empty list.
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::Some { reactions, .. } if reactions.is_empty())
+    }
+
+    /// JSON object for `setChatAvailableReactions`.
+    pub fn to_tdlib_json(&self) -> serde_json::Value {
+        match self {
+            Self::All { max_reaction_count } => serde_json::json!({
+                "@type": "chatAvailableReactionsAll",
+                "max_reaction_count": max_reaction_count,
+            }),
+            Self::Some {
+                reactions,
+                max_reaction_count,
+            } => serde_json::json!({
+                "@type": "chatAvailableReactionsSome",
+                "reactions": reactions.iter().map(ReactionType::to_tdlib_json).collect::<Vec<_>>(),
+                "max_reaction_count": max_reaction_count,
+            }),
+        }
+    }
+}
+
+/// Parse `chat.available_reactions` / `updateChatAvailableReactions`.
+pub(crate) fn parse_chat_available_reactions(
+    value: Option<&Value>,
+) -> Option<ChatAvailableReactions> {
+    let value = value?;
+    let max_reaction_count = value
+        .get("max_reaction_count")
+        .and_then(Value::as_i64)
+        .map(|n| n.clamp(1, 11) as i32)
+        .unwrap_or(DEFAULT_MAX_REACTION_COUNT);
+    match value.get("@type").and_then(Value::as_str) {
+        Some("chatAvailableReactionsAll") => {
+            Some(ChatAvailableReactions::All { max_reaction_count })
+        }
+        Some("chatAvailableReactionsSome") => Some(ChatAvailableReactions::Some {
+            reactions: value
+                .get("reactions")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|reaction| parse_reaction_type(Some(reaction)))
+                .filter(|reaction| *reaction != ReactionType::Unknown)
+                .collect(),
+            max_reaction_count,
+        }),
+        _ => None,
+    }
+}
+
 /// `unreadReaction type:ReactionType sender_id:MessageSender is_big:Bool`
 /// (schema 1.8.67, line 2995): one not-yet-seen reaction on an own message.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -5,16 +5,21 @@ use super::groups::{ADMIN_RIGHT_LABELS, admin_right_get, admin_right_set};
 use super::groups::{
     CHAT_PERMISSION_LABELS, admin_rights_summary, chat_permission_get, chat_permission_set,
 };
+use super::scheduled::picked_unix;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::date_picker::DatePicker;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::local_time::now_unix;
+use quill::moderation::{RestrictUntil, UntilError, validate_restrict_until};
 use quill::state::{AdminListFetch, AdminRightsFetch, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChatAdminRights, ChatPermissions, MessageSender};
 use std::cell::RefCell;
@@ -202,6 +207,7 @@ impl QuillApp {
         chat_id: ChatId,
         user_id: i64,
         ban: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let current = self
@@ -209,7 +215,9 @@ impl QuillApp {
             .and_then(|session| session.chats.get(&chat_id.0))
             .and_then(|chat| chat.permissions)
             .unwrap_or_else(ChatPermissions::all);
-        self.restrict_dialog = Some(RestrictDialog::new(chat_id, user_id, ban, current));
+        self.restrict_dialog = Some(RestrictDialog::new(
+            window, cx, chat_id, user_id, ban, current,
+        ));
         cx.notify();
     }
 
@@ -226,14 +234,11 @@ impl QuillApp {
         }
     }
 
-    pub(super) fn cycle_restrict_duration(&mut self, cx: &mut Context<Self>) {
-        const DURATIONS: [i32; 4] = [0, 1, 7, 30];
+    /// Choose how long the restriction or ban lasts.
+    pub(super) fn pick_restrict_until(&mut self, until: RestrictUntil, cx: &mut Context<Self>) {
         if let Some(dialog) = self.restrict_dialog.as_mut() {
-            let position = DURATIONS
-                .iter()
-                .position(|days| *days == dialog.banned_until_days)
-                .unwrap_or(0);
-            dialog.banned_until_days = DURATIONS[(position + 1) % DURATIONS.len()];
+            dialog.until = until;
+            dialog.error = None;
             cx.notify();
         }
     }
@@ -241,12 +246,30 @@ impl QuillApp {
     /// Slice G1: submit restrict/ban (`setChatMemberStatus`, schema
     /// 1.8.67 line 13592). Duration is now + days; 0 = forever.
     pub(super) fn submit_restrict_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.restrict_dialog.take() else {
+        let Some(mut dialog) = self.restrict_dialog.take() else {
             return;
+        };
+        // A custom time is read from the picker and bounded like
+        // tdesktop's `ChooseDateTimeBox` (30 seconds to 366 days ahead);
+        // a bad pick keeps the dialog open with the reason.
+        let now = now_unix();
+        let until_date = match dialog.until {
+            RestrictUntil::Custom(_) => match picked_unix(&dialog.custom, cx)
+                .ok_or(UntilError::Invalid)
+                .and_then(|unix| validate_restrict_until(unix, now))
+            {
+                Ok(unix) => RestrictUntil::Custom(unix).until_date(now),
+                Err(err) => {
+                    dialog.error = Some(err.message());
+                    self.restrict_dialog = Some(dialog);
+                    cx.notify();
+                    return;
+                }
+            },
+            preset => preset.until_date(now),
         };
         let note = match self.live.as_mut() {
             Some(live) => {
-                let until_date = Self::restrict_until_date(dialog.banned_until_days);
                 let result = if dialog.ban {
                     live.driver
                         .ban_chat_member(dialog.chat_id, dialog.user_id, until_date)
@@ -448,11 +471,6 @@ impl QuillApp {
                 .and_then(|session| session.user(dialog_state.user_id))
                 .map(|user| user.display_name())
                 .unwrap_or_else(|| format!("User {}", dialog_state.user_id));
-            let duration_label = match dialog_state.banned_until_days {
-                0 => "Forever".to_string(),
-                1 => "1 day".to_string(),
-                days => format!("{days} days"),
-            };
             let title = format!(
                 "{} {name}",
                 if dialog_state.ban { "Ban" } else { "Restrict" }
@@ -468,27 +486,62 @@ impl QuillApp {
                     )
                     .child(this.restrict_permission_checkboxes(&dialog_state.permissions, cx));
             }
-            body = body.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Duration:"),
-                    )
-                    .child(
-                        Button::new("g1-restrict-duration")
-                            .label(duration_label)
-                            .ghost()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.cycle_restrict_duration(cx);
+            let until = dialog_state.until;
+            let selected_until = match until {
+                RestrictUntil::Forever => 0,
+                RestrictUntil::Day => 1,
+                RestrictUntil::Week => 2,
+                RestrictUntil::Month => 3,
+                RestrictUntil::Custom(_) => 4,
+            };
+            let until_weak = cx.weak_entity();
+            let mut until_bar = TabBar::new("g1-restrict-until").segmented();
+            for preset in RestrictUntil::PRESETS {
+                until_bar = until_bar.child(Tab::new().label(preset.label()));
+            }
+            until_bar = until_bar.child(Tab::new().label(RestrictUntil::Custom(0).label()));
+            body = body
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(if dialog_state.ban {
+                            "Banned until"
+                        } else {
+                            "Restricted until"
+                        }),
+                )
+                .child(
+                    until_bar
+                        .selected_index(selected_until)
+                        .on_click(move |ix, window, cx| {
+                            let choice = match *ix {
+                                0 => RestrictUntil::Forever,
+                                1 => RestrictUntil::Day,
+                                2 => RestrictUntil::Week,
+                                3 => RestrictUntil::Month,
+                                _ => RestrictUntil::Custom(0),
+                            };
+                            let _ = until_weak.update(cx, |this, cx| {
+                                this.pick_restrict_until(choice, cx);
                                 this.close_kit_dialog_if_done(DialogKind::Restrict, window, cx);
-                            })),
-                    ),
-            );
+                            });
+                        }),
+                );
+            if matches!(until, RestrictUntil::Custom(_)) {
+                body = body.child(
+                    DatePicker::new(&dialog_state.custom).placeholder("Pick a date and time"),
+                );
+            }
+            if let Some(error) = dialog_state.error {
+                body = body.child(
+                    div()
+                        .id("g1-restrict-error")
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(error),
+                );
+            }
             let footer = div()
                 .flex()
                 .justify_end()

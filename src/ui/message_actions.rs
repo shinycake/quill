@@ -433,6 +433,26 @@ impl QuillApp {
                 }
             );
         }
+        // B15: "Poll Stats" (`getPollVoteStatistics`, schema 1.8.67 line
+        // 12947) when `messageProperties.can_get_poll_vote_statistics`.
+        if matches!(message.content, MessageContent::Poll(_))
+            && allows(false, |a| a.can_get_poll_vote_statistics)
+        {
+            item!(
+                quill::message_menu::order::POLL_STATS,
+                gpui_kit::assets::IconName::ChartPie,
+                "menu-poll-stats",
+                "Poll Stats",
+                this,
+                _window,
+                cx,
+                {
+                    this.open_poll_stats_dialog(chat_id, message_id, cx);
+                    this.message_menu = None;
+                    cx.notify();
+                }
+            );
+        }
         // Channel-post comments and group reply threads: `getMessageThread`
         // (schema 1.8.67, line 11566) gated by
         // `messageProperties.can_get_message_thread`.

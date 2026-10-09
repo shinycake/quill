@@ -68,6 +68,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             draft_clock: DraftSaveClock::idle(),
             draft_save_token: 0,
             pending_draft: None,
+            flood_retries: Vec::new(),
+            flood_attempts: HashMap::new(),
+            last_request_sweep: None,
         }
     }
 
@@ -102,6 +105,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
+        // Q1: a rate-limited read is re-sent later; the reducer never sees
+        // the 429 and the request stays pending.
+        if self.absorb_flood(&owned.envelope, std::time::Instant::now()) {
+            return Ok(());
+        }
         let was_ready = matches!(self.session.auth, AuthorizationState::Ready);
         let active_call_before = self.session.active_call.as_ref().map(|call| call.id);
         let active_group_call_before = self.session.active_group_call.as_ref().map(|call| call.id);
@@ -249,7 +257,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
-                .is_some_and(|purpose| purpose == RequestPurpose::GetMessageLink)
+                .is_some_and(|purpose| {
+                    matches!(
+                        purpose,
+                        RequestPurpose::GetMessageLink | RequestPurpose::GetForumTopicLink
+                    )
+                })
                 .then(|| (link.clone(), *is_public)),
             _ => None,
         };
@@ -536,7 +549,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let topic_chat = Self::possible_topic_chat(&owned.envelope.payload);
         let topic_refresh = Self::possible_topic_refresh(&owned.envelope.payload);
         let previous_seq = self.session.last_seq;
+        // B7: the step waiting for this answer (basic group upgrade,
+        // history before a discussion link), taken before `apply`.
+        let admin_followup = self.capture_admin_followup(&owned);
         self.session.apply(owned);
+        if let Some((followup, ok)) = admin_followup {
+            self.run_admin_followup(followup, ok);
+        }
         self.maybe_fetch_bot_topics(topic_chat);
         self.maybe_refresh_forum_topic(topic_refresh);
         if self.session.last_seq != previous_seq {
@@ -877,6 +896,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
+        self.refresh_stale_panels()?;
+        self.open_attached_sticker_set()?;
         if chat_search_hits {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
             self.jump_selected_chat_search_hit()?;

@@ -1,0 +1,6 @@
+# B16 forums and Saved Messages sublists / tags
+parity:forum-view-as-topics
+parity:forum-topic-icon-picker
+parity:forum-topic-extras
+parity:saved-sublists
+parity:saved-tags-manage

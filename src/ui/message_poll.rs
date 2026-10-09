@@ -7,9 +7,10 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::local_time::now_unix;
 use quill::poll::{
-    can_view_poll_voters, poll_bar_fraction, poll_vote_restriction_label, quiz_explanation,
-    voter_count_label,
+    can_offer_add_option, can_view_poll_voters, poll_bar_fraction, poll_ends_in_label,
+    poll_results_hidden, poll_vote_restriction_label, quiz_explanation, voter_count_label,
 };
 use quill::telegram::envelope::{PollContent, PollOption, PollType};
 /// Phase 4.2: `messagePoll` row — the question, one tappable option row per
@@ -43,7 +44,7 @@ pub(super) fn poll_body(
                 .child(content.description.clone()),
         );
     }
-    body = body.child(div().text_xs().text_color(text_muted()).child(format!(
+    let mut meta = format!(
         "{} · {} · {}",
         kind_label,
         voter_count_label(poll.total_voter_count),
@@ -54,7 +55,27 @@ pub(super) fn poll_body(
         } else {
             "public"
         },
-    )));
+    );
+    // B15: "Restrict to Subscribers" and the absolute deadline
+    // (`lng_polls_results_in_*`-style "ends in …").
+    if poll.members_only {
+        meta.push_str(" · subscribers only");
+    }
+    if let Some(ends) = poll_ends_in_label(poll, now_unix()) {
+        meta.push_str(" · ");
+        meta.push_str(&ends);
+    }
+    body = body.child(div().text_xs().text_color(text_muted()).child(meta));
+    // B15: "Hide results" — `lng_polls_results_after_close`.
+    let results_hidden = poll_results_hidden(poll);
+    if results_hidden {
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(text_muted())
+                .child("Results will appear after the poll ends."),
+        );
+    }
     // B4: `pollVoteRestrictionReason*` (schema `td_api.tl:494`-`:510`) —
     // a human reason instead of a dead tap.
     if let Some(reason) = &poll.vote_restriction_reason {
@@ -67,8 +88,27 @@ pub(super) fn poll_body(
     }
     for (index, option) in poll.options.iter().enumerate() {
         body = body.child(poll_option_row(
-            chat_id, message_id, index, option, poll, cx,
+            chat_id,
+            message_id,
+            index,
+            option,
+            poll,
+            results_hidden,
+            cx,
         ));
+    }
+    // B15: "Add an Option" (`addPollOption`) when the server allows it
+    // (`messagePoll.can_add_option`).
+    if can_offer_add_option(content.can_add_option, poll) {
+        body = body.child(
+            Button::new(format!("poll-add-option-{}", message_id.0))
+                .label("Add an Option")
+                .ghost()
+                .text_color(accent())
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_poll_add_option(chat_id, message_id, window, cx);
+                })),
+        );
     }
     // B4: quiz explanation (`pollTypeQuiz.explanation`, schema line
     // 475-476) — auto-shown on an incorrect answer, per TGX; no lamp
@@ -110,9 +150,14 @@ pub(super) fn poll_option_row(
     index: usize,
     option: &PollOption,
     poll: &quill::telegram::Poll,
+    results_hidden: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let fill = poll_bar_fraction(option.vote_percentage);
+    let fill = if results_hidden {
+        0.0
+    } else {
+        poll_bar_fraction(option.vote_percentage)
+    };
     let chosen = option.is_chosen;
     let votable = poll.can_vote();
     let quiz_correct = poll.is_closed
@@ -128,7 +173,9 @@ pub(super) fn poll_option_row(
     } else {
         option_label
     };
-    let stats = if option.voter_count > 0 {
+    let stats = if results_hidden {
+        String::new()
+    } else if option.voter_count > 0 {
         format!(
             "{}% · {} {}",
             option.vote_percentage,

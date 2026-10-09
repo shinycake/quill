@@ -330,6 +330,7 @@ fn admin_moderation_sends_each_checked_action() {
                 report_spam: true,
                 delete_all: true,
                 ban: true,
+                ..ModerationChoice::default()
             },
         )
         .unwrap();

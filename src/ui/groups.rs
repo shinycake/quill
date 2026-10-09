@@ -543,6 +543,22 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Flip the channel's "Auto-translate messages" switch.
+    pub(super) fn set_auto_translate(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let enabled = !self
+            .session()
+            .is_some_and(|session| session.chat_auto_translate(chat_id));
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.toggle_auto_translate(chat_id, enabled) {
+                Ok(()) => "auto-translate updated".into(),
+                Err(_) => "could not change auto-translate".into(),
+            };
+        } else {
+            self.status_note = "auto-translate needs a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
     /// Slice G2: aggressive anti-spam toggle (info panel → Manage
     /// group). Gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`.
     pub(super) fn set_anti_spam(&mut self, chat_id: ChatId, enabled: bool, cx: &mut Context<Self>) {
@@ -592,16 +608,6 @@ impl QuillApp {
             self.session()
                 .is_some_and(|session| session.supergroup_is_broadcast.get(&id) == Some(&true))
         })
-    }
-
-    /// Slice G1: days (0 = forever) to a TDLib `banned_until_date` Unix
-    /// timestamp (schema 1.8.67, line 2510: 0 = forever).
-    pub(super) fn restrict_until_date(days: i32) -> i32 {
-        if days <= 0 {
-            0
-        } else {
-            (quill::state::unix_ms_now() / 1000) as i32 + days.saturating_mul(86_400)
-        }
     }
 
     pub(super) fn open_create_chat_dialog(
@@ -1286,6 +1292,10 @@ impl QuillApp {
                         .driver
                         .delete_forum_topic(dialog.chat_id, forum_topic_id)
                         .map(|_| "deleting topic…".to_string()),
+                    GroupConfirmAction::DeleteSavedSublist { topic_id } => live
+                        .driver
+                        .delete_saved_topic_history(topic_id)
+                        .map(|_| "deleting saved messages…".to_string()),
                     GroupConfirmAction::RemoveInstalledStickerSets => {
                         let ids: Vec<_> = live
                             .driver
@@ -1312,6 +1322,10 @@ impl QuillApp {
                         .driver
                         .clear_saved_payment_info()
                         .map(|_| "clearing saved payment info…".to_string()),
+                    GroupConfirmAction::RemoveMember { user_id } => live
+                        .driver
+                        .remove_chat_member(dialog.chat_id, user_id)
+                        .map(|id| sent_note(id, "removing member…")),
                 };
                 match result {
                     Ok(note) => note,
@@ -1702,6 +1716,24 @@ impl QuillApp {
                             "Delete".to_string(),
                         )
                     }
+                    GroupConfirmAction::DeleteSavedSublist { topic_id } => {
+                        let name = this
+                            .session()
+                            .and_then(|s| {
+                                s.saved
+                                    .topics
+                                    .get(&topic_id)
+                                    .map(|topic| s.saved_topic_title(topic))
+                            })
+                            .unwrap_or_else(|| "this chat".to_string());
+                        (
+                            "Delete chat".to_string(),
+                            format!(
+                                "Delete all messages saved from {name}? This cannot be undone."
+                            ),
+                            "Delete".to_string(),
+                        )
+                    }
                     GroupConfirmAction::RemoveSavedGif { .. } => (
                         "Remove saved GIF".to_string(),
                         "Remove this GIF from your saved GIFs?".to_string(),
@@ -1718,6 +1750,19 @@ impl QuillApp {
                         "Remove this sticker set from your installed stickers? You can install it again later.".to_string(),
                         "Remove".to_string(),
                     ),
+                    GroupConfirmAction::RemoveMember { user_id } => {
+                        let name = this.contact_display_name(user_id);
+                        let place = if this.group_flavor(dialog_state.chat_id) == Some(quill::moderation::GroupFlavor::Channel) {
+                            "channel"
+                        } else {
+                            "group"
+                        };
+                        (
+                            "Remove member".to_string(),
+                            format!("Remove {name} from the {place}?"),
+                            "Remove".to_string(),
+                        )
+                    }
                     GroupConfirmAction::ClearPaymentInfo => (
                         "Clear saved payment info".to_string(),
                         "Delete the shipping info and payment credentials Telegram saved from past checkouts? This cannot be undone.".to_string(),
@@ -1733,9 +1778,11 @@ impl QuillApp {
                     | GroupConfirmAction::ClearPaymentInfo
                     | GroupConfirmAction::RemoveSavedGif { .. }
                     | GroupConfirmAction::DeleteForumTopic { .. }
+                    | GroupConfirmAction::DeleteSavedSublist { .. }
                     | GroupConfirmAction::RemoveInstalledStickerSets
                     | GroupConfirmAction::RemoveStickerSet { .. }
                     | GroupConfirmAction::RemoveEmojiSet { .. }
+                    | GroupConfirmAction::RemoveMember { .. }
             );
             let body = div()
                 .flex()

@@ -21,8 +21,8 @@ use quill::state::{HistoryMessage, Session, Translation};
 use quill::telegram::envelope::ChatKind;
 use quill::text::TextEntity;
 use quill::translate::{
-    TranslatePrefs, bar_label, choose_translate_to, detect_language, language_name, offer_language,
-    replace_content_text, search_languages, translatable_content,
+    TranslatePrefs, bar_label_for, choose_translate_to, detect_language, language_name,
+    offer_language, replace_content_text, search_languages, tracking_enabled, translatable_content,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -107,6 +107,9 @@ pub(super) struct TranslateBarModel {
     to: &'static str,
     from: Option<&'static str>,
     translated: bool,
+    /// The channel translates automatically (`autoTranslation`): the bar
+    /// works without Premium and also covers the user's own messages.
+    automatic: bool,
 }
 
 pub(super) struct TranslateUi {
@@ -184,7 +187,7 @@ impl QuillApp {
             .ordered()
             .into_iter()
             .rev()
-            .filter(|message| !message.is_outgoing)
+            .filter(|message| !message.is_outgoing || session.chat_auto_translate(chat_id))
             .filter_map(|message| translatable_content(&message.content).map(|(text, _)| text))
             .collect();
         let value = offer_language(texts, skip);
@@ -199,8 +202,8 @@ impl QuillApp {
     pub(super) fn translate_bar_model(&self, chat_id: ChatId) -> Option<TranslateBarModel> {
         let session = self.session()?;
         let prefs = &self.translate_ui.prefs;
-        if !prefs.translate_chats
-            || !session.is_premium()
+        let automatic = session.chat_auto_translate(chat_id);
+        if !tracking_enabled(prefs.translate_chats, session.is_premium(), automatic)
             || !session.chat_is_translatable(chat_id)
             || prefs.bar_hidden(chat_id.0)
             || session
@@ -221,6 +224,7 @@ impl QuillApp {
             to: choose_translate_to(from, prefs.to_language(&ui), &skip),
             from,
             translated,
+            automatic,
         })
     }
 
@@ -834,7 +838,7 @@ impl QuillApp {
 
     fn translate_bar_view(&self, chat_id: ChatId, cx: &mut Context<Self>) -> Option<AnyElement> {
         let model = self.translate_bar_model(chat_id)?;
-        let label = bar_label(model.translated, model.to);
+        let label = bar_label_for(model.translated, model.to, model.automatic, model.from);
         let to = model.to;
         let from = model.from;
         let owner = cx.entity().downgrade();
@@ -959,9 +963,7 @@ impl QuillApp {
                             this.translate_ui.toast = None;
                             match action {
                                 ToastAction::ShowBar => {
-                                    this.set_translate_prefs(cx, |p| {
-                                        p.set_bar_hidden(chat_id.0, false)
-                                    });
+                                    this.set_translate_bar_hidden(chat_id, false, cx)
                                 }
                                 ToastAction::OpenSkipList => {
                                     this.open_translate_skip_list(window, cx);
@@ -1039,6 +1041,23 @@ impl QuillApp {
         );
     }
 
+    /// Hide or show the chat's translate bar. A live account sends
+    /// `toggleChatIsTranslatable` (the server flag, as in tdesktop); the
+    /// demo keeps the choice locally.
+    fn set_translate_bar_hidden(&mut self, chat_id: ChatId, hidden: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if live
+                .driver
+                .toggle_chat_is_translatable(chat_id, !hidden)
+                .is_ok()
+            {
+                self.set_translate_prefs(cx, |p| p.set_bar_hidden(chat_id.0, false));
+                return;
+            }
+        }
+        self.set_translate_prefs(cx, |p| p.set_bar_hidden(chat_id.0, hidden));
+    }
+
     /// Bar menu → Hide.
     fn hide_translate_bar(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let kind = self
@@ -1054,7 +1073,7 @@ impl QuillApp {
             }
             _ => "Translation bar is now hidden for this group.",
         };
-        self.set_translate_prefs(cx, |prefs| prefs.set_bar_hidden(chat_id.0, true));
+        self.set_translate_bar_hidden(chat_id, true, cx);
         self.show_translate_toast(
             chat_id,
             phrase.to_string(),
@@ -1076,7 +1095,8 @@ impl QuillApp {
         let Some(to) = session.chat_translated_to(chat_id) else {
             return;
         };
-        for message in messages.iter_mut().filter(|m| !m.is_outgoing) {
+        let automatic = session.chat_auto_translate(chat_id);
+        for message in messages.iter_mut().filter(|m| automatic || !m.is_outgoing) {
             if let Some(Translation::Done { text, entities }) =
                 session.message_translation(chat_id, message.id, to)
             {
@@ -1131,7 +1151,7 @@ impl QuillApp {
                 .ordered()
                 .into_iter()
                 .rev()
-                .filter(|m| !m.is_outgoing && !m.pending && m.id.0 > 0)
+                .filter(|m| (model.automatic || !m.is_outgoing) && !m.pending && m.id.0 > 0)
                 .filter(|m| {
                     translatable_content(&m.content).is_some_and(|(text, _)| {
                         detect_language(text)

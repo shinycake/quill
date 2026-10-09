@@ -583,6 +583,31 @@ pub fn forward_messages(
     send_copy: bool,
     remove_caption: bool,
 ) -> String {
+    forward_messages_with_options(
+        extra,
+        chat_id,
+        from_chat_id,
+        message_ids,
+        send_copy,
+        remove_caption,
+        &SendOptions::default(),
+    )
+}
+
+/// `forwardMessages` with the share box's send options: `disable_notification`
+/// ("Send without sound") and `scheduling_state` ("Schedule") ride
+/// `messageSendOptions` (`schema/td_api.tl:5934`). Default options send
+/// `options: null`, the plain forward.
+pub fn forward_messages_with_options(
+    extra: RequestId,
+    chat_id: ChatId,
+    from_chat_id: ChatId,
+    message_ids: &[MessageId],
+    send_copy: bool,
+    remove_caption: bool,
+    options: &SendOptions,
+) -> String {
+    let plain = !options.disable_notification && options.scheduling == ComposerScheduling::None;
     json!({
         "@type": "forwardMessages",
         "@extra": extra.as_extra(),
@@ -590,7 +615,7 @@ pub fn forward_messages(
         "topic_id": Value::Null,
         "from_chat_id": from_chat_id.0,
         "message_ids": message_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
-        "options": Value::Null,
+        "options": if plain { Value::Null } else { message_send_options(options) },
         "send_copy": send_copy,
         "remove_caption": remove_caption && send_copy
     })
@@ -1045,6 +1070,17 @@ pub fn recognize_speech(extra: RequestId, chat_id: ChatId, message_id: MessageId
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "message_id": message_id.0
+    })
+    .to_string()
+}
+
+/// B11: `setDefaultReactionType reaction_type:ReactionType = Ok` (TDLib
+/// 1.8.67, line 12852): Settings, "Quick reaction".
+pub fn set_default_reaction_type(extra: RequestId, reaction_type: Value) -> String {
+    json!({
+        "@type": "setDefaultReactionType",
+        "@extra": extra.as_extra(),
+        "reaction_type": reaction_type,
     })
     .to_string()
 }

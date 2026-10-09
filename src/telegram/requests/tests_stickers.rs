@@ -189,3 +189,34 @@ fn s9_saved_animation_request_shapes_match_1_8_67() {
     assert_eq!(v["animation"]["@type"], "inputFileId");
     assert_eq!(v["animation"]["id"], 42);
 }
+
+#[test]
+fn b11_requests_match_the_schema() {
+    use serde_json::Value;
+    let parse = |json: String| serde_json::from_str::<Value>(&json).unwrap();
+    let remove = parse(remove_recent_sticker(RequestId(1), FileId(9), false));
+    assert_eq!(remove["@type"], "removeRecentSticker");
+    assert_eq!(remove["sticker"]["@type"], "inputFileId");
+    assert_eq!(remove["is_attached"], false);
+    let keywords = parse(get_keyword_emojis(
+        RequestId(2),
+        "fire",
+        &["en".to_string(), "ru".to_string()],
+    ));
+    assert_eq!(keywords["@type"], "getKeywordEmojis");
+    assert_eq!(
+        keywords["input_language_codes"],
+        serde_json::json!(["en", "ru"])
+    );
+    let attached = parse(get_attached_sticker_sets(RequestId(3), FileId(4)));
+    assert_eq!(attached["file_id"], 4);
+    assert_eq!(
+        parse(get_greeting_stickers(RequestId(4)))["@type"],
+        "getGreetingStickers"
+    );
+    let default = parse(crate::telegram::requests::set_default_reaction_type(
+        RequestId(5),
+        crate::telegram::requests::reaction_type_emoji("👍"),
+    ));
+    assert_eq!(default["reaction_type"]["@type"], "reactionTypeEmoji");
+}

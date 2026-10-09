@@ -30,6 +30,35 @@ impl Session {
             Some(RequestPurpose::ReportSupergroupSpam) => {
                 self.message_action_note = Some("spam reported".into());
             }
+            // Forum extras and Saved Messages sublists (batch B16).
+            Some(RequestPurpose::DeleteSavedMessagesTopicHistory { topic_id }) => {
+                self.remove_saved_topic(topic_id);
+            }
+            Some(RequestPurpose::ReadAllForumTopicMentions { forum_topic_id }) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.clear_topic_marks(chat_id, forum_topic_id, true);
+                }
+            }
+            Some(RequestPurpose::ReadAllForumTopicReactions { forum_topic_id }) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.clear_topic_marks(chat_id, forum_topic_id, false);
+                }
+            }
+            Some(RequestPurpose::DeleteMessageReactionsFromSender {
+                message_id,
+                user_id,
+            }) => {
+                self.message_action_note = Some("reaction deleted".into());
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.drop_reactor_from_audience(chat_id, MessageId(message_id), user_id);
+                }
+            }
+            Some(RequestPurpose::TransferChatOwnership { user_id }) => {
+                self.finish_ownership_transfer(
+                    user_id,
+                    pending.and_then(|p| p.chat_id).map(|c| c.0),
+                );
+            }
             _ => {}
         }
         // Slice A3: a `terminateSession` /
@@ -447,12 +476,14 @@ impl Session {
                 Some(RequestPurpose::SetChatMemberStatus {
                     kind: MemberStatusChange::Restrict
                         | MemberStatusChange::Ban
-                        | MemberStatusChange::Unban,
+                        | MemberStatusChange::Unban
+                        | MemberStatusChange::Remove,
                     ..
                 })
             ) {
                 self.supergroup_members
                     .retain(|(id, _), _| *id != chat_id.0);
+                self.basic_group_members.remove(&chat_id.0);
             }
         }
         // Slice G1: `setChatMemberTag` confirmed — the custom

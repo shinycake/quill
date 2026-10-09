@@ -8,6 +8,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -312,7 +313,7 @@ impl QuillApp {
                         );
                     }
                     for member in members.iter().take(200) {
-                        list = list.child(this.member_row(chat_id, member, tab, can_restrict, cx));
+                        list = list.child(this.member_row(chat_id, member, cx));
                     }
                 }
             }
@@ -559,8 +560,6 @@ impl QuillApp {
         &self,
         chat_id: ChatId,
         member: &quill::telegram::envelope::ParsedChatMember,
-        tab: MemberTab,
-        can_restrict: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let user_id = match member.member_id {
@@ -581,7 +580,8 @@ impl QuillApp {
         // Slice G1: show the admin custom title (`chatMember.tag`,
         // schema 1.8.67 line 2526) next to the status when set.
         let tag_label = (!member.tag.is_empty()).then(|| format!("❝{}❞", member.tag));
-        let mut row = div()
+        let row = div()
+            .id(format!("g1-member-row-{}", user_id.unwrap_or_default()))
             .flex()
             .items_center()
             .gap_2()
@@ -600,117 +600,25 @@ impl QuillApp {
                         .child(label),
                 )
             });
-        // Slice G1: admin custom titles (`setChatMemberTag`, schema
-        // 1.8.67 line 13598 — the setter Telegram X's
-        // `EditRightsController` drives). Offered for admin/creator
-        // rows when the viewer may manage tags, or for the viewer's
-        // own row (any admin may retitle themselves). Not for
-        // channels (schema: basic groups and supergroups only).
-        let is_adminish = matches!(
-            member.status,
-            quill::telegram::envelope::ChannelMemberStatus::Administrator
-                | quill::telegram::envelope::ChannelMemberStatus::Creator
-        );
-        if is_adminish && let Some(user_id) = user_id {
-            let me = self.session().and_then(|s| s.my_user_id);
-            let can_title = Some(user_id) == me
-                || self
-                    .session()
-                    .is_some_and(|s| s.chat_can_manage_tags(chat_id));
-            if can_title {
-                let tag = member.tag.clone();
-                row = row.child(
-                    Button::new(format!("g1-member-title-{user_id}"))
-                        .label("Custom title")
+        // The member menu (tdesktop `rowContextMenu`): right-click the row
+        // or use the "more" button. Which items appear is decided by
+        // `quill::moderation::member_menu_actions` from the viewer's rights.
+        let build = self.member_menu_build(chat_id, member, cx);
+        match build {
+            Some(build) => {
+                let for_button = build.clone();
+                row.child(
+                    Button::new(format!("g1-member-more-{}", user_id.unwrap_or_default()))
+                        .icon(gpui_kit::assets::IconName::EllipsisVertical)
                         .ghost()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_custom_title_dialog(chat_id, user_id, &tag, window, cx);
-                        })),
-                );
-            }
-        }
-        if can_restrict {
-            // Slice G1 fix-up: restricted status is not supported in
-            // channels (schema 1.8.67, line 2506) — channel rows offer
-            // Ban only, never Restrict.
-            let is_channel = self.session().is_some_and(|s| {
-                matches!(
-                    s.chats.get(&chat_id.0),
-                    Some(chat)
-                        if matches!(chat.kind, ChatKind::Supergroup { is_channel: true, .. })
+                        .xsmall()
+                        .accessibility_label("Member actions")
+                        .dropdown_menu(move |menu, window, cx| for_button(menu, window, cx)),
                 )
-            });
-            if let Some(user_id) = user_id {
-                // Slice G1: never offer restrict/ban against the viewer,
-                // the owner, or a non-editable administrator — TDLib
-                // rejects all three (Telegram X `ProfileController`
-                // `YouCantBanX`).
-                let me = self.session().and_then(|s| s.my_user_id);
-                let actionable = Some(user_id) != me
-                    && !matches!(
-                        member.status,
-                        quill::telegram::envelope::ChannelMemberStatus::Creator
-                    )
-                    && (member.status
-                        != quill::telegram::envelope::ChannelMemberStatus::Administrator
-                        || member.can_be_edited);
-                if actionable {
-                    match tab {
-                        MemberTab::All => {
-                            if !is_channel {
-                                row = row.child(
-                                    Button::new(format!("g1-member-restrict-{user_id}"))
-                                        .label("Restrict")
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.open_restrict_dialog(chat_id, user_id, false, cx);
-                                        })),
-                                );
-                            }
-                            row = row.child(
-                                Button::new(format!("g1-member-ban-{user_id}"))
-                                    .label("Ban")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.open_restrict_dialog(chat_id, user_id, true, cx);
-                                    })),
-                            );
-                        }
-                        MemberTab::Restricted => {
-                            if !is_channel {
-                                row = row.child(
-                                    Button::new(format!("g1-member-edit-{user_id}"))
-                                        .label("Edit")
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.open_restrict_dialog(chat_id, user_id, false, cx);
-                                        })),
-                                );
-                            }
-                            row = row.child(
-                                Button::new(format!("g1-member-unrestrict-{user_id}"))
-                                    .label("Unrestrict")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.unban_member(chat_id, user_id, cx);
-                                    })),
-                            );
-                        }
-                        MemberTab::Banned => {
-                            row = row.child(
-                                Button::new(format!("g1-member-unban-{user_id}"))
-                                    .label("Unban")
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.unban_member(chat_id, user_id, cx);
-                                    })),
-                            );
-                        }
-                        MemberTab::Administrators => {}
-                    }
-                }
+                .context_menu(move |menu, window, cx| build(menu, window, cx))
+                .into_any_element()
             }
+            None => row.into_any_element(),
         }
-        row.into_any_element()
     }
 }

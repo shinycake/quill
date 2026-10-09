@@ -42,6 +42,10 @@ pub struct ForumTopic {
     /// Subsection tabs: `forumTopic.notification_settings` — drives the
     /// tab menu's Mute / Unmute (`setForumTopicNotificationSettings`).
     pub notification_settings: ChatNotificationSettings,
+    /// `forumTopic.unread_mention_count` — gates "Mark all mentions as read".
+    pub unread_mention_count: i32,
+    /// `forumTopic.unread_reaction_count` — gates "Read all reactions".
+    pub unread_reaction_count: i32,
 }
 
 /// Subsection tabs: the `forumTopicInfo` fields that
@@ -66,6 +70,8 @@ pub struct ForumTopicUpdate {
     pub is_pinned: bool,
     pub last_read_inbox_message_id: i64,
     pub notification_settings: ChatNotificationSettings,
+    pub unread_mention_count: i32,
+    pub unread_reaction_count: i32,
 }
 
 fn icon_fields(info: &Value) -> (i32, i64) {
@@ -105,6 +111,8 @@ pub(crate) fn parse_forum_topic_update(value: &Value) -> Option<ForumTopicUpdate
             .unwrap_or(false),
         last_read_inbox_message_id: int53_or_zero(value.get("last_read_inbox_message_id")),
         notification_settings: parse_chat_notification_settings(value.get("notification_settings")),
+        unread_mention_count: int53_or_zero(value.get("unread_mention_count")) as i32,
+        unread_reaction_count: int53_or_zero(value.get("unread_reaction_count")) as i32,
     })
 }
 
@@ -158,5 +166,7 @@ pub(crate) fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
         last_message_id,
         last_read_inbox_message_id: int53_or_zero(value.get("last_read_inbox_message_id")),
         notification_settings: parse_chat_notification_settings(value.get("notification_settings")),
+        unread_mention_count: int53_or_zero(value.get("unread_mention_count")) as i32,
+        unread_reaction_count: int53_or_zero(value.get("unread_reaction_count")) as i32,
     })
 }
