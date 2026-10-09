@@ -24,6 +24,7 @@ mod force_reply;
 mod frame_clock;
 mod image_budget;
 mod inline_video;
+pub(crate) mod interface_zoom;
 mod lru;
 mod motion;
 mod native_video;

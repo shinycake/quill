@@ -617,7 +617,8 @@ impl Render for CallPanel {
             }
         };
         let video = snap.remote.is_some();
-        let bounds = window.bounds().size;
+        // The layout's own size (screen size shrinks by the interface scale).
+        let bounds = window.viewport_size();
         let compact = bounds.height < px(480.);
         let photo_size = if snap.local.is_some() && !video || compact {
             100.
