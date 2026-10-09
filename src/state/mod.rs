@@ -86,6 +86,7 @@ mod session_history_window;
 mod session_members;
 mod session_message_menu;
 mod session_notifications;
+mod session_profile_panels;
 mod session_proxy;
 mod session_reply;
 mod session_requests;

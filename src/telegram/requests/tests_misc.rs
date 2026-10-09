@@ -69,6 +69,8 @@ fn add_contact_shape_matches_1_8_67() {
         "+15550131",
         "CANARY-first",
         "CANARY-last",
+        "",
+        false,
     );
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "addContact");

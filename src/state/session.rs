@@ -673,6 +673,13 @@ pub struct Session {
     /// for the similar-bots section of the bot profile, keyed by bot
     /// user id. The `users` ids resolve to names via `Session::users`.
     pub similar_bots: HashMap<i64, SimilarBotsFetch>,
+    /// B10: chat-id lists behind the profile panels, keyed by
+    /// `(kind, user/chat id)`: groups in common, similar channels and
+    /// the suitable personal channels. Chat objects themselves arrive via
+    /// `updateNewChat` before the `chats` answer.
+    pub profile_chat_lists: HashMap<(ProfileChatsKind, i64), ProfileChatsFetch>,
+    /// B10: profile photo galleries (`getUserProfilePhotos`) by user id.
+    pub user_profile_photos: HashMap<i64, ProfilePhotosFetch>,
     /// Slice bots-games: games seen via `messageGame` in a bot's chat,
     /// keyed by bot user id. Only short names TDLib actually delivered
     /// are cached — the bot info panel's Send buttons never offer an
@@ -1253,6 +1260,8 @@ impl Session {
             bot_info: HashMap::new(),
             bot_start_params: HashMap::new(),
             similar_bots: HashMap::new(),
+            profile_chat_lists: HashMap::new(),
+            user_profile_photos: HashMap::new(),
             bot_games: HashMap::new(),
             game_scores: HashMap::new(),
             bot_commands: HashMap::new(),

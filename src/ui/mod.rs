@@ -150,6 +150,8 @@ mod polls;
 mod pressable;
 mod profile;
 mod profile_modal;
+mod profile_panels;
+mod profile_panels_demo;
 mod proxy;
 mod reactions;
 mod recording;

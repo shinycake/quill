@@ -14,6 +14,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::local_path::sandboxed_display_path;
+use quill::state::ProfileChatsKind;
 use quill::state::{ContactRow, InfoPanelTarget, SupergroupMembersFetch};
 use quill::telegram::envelope::ChatKind;
 use quill::telegram::envelope::MUTE_FOREVER;
@@ -199,6 +200,11 @@ impl QuillApp {
             }
             let fetch = match target {
                 InfoPanelTarget::User(user_id) => {
+                    // B10: the groups you share with the user, listed under
+                    // the media counts (yourself has none).
+                    if live.driver.session.my_user_id != Some(user_id) {
+                        let _ = live.driver.fetch_groups_in_common(user_id);
+                    }
                     live.driver.fetch_user_full_info(user_id).map(|_| ())
                 }
                 InfoPanelTarget::Supergroup(supergroup_id) => {
@@ -244,6 +250,11 @@ impl QuillApp {
                         if is_channel && let Err(err) = live.driver.fetch_chat_boost_status(chat_id)
                         {
                             result = Err(err);
+                        }
+                        // B10: similar channels (cached and deduped by the
+                        // driver; best-effort, the section just stays out).
+                        if is_channel {
+                            let _ = live.driver.fetch_similar_chats(chat_id);
                         }
                         // Slice G2: welcome-message pack for admins who may
                         // send them (the driver dedupes on a cached pack).
@@ -533,15 +544,6 @@ impl QuillApp {
                 }
             })
             .unwrap_or_default();
-        let username = user
-            .as_ref()
-            .map(|u| u.username.clone())
-            .unwrap_or_default();
-        let phone = user
-            .as_ref()
-            .map(|u| u.phone_number.clone())
-            .unwrap_or_default();
-        let bio = info.as_ref().map(|i| i.bio.clone()).unwrap_or_default();
         let show_add = user.as_ref().is_some_and(|u| !u.is_contact && !u.is_bot);
         let roots = self.media_display_roots();
         let photo_path: Option<PathBuf> = session
@@ -572,6 +574,24 @@ impl QuillApp {
         let can_reach = session
             .as_ref()
             .is_some_and(|s| Self::can_start_secret_chat_with(s, user_id));
+        // B10: a profile with a photo opens the photo gallery in the media
+        // viewer.
+        let has_photo = info.as_ref().is_some_and(|i| i.photo_id.is_some())
+            || user.as_ref().is_some_and(|u| u.photo_small_file_id != 0);
+        let avatar: AnyElement = if has_photo {
+            div()
+                .id(("info-panel-photo-open", user_id as u64))
+                .cursor_pointer()
+                .role(gpui_kit::Role::Button)
+                .aria_label("View profile photos")
+                .tab_index(0)
+                .on_click(cx.listener(move |this, _, _, cx| this.open_profile_photos(user_id, cx)))
+                .child(avatar)
+                .into_any_element()
+        } else {
+            avatar
+        };
+        let name_for_copy = name.clone();
         let mut body = div()
             .flex()
             .flex_col()
@@ -585,7 +605,21 @@ impl QuillApp {
                     .flex_col()
                     .items_center()
                     .gap_0p5()
-                    .child(div().text_lg().font_semibold().child(name.clone()))
+                    .child(
+                        div()
+                            .id(("info-panel-name", user_id as u64))
+                            .text_lg()
+                            .font_semibold()
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.copy_profile_text(
+                                    &name_for_copy,
+                                    "Name copied to clipboard",
+                                    cx,
+                                );
+                            }))
+                            .child(name.clone()),
+                    )
                     .child(
                         div()
                             .text_sm()
@@ -691,54 +725,26 @@ impl QuillApp {
             body = body.child(tiles);
         }
         // Details: value over label, left-aligned like a contact card.
-        let mut details: Vec<(&str, String)> = Vec::new();
-        if !bio.is_empty() {
-            details.push(("Bio", bio));
-        }
-        if !username.is_empty() {
-            details.push(("Username", format!("@{username}")));
-        }
-        if !phone.is_empty() {
-            details.push(("Mobile", format_phone(&phone)));
-        }
-        if let Some(birthday) = info
-            .as_ref()
-            .and_then(|i| i.extras.birthdate)
-            .map(format_birthday)
-        {
-            details.push(("Birthday", birthday));
-        }
-        if !details.is_empty() {
-            let mut card = div()
-                .flex()
-                .flex_col()
-                .w_full()
-                .rounded_lg()
-                .border_1()
-                .border_color(cx.theme().border);
-            for (index, (label, value)) in details.into_iter().enumerate() {
-                card = card.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .px_3()
-                        .py_2()
-                        .when(index > 0, |this| {
-                            this.border_t_1().border_color(cx.theme().border)
-                        })
-                        .child(div().text_sm().child(value))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(label),
-                        ),
-                );
-            }
+        // Rows copy on tap and in the right-click menu (B10).
+        if let Some(card) = self.profile_details_card(user_id, cx) {
             body = body.child(card);
         }
+        if let Some(actions) = self.profile_contact_actions(user_id, cx) {
+            body = body.child(actions);
+        }
         let groups_in_common = info.as_ref().map_or(0, |i| i.extras.groups_in_common);
-        if let Some(section) = self.media_counts_section(groups_in_common, cx) {
+        // B10: the group rows replace the bare count once the list is
+        // loaded; until then the count row stays.
+        let groups_loaded = session.is_some_and(|s| {
+            !s.profile_chat_list(ProfileChatsKind::GroupsInCommon, user_id)
+                .is_empty()
+        });
+        if let Some(section) =
+            self.media_counts_section(if groups_loaded { 0 } else { groups_in_common }, cx)
+        {
+            body = body.child(section);
+        }
+        if let Some(section) = self.groups_in_common_section(user_id, cx) {
             body = body.child(section);
         }
         // Slice A6: contact management for any other user — Delete
@@ -1007,6 +1013,10 @@ impl QuillApp {
         if let Some(section) = self.media_counts_section(0, cx) {
             body = body.child(section);
         }
+        // B10: channels similar to this one (`getChatSimilarChats`).
+        if is_channel && let Some(section) = self.similar_channels_section(chat_id, cx) {
+            body = body.child(section);
+        }
         // Phase D3a: invite-link + join-request management (admins with
         // `can_invite_users` only; the sections no-op otherwise).
         body = body.child(self.invite_links_section(chat_id, cx));
@@ -1119,7 +1129,7 @@ fn info_tile(
 
 /// `+15550101031` → `+1 555 010 1031`-style grouping for readability;
 /// numbers that don't look like E.164 pass through unchanged.
-fn format_phone(raw: &str) -> String {
+pub(super) fn format_phone(raw: &str) -> String {
     // Grouping by country code, as Telegram's phone formatter does for the
     // common ones; other codes keep their digits.
     const PATTERNS: [(&str, &[usize]); 14] = [
@@ -1160,7 +1170,7 @@ fn format_phone(raw: &str) -> String {
 }
 
 /// "Jul 30, 1965 (61 years old)" — Telegram Desktop's birthday row.
-fn format_birthday(date: quill::telegram::envelope::Birthdate) -> String {
+pub(super) fn format_birthday(date: quill::telegram::envelope::Birthdate) -> String {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
