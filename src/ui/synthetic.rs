@@ -227,6 +227,11 @@ pub(crate) struct MessageChrome {
     pub actions: Option<AnyElement>,
     /// Full-width bar under the footer (the comments / replies bar).
     pub bottom_bar: Option<AnyElement>,
+    /// Content width of the picture / video / GIF / album that leads the
+    /// bubble. The media decides the bubble's width (Telegram Desktop's
+    /// `Photo::countCurrentSize`): captions, reactions and the footer wrap
+    /// to it instead of widening the bubble.
+    pub media_width: Option<Pixels>,
 }
 
 /// Width the time/receipt footer needs inside a bubble (`21:44 ✓✓` at
@@ -321,6 +326,7 @@ fn message_bubble_with_quote(
         media_led,
         actions,
         bottom_bar,
+        media_width,
     } = chrome;
     let group: SharedString = format!("message-row-{}", row.id).into();
     let alignment = if row.outgoing {
@@ -412,6 +418,11 @@ fn message_bubble_with_quote(
         .max_w(px(560.))
         .line_height(relative(1.4))
         .when(media_led && !look.plain, |this| this.p_0())
+        .when_some(media_width, |this, width| {
+            this.w(super::message_media::bubble_outer_width(
+                width, media_led, look.plain,
+            ))
+        })
         .map(|this| match footer {
             Some(footer) if footer_overlay => {
                 let pill = |footer: AnyElement| {
