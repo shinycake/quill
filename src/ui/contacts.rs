@@ -535,6 +535,29 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The add-contact dialog prefilled from a shared contact card (the
+    /// account may be unknown to the session, so the card's own phone and
+    /// names are used).
+    pub(super) fn open_add_contact_dialog_for(
+        &mut self,
+        user_id: i64,
+        phone: &str,
+        first: &str,
+        last: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.add_contact_dialog = Some(AddContactDialog::new(
+            window, cx, user_id, phone, first, last,
+        ));
+        if let Some(dialog) = &self.add_contact_dialog {
+            dialog
+                .phone_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+        cx.notify();
+    }
+
     pub(super) fn close_add_contact_dialog(&mut self, cx: &mut Context<Self>) {
         self.add_contact_dialog = None;
         cx.notify();

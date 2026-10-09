@@ -617,6 +617,23 @@ pub fn save_media_to_downloads(src: &std::path::Path) -> std::io::Result<std::pa
     save_media_to_downloads_in_dir(src, &dir)
 }
 
+/// The toast after "Save": "Saved to Downloads" when the file went to the
+/// downloads folder (tdesktop `lng_mediaview_saved`), else the folder's
+/// name, so a custom location is never mislabeled.
+pub fn saved_note(dest: &std::path::Path, downloads: Option<&std::path::Path>) -> String {
+    let parent = dest.parent();
+    if parent.is_some() && parent == downloads {
+        return "Saved to Downloads".to_string();
+    }
+    match parent
+        .and_then(std::path::Path::file_name)
+        .and_then(|name| name.to_str())
+    {
+        Some(folder) => format!("Saved to {folder}"),
+        None => "Saved".to_string(),
+    }
+}
+
 /// The user's downloads folder (`XDG_DOWNLOAD_DIR`, else the platform's,
 /// else `~/Downloads`).
 pub fn downloads_dir() -> Option<std::path::PathBuf> {
@@ -714,9 +731,9 @@ fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
         // viewer like any photo.
         MessageContent::Action(action) => match action.as_ref() {
             ServiceAction::ChatPhoto { photo: Some(photo) }
-            | ServiceAction::SuggestProfilePhoto { photo: Some(photo) } => {
-                photo_viewer_item(message, photo)
-            }
+            | ServiceAction::SuggestProfilePhoto {
+                photo: Some(photo), ..
+            } => photo_viewer_item(message, photo),
             _ => None,
         },
         MessageContent::Video(video) if !video.is_secret => {
@@ -851,6 +868,25 @@ pub fn viewer_key_action(
 mod tests {
     use super::*;
     use crate::telegram::envelope::{PhotoContent, PhotoSizeView, TextContent, VideoContent};
+
+    #[test]
+    fn saved_note_names_the_downloads_folder() {
+        use std::path::Path;
+        let downloads = Path::new("/home/me/Downloads");
+        assert_eq!(
+            saved_note(Path::new("/home/me/Downloads/cat.jpg"), Some(downloads)),
+            "Saved to Downloads"
+        );
+        assert_eq!(
+            saved_note(Path::new("/home/me/Pictures/cat.jpg"), Some(downloads)),
+            "Saved to Pictures"
+        );
+        assert_eq!(
+            saved_note(Path::new("/home/me/Downloads/cat.jpg"), None),
+            "Saved to Downloads"
+        );
+        assert_eq!(saved_note(Path::new("cat.jpg"), None), "Saved");
+    }
 
     fn photo_message(
         chat: i64,

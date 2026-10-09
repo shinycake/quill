@@ -2080,6 +2080,31 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — forums and saved sublists".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyRenderingLeftovers)) {
+            let view = std::env::var("QUILL_DEMO_RENDERING_VIEW").unwrap_or_default();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::rendering_demo::apply_ready_rendering_leftovers(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    &view,
+                );
+            }
+            match view.as_str() {
+                "viewer" => {
+                    self.open_media_viewer(
+                        ChatId(super::rendering_demo::CARDS),
+                        MessageId(310),
+                        cx,
+                    );
+                }
+                "contact" => self.open_share_contact_panel(window, cx),
+                "location" => self.open_share_location_panel(window, cx),
+                _ => {}
+            }
+            self.status_note = "screenshot demo — rendering leftovers".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyBubbleHeaders)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);

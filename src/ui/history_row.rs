@@ -23,6 +23,9 @@ pub(crate) struct HistoryRowInputs {
     pub(crate) highlighted: bool,
     /// First row of a sender run (gets extra top spacing).
     pub(crate) run_start: bool,
+    /// Continues the previous bubble of the same sender (no day divider or
+    /// unread marker between): the bubble joins it with a small corner.
+    pub(crate) joined_above: bool,
     /// Local-day separator rendered above the row ("Today", "Monday",
     /// "12 March") when this row starts a new day.
     pub(crate) day_label: Option<String>,
@@ -102,6 +105,7 @@ impl HistoryRow {
                     && a.day_label == b.day_label
                     && a.unread_divider == b.unread_divider
                     && a.run_start == b.run_start
+                    && a.joined_above == b.joined_above
                     && a.sender_avatar == b.sender_avatar
             }
             (

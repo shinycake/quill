@@ -69,6 +69,12 @@ impl Session {
             // Batch 4: `setOption("online")` is fire-and-forget; the next
             // presence check sends it again.
             Some(RequestPurpose::SetOnline) => {}
+            // A place without a tile keeps the coordinate card.
+            Some(RequestPurpose::GetMapThumbnailFile) => {
+                if let Some(pending) = pending {
+                    self.map_thumbs.failed(pending.id);
+                }
+            }
             Some(RequestPurpose::ReviewUnconfirmedSession { confirmed }) => {
                 self.finish_login_review(
                     confirmed,

@@ -235,9 +235,51 @@ pub fn full_stamp(time: &CivilTime) -> String {
     )
 }
 
+/// The media viewer's date under the sender's name: "today at 14:05",
+/// "yesterday at 09:30", "12 March at 21:42" this year and
+/// "12 March 2025 at 21:42" earlier (Telegram Desktop `langDateTime`).
+pub fn viewer_stamp(date: &CivilTime, now: &CivilTime) -> String {
+    let time = hhmm(date);
+    match now.day_number() - date.day_number() {
+        0 => format!("today at {time}"),
+        1 => format!("yesterday at {time}"),
+        _ if date.year == now.year => {
+            format!("{} {} at {time}", date.day, month_name(date.month))
+        }
+        _ => format!(
+            "{} {} {} at {time}",
+            date.day,
+            month_name(date.month),
+            date.year
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewer_stamp_names_today_and_yesterday() {
+        // 2026-09-28 21:42 UTC.
+        let now = civil_at(1_790_631_720, 0);
+        assert_eq!(
+            viewer_stamp(&civil_at(1_790_631_720 - 3600, 0), &now),
+            "today at 20:42"
+        );
+        assert_eq!(
+            viewer_stamp(&civil_at(1_790_631_720 - 86_400, 0), &now),
+            "yesterday at 21:42"
+        );
+        assert_eq!(
+            viewer_stamp(&civil_at(1_790_631_720 - 5 * 86_400, 0), &now),
+            "23 September at 21:42"
+        );
+        assert_eq!(
+            viewer_stamp(&civil_at(951_782_400 + 3600, 0), &now),
+            "29 February 2000 at 01:00"
+        );
+    }
 
     // 2026-09-28 21:42:00 UTC, a Monday.
     const T: i64 = 1_790_631_720;

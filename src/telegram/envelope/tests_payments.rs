@@ -278,3 +278,35 @@ fn payment_recurring_star_subscriptions_tolerate_gaps() {
         .unwrap();
     assert!(matches!(env.payload, EnvelopePayload::Error(_)));
 }
+
+#[test]
+fn paid_media_keeps_locked_previews_and_caption() {
+    let env = parse_envelope(
+        r#"{"@type":"updateNewMessage","message":{"id":402,"chat_id":21,"is_outgoing":false,"content":{"@type":"messagePaidMedia","star_count":25,"media":[{"@type":"paidMediaPreview","width":800,"height":600,"duration":0,"minithumbnail":{"@type":"minithumbnail","width":40,"height":30,"data":"AQID"}},{"@type":"paidMediaPreview","width":400,"height":400,"duration":12,"minithumbnail":null},{"@type":"paidMediaUnsupported"}],"caption":{"@type":"formattedText","text":"Behind the scenes","entities":[]},"show_caption_above_media":false}}}"#,
+    )
+    .unwrap();
+    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Action(action) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    let ServiceAction::PaidMedia {
+        stars,
+        locked,
+        caption,
+    } = action.as_ref()
+    else {
+        panic!("{action:?}");
+    };
+    assert_eq!(*stars, 25);
+    assert_eq!(caption, "Behind the scenes");
+    assert_eq!(locked.len(), 2);
+    assert_eq!((locked[0].width, locked[0].height), (800, 600));
+    assert_eq!(
+        locked[0].minithumbnail.as_ref().unwrap().data,
+        vec![1, 2, 3]
+    );
+    assert_eq!(locked[1].duration, 12);
+    assert!(locked[1].minithumbnail.is_none());
+}

@@ -2091,6 +2091,11 @@ impl Session {
                 }
             }
             EnvelopePayload::UpdateFile(file) | EnvelopePayload::File(file) => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetMapThumbnailFile
+                {
+                    self.map_thumbs.answered(pending.id, file.id.0);
+                }
                 self.upsert_file(file, true);
             }
             EnvelopePayload::UpdateFileDownload {

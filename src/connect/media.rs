@@ -15,11 +15,43 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(Vec::new());
         }
+        let mut extras = self.maybe_request_map_thumbs()?;
         let ids = self.session.thumb_file_ids_to_download();
-        let mut extras = Vec::new();
         for file_id in ids {
             if let Some(extra) = self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY)? {
                 extras.push(extra);
+            }
+        }
+        Ok(extras)
+    }
+
+    /// Ask TDLib for the map tile of every location in the open chat that
+    /// has none yet (`getMapThumbnailFile`). Each place is asked once; the
+    /// answered file then downloads like a photo thumbnail.
+    fn maybe_request_map_thumbs(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
+        let mut extras = Vec::new();
+        for (key, chat_id) in self.session.map_thumbs_to_request() {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetMapThumbnailFile, Some(chat_id));
+            self.session.map_thumbs.expect(extra, key);
+            let json = crate::telegram::requests::get_map_thumbnail_file(
+                extra,
+                key.latitude(),
+                key.longitude(),
+                crate::state::MAP_THUMB_ZOOM,
+                crate::state::MAP_THUMB_WIDTH,
+                crate::state::MAP_THUMB_HEIGHT,
+                crate::state::MAP_THUMB_SCALE,
+                chat_id,
+            );
+            match self.sender.send_json(&json) {
+                Ok(()) => extras.push(extra),
+                Err(err) => {
+                    self.session.requests.take(extra);
+                    self.session.map_thumbs.unsent(extra);
+                    return Err(err);
+                }
             }
         }
         Ok(extras)

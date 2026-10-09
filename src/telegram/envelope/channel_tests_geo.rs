@@ -136,6 +136,45 @@ fn message_dice_parses_emoji_and_value() {
     }
 }
 
+#[test]
+fn message_dice_keeps_the_regular_final_state_sticker() {
+    let sticker = |id: i32| {
+        format!(
+            r#"{{"@type":"sticker","id":9,"set_id":3,"width":512,"height":512,"emoji":"🎲","format":{{"@type":"stickerFormatTgs"}},"sticker":{{"@type":"file","id":{id},"size":4000,"local":{{"@type":"localFile","path":"","is_downloading_completed":false}},"remote":{{"@type":"remoteFile","id":"r{id}"}}}}}}"#
+        )
+    };
+    let json = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":116,"chat_id":17,"is_outgoing":true,"content":{{"@type":"messageDice","initial_state":{{"@type":"diceStickersRegular","sticker":{}}},"final_state":{{"@type":"diceStickersRegular","sticker":{}}},"emoji":"🎲","value":5,"success_animation_frame_number":0}}}}}}"#,
+        sticker(70),
+        sticker(71)
+    );
+    let env = parse_envelope(&json).unwrap();
+    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Dice(dice) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    let sticker = dice.final_sticker.as_ref().expect("final sticker");
+    assert_eq!(sticker.file_id.0, 71);
+    assert_eq!(sticker.format, StickerFormat::Tgs);
+    assert!(message.files.iter().any(|file| file.id.0 == 71));
+}
+
+#[test]
+fn message_dice_slot_machine_has_no_single_final_sticker() {
+    let json = r#"{"@type":"updateNewMessage","message":{"id":117,"chat_id":17,"is_outgoing":false,"content":{"@type":"messageDice","initial_state":{"@type":"diceStickersSlotMachine"},"final_state":{"@type":"diceStickersSlotMachine"},"emoji":"🎰","value":64,"success_animation_frame_number":0}}}"#;
+    let env = parse_envelope(json).unwrap();
+    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+        panic!("not a new message");
+    };
+    let MessageContent::Dice(dice) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    assert_eq!(dice.value, 64);
+    assert!(dice.final_sticker.is_none());
+}
+
 // Phase 4.4 safe rule: `value` is required — a missing (or
 // non-integer) value can't be displayed honestly, so the message
 // becomes `Unsupported` instead of inventing a number.

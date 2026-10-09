@@ -6,13 +6,13 @@ use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::message_checklist::checklist_body;
 use super::message_games::game_card;
 use super::message_media::{
-    MediaCorners, file_is_downloading, media_content_width, media_frame, photo_display_path,
-    single_media_width, spoiler_cover,
+    ContactCardState, animation_attachment, audio_row, contact_row, dice_row, document_chip,
+    location_row, paid_media_card, photo_attachment, sticker_attachment, venue_row,
+    video_attachment, video_note_attachment, voice_note_row,
 };
 use super::message_media::{
-    animation_attachment, audio_row, contact_row, dice_row, document_chip, location_row,
-    photo_attachment, sticker_attachment, venue_row, video_attachment, video_note_attachment,
-    voice_note_row,
+    MediaCorners, file_is_downloading, media_content_width, media_frame, photo_display_path,
+    single_media_width, spoiler_cover,
 };
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,
@@ -259,7 +259,9 @@ pub(super) fn album_history_row(
     let has_caption = caption.is_some();
     let avatar_link = avatar_link(&sender_avatar, first, cx);
     let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending);
-    if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link) {
+    if let Some(link) = avatar_link
+        && let Some(avatar) = chrome.avatar.take()
+    {
         chrome.avatar = Some(link.wrap(avatar));
     }
     chrome.media_led = true;
@@ -516,6 +518,20 @@ pub(super) fn service_pill(
             .text_color(cx.theme().secondary_foreground)
             .child(text.into()),
     )
+}
+
+/// The downloaded map tile of a place, if TDLib has produced one.
+fn map_tile_path(
+    session: Option<&Session>,
+    location: &quill::telegram::envelope::GeoLocation,
+    files: &HashMap<i32, ParsedFile>,
+    media_roots: &[PathBuf],
+) -> Option<PathBuf> {
+    let file_id = session?.map_thumbs.file_id(location)?;
+    files
+        .get(&file_id)
+        .and_then(|file| file.usable_path())
+        .and_then(|path| sandboxed_display_path(path, media_roots))
 }
 
 pub(super) fn session_history_row(
@@ -1072,11 +1088,37 @@ pub(super) fn session_history_row(
             message.id.0 as u64,
             &location.location,
             location.live.as_ref(),
+            map_tile_path(session, &location.location, files, media_roots),
             cx,
         )),
-        MessageContent::Venue(venue) => Some(venue_row(message.id.0 as u64, venue, cx)),
-        MessageContent::Contact(contact) => Some(contact_row(message.id.0 as u64, contact)),
-        MessageContent::Dice(dice) => Some(dice_row(message.id.0 as u64, dice)),
+        MessageContent::Venue(venue) => Some(venue_row(
+            message.id.0 as u64,
+            venue,
+            map_tile_path(session, &venue.location, files, media_roots),
+            cx,
+        )),
+        MessageContent::Contact(contact) => Some(contact_row(
+            message.id.0 as u64,
+            contact,
+            ContactCardState::of(contact.user_id, session),
+            session
+                .and_then(|s| s.user_photo_path(contact.user_id))
+                .and_then(|path| sandboxed_display_path(path, media_roots)),
+            cx,
+        )),
+        MessageContent::Dice(dice) => Some(dice_row(
+            message.id.0 as u64,
+            dice,
+            files,
+            downloading,
+            media_roots,
+            sticker_frame,
+            cx,
+        )),
+        MessageContent::Action(_) if super::service_row::locked_paid_media(&message.content).is_some() => {
+            super::service_row::locked_paid_media(&message.content)
+                .map(|(stars, locked, caption)| paid_media_card(message.id.0 as u64, stars, locked, caption))
+        }
         MessageContent::Action(_)
         | MessageContent::Text(_)
         | MessageContent::RichMessage(_)
@@ -1427,7 +1469,10 @@ pub(super) fn session_history_row(
             message.date,
             message.pending,
         );
-        if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link.take()) {
+        // A spacer (no link) keeps its slot: taking it would drop the gutter.
+        if let Some(link) = avatar_link.take()
+            && let Some(avatar) = chrome.avatar.take()
+        {
             chrome.avatar = Some(link.wrap(avatar));
         }
         chrome.footer = message_footer_meta(&footer_meta);

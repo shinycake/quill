@@ -272,6 +272,7 @@ impl QuillApp {
             } else {
                 cx.theme().foreground
             },
+            joined_above: false,
         }
     }
 

@@ -378,3 +378,19 @@ fn chat_list_folder_parsed() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn suggested_profile_photo_keeps_the_chat_photo_id() {
+    // `messageSuggestProfilePhoto` (schema 1.8.67, line 5411): accepting
+    // the suggestion needs `chatPhoto.id` for `inputChatPhotoPrevious`.
+    let json = r#"{"id":504,"chat_id":41,"is_outgoing":false,"content":{"@type":"messageSuggestProfilePhoto","photo":{"@type":"chatPhoto","id":"987654321","sizes":[{"@type":"photoSize","type":"a","photo":{"@type":"file","id":55,"size":100,"local":{"@type":"localFile","path":"","is_downloading_completed":false},"remote":{"@type":"remoteFile","id":"r55"}},"width":160,"height":160}]}}}"#;
+    let parsed = parse_message(&serde_json::from_str(json).unwrap()).unwrap();
+    let MessageContent::Action(action) = &parsed.content else {
+        panic!("{:?}", parsed.content);
+    };
+    let ServiceAction::SuggestProfilePhoto { photo, photo_id } = action.as_ref() else {
+        panic!("{action:?}");
+    };
+    assert_eq!(*photo_id, 987_654_321);
+    assert!(photo.is_some());
+}

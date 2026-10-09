@@ -26,6 +26,7 @@ pub(crate) mod poll;
 pub(crate) mod poll_voters;
 pub(crate) mod profile_panels;
 pub(crate) mod restrict;
+pub(crate) mod share_content;
 pub(crate) mod username;
 pub(crate) mod welcome;
 
@@ -57,5 +58,6 @@ pub(crate) use poll::*;
 pub(crate) use poll_voters::*;
 pub(crate) use profile_panels::*;
 pub(crate) use restrict::*;
+pub(crate) use share_content::*;
 pub(crate) use username::*;
 pub(crate) use welcome::*;

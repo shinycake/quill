@@ -154,6 +154,7 @@ impl Session {
                     }
                     | crate::telegram::envelope::ServiceAction::SuggestProfilePhoto {
                         photo: Some(photo),
+                        ..
                     } = action.as_ref()
                         && let Some(size) = photo.thumb_size().or_else(|| photo.largest_size())
                         && self.should_download(size.file_id)
@@ -190,6 +191,18 @@ impl Session {
                 }
                 MessageContent::Sticker(sticker) => {
                     if let Some(file_id) = sticker.display_file_id()
+                        && self.should_download(file_id)
+                    {
+                        ids.push(file_id);
+                    }
+                }
+                // A dice's landing animation: its thumbnail is the still
+                // shown until the animation decodes.
+                MessageContent::Dice(dice) => {
+                    if let Some(file_id) = dice
+                        .final_sticker
+                        .as_ref()
+                        .and_then(|sticker| sticker.display_file_id())
                         && self.should_download(file_id)
                     {
                         ids.push(file_id);
@@ -294,6 +307,7 @@ impl Session {
                 ids.push(file_id);
             }
         }
+        ids.extend(self.map_thumb_file_ids_to_download());
         ids.sort_by_key(|id| id.0);
         ids.dedup();
         ids

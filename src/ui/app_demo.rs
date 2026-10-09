@@ -691,6 +691,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — forums and saved sublists".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyRenderingLeftovers => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — rendering leftovers".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBubbleHeaders => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1854,6 +1860,7 @@ impl QuillApp {
             poll_voters_dialog: None,
             poll_add_option: None,
             checklist_dialog: None,
+            share_content_dialog: None,
             welcome_dialog: None,
             event_log_search: None,
             event_log_admin_filter: None,

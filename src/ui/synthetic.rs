@@ -135,7 +135,15 @@ pub(crate) struct BubbleLook {
     pub font: Pixels,
     pub plain: bool,
     pub text: Hsla,
+    /// The bubble continues the previous bubble of the same sender
+    /// (Telegram Desktop's grouping): its top corner on the avatar side is
+    /// small.
+    pub joined_above: bool,
 }
+
+/// Radius of a corner that joins a neighbouring bubble or carries the
+/// bubble's tail (tdesktop `bubbleRadiusSmall`).
+const JOINED_RADIUS: f32 = 5.0;
 
 impl BubbleLook {
     /// Pre-login synthetic placeholder: today's fixed look.
@@ -144,7 +152,31 @@ impl BubbleLook {
             font: px(14.),
             plain: false,
             text: Hsla::from(rgb(0xffffff)),
+            joined_above: false,
         }
+    }
+}
+
+/// Grouped corners: on the side facing the sender's avatar the bottom
+/// corner is small (the tail of the last bubble, the join of the others)
+/// and so is the top corner when the bubble continues the one above.
+fn bubble_corners(
+    content: component::bubble::BubbleContent,
+    outgoing: bool,
+    look: BubbleLook,
+) -> component::bubble::BubbleContent {
+    if look.plain {
+        return content;
+    }
+    let small = px(JOINED_RADIUS);
+    if outgoing {
+        content
+            .when(look.joined_above, |this| this.rounded_tr(small))
+            .rounded_br(small)
+    } else {
+        content
+            .when(look.joined_above, |this| this.rounded_tl(small))
+            .rounded_bl(small)
     }
 }
 
@@ -361,6 +393,7 @@ fn message_bubble_with_quote(
             Hsla::from(text_bright())
         })
         .when(rtl, |this| this.text_right())
+        .map(|this| bubble_corners(this, row.outgoing, look))
         // Telegram Desktop names a group sender inside the bubble, on its
         // first line, in the sender's color. Bubble-less rows (stickers,
         // round videos, big emoji) keep the name above instead.

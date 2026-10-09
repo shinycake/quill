@@ -593,6 +593,21 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// "Set as My Photo" under a suggested profile photo
+    /// (`setProfilePhoto` with the suggestion's `chatPhoto.id`).
+    pub(super) fn accept_suggested_photo(&mut self, photo_id: i64, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            self.status_note = "profile photo changes need a live connection (demo)".into();
+            cx.notify();
+            return;
+        };
+        match live.driver.set_profile_photo_previous(photo_id) {
+            Ok(_) => self.status_note = "Profile photo updated".into(),
+            Err(_) => self.status_note = "Couldn't reach Telegram; try again.".into(),
+        }
+        cx.notify();
+    }
+
     /// "Set as main photo" on one of your own earlier photos.
     pub(super) fn set_viewer_photo_as_main(&mut self, cx: &mut Context<Self>) {
         let Some(photo_id) = self.media_viewer.current().map(|item| item.message_id.0) else {

@@ -66,6 +66,7 @@ impl Render for QuillApp {
             cx.defer_in(window, |this, window, cx| this.send_recording(window, cx));
         }
         let status_toast = self.status_toast_visible(cx);
+        let viewer_open = self.media_viewer.is_open();
         let menu_open =
             self.message_menu.is_some() || self.chat_menu.is_some() || self.archive_menu.is_some();
         if menu_open && !self.context_menu_was_open {
@@ -777,16 +778,21 @@ impl Render for QuillApp {
                     )
                 },
             )
+            .when(
+                self.media_viewer.is_open() && self.pip_window.is_none(),
+                |this| this.child(self.media_viewer_overlay(window, cx)),
+            )
             // Live: the latest status note is a transient toast floating
             // above the composer — no layout shift, no click capture, gone
-            // after a few seconds.
+            // after a few seconds. It paints above the media viewer too
+            // ("Saved to Downloads", "Frame copied"), clear of its controls.
             .when(status_toast, |this| {
                 this.child(
                     div()
                         .absolute()
                         .left_0()
                         .right_0()
-                        .bottom(px(84.))
+                        .bottom(px(if viewer_open { 132. } else { 84. }))
                         .flex()
                         .justify_center()
                         .child(
@@ -809,10 +815,6 @@ impl Render for QuillApp {
                         ),
                 )
             })
-            .when(
-                self.media_viewer.is_open() && self.pip_window.is_none(),
-                |this| this.child(self.media_viewer_overlay(window, cx)),
-            )
             .children(self.photo_editor_overlay(cx))
             // Phase 9.1: story viewer overlay above the media viewer.
             .when(self.story_viewer.is_open(), |this| {

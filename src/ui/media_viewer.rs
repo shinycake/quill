@@ -1074,11 +1074,9 @@ impl QuillApp {
         match path {
             Some(path) => match save_media_to_downloads(&path) {
                 Ok(dest) => {
-                    self.status_note = format!(
-                        "saved to {}",
-                        dest.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("downloads")
+                    self.status_note = quill::media_viewer::saved_note(
+                        &dest,
+                        quill::media_viewer::downloads_dir().as_deref(),
                     );
                 }
                 Err(err) => {
@@ -1219,6 +1217,96 @@ impl QuillApp {
             Err(note) => self.status_note = note.into(),
         }
         cx.notify();
+    }
+
+    /// "Copy Frame": the video frame on screen to the clipboard as an
+    /// image (tdesktop's viewer context menu offers it for videos). Needs
+    /// the in-viewer frames; a native-surface or still-loading clip says
+    /// so instead of copying a thumbnail.
+    pub(super) fn copy_viewer_frame(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = self.media_viewer.current().cloned() else {
+            return;
+        };
+        if self.refuse_protected_copy(item.chat_id, cx) {
+            return;
+        }
+        let png = self
+            .viewer_render_frame()
+            .ok_or("a frame can only be copied once the video has loaded")
+            .and_then(|frame| {
+                let size = frame.size(0);
+                let (width, height) = (size.width.0 as u32, size.height.0 as u32);
+                let mut pixels = frame
+                    .as_bytes(0)
+                    .ok_or("couldn't copy this frame")?
+                    .to_vec();
+                // RenderImage pixels are BGRA.
+                for pixel in pixels.as_chunks_mut::<4>().0 {
+                    pixel.swap(0, 2);
+                }
+                let rgba = image::RgbaImage::from_raw(width, height, pixels)
+                    .ok_or("couldn't copy this frame")?;
+                let mut bytes = std::io::Cursor::new(Vec::new());
+                image::DynamicImage::ImageRgba8(rgba)
+                    .write_to(&mut bytes, image::ImageFormat::Png)
+                    .map_err(|_| "couldn't copy this frame")?;
+                Ok(bytes.into_inner())
+            });
+        match png {
+            Ok(bytes) => {
+                cx.write_to_clipboard(ClipboardItem::new_image(&gpui_kit::Image::from_bytes(
+                    gpui_kit::ImageFormat::Png,
+                    bytes,
+                )));
+                self.status_note = "Frame copied".into();
+            }
+            Err(note) => self.status_note = note.into(),
+        }
+        cx.notify();
+    }
+
+    /// "View all media": close the viewer and open the chat's Shared
+    /// Media gallery on its photos and videos (tdesktop opens the same
+    /// list as the viewer's paging source).
+    pub(super) fn view_all_viewer_media(&mut self, cx: &mut Context<Self>) {
+        self.close_media_viewer(cx);
+        self.open_shared_media_ui(cx);
+        self.select_shared_media_tab_ui(quill::state::SharedMediaTab::Media, cx);
+    }
+
+    /// The sender name and date shown under the viewer's title: who sent
+    /// the photo and "today at 14:05" (tdesktop's viewer header). Profile
+    /// photos carry no message, so they show neither.
+    fn viewer_sender_line(&self, item: &MediaViewerItem) -> Option<(String, String)> {
+        let session = self.session()?;
+        let message = session
+            .histories
+            .get(&item.chat_id.0)?
+            .messages
+            .get(&item.message_id.0)?;
+        let name = match message.sender {
+            Some(quill::telegram::envelope::MessageSender::User { user_id }) => {
+                session.user(user_id).map(|user| user.display_name())
+            }
+            Some(quill::telegram::envelope::MessageSender::Chat { chat_id }) => {
+                session.chats.get(&chat_id).map(|chat| chat.title.clone())
+            }
+            None => None,
+        }
+        .or_else(|| {
+            session
+                .chats
+                .get(&item.chat_id.0)
+                .map(|chat| chat.title.clone())
+        })?;
+        if message.date <= 0 {
+            return Some((name, String::new()));
+        }
+        let when = quill::local_time::viewer_stamp(
+            &quill::local_time::civil_local(i64::from(message.date)),
+            &quill::local_time::civil_local(quill::local_time::now_unix()),
+        );
+        Some((name, when))
     }
 
     /// Mouse-move listener for the control surfaces: keeps them shown.
@@ -2009,6 +2097,9 @@ impl QuillApp {
         } else {
             item.kind.label()
         };
+        let sender_line = (!profile_view)
+            .then(|| self.viewer_sender_line(&item))
+            .flatten();
         let header_label = if total > 1 {
             format!("{kind_label} {position} of {total}")
         } else {
@@ -2193,6 +2284,8 @@ impl QuillApp {
             let menu_can_delete = can_delete;
             let menu_profile = profile_view;
             let menu_set_main = can_set_main;
+            let menu_playable = item.kind.is_playable();
+            let menu_chat_source = self.media_viewer.source() == ViewerSource::Chat;
             // `photo.has_stickers` / `video.has_stickers`: stickers were
             // added to the media (tdesktop "Attached Stickers").
             let menu_attached = self
@@ -2304,6 +2397,9 @@ impl QuillApp {
                         if is_photo {
                             menu =
                                 menu.item(item("Copy", |this, _, cx| this.copy_viewer_photo(cx)));
+                        } else if menu_playable {
+                            menu = menu
+                                .item(item("Copy Frame", |this, _, cx| this.copy_viewer_frame(cx)));
                         }
                     }
                     if menu_attached {
@@ -2314,6 +2410,11 @@ impl QuillApp {
                     if !menu_profile {
                         menu = menu.item(item("Show in Chat", |this, _, cx| {
                             this.show_viewer_in_chat(cx)
+                        }));
+                    }
+                    if menu_chat_source {
+                        menu = menu.item(item("View All Media", |this, _, cx| {
+                            this.view_all_viewer_media(cx)
                         }));
                     }
                     if is_photo {
@@ -2635,12 +2736,32 @@ impl QuillApp {
             .flex()
             .items_center()
             .justify_between()
-            .child(
-                div()
+            .child(match sender_line {
+                Some((name, when)) => div()
+                    .id("media-viewer-sender")
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .text_color(gpui_kit::white())
+                    .child(div().font_semibold().truncate().child(name))
+                    .child(
+                        div()
+                            .text_xs()
+                            .opacity(0.7)
+                            .truncate()
+                            .child(if when.is_empty() {
+                                header_label
+                            } else {
+                                format!("{when} \u{b7} {header_label}")
+                            }),
+                    )
+                    .into_any_element(),
+                None => div()
                     .font_semibold()
                     .text_color(gpui_kit::white())
-                    .child(header_label),
-            )
+                    .child(header_label)
+                    .into_any_element(),
+            })
             .child(
                 div()
                     .flex()

@@ -571,6 +571,9 @@ pub enum RequestPurpose {
     ToggleHasSponsoredMessagesEnabled,
     /// `clickChatSponsoredMessage`. Response is `ok`; fire-and-forget.
     ClickChatSponsoredMessage,
+    /// `getMapThumbnailFile` for a location or venue message. Response is
+    /// `file`; the tile's file id is kept per place (`Session::map_thumbs`).
+    GetMapThumbnailFile,
     /// `getMe`. Response is `user`; only the id is kept.
     GetMe,
     /// `getChatMember` for the current user in a channel. Response is

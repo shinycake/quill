@@ -126,6 +126,9 @@ pub enum ServiceAction {
     },
     SuggestProfilePhoto {
         photo: Option<PhotoContent>,
+        /// `chatPhoto.id`: accepting the suggestion sets this photo as
+        /// the user's own (`inputChatPhotoPrevious`). 0 when unknown.
+        photo_id: i64,
     },
     SuggestBirthdate {
         day: i32,
@@ -296,9 +299,50 @@ pub enum ServiceAction {
     Story {
         via_mention: bool,
     },
+    /// `messagePaidMedia`: media sold for Stars. `locked` holds one entry
+    /// per `paidMediaPreview` (blurred thumbnail, size, duration) while
+    /// the media is still locked; it is empty once the viewer bought it
+    /// (the unlocked photos and videos are not rendered yet).
     PaidMedia {
         stars: i64,
+        locked: Vec<PaidMediaPreview>,
+        caption: String,
     },
+}
+
+/// One locked item of a `messagePaidMedia` (`paidMediaPreview`, schema
+/// 1.8.67 line 4789).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaidMediaPreview {
+    pub width: i32,
+    pub height: i32,
+    /// Video length in seconds, 0 for a photo.
+    pub duration: i32,
+    /// The blurred inline preview TDLib sends; `None` when absent.
+    pub minithumbnail: Option<MiniThumbnail>,
+}
+
+fn paid_media_previews(value: &Value) -> Vec<PaidMediaPreview> {
+    value
+        .get("media")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| {
+                    item.get("@type").and_then(Value::as_str) == Some("paidMediaPreview")
+                })
+                .map(|item| PaidMediaPreview {
+                    width: n(item, "width"),
+                    height: n(item, "height"),
+                    duration: n(item, "duration"),
+                    minithumbnail: super::message_media::parse_minithumbnail(
+                        item.get("minithumbnail"),
+                    ),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn i(value: &Value, key: &str) -> i64 {
@@ -502,6 +546,7 @@ impl ServiceAction {
             },
             "messageSuggestProfilePhoto" => A::SuggestProfilePhoto {
                 photo: chat_photo(value, files),
+                photo_id: value.get("photo").map_or(0, |photo| i(photo, "id")),
             },
             "messageSuggestBirthdate" => {
                 let birthdate = value.get("birthdate").unwrap_or(&Value::Null);
@@ -787,6 +832,13 @@ impl ServiceAction {
             },
             "messagePaidMedia" => A::PaidMedia {
                 stars: i(value, "star_count"),
+                locked: paid_media_previews(value),
+                caption: value
+                    .get("caption")
+                    .and_then(|caption| caption.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
             },
             _ => return None,
         })
