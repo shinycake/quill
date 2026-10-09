@@ -1,9 +1,0 @@
-parity:deeplink-internal-link-type
-parity:deeplink-stickers-emoji
-parity:deeplink-proxy
-parity:deeplink-share-draft
-parity:deeplink-settings
-parity:deeplink-phone
-parity:deeplink-thread-comment
-parity:deeplink-story
-parity:deeplink-timestamp
