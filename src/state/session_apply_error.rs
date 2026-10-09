@@ -23,6 +23,14 @@ impl Session {
         {
             self.send_permission_error = Some(notice.into());
         }
+        // Q1: a rate-limited user action says so (tdesktop's
+        // `lng_flood_error`); background lookups were already retried by
+        // the driver and stay quiet.
+        if let Some(notice) = err.flood_notice()
+            && pending.is_some_and(|p| is_user_action(p.purpose))
+        {
+            self.flood_notice = Some(notice);
+        }
         if let Some(p) = pending
             && p.purpose == RequestPurpose::GetChatMember
             && let Some(chat_id) = p.chat_id
@@ -243,11 +251,14 @@ impl Session {
             // leave the message list without a history entry — the
             // skeleton shimmer would run forever. Create the entry
             // so the UI settles into the empty state.
-            Some(RequestPurpose::GetHistory) => {
+            Some(RequestPurpose::GetHistory | RequestPurpose::GetHistoryAround) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
+                    && !self.take_stale_history_request(pending)
                 {
-                    self.histories.entry(chat_id.0).or_default();
+                    // R5: the empty window shows "Couldn't load messages ·
+                    // Retry" instead of a skeleton that never settles.
+                    self.histories.entry(chat_id.0).or_default().load_failed = true;
                 }
             }
             // `parity:platform-chat-export` — a failed export page must not
@@ -1635,4 +1646,26 @@ pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> S
         }
         _ => format!("Couldn't open the link (error {code})."),
     }
+}
+
+/// Q1: whether a request is something the user did on purpose (send,
+/// edit, join, ...), as opposed to a background lookup, a view/online
+/// ping or a login submit (which has its own error line).
+fn is_user_action(purpose: RequestPurpose) -> bool {
+    if is_auth_submit(purpose) || purpose.is_sweepable() {
+        return false;
+    }
+    let debug = format!("{purpose:?}");
+    ![
+        "Get",
+        "Load",
+        "Search",
+        "Download",
+        "View",
+        "Open",
+        "Close",
+        "SetOnline",
+    ]
+    .iter()
+    .any(|prefix| debug.starts_with(prefix))
 }

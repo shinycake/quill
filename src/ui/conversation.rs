@@ -1111,7 +1111,35 @@ impl QuillApp {
                     // message rows instead of the empty placeholder.
                     let history_loading =
                         open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
-                    if history_loading {
+                    // R5: the first page failed or timed out — a Retry row
+                    // instead of an endless skeleton or a false "No messages".
+                    let history_failed =
+                        open.is_some_and(|id| session.is_some_and(|s| s.history_load_failed(id)));
+                    if history_failed {
+                        div()
+                            .id("history-load-failed")
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .p_6()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Couldn’t load messages ·"),
+                            )
+                            .child(
+                                Button::new("history-retry")
+                                    .label("Retry")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.retry_history_load(cx);
+                                    })),
+                            )
+                            .into_any_element()
+                    } else if history_loading {
                         history_skeleton().into_any_element()
                     } else if is_secret {
                         self.secret_empty_explainer(cx).into_any_element()
@@ -2116,6 +2144,17 @@ impl QuillApp {
             }
             self.history_scroller
                 .update(cx, |state, cx| state.scroll_to_end(cx));
+        }
+        cx.notify();
+    }
+
+    /// The "Couldn't load messages · Retry" row: ask for the first page
+    /// again.
+    pub(super) fn retry_history_load(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.retry_history().is_err()
+        {
+            self.status_note = "could not load history".into();
         }
         cx.notify();
     }
