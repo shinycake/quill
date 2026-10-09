@@ -981,6 +981,9 @@ pub struct QuillApp {
     /// B10: edit-contact / birthday / personal-channel / share-contact
     /// dialog behind the profile panels.
     pub(super) profile_dialog: Option<ProfileDialog>,
+    /// B7: group / channel settings dialog (topics, history, reactions,
+    /// discussion group, ...).
+    pub(super) group_settings_dialog: Option<GroupSettingsDialog>,
     /// B10: a profile photo gallery whose list was requested; the viewer
     /// opens when it lands (checked by the poll loop).
     pub(super) pending_profile_gallery: Option<i64>,

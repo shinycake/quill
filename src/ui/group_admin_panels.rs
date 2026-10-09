@@ -388,6 +388,22 @@ impl QuillApp {
                 }
             );
         }
+        // B7: one entry for the settings the viewer's rights allow
+        // (topics, history, reactions, discussion group, ...).
+        if session.is_some_and(|s| !s.group_admin_controls(chat_id).is_empty()) {
+            row!(
+                "b7-open-settings",
+                I::Settings,
+                if is_channel {
+                    "Channel settings"
+                } else {
+                    "Group settings"
+                },
+                |this, _window, cx| {
+                    this.open_group_settings_dialog(chat_id, cx);
+                }
+            );
+        }
         // Members / subscribers — everyone who can see the panel and
         // add or restrict may manage; plain members get a read-only
         // list through the dialog's All tab.

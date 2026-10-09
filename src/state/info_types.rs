@@ -29,6 +29,9 @@ pub enum ProfileChatsKind {
     GroupsInCommon,
     SimilarChats,
     SuitablePersonalChats,
+    /// B7: the groups that can become a channel's discussion group
+    /// (`getSuitableDiscussionChats`); key id 0.
+    SuitableDiscussionChats,
 }
 
 /// B10: fetch state of one `ProfileChatsKind` list. `Loading` is the
@@ -102,6 +105,9 @@ pub struct SupergroupFullInfoData {
     /// (schema 1.8.67, line 2792) — the group's custom-emoji set; 0
     /// when none.
     pub custom_emoji_sticker_set_id: i64,
+    /// B7: the flags behind the group admin toggles (history for new
+    /// members, hidden members, paid reactions).
+    pub admin: crate::telegram::envelope::SupergroupFullAdmin,
 }
 
 impl Default for SupergroupFullInfoData {
@@ -119,6 +125,7 @@ impl Default for SupergroupFullInfoData {
             can_set_sticker_set: false,
             sticker_set_id: 0,
             custom_emoji_sticker_set_id: 0,
+            admin: Default::default(),
         }
     }
 }

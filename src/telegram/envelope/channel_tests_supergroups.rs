@@ -25,6 +25,7 @@ fn supergroup_full_info_parsed() {
             can_set_sticker_set,
             sticker_set_id,
             custom_emoji_sticker_set_id,
+            admin: _,
         } => {
             assert_eq!(description, "CANARY group description");
             assert_eq!(member_count, 1234);
@@ -309,4 +310,129 @@ fn update_supergroup_full_info_parses_slow_mode_fields() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn b7_full_info_parses_the_admin_toggle_flags() {
+    // B7: `can_hide_members`, `has_hidden_members`, `is_all_history_available`
+    // and `can_enable_paid_reaction` (schema 1.8.67, line 2792).
+    let env = parse_envelope(
+        r#"{"@type":"supergroupFullInfo","@extra":"5","description":"d","member_count":10,"can_hide_members":true,"has_hidden_members":true,"is_all_history_available":true,"can_enable_paid_reaction":true}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::SupergroupFullInfo { admin, .. } => {
+            assert!(admin.can_hide_members);
+            assert!(admin.has_hidden_members);
+            assert!(admin.is_all_history_available);
+            assert!(admin.can_enable_paid_reaction);
+        }
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(
+        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":9,"supergroup_full_info":{"description":"d","member_count":10,"is_all_history_available":true}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateSupergroupFullInfo { admin, .. } => {
+            assert!(admin.is_all_history_available);
+            // Absent flags read as false.
+            assert!(!admin.can_hide_members);
+            assert!(!admin.has_hidden_members);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn b7_supergroup_parses_join_to_send_messages() {
+    let env = parse_envelope(
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":9,"join_to_send_messages":true}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateSupergroup {
+            join_to_send_messages,
+            ..
+        } => assert!(join_to_send_messages),
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(r#"{"@type":"supergroup","@extra":"1","id":9}"#).unwrap();
+    match env.payload {
+        EnvelopePayload::Supergroup {
+            join_to_send_messages,
+            ..
+        } => assert!(!join_to_send_messages),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn b7_basic_group_keeps_status_and_activity() {
+    let env = parse_envelope(
+        r#"{"@type":"updateBasicGroup","basic_group":{"@type":"basicGroup","id":7,"member_count":4,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true}},"is_active":false}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateBasicGroup {
+            status,
+            can_change_info,
+            is_active,
+            ..
+        } => {
+            assert_eq!(status, ChannelMemberStatus::Administrator);
+            assert_eq!(can_change_info, Some(true));
+            assert!(!is_active);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn b7_chat_available_reactions_parse_all_some_and_junk() {
+    use crate::telegram::envelope::{ChatAvailableReactions, ReactionType};
+    let env = parse_envelope(
+        r#"{"@type":"updateChatAvailableReactions","chat_id":5,"available_reactions":{"@type":"chatAvailableReactionsSome","reactions":[{"@type":"reactionTypeEmoji","emoji":"🔥"},{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"42"},{"@type":"reactionTypePaid"}],"max_reaction_count":4}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateChatAvailableReactions {
+            chat_id,
+            available_reactions,
+        } => {
+            assert_eq!(chat_id, 5);
+            assert_eq!(
+                available_reactions,
+                ChatAvailableReactions::Some {
+                    reactions: vec![
+                        ReactionType::emoji("🔥"),
+                        ReactionType::CustomEmoji {
+                            custom_emoji_id: 42
+                        },
+                        ReactionType::Paid
+                    ],
+                    max_reaction_count: 4
+                }
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    // The limit is clamped to 1..=11; an unknown constructor is ignored.
+    let env = parse_envelope(
+        r#"{"@type":"updateChatAvailableReactions","chat_id":5,"available_reactions":{"@type":"chatAvailableReactionsAll","max_reaction_count":99}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateChatAvailableReactions {
+            available_reactions,
+            ..
+        } => assert_eq!(available_reactions.max_reaction_count(), 11),
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        parse_envelope(
+            r#"{"@type":"updateChatAvailableReactions","chat_id":5,"available_reactions":{"@type":"somethingNew"}}"#
+        )
+        .is_err()
+    );
 }

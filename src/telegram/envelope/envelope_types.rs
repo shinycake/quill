@@ -269,6 +269,9 @@ pub enum EnvelopePayload {
         /// — the chat's content can't be saved, forwarded or copied.
         /// Refreshed by `updateChatHasProtectedContent` (line 10582).
         has_protected_content: bool,
+        /// `chat.available_reactions` (schema 1.8.67, line 3627); refreshed
+        /// by `updateChatAvailableReactions`. `None` when absent.
+        available_reactions: Option<ChatAvailableReactions>,
         /// `chat.has_scheduled_messages` (schema 1.8.67, line 3627) — the
         /// chat has scheduled messages; refreshed by
         /// `updateChatHasScheduledMessages`.
@@ -661,6 +664,14 @@ pub enum EnvelopePayload {
     UpdateBasicGroup {
         basic_group_id: i64,
         member_count: i32,
+        /// B7: the viewer's own `basicGroup.status` (schema 1.8.67, line
+        /// 2705) - owner and admin gates of the group settings.
+        status: ChannelMemberStatus,
+        /// B7: `rights.can_change_info` of an administrator status.
+        can_change_info: Option<bool>,
+        /// B7: `basicGroup.is_active` - false once upgraded to a
+        /// supergroup.
+        is_active: bool,
     },
     /// `updateChatOnlineMemberCount` — sent for opened groups.
     UpdateChatOnlineMemberCount {
@@ -735,6 +746,9 @@ pub enum EnvelopePayload {
         /// 2746) — sender shown alongside the signature; only meaningful
         /// when `sign_messages` is true.
         show_message_sender: bool,
+        /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line
+        /// 2746) — discussion group members must join to write.
+        join_to_send_messages: bool,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
@@ -790,6 +804,9 @@ pub enum EnvelopePayload {
         /// Slice G2: `supergroup.show_message_sender` (schema 1.8.67, line
         /// 2746).
         show_message_sender: bool,
+        /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line
+        /// 2746).
+        join_to_send_messages: bool,
     },
     /// `forumTopics` — `getForumTopics` response. Only the first page is
     /// fetched; `next_offset_*` are dropped (see Phase 5.1 DECISIONS).
@@ -1159,6 +1176,8 @@ pub enum EnvelopePayload {
         /// (schema 1.8.67, line 2792) — the group's custom-emoji set; 0
         /// when none.
         custom_emoji_sticker_set_id: i64,
+        /// B7: admin-toggle flags of `supergroupFullInfo`.
+        admin: SupergroupFullAdmin,
     },
     /// Slice (communities backend core): `updateCommunity` (schema 1.8.67,
     /// line 10726) — the update carries the full `community` object and is
@@ -1200,6 +1219,16 @@ pub enum EnvelopePayload {
     UpdateChatHasProtectedContent {
         chat_id: i64,
         has_protected_content: bool,
+    },
+    /// B7: `updateChatAvailableReactions` (schema 1.8.67, line 10532).
+    UpdateChatAvailableReactions {
+        chat_id: i64,
+        available_reactions: ChatAvailableReactions,
+    },
+    /// B7: `updateActiveEmojiReactions` (schema 1.8.67, line 10999) — the
+    /// emoji that can be used as reactions, in display order.
+    UpdateActiveEmojiReactions {
+        emojis: Vec<String>,
     },
     /// `updateChatHasScheduledMessages` — the chat gained its first or lost
     /// its last scheduled message.
@@ -1389,6 +1418,8 @@ pub enum EnvelopePayload {
         can_set_sticker_set: bool,
         sticker_set_id: i64,
         custom_emoji_sticker_set_id: i64,
+        /// B7: admin-toggle flags of `supergroupFullInfo`.
+        admin: SupergroupFullAdmin,
     },
     /// `botCommands` — `getCommands` response (TDLib 1.8.67,
     /// `schema/td_api.tl:829`): the bot's commands for the requested scope
@@ -1728,4 +1759,18 @@ pub struct CalendarDay {
     pub total_count: i32,
     pub message_id: MessageId,
     pub date: i32,
+}
+
+/// B7: the `supergroupFullInfo` flags behind the group admin toggles
+/// (schema 1.8.67, line 2792).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SupergroupFullAdmin {
+    /// `can_hide_members` — `toggleSupergroupHasHiddenMembers` may be used.
+    pub can_hide_members: bool,
+    /// `has_hidden_members` — non-admins can't list the members.
+    pub has_hidden_members: bool,
+    /// `is_all_history_available` — new members see older messages.
+    pub is_all_history_available: bool,
+    /// `can_enable_paid_reaction` — channels only.
+    pub can_enable_paid_reaction: bool,
 }

@@ -356,6 +356,23 @@ impl Session {
                     self.supergroup_anti_spam_enabled.remove(&supergroup_id);
                 }
             },
+            // B7: restore the group admin toggles the server refused.
+            Some(RequestRollback::GroupToggle {
+                supergroup_id,
+                toggle,
+                previous,
+            }) => self.restore_group_toggle(supergroup_id, toggle, previous),
+            Some(RequestRollback::ProtectedContent { chat_id, previous }) => {
+                self.set_chat_protected(chat_id, previous);
+            }
+            Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
+                Some(setting) => {
+                    self.chat_available_reactions.insert(chat_id, setting);
+                }
+                None => {
+                    self.chat_available_reactions.remove(&chat_id);
+                }
+            },
             // Slice CL1: restore the pre-toggle pinned /
             // marked-as-unread flags the server refused.
             Some(RequestRollback::ChatPin { previous, archived }) => {
@@ -530,6 +547,23 @@ impl Session {
             ) => {
                 self.chat_action_error =
                     Some(format!("could not save the change (error {})", err.code));
+            }
+            // B7: refused group admin changes were rolled back above; say
+            // so instead of showing the old value as if nothing happened.
+            Some(
+                RequestPurpose::ToggleSupergroupIsForum
+                | RequestPurpose::ToggleSupergroupIsAllHistoryAvailable
+                | RequestPurpose::ToggleSupergroupJoinToSendMessages
+                | RequestPurpose::ToggleSupergroupHasHiddenMembers
+                | RequestPurpose::ToggleChatHasProtectedContent
+                | RequestPurpose::SetChatAvailableReactions
+                | RequestPurpose::SetChatDiscussionGroup
+                | RequestPurpose::UpgradeBasicGroup,
+            ) => {
+                self.chat_action_error = Some(format!(
+                    "could not change the group setting (error {})",
+                    err.code
+                ));
             }
             Some(RequestPurpose::RemoveChatFromList) => {
                 self.chat_action_error =

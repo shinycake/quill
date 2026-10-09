@@ -8,6 +8,7 @@ mod chat_list;
 mod chats;
 mod contacts;
 mod folders;
+mod group_admin;
 mod group_calls;
 mod groups;
 mod media;
@@ -31,6 +32,8 @@ mod tests_calls;
 mod tests_chat_list;
 #[cfg(test)]
 mod tests_chats;
+#[cfg(test)]
+mod tests_group_admin;
 #[cfg(test)]
 mod tests_groups;
 #[cfg(test)]
@@ -63,6 +66,7 @@ pub use chat_list::*;
 pub use chats::*;
 pub use contacts::*;
 pub use folders::*;
+pub use group_admin::*;
 pub use group_calls::*;
 pub use groups::*;
 pub use media::*;

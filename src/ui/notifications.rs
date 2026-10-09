@@ -447,6 +447,10 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // B7: a basic group became a supergroup: leave the old chat.
+        if self.pump_chat_upgrades(cx) {
+            progressed = true;
+        }
         // B10: open a profile photo gallery that was waiting for its list.
         if self.pump_profile_gallery(cx) {
             progressed = true;
