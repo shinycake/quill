@@ -79,7 +79,8 @@ fn icon_fields(info: &Value) -> (i32, i64) {
     let color = icon
         .and_then(|i| i.get("color"))
         .and_then(Value::as_i64)
-        .unwrap_or(0) as i32;
+        .unwrap_or(0)
+        .sat_i32();
     let custom_emoji_id = int53_or_zero(icon.and_then(|i| i.get("custom_emoji_id")));
     (color, custom_emoji_id)
 }
@@ -90,7 +91,7 @@ pub(crate) fn parse_forum_topic_info(info: &Value) -> Option<ForumTopicInfoUpdat
     let (icon_color, icon_custom_emoji_id) = icon_fields(info);
     Some(ForumTopicInfoUpdate {
         chat_id: info.get("chat_id").and_then(Value::as_i64)?,
-        forum_topic_id: info.get("forum_topic_id")?.as_i64()? as i32,
+        forum_topic_id: info.get("forum_topic_id")?.as_i64()?.sat_i32(),
         name: json_field_str(info, "name"),
         icon_color,
         icon_custom_emoji_id,
@@ -104,15 +105,15 @@ pub(crate) fn parse_forum_topic_info(info: &Value) -> Option<ForumTopicInfoUpdat
 pub(crate) fn parse_forum_topic_update(value: &Value) -> Option<ForumTopicUpdate> {
     Some(ForumTopicUpdate {
         chat_id: value.get("chat_id").and_then(Value::as_i64)?,
-        forum_topic_id: value.get("forum_topic_id")?.as_i64()? as i32,
+        forum_topic_id: value.get("forum_topic_id")?.as_i64()?.sat_i32(),
         is_pinned: value
             .get("is_pinned")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         last_read_inbox_message_id: int53_or_zero(value.get("last_read_inbox_message_id")),
         notification_settings: parse_chat_notification_settings(value.get("notification_settings")),
-        unread_mention_count: int53_or_zero(value.get("unread_mention_count")) as i32,
-        unread_reaction_count: int53_or_zero(value.get("unread_reaction_count")) as i32,
+        unread_mention_count: int53_or_zero(value.get("unread_mention_count")).sat_i32(),
+        unread_reaction_count: int53_or_zero(value.get("unread_reaction_count")).sat_i32(),
     })
 }
 
@@ -120,7 +121,7 @@ pub(crate) fn parse_forum_topic_update(value: &Value) -> Option<ForumTopicUpdate
 /// malformed (the row is skipped, matching the lenient message parsing).
 pub(crate) fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
     let info = value.get("info")?;
-    let forum_topic_id = info.get("forum_topic_id")?.as_i64()? as i32;
+    let forum_topic_id = info.get("forum_topic_id")?.as_i64()?.sat_i32();
     let name = json_field_str(info, "name");
     let is_general = info
         .get("is_general")
@@ -141,7 +142,8 @@ pub(crate) fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
     let unread_count = value
         .get("unread_count")
         .and_then(Value::as_i64)
-        .unwrap_or(0) as i32;
+        .unwrap_or(0)
+        .sat_i32();
     let order = int53_or_zero(value.get("order"));
     let last_message = value
         .get("last_message")
@@ -166,7 +168,7 @@ pub(crate) fn parse_forum_topic(value: &Value) -> Option<ForumTopic> {
         last_message_id,
         last_read_inbox_message_id: int53_or_zero(value.get("last_read_inbox_message_id")),
         notification_settings: parse_chat_notification_settings(value.get("notification_settings")),
-        unread_mention_count: int53_or_zero(value.get("unread_mention_count")) as i32,
-        unread_reaction_count: int53_or_zero(value.get("unread_reaction_count")) as i32,
+        unread_mention_count: int53_or_zero(value.get("unread_mention_count")).sat_i32(),
+        unread_reaction_count: int53_or_zero(value.get("unread_reaction_count")).sat_i32(),
     })
 }

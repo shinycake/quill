@@ -350,7 +350,7 @@ fn i(value: &Value, key: &str) -> i64 {
 }
 
 fn n(value: &Value, key: &str) -> i32 {
-    i(value, key) as i32
+    i(value, key).sat_i32()
 }
 
 fn flag(value: &Value, key: &str) -> bool {

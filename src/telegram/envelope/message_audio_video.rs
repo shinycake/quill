@@ -275,19 +275,16 @@ pub(crate) fn parse_message_animation(value: &Value) -> (MessageContent, Vec<Par
 pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     let (caption, caption_entities) = parse_caption(value.get("caption"));
     let video = value.get("video");
-    if video
-        .and_then(|video| video.get("@type"))
-        .and_then(Value::as_str)
-        != Some("video")
-    {
+    let Some(video) =
+        video.filter(|video| video.get("@type").and_then(Value::as_str) == Some("video"))
+    else {
         return (
             MessageContent::Unsupported {
                 type_name: "messageVideo".into(),
             },
             Vec::new(),
         );
-    }
-    let video = video.expect("video");
+    };
     let mut files = Vec::new();
     let file_id = match parse_file(video.get("video")) {
         Ok(file) => {
@@ -365,19 +362,16 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
 
 pub(crate) fn parse_message_video_note(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     let note = value.get("video_note");
-    if note
-        .and_then(|note| note.get("@type"))
-        .and_then(Value::as_str)
-        != Some("videoNote")
-    {
+    let Some(note) =
+        note.filter(|note| note.get("@type").and_then(Value::as_str) == Some("videoNote"))
+    else {
         return (
             MessageContent::Unsupported {
                 type_name: "messageVideoNote".into(),
             },
             Vec::new(),
         );
-    }
-    let note = note.expect("videoNote");
+    };
     let mut files = Vec::new();
     let file_id = match parse_file(note.get("video")) {
         Ok(file) => {
@@ -508,19 +502,16 @@ pub(crate) fn parse_animations(value: &Value) -> EnvelopePayload {
 pub(crate) fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     let (caption, caption_entities) = parse_caption(value.get("caption"));
     let audio = value.get("audio");
-    if audio
-        .and_then(|audio| audio.get("@type"))
-        .and_then(Value::as_str)
-        != Some("audio")
-    {
+    let Some(audio) =
+        audio.filter(|audio| audio.get("@type").and_then(Value::as_str) == Some("audio"))
+    else {
         return (
             MessageContent::Unsupported {
                 type_name: "messageAudio".into(),
             },
             Vec::new(),
         );
-    }
-    let audio = audio.expect("audio");
+    };
     let mut files = Vec::new();
     let file_id = match parse_file(audio.get("audio")) {
         Ok(file) => {

@@ -48,7 +48,7 @@ pub(crate) fn parse_star_subscription_pricing(
         return None;
     }
     Some(StarSubscriptionPricing {
-        period: int53(value.get("period")).ok()? as i32,
+        period: int53(value.get("period")).ok()?.sat_i32(),
         star_count: int53(value.get("star_count")).ok()?,
     })
 }
@@ -66,16 +66,23 @@ pub(crate) fn parse_chat_invite_link(value: Option<&Value>) -> Option<ParsedChat
             .unwrap_or_default()
             .to_owned(),
         creator_user_id: int53(value.get("creator_user_id")).ok()?,
-        date: int53(value.get("date")).ok()? as i32,
-        edit_date: int53(value.get("edit_date")).ok().unwrap_or(0) as i32,
-        expiration_date: int53(value.get("expiration_date")).ok().unwrap_or(0) as i32,
+        date: int53(value.get("date")).ok()?.sat_i32(),
+        edit_date: int53(value.get("edit_date")).ok().unwrap_or(0).sat_i32(),
+        expiration_date: int53(value.get("expiration_date"))
+            .ok()
+            .unwrap_or(0)
+            .sat_i32(),
         subscription_pricing: parse_star_subscription_pricing(value.get("subscription_pricing")),
-        member_limit: int53(value.get("member_limit")).ok().unwrap_or(0) as i32,
-        member_count: int53(value.get("member_count")).ok().unwrap_or(0) as i32,
-        expired_member_count: int53(value.get("expired_member_count")).ok().unwrap_or(0) as i32,
+        member_limit: int53(value.get("member_limit")).ok().unwrap_or(0).sat_i32(),
+        member_count: int53(value.get("member_count")).ok().unwrap_or(0).sat_i32(),
+        expired_member_count: int53(value.get("expired_member_count"))
+            .ok()
+            .unwrap_or(0)
+            .sat_i32(),
         pending_join_request_count: int53(value.get("pending_join_request_count"))
             .ok()
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         creates_join_request: value
             .get("creates_join_request")
             .and_then(Value::as_bool)
@@ -98,7 +105,7 @@ pub(crate) fn parse_chat_join_request(value: Option<&Value>) -> Option<ParsedCha
     }
     Some(ParsedChatJoinRequest {
         user_id: int53(value.get("user_id")).ok()?,
-        date: int53(value.get("date")).ok()? as i32,
+        date: int53(value.get("date")).ok()?.sat_i32(),
         bio: value
             .get("bio")
             .and_then(Value::as_str)
@@ -131,10 +138,14 @@ pub(crate) fn parse_chat_invite_link_count(
     let value = value?;
     Some(ParsedChatInviteLinkCount {
         user_id: int53(value.get("user_id")).ok()?,
-        invite_link_count: int53(value.get("invite_link_count")).ok().unwrap_or(0) as i32,
+        invite_link_count: int53(value.get("invite_link_count"))
+            .ok()
+            .unwrap_or(0)
+            .sat_i32(),
         revoked_invite_link_count: int53(value.get("revoked_invite_link_count"))
             .ok()
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
     })
 }
 
@@ -144,7 +155,10 @@ pub(crate) fn parse_chat_invite_link_member(
     let value = value?;
     Some(ParsedChatInviteLinkMember {
         user_id: int53(value.get("user_id")).ok()?,
-        joined_chat_date: int53(value.get("joined_chat_date")).ok().unwrap_or(0) as i32,
+        joined_chat_date: int53(value.get("joined_chat_date"))
+            .ok()
+            .unwrap_or(0)
+            .sat_i32(),
         via_chat_folder_invite_link: value
             .get("via_chat_folder_invite_link")
             .and_then(Value::as_bool)

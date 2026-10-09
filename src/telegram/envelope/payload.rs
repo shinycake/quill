@@ -58,7 +58,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             })
         }
         "count" => Ok(EnvelopePayload::Count {
-            count: value.get("count").and_then(Value::as_i64).unwrap_or(0) as i32,
+            count: value
+                .get("count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         "updateStopMessageDraft" => Ok(EnvelopePayload::UpdateStopMessageDraft {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -162,7 +166,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "updateMessageEdited" => Ok(EnvelopePayload::UpdateMessageEdited {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             message_id: MessageId(int53(value.get("message_id"))?),
-            edit_date: value.get("edit_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+            edit_date: value
+                .get("edit_date")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
             reply_markup: parse_reply_markup(value.get("reply_markup")),
         }),
         "updatePoll" => Ok(EnvelopePayload::UpdatePoll {
@@ -242,7 +250,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             let total_count = value
                 .get("total_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32;
+                .unwrap_or(0)
+                .sat_i32();
             let stories = value
                 .get("stories")
                 .and_then(Value::as_array)
@@ -253,7 +262,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_array)
                 .map(|ids| {
                     ids.iter()
-                        .filter_map(|id| id.as_i64().map(|id| id as i32))
+                        .filter_map(|id| id.as_i64().map(|id| id.sat_i32()))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -273,7 +282,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             story_id: value
                 .get("story_id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
         }),
         // Phase B1: secret chat lifecycle (schema 1.8.67, lines 10741 /
         // 2816). `updateSecretChat` carries the full `secretChat` object in
@@ -296,7 +306,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             call_id: value
                 .get("call_id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
             data: value
                 .get("data")
                 .and_then(Value::as_str)
@@ -307,7 +318,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             id: value
                 .get("id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
         }),
         // Phase C3a: `groupCallId` (schema 1.8.67, line 7037) — the
         // `createVideoChat` answer. The driver fetches the full
@@ -317,7 +329,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             id: value
                 .get("id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
         }),
         // Phase C2f: `groupCallInfo` (schema 1.8.67, line 7190) — the
         // `joinGroupCall` answer.
@@ -325,7 +338,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             group_call_id: value
                 .get("group_call_id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
             join_payload: value
                 .get("join_payload")
                 .and_then(Value::as_str)
@@ -349,7 +363,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             group_call_id: value
                 .get("group_call_id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
             participant: parse_group_call_participant(value.get("participant"))
                 .ok_or(ParseError::MissingField)?,
         }),
@@ -357,7 +372,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             group_call_id: value
                 .get("group_call_id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
             participant_user_ids: value
                 .get("participant_user_ids")
                 .and_then(Value::as_array)
@@ -369,11 +385,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 group_call_id: value
                     .get("group_call_id")
                     .and_then(Value::as_i64)
-                    .ok_or(ParseError::MissingField)? as i32,
+                    .ok_or(ParseError::MissingField)?
+                    .sat_i32(),
                 generation: value
                     .get("generation")
                     .and_then(Value::as_i64)
-                    .ok_or(ParseError::MissingField)? as i32,
+                    .ok_or(ParseError::MissingField)?
+                    .sat_i32(),
                 emojis: value
                     .get("emojis")
                     .and_then(Value::as_array)
@@ -391,7 +409,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             group_call_id: value
                 .get("group_call_id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
             message: parse_group_call_message(value.get("message"))
                 .ok_or(ParseError::MissingField)?,
         }),
@@ -400,11 +419,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 group_call_id: value
                     .get("group_call_id")
                     .and_then(Value::as_i64)
-                    .ok_or(ParseError::MissingField)? as i32,
+                    .ok_or(ParseError::MissingField)?
+                    .sat_i32(),
                 message_id: value
                     .get("message_id")
                     .and_then(Value::as_i64)
-                    .ok_or(ParseError::MissingField)? as i32,
+                    .ok_or(ParseError::MissingField)?
+                    .sat_i32(),
                 error: parse_error(value.get("error")),
             })
         }
@@ -412,14 +433,15 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             group_call_id: value
                 .get("group_call_id")
                 .and_then(Value::as_i64)
-                .ok_or(ParseError::MissingField)? as i32,
+                .ok_or(ParseError::MissingField)?
+                .sat_i32(),
             message_ids: value
                 .get("message_ids")
                 .and_then(Value::as_array)
                 .map(|arr| {
                     arr.iter()
                         .filter_map(|v| v.as_i64())
-                        .map(|id| id as i32)
+                        .map(|id| id.sat_i32())
                         .collect::<Vec<i32>>()
                 })
                 .ok_or(ParseError::MissingField)?,
@@ -438,7 +460,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 old_story_id: value
                     .get("old_story_id")
                     .and_then(Value::as_i64)
-                    .ok_or(ParseError::MissingField)? as i32,
+                    .ok_or(ParseError::MissingField)?
+                    .sat_i32(),
             })
         }
         "updateStoryPostFailed" => {
@@ -515,7 +538,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             unread_count: value
                 .get("unread_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         // Slice CL3: mention / reaction badge counts (schema 1.8.67,
         // lines 10567/10570). Reading a mention or a reaction reports the
@@ -530,7 +554,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 unread_mention_count: value
                     .get("unread_mention_count")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
             })
         }
         // B15: poll-vote badge counts (schema 1.8.67, lines 10457/10573).
@@ -542,7 +567,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 unread_poll_vote_count: value
                     .get("unread_poll_vote_count")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
             })
         }
         // B15: `pollVoteStatistics` (schema 1.8.67, line 10263).
@@ -557,7 +583,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             unread_reaction_count: value
                 .get("unread_reaction_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             newest: value
                 .get("unread_reactions")
                 .and_then(Value::as_array)
@@ -569,7 +596,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             total_count: value
                 .get("total_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             added_count: value
                 .get("added_notifications")
                 .and_then(Value::as_array)
@@ -603,7 +631,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             unread_reaction_count: value
                 .get("unread_reaction_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         // Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594).
         "updateChatBlockList" => Ok(EnvelopePayload::UpdateChatBlockList {
@@ -669,7 +698,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             .map(|topic| EnvelopePayload::UpdateSavedMessagesTopic(Box::new(topic)))
             .ok_or(ParseError::MissingField),
         "updateSavedMessagesTopicCount" => Ok(EnvelopePayload::UpdateSavedMessagesTopicCount {
-            topic_count: int53_or_zero(value.get("topic_count")) as i32,
+            topic_count: int53_or_zero(value.get("topic_count")).sat_i32(),
         }),
         "updateSavedMessagesTags" => Ok(EnvelopePayload::UpdateSavedMessagesTags {
             saved_messages_topic_id: int53_or_zero(value.get("saved_messages_topic_id")),
@@ -792,7 +821,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 message_auto_delete_time: value
                     .get("message_auto_delete_time")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
@@ -918,7 +948,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             total_count: value
                 .get("total_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             voters: value
                 .get("voters")
                 .and_then(Value::as_array)
@@ -1150,7 +1181,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             total_count: value
                 .get("total_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             chat_ids: value
                 .get("chat_ids")
                 .and_then(Value::as_array)
@@ -1182,7 +1214,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             total_count: value
                 .get("total_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             photos: value
                 .get("photos")
                 .and_then(Value::as_array)
@@ -1205,7 +1238,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 total_count: value
                     .get("total_count")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 messages: parsed,
                 next_offset: value
                     .get("next_offset")
@@ -1267,7 +1301,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 total_count: value
                     .get("total_count")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 sender_ids: senders
                     .iter()
                     .filter(|s| s.get("@type").and_then(Value::as_str) == Some("messageSenderUser"))
@@ -1285,13 +1320,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                         .filter_map(|day| {
                             let message = day.get("message")?;
                             let message_id = int53_or_zero(message.get("id"));
-                            let date = message.get("date").and_then(Value::as_i64)? as i32;
+                            let date = message.get("date").and_then(Value::as_i64)?.sat_i32();
                             (message_id > 0).then(|| CalendarDay {
                                 total_count: day
                                     .get("total_count")
                                     .and_then(Value::as_i64)
                                     .unwrap_or(0)
-                                    as i32,
+                                    .sat_i32(),
                                 message_id: MessageId(message_id),
                                 date,
                             })
@@ -1303,7 +1338,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 total_count: value
                     .get("total_count")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 days,
             })
         }
@@ -1321,7 +1357,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 total_count: value
                     .get("total_count")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 messages: parsed,
                 next_from_message_id: MessageId(int53_or_zero(value.get("next_from_message_id"))),
             })
@@ -1335,7 +1372,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             let group = value.get("basic_group").ok_or(ParseError::MissingField)?;
             Ok(EnvelopePayload::UpdateBasicGroup {
                 basic_group_id: int53(group.get("id"))?,
-                member_count: int53(group.get("member_count")).unwrap_or(0) as i32,
+                member_count: int53(group.get("member_count")).unwrap_or(0).sat_i32(),
                 status: parse_channel_member_status(group.get("status"))
                     .map(|(status, _)| status)
                     .unwrap_or(ChannelMemberStatus::Unknown),
@@ -1353,7 +1390,9 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         }
         "updateChatOnlineMemberCount" => Ok(EnvelopePayload::UpdateChatOnlineMemberCount {
             chat_id: int53(value.get("chat_id"))?,
-            online_member_count: int53(value.get("online_member_count")).unwrap_or(0) as i32,
+            online_member_count: int53(value.get("online_member_count"))
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         "updateSupergroup" => {
             let supergroup = value.get("supergroup").ok_or(ParseError::MissingField)?;
@@ -1371,7 +1410,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     is_scam: verification_flag("is_scam"),
                     is_fake: verification_flag("is_fake"),
                 },
-                member_count: int53(supergroup.get("member_count")).unwrap_or(0) as i32,
+                member_count: int53(supergroup.get("member_count")).unwrap_or(0).sat_i32(),
                 is_forum: supergroup
                     .get("is_forum")
                     .and_then(Value::as_bool)
@@ -1502,7 +1541,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 total_count: value
                     .get("total_count")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 topics: parsed,
             })
         }
@@ -1530,12 +1570,12 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // Slice media-downloads-pause: `updateFileDownload` (schema 1.8.67,
         // line 10795) — pause state / completion for a listed download.
         "updateFileDownload" => Ok(EnvelopePayload::UpdateFileDownload {
-            file_id: int53_or_zero(value.get("file_id")) as i32,
+            file_id: int53_or_zero(value.get("file_id")).sat_i32(),
             is_paused: value
                 .get("is_paused")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-            complete_date: int53_or_zero(value.get("complete_date")) as i32,
+            complete_date: int53_or_zero(value.get("complete_date")).sat_i32(),
         }),
         "file" => Ok(EnvelopePayload::File(parse_file(Some(&value))?)),
         "stickerSets" => Ok(parse_sticker_sets(&value)),
@@ -1620,11 +1660,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             active_until_date: value
                 .get("active_until_date")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             cooldown_until_date: value
                 .get("cooldown_until_date")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         "updateSavedAnimations" => Ok(EnvelopePayload::UpdateSavedAnimations {
             animation_ids: value
@@ -1633,7 +1675,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .map(|ids| {
                     ids.iter()
                         .filter_map(|id| id.as_i64())
-                        .map(|id| id as i32)
+                        .map(|id| id.sat_i32())
                         .filter(|id| *id != 0)
                         .collect()
                 })
@@ -2064,7 +2106,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             member_count: value
                 .get("member_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             // Parity slice: `linked_chat_id` (schema 1.8.67, line 2792) —
             // the discussion-group chat id (0 = none).
             linked_chat_id: int53_or_zero(value.get("linked_chat_id")),
@@ -2074,7 +2117,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             slow_mode_delay: value
                 .get("slow_mode_delay")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             slow_mode_delay_expires_in: value
                 .get("slow_mode_delay_expires_in")
                 .and_then(Value::as_f64)
@@ -2082,11 +2126,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             my_boost_count: value
                 .get("my_boost_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             unrestrict_boost_count: value
                 .get("unrestrict_boost_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             // Phase D2: `can_get_statistics` (schema 1.8.67, line 2792) —
             // gates the statistics entry point in the info panel.
             can_get_statistics: value
@@ -2129,7 +2175,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .get("supergroup_full_info")
                 .and_then(|info| info.get("member_count"))
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             linked_chat_id: int53_or_zero(
                 value
                     .get("supergroup_full_info")
@@ -2141,7 +2188,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .get("supergroup_full_info")
                 .and_then(|info| info.get("slow_mode_delay"))
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             slow_mode_delay_expires_in: value
                 .get("supergroup_full_info")
                 .and_then(|info| info.get("slow_mode_delay_expires_in"))
@@ -2151,12 +2199,14 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .get("supergroup_full_info")
                 .and_then(|info| info.get("my_boost_count"))
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             unrestrict_boost_count: value
                 .get("supergroup_full_info")
                 .and_then(|info| info.get("unrestrict_boost_count"))
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             // Phase D2: `can_get_statistics` (schema 1.8.67, line 2792),
             // nested like the other fields.
             can_get_statistics: value
@@ -2324,11 +2374,16 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .unwrap_or(false),
         }),
         "chatBoostStatus" => Ok(EnvelopePayload::ChatBoostStatus {
-            level: value.get("level").and_then(Value::as_i64).unwrap_or(0) as i32,
+            level: value
+                .get("level")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
             boost_count: value
                 .get("boost_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         "chatBoostSlots" => Ok(EnvelopePayload::ChatBoostSlots {
             slots: value
@@ -2338,7 +2393,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     slots
                         .iter()
                         .filter_map(|slot| slot.get("slot_id").and_then(Value::as_i64))
-                        .map(|id| id as i32)
+                        .map(|id| id.sat_i32())
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -2372,7 +2427,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .unwrap_or_default(),
         }),
         "chatMembers" => Ok(EnvelopePayload::SupergroupMembers {
-            total_count: int53(value.get("total_count")).map(|v| v as i32)?,
+            total_count: int53(value.get("total_count")).map(|v| v.sat_i32())?,
             members: value
                 .get("members")
                 .and_then(Value::as_array)
@@ -2390,7 +2445,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // Checked invite preview; joining requires a separate confirmation.
         "chatInviteLinkInfo" => Ok(EnvelopePayload::ChatInviteLinkInfo {
             title: json_field_str(&value, "title"),
-            member_count: int53(value.get("member_count")).unwrap_or(0) as i32,
+            member_count: int53(value.get("member_count")).unwrap_or(0).sat_i32(),
             creates_join_request: value
                 .get("creates_join_request")
                 .and_then(Value::as_bool)
@@ -2431,7 +2486,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .ok_or(ParseError::MissingField)
         }
         "chatInviteLinks" => Ok(EnvelopePayload::ChatInviteLinks {
-            total_count: int53(value.get("total_count")).map(|v| v as i32)?,
+            total_count: int53(value.get("total_count")).map(|v| v.sat_i32())?,
             links: value
                 .get("invite_links")
                 .and_then(Value::as_array)
@@ -2456,7 +2511,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .unwrap_or_default(),
         }),
         "chatInviteLinkMembers" => Ok(EnvelopePayload::ChatInviteLinkMembers {
-            total_count: int53(value.get("total_count")).map(|v| v as i32)?,
+            total_count: int53(value.get("total_count")).map(|v| v.sat_i32())?,
             members: value
                 .get("members")
                 .and_then(Value::as_array)
@@ -2469,7 +2524,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .unwrap_or_default(),
         }),
         "chatJoinRequests" => Ok(EnvelopePayload::ChatJoinRequests {
-            total_count: int53(value.get("total_count")).map(|v| v as i32)?,
+            total_count: int53(value.get("total_count")).map(|v| v.sat_i32())?,
             requests: value
                 .get("requests")
                 .and_then(Value::as_array)
@@ -2521,7 +2576,8 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .filter(|v| v.get("@type").and_then(Value::as_str) == Some("chatJoinRequestsInfo"));
             Ok(EnvelopePayload::UpdateChatPendingJoinRequests {
                 chat_id: int53(value.get("chat_id"))?,
-                total_count: int53(pending.and_then(|v| v.get("total_count"))).map(|v| v as i32)?,
+                total_count: int53(pending.and_then(|v| v.get("total_count")))
+                    .map(|v| v.sat_i32())?,
                 user_ids: pending
                     .and_then(|v| v.get("user_ids"))
                     .and_then(Value::as_array)

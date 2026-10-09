@@ -1,3 +1,4 @@
+use super::SatI32;
 use serde_json::Value;
 
 /// Batch 8: `ChatActionBar` (TDLib 1.8.67, `schema/td_api.tl:3667-3690`) —
@@ -72,7 +73,8 @@ pub(crate) fn parse_chat_action_bar(value: Option<&Value>) -> Option<ChatActionB
             request_date: value
                 .get("request_date")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         _ => None,
     }

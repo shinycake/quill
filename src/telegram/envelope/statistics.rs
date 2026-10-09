@@ -219,11 +219,13 @@ pub(crate) fn parse_statistics_period(value: Option<&Value>) -> Result<(i32, i32
     let start = value
         .get("start_date")
         .and_then(Value::as_i64)
-        .ok_or(ParseError::MissingField)? as i32;
+        .ok_or(ParseError::MissingField)?
+        .sat_i32();
     let end = value
         .get("end_date")
         .and_then(Value::as_i64)
-        .ok_or(ParseError::MissingField)? as i32;
+        .ok_or(ParseError::MissingField)?
+        .sat_i32();
     Ok((start, end))
 }
 
@@ -234,7 +236,11 @@ pub(crate) fn parse_chat_statistics_object(value: Option<&Value>) -> Option<Chat
             message_id: int53_or_zero(value.get("message_id")),
         }),
         Some("chatStatisticsObjectTypeStory") => Some(ChatStatisticsObject::Story {
-            story_id: value.get("story_id").and_then(Value::as_i64).unwrap_or(0) as i32,
+            story_id: value
+                .get("story_id")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         _ => None,
     }
@@ -245,15 +251,21 @@ pub(crate) fn parse_chat_statistics_interaction_info(
 ) -> Option<ChatStatisticsInteractionInfo> {
     Some(ChatStatisticsInteractionInfo {
         object: parse_chat_statistics_object(value.get("object_type"))?,
-        view_count: value.get("view_count").and_then(Value::as_i64).unwrap_or(0) as i32,
+        view_count: value
+            .get("view_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         forward_count: value
             .get("forward_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         reaction_count: value
             .get("reaction_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
     })
 }
 
@@ -343,12 +355,12 @@ pub(crate) fn parse_chat_statistics(value: &Value) -> Result<ChatStatistics, Par
                                     .get("sent_message_count")
                                     .and_then(Value::as_i64)
                                     .unwrap_or(0)
-                                    as i32,
+                                    .sat_i32(),
                                 average_character_count: item
                                     .get("average_character_count")
                                     .and_then(Value::as_i64)
                                     .unwrap_or(0)
-                                    as i32,
+                                    .sat_i32(),
                             })
                             .collect()
                     })
@@ -365,17 +377,17 @@ pub(crate) fn parse_chat_statistics(value: &Value) -> Result<ChatStatistics, Par
                                     .get("deleted_message_count")
                                     .and_then(Value::as_i64)
                                     .unwrap_or(0)
-                                    as i32,
+                                    .sat_i32(),
                                 banned_user_count: item
                                     .get("banned_user_count")
                                     .and_then(Value::as_i64)
                                     .unwrap_or(0)
-                                    as i32,
+                                    .sat_i32(),
                                 restricted_user_count: item
                                     .get("restricted_user_count")
                                     .and_then(Value::as_i64)
                                     .unwrap_or(0)
-                                    as i32,
+                                    .sat_i32(),
                             })
                             .collect()
                     })
@@ -392,7 +404,7 @@ pub(crate) fn parse_chat_statistics(value: &Value) -> Result<ChatStatistics, Par
                                     .get("added_member_count")
                                     .and_then(Value::as_i64)
                                     .unwrap_or(0)
-                                    as i32,
+                                    .sat_i32(),
                             })
                             .collect()
                     })
