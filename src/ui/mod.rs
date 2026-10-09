@@ -105,6 +105,7 @@ mod deep_link_routes;
 mod deep_links;
 mod demo;
 mod demo_setup;
+mod demo_stream;
 mod downloads;
 mod drafts;
 mod emoji_sets;

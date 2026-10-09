@@ -614,6 +614,10 @@ pub struct Session {
     /// clears the mark (Telegram X `TdlibFilesManager.onFileUpdate` treats
     /// a stopped download as paused until asked again).
     pub stalled_auto_downloads: HashSet<i32>,
+    /// Automatic downloads of full media in the open chat (MED3), whose
+    /// progress the history draws: their `updateFile`s redraw at once
+    /// (`redraw_need`). Pruned to `downloading` on each pass.
+    pub open_chat_media_downloads: HashSet<i32>,
     /// Avatar file id → number of chats / users showing it (chat-list
     /// photos and contact `photo_small`), kept where those ids are set.
     pub(crate) avatar_file_refs: HashMap<i32, u32>,
@@ -1237,6 +1241,7 @@ impl Session {
             paused_downloads: HashSet::new(),
             failed_downloads: HashSet::new(),
             stalled_auto_downloads: HashSet::new(),
+            open_chat_media_downloads: HashSet::new(),
             avatar_file_refs: HashMap::new(),
             avatar_downloads_due: BTreeSet::new(),
             avatar_rescan: true,
