@@ -72,9 +72,45 @@ actions!(
         ViewerFlipHorizontal,
         ViewerFlipVertical,
         ViewerCopy,
-        ViewerSave
+        ViewerSave,
+        /// Shortcut pack (tdesktop `replyToPreviousMessage` /
+        /// `replyToNextMessage`): Cmd/Ctrl+Up / Down.
+        ReplyToPrevious,
+        ReplyToNext,
+        /// Cmd/Ctrl+O: the attach file picker.
+        AttachFile,
+        /// PageUp / PageDown / Home / End scroll the message history.
+        HistoryPageUp,
+        HistoryPageDown,
+        HistoryToTop,
+        HistoryToBottom,
+        /// Delete / Backspace while messages are selected: the delete box.
+        DeleteSelection,
+        /// Cmd/Ctrl+0 (Saved Messages), +9 (Archive), +J (Contacts).
+        OpenSavedMessages,
+        OpenArchive,
+        OpenContacts,
+        /// Cmd/Ctrl+Alt+Home / End: first / last chat of the list.
+        FirstChat,
+        LastChat,
+        /// Ctrl+Shift+Up / Down: previous / next chat folder.
+        PrevFolder,
+        NextFolder,
+        /// Cmd/Ctrl+R: mark the open chat as read.
+        MarkChatRead,
+        /// Cmd/Ctrl+\: the open chat's context menu.
+        ShowChatMenu,
+        /// Cmd/Ctrl+]: the open chat's peek preview.
+        ShowChatPreview
     ]
 );
+
+/// Cmd/Ctrl+1..8: open the Nth pinned chat (`index` is zero-based).
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = quill_ui, no_json)]
+pub struct OpenPinnedChat {
+    pub index: usize,
+}
 
 /// codex:spellcheck-native: composer context-menu "spelling" items. They
 /// carry their word, so they are built per menu and dispatched by the

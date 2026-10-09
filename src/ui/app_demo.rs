@@ -1609,6 +1609,7 @@ impl QuillApp {
             scroll_date: Default::default(),
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),
+            scroll_view_probe: Default::default(),
             group_call_composer,
             command_menu_open: false,
             command_menu_selected: 0,

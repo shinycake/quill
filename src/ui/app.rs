@@ -119,6 +119,9 @@ pub struct QuillApp {
     /// Top visible row of the last paint: `(row, its day separator is at
     /// the top edge)`.
     pub(super) scroll_top_probe: std::rc::Rc<std::cell::Cell<Option<(usize, bool)>>>,
+    /// First and last row on screen at the last paint (the page keys scroll
+    /// by this many rows).
+    pub(super) scroll_view_probe: std::rc::Rc<std::cell::Cell<Option<(usize, usize)>>>,
     /// Phase 3.3: `/` command menu state. Open while the composer text
     /// ends with a `/`-led token and the open bot chat has commands;
     /// `command_menu_selected` is the highlighted row (Up/Down/Enter).

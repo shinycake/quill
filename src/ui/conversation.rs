@@ -1687,6 +1687,7 @@ impl QuillApp {
         let date_pill = self.scroll_date_pill(cx);
         let probe = self.scroll_probe.clone();
         let top_probe = self.scroll_top_probe.clone();
+        let view_probe = self.scroll_view_probe.clone();
         let reveal = self.history_reveal(cx);
         let reveal_probe = self.motion.reveal_probe();
         let jump_zone = self.history_scroller.read(cx).is_scrolled_up().then(|| {
@@ -1787,9 +1788,19 @@ impl QuillApp {
                                 .map(|(ix, row, has_day)| {
                                     (*ix, *has_day && row.top() >= bounds.top())
                                 });
+                            let on_screen = rows
+                                .iter()
+                                .filter(|(_, row, _)| {
+                                    row.bottom() > bounds.top() && row.top() < bounds.bottom()
+                                })
+                                .map(|(ix, _, _)| *ix);
+                            let range = on_screen.clone().min().zip(on_screen.max());
                             rows.clear();
                             if top.is_some() {
                                 top_probe.set(top);
+                            }
+                            if range.is_some() {
+                                view_probe.set(range);
                             }
                         },
                     )
