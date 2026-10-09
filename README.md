@@ -480,8 +480,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] "Disappears in" countdown on timed photos and videos <!-- parity:viewer-ttl-countdown -->
 - [ ] "View all photos / files" link to shared media <!-- parity:viewer-view-all -->
 - [ ] "Saved to Downloads" toast with a folder link <!-- parity:viewer-saved-toast -->
-- [ ] Video playback in the viewer and inline on Linux and Windows <!-- parity:viewer-video-cross-platform -->
-- [ ] Round video notes autoplay muted inline in history <!-- parity:viewer-round-autoplay -->
+- [x] Video playback in the viewer and inline on Linux and Windows <!-- parity:viewer-video-cross-platform -->
+- [x] Round video notes autoplay muted inline in history <!-- parity:viewer-round-autoplay -->
 - [x] Audio playlist with repeat, shuffle and autoplay of the next voice message <!-- parity:viewer-audio-playlist -->
 - [ ] OS media keys and Now Playing integration <!-- parity:viewer-os-media-keys -->
 - [ ] Voice and round playback speed dial with custom speeds <!-- parity:viewer-speed-dial -->
