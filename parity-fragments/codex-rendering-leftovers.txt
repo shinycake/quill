@@ -1,7 +1,0 @@
-# B17 rendering leftovers (see docs/decisions/codex-rendering-leftovers.md)
-parity:render-contact-card-actions
-parity:render-map-thumbnail
-parity:composer-send-dice
-parity:render-bubble-tails
-parity:render-sticky-avatar
-parity:render-code-block-header
