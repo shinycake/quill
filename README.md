@@ -124,6 +124,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Username management: Check availability via checkChatUsername (private chat with self; all six checkChatUsernameResult verdicts parsed, envelope.rs:2386), set/clear editable username (empty clears per schema :14830), up/down reorder of active usernames, activate/deactivate (editable username can't be deactivated per schema :14835); schema: setUsername, reorderActiveUsernames, toggleUsernameIsActive (telegram/requests.rs:4235; connect.rs:8935; ui/mod.rs:18963) <!-- parity:auth-username -->
 - [x] Set / remove profile photo: setProfilePhoto via inputChatPhotoStatic + inputFileLocal with is_public hard-coded false for the main (non-public) photo (schema :14803; TGX AvatarPickerManager), remove via deleteProfilePhoto with the retained chatPhoto.id (state.rs:3771) (telegram/requests.rs:4283; connect.rs:9006; ui/mod.rs:18963) <!-- parity:auth-profile-photo -->
 - [x] Profile accent color (schema: setProfileAccentColor) <!-- parity:auth-profile-accent -->
+- [ ] Country picker with search and national phone number formatting <!-- parity:auth-country-picker -->
+- [ ] "Code didn't arrive" and reset login email <!-- parity:auth-code-missing -->
+- [ ] Dedicated box for banned phone numbers <!-- parity:auth-phone-banned-box -->
+- [ ] Note about the maximum number of accounts <!-- parity:auth-max-accounts-note -->
+- [ ] Hidden test-server and debug log toggles (deferred: low impact) <!-- parity:auth-debug-toggles -->
 
 ### Messaging core
 
@@ -187,6 +192,144 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Rich-text composer max length (32,768 chars) <!-- parity:msg-richtext-max-length -->
 - [x] Premium gating of the rich-text editor <!-- parity:msg-richtext-premium-gate -->
 
+### Message rendering
+
+- [x] Clickable @mentions, #hashtags, $cashtags, /commands, emails, phone numbers, bank cards, media timestamps and dates in message text <!-- parity:render-entity-links -->
+- [x] Tapping a /command in a group chat sends it addressed to that bot <!-- parity:render-bot-command-click -->
+- [ ] Tapping a timestamp link seeks the video or voice message to that moment <!-- parity:render-media-timestamp-seek -->
+- [x] "Open this link?" confirmation when a link's label differs from its real address <!-- parity:render-hidden-link-confirm -->
+- [ ] Hovering a text link shows its full address in a tooltip <!-- parity:render-link-hover-tooltip -->
+- [x] Reply header shows the replied sender's name in their color <!-- parity:render-reply-header-sender -->
+- [ ] Reply header shows a media thumbnail, quote mark, other-chat name, and story replies <!-- parity:render-reply-header-media -->
+- [x] Replied-to messages outside the loaded history are fetched and previewed <!-- parity:render-reply-outside-window -->
+- [ ] Reply header custom-emoji pattern and accent background <!-- parity:render-reply-header-emoji-pattern -->
+- [x] "edited" marker in the message footer <!-- parity:render-edited-marker -->
+- [x] Hovering the message time shows full sent, edited and original-forward dates <!-- parity:render-time-tooltip -->
+- [x] Forward header opens the original chat or post; hidden senders get a tooltip <!-- parity:render-forward-header-click -->
+- [x] "via @bot" attribution on messages sent through an inline bot <!-- parity:render-via-bot -->
+- [x] "N comments" bar with commenter avatars under channel posts and reply counters in groups <!-- parity:render-comments-bar -->
+- [x] Service messages name the people involved and their names are clickable <!-- parity:render-service-actors -->
+- [x] Pinned-message service row shows an excerpt and jumps to the message <!-- parity:render-service-pinned-excerpt -->
+- [ ] Group photo change service row shows the new photo and opens it <!-- parity:render-service-photo-thumb -->
+- [x] Video chat service rows: ended with duration, scheduled, and invited members <!-- parity:render-service-video-chat -->
+- [x] Forum topic created, edited, closed and hidden service rows <!-- parity:render-service-topics -->
+- [x] Chat theme and wallpaper change service rows <!-- parity:render-service-theme-wallpaper -->
+- [x] Owner change, boost, game score and proximity alert service rows <!-- parity:render-service-owner-boost-game -->
+- [ ] Suggested profile photo and birthday rows with an Accept action <!-- parity:render-service-suggestions -->
+- [x] Service rows for users or chats shared with a bot, web-app data sent and bot write access allowed <!-- parity:render-service-bot-shared -->
+- [x] Protected-content toggled and disable-requested service rows <!-- parity:render-service-protected-content -->
+- [x] Payment refunded, paid-message refunded and price-changed service rows <!-- parity:render-service-payment-refund -->
+- [ ] Forwarded story messages and story mentions <!-- parity:render-story-message -->
+- [ ] Paid media shows a blurred locked preview with an unlock button <!-- parity:render-paid-media -->
+- [ ] Checklist messages render with tasks and done marks <!-- parity:render-checklist -->
+- [ ] Gift and giveaway messages render as cards (regular, unique, refunded, prize, winners, gift code) <!-- parity:render-gift-cards -->
+- [ ] Contact cards show an avatar with Message, Add contact and View buttons <!-- parity:render-contact-card-actions -->
+- [ ] Location and venue messages show a map thumbnail <!-- parity:render-map-thumbnail -->
+- [ ] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
+- [ ] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
+- [ ] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
+- [ ] Premium sticker fullscreen effect <!-- parity:render-premium-sticker-effect -->
+- [ ] Message effects playback (deferred: low impact) <!-- parity:render-message-effects -->
+- [ ] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
+- [ ] Similar channels carousel after joining a channel <!-- parity:render-similar-channels -->
+- [ ] Link-preview "View channel / bot / message" buttons <!-- parity:render-preview-view-button -->
+- [ ] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
+- [ ] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
+- [ ] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
+- [ ] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
+- [ ] Fact-check block under messages <!-- parity:render-fact-check -->
+- [ ] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
+
+### Message menu & selection
+
+- [x] Copy Image from the message menu <!-- parity:menu-copy-image -->
+- [x] Save As for photos, videos, audio, files and GIFs from the message menu <!-- parity:menu-save-as -->
+- [x] Show in Folder / Finder from the message menu <!-- parity:menu-show-in-folder -->
+- [x] Copy Filename for documents <!-- parity:menu-copy-filename -->
+- [x] Cancel Download / Cancel Upload from the message menu <!-- parity:menu-cancel-transfer -->
+- [x] Add to GIFs and Open GIF from the message menu <!-- parity:menu-gif-actions -->
+- [x] Add or remove favorite sticker, View Sticker Set and Add Stickers from the message menu <!-- parity:menu-sticker-actions -->
+- [ ] Attached Stickers for photos that contain stickers <!-- parity:menu-attached-stickers -->
+- [ ] "This message contains emoji from X pack" footer <!-- parity:menu-emoji-pack-footer -->
+- [x] Report a message with a reason flow, also from the selection bar <!-- parity:menu-report-message -->
+- [x] "N Seen / N Reacted" row with reader and reactor lists and read date <!-- parity:menu-seen-by -->
+- [x] "Sent today at 12:34" row in the message menu <!-- parity:menu-sent-time-row -->
+- [x] Translate message and Translate selected text <!-- parity:menu-translate -->
+- [ ] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
+- [ ] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
+- [ ] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
+- [ ] Edit Image, Edit Video and Edit Cover on your own media <!-- parity:menu-edit-media-items -->
+- [ ] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
+- [ ] Go To Message from search, pinned and saved lists <!-- parity:menu-go-to-message -->
+- [ ] Add or edit a fact check as a channel admin <!-- parity:menu-fact-check-edit -->
+- [ ] Save an audio message as a notification tone <!-- parity:menu-save-notification-tone -->
+- [ ] Copy Post Link versus Copy Message Link wording and "members only" hint <!-- parity:menu-copy-post-link-wording -->
+- [ ] Copy Card Number for bank-card entities <!-- parity:menu-copy-card-number -->
+- [ ] Poll menu: Retract vote, View results and ends-in note <!-- parity:menu-poll-actions -->
+- [ ] Saved Messages tag menu: Filter by Tag, Add or Edit Name, Remove Tag <!-- parity:menu-saved-tag-menu -->
+- [ ] Info line explaining why Forward and Copy are missing in protected chats <!-- parity:menu-noforwards-note -->
+- [ ] Admin delete box: delete all from user, ban and report spam in one step <!-- parity:menu-moderate-delete -->
+- [ ] Delete a member's reaction as an admin <!-- parity:menu-delete-reaction -->
+- [ ] Selection bar: Copy Selected as Text <!-- parity:selection-copy-text -->
+- [ ] Selection bar: Download, Save, Unpin, Report, Send Now and Reschedule selected messages <!-- parity:selection-bulk-actions -->
+- [ ] Drag-select across messages and Shift-click range selection <!-- parity:selection-drag-range -->
+- [ ] Delete key removes the selected messages and Esc clears the selection <!-- parity:selection-delete-key -->
+- [ ] Keyboard selection with Ctrl+Space and per-message focus <!-- parity:selection-keyboard -->
+- [ ] Pin confirmation with "Notify all members" and "Also pin for {user}" <!-- parity:pin-confirm-options -->
+- [ ] Unpin-all and hide-pinned confirmations with message counts (partial: basic confirm exists) <!-- parity:pin-unpin-all-confirm -->
+
+### Composer & sending
+
+- [ ] Formatting shows live in the input (bold appears bold, mentions as tags, custom emoji inline) <!-- parity:composer-wysiwyg -->
+- [ ] Mention without a username inserts a styled tag instead of raw markup <!-- parity:composer-mention-tags -->
+- [ ] Send as another identity (channel or anonymous) picker <!-- parity:composer-send-as -->
+- [ ] Forward bar in the composer: change recipient, hide sender or captions, add a comment <!-- parity:composer-forward-bar -->
+- [ ] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
+- [ ] Repeating scheduled messages (Premium) <!-- parity:composer-repeat-schedule -->
+- [ ] Send a dice, dart, basketball, football, bowling or slot machine by sending its emoji alone <!-- parity:composer-send-dice -->
+- [ ] Share a contact card from a profile <!-- parity:composer-share-contact -->
+- [ ] Create checklists <!-- parity:composer-checklist -->
+- [ ] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
+- [ ] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
+- [ ] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
+- [ ] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
+- [ ] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
+- [ ] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->
+- [ ] Premium-only and paid-message gates ("charges N per message", "only accepts messages from contacts") <!-- parity:composer-paid-gates -->
+- [ ] Show and hide button for bot reply keyboards <!-- parity:composer-bot-keyboard-toggle -->
+- [ ] Reply keyboards update from the server outside the loaded history <!-- parity:composer-reply-markup-update -->
+- [ ] Keyboard buttons that request users, a chat or a phone number <!-- parity:composer-keyboard-request-buttons -->
+- [ ] Inline bot results in a grid and the "switch to PM" button <!-- parity:composer-inline-grid -->
+- [ ] Recent inline bots suggested when typing @ <!-- parity:composer-recent-inline-bots -->
+- [ ] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
+- [ ] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
+- [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
+- [ ] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
+- [ ] Voice recording: pause, resume, preview before sending, and Play once <!-- parity:composer-voice-pause -->
+- [ ] Custom emoji shown in the composer instead of a fallback glyph <!-- parity:composer-custom-emoji -->
+
+### Chat view chrome
+
+- [x] Action bar for new chats: Add contact, Block, Report spam, Share my phone, Add to group <!-- parity:chrome-action-bar -->
+- [x] "N requested to join" bar with avatars that opens the requests list <!-- parity:chrome-join-requests-bar -->
+- [ ] Translate bar at the top of a chat (partial: translate actions exist; no bar or per-chat toggle) <!-- parity:chrome-translate-bar -->
+- [ ] Similar channels suggestions after leaving a channel <!-- parity:chrome-similar-channels -->
+- [ ] Business bot manage bar <!-- parity:chrome-business-bot-bar -->
+- [ ] Pin message from the pinned bar and hide-all confirmation wording <!-- parity:chrome-pinned-bar-confirm -->
+- [x] Top "now playing" bar for voice and music with play, prev, next, speed and close <!-- parity:chrome-now-playing-bar -->
+- [ ] Emoji status and premium badge beside the chat title <!-- parity:chrome-header-status -->
+- [ ] Restricted, Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
+- [ ] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
+- [ ] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
+- [ ] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
+- [ ] Per-chat wallpaper and chat themes <!-- parity:chrome-chat-wallpaper -->
+- [ ] "What can this bot do?" intro in an empty bot chat <!-- parity:chrome-bot-intro -->
+- [ ] Composer state buttons: Unblock, Start, Join, Apply to join, Mute and Unmute (partial: Join and Mute exist; Unblock and Apply to join unverified) <!-- parity:chrome-composer-states -->
+- [ ] "Discuss" and "Direct messages" buttons in the channel bottom bar <!-- parity:chrome-discuss-buttons -->
+- [ ] Middle-click autoscroll in history <!-- parity:chrome-middle-click-scroll -->
+- [ ] PageUp, PageDown, Home and End scroll the history <!-- parity:chrome-page-keys -->
+- [ ] Window title shows the chat name or unread count <!-- parity:chrome-window-title -->
+
 ### Chat list
 
 - [x] Chat rows with avatar (photo or colored initials), title, and last-message preview <!-- parity:chatlist-row -->
@@ -226,6 +369,55 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] App badge counter settings: include muted chats, include archived chats, count messages vs chats (BadgePrefs in src/settings.rs persisted to badge_prefs.json; tray badge_count honors prefs; section in notification defaults dialog) <!-- parity:chatlist-badge-settings -->
 - [x] Chat list style settings: two/three lines, media icons, text formatting (Settings → Appearance → Chat list rows; src/chatlist_style.rs, src/ui/chatlist_style.rs, ui/appearance.rs) <!-- parity:chatlist-list-style --> (parity: chat-list style settings (two/three lines, media icons, formatted preview))
 - [x] Unread / Archived filter category chips beside the folder tabs (the folder/Main selection itself is the All view); Archived forces the archive section open (src/ui/mod.rs: ChatListFilter) <!-- parity:chatlist-category-filters -->
+- [ ] "Frequent contacts" row in search, with a setting to hide it <!-- parity:chatlist-frequent-contacts -->
+- [ ] Remove a single recent search entry <!-- parity:chatlist-remove-recent-search -->
+- [ ] Global search filters: private, groups, channels, archived, date range <!-- parity:chatlist-search-filters -->
+- [ ] Global search tabs: channels, apps, public posts, media, links, files, music, voice <!-- parity:chatlist-search-tabs -->
+- [ ] Server-side chat and contact search <!-- parity:chatlist-search-server -->
+- [ ] Tapping a hashtag searches this chat, my messages or public posts <!-- parity:chatlist-hashtag-search -->
+- [ ] In-chat search: filter by sender, calendar, and "N of M" result counter <!-- parity:chatlist-inchat-search-from -->
+- [ ] Shareable folders: invite links, add folder by link, "N new chats" bar <!-- parity:chatlist-folder-share -->
+- [ ] Recommended folders <!-- parity:chatlist-folder-recommended -->
+- [ ] Folder icon picker and tab display (text, icons, or both) <!-- parity:chatlist-folder-icons -->
+- [ ] Folders sidebar layout (tabs on the left) <!-- parity:chatlist-folder-sidebar -->
+- [ ] Folder tag color picker <!-- parity:chatlist-folder-tag-color -->
+- [ ] Folder context menu: Edit, Remove, Mark all as read, Share <!-- parity:chatlist-folder-context-menu -->
+- [ ] Folder limit boxes with a Premium upsell <!-- parity:chatlist-folder-limits -->
+- [ ] Folder editor shows an "N chats" counter and include/exclude chat pickers with search <!-- parity:chatlist-folder-chat-picker -->
+- [ ] Toast "{chat} added to {folder}" <!-- parity:chatlist-folder-toast -->
+- [ ] Chat row menu extras: view profile, open in new window, mark mentions or reactions or poll votes read, export chat, report with reasons <!-- parity:chatlist-row-menu-extras -->
+- [ ] Active video chat badge on group avatars in the list <!-- parity:chatlist-call-badge -->
+- [ ] Emoji status next to names in chat rows <!-- parity:chatlist-emoji-status -->
+- [ ] Suggestions block: birthdays, set a photo, check phone or password, Premium <!-- parity:chatlist-suggestions -->
+- [ ] Story strip context menu: Hide stories, View profile, Mute <!-- parity:chatlist-stories-menu -->
+- [ ] Contacts: sort by last seen, Invite friends, search <!-- parity:chatlist-contacts-extras -->
+- [ ] Clear all call history from the Calls list <!-- parity:chatlist-clear-calls -->
+- [ ] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
+- [ ] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
+- [ ] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
+
+### Profiles & shared media
+
+- [ ] Profile photo gallery with Set as Main, report and "photo set by you" <!-- parity:profile-photo-gallery -->
+- [ ] Edit contact and Share contact from a profile <!-- parity:profile-contact-actions -->
+- [ ] Copy phone, name, username and link from profile rows <!-- parity:profile-copy-rows -->
+- [ ] Set or suggest a personal photo for a contact <!-- parity:profile-personal-photo -->
+- [ ] Private notes about a user <!-- parity:profile-private-note -->
+- [ ] Groups in common list <!-- parity:profile-groups-in-common -->
+- [ ] Similar channels and bots list on a profile <!-- parity:profile-similar-channels -->
+- [ ] Personal channel on a profile <!-- parity:profile-personal-channel -->
+- [ ] Business hours and location rows <!-- parity:profile-business-hours -->
+- [ ] Shared media tabs: separate Photos and Videos, round videos, Polls, Stories, Gifts, Saved Music <!-- parity:profile-media-tabs -->
+- [ ] Shared media calendar and jump by month <!-- parity:profile-media-calendar -->
+- [ ] Members list inline in the group info panel with online first and admin badges <!-- parity:profile-members-inline -->
+- [ ] Member context menu: Mention, Search messages, Promote, Restrict, Ban, Remove <!-- parity:profile-member-menu -->
+- [ ] Remove from group (kick) as distinct from ban <!-- parity:profile-remove-member -->
+- [ ] Add a bot to a group or channel as admin with chosen rights <!-- parity:profile-add-bot-to-group -->
+- [ ] Bot "Open App" main mini-app button <!-- parity:profile-bot-open-app -->
+- [ ] Profile action row: Message, Mute, Call, Video, Gift, More <!-- parity:profile-action-row -->
+- [ ] Unofficial-client warning on a profile <!-- parity:profile-unofficial-warning -->
+- [ ] Fragment number note in the phone context menu <!-- parity:profile-fragment-note -->
+- [ ] Topic and thread info panels <!-- parity:profile-topic-info -->
 
 ### Media
 
@@ -282,6 +474,18 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "Add a caption…" affordance when attaching media (caption bar above the composer with hint, above/below toggle, live n / max counter) <!-- parity:media-caption-prompt -->
 - [x] Remove captions when forwarding copies (TGX RemoveCaptions; checkbox gated on send-copy) <!-- parity:media-caption-remove-on-forward -->
 - [x] Caption-too-long validation on sends and caption edits (runtime `message_caption_length_max`, live counter, refusal names the limit) <!-- parity:media-caption-length-limit -->
+- [ ] Video viewer: Copy Frame, Share at current time, quality picker, rotate video <!-- parity:viewer-video-extras -->
+- [ ] Caption overlay in the viewer with formatted text and links <!-- parity:viewer-caption-entities -->
+- [ ] Viewer header shows the sender (opens profile) and send time <!-- parity:viewer-sender-header -->
+- [ ] "Disappears in" countdown on timed photos and videos <!-- parity:viewer-ttl-countdown -->
+- [ ] "View all photos / files" link to shared media <!-- parity:viewer-view-all -->
+- [ ] "Saved to Downloads" toast with a folder link <!-- parity:viewer-saved-toast -->
+- [ ] Video playback in the viewer and inline on Linux and Windows <!-- parity:viewer-video-cross-platform -->
+- [ ] Round video notes autoplay muted inline in history <!-- parity:viewer-round-autoplay -->
+- [x] Audio playlist with repeat, shuffle and autoplay of the next voice message <!-- parity:viewer-audio-playlist -->
+- [ ] OS media keys and Now Playing integration <!-- parity:viewer-os-media-keys -->
+- [ ] Voice and round playback speed dial with custom speeds <!-- parity:viewer-speed-dial -->
+- [ ] Save music to Profile, Saved Messages or Downloads <!-- parity:viewer-save-music -->
 
 ### Groups, supergroups & channels
 
@@ -339,6 +543,40 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Communities: "chat removed from community" service message (`messageChatRemovedFromCommunity`; TGX `ActionChatRemovedFromCommunity` verbatim — `This chat was removed from community`) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:groups-removed-from-community -->
 - [x] Communities: community search filter (searchMessagesChatTypeFilterCommunity) <!-- parity:communities-search-filter -->
 - [x] Communities: community join service message (`messageChatJoinFromCommunity`; TGX `group_user_join_from_community*` verbatim — `{name} joined the group from the community "NAME"` / `You joined the group from the community "NAME"`, nameless fallbacks; sender kept uncollapsed so incoming rows attribute the join) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:communities-join-service-message -->
+- [ ] Chat history visible to new members toggle <!-- parity:admin-history-new-members -->
+- [ ] Turn on topics (forum) for an existing group <!-- parity:admin-enable-topics -->
+- [ ] Allowed reactions settings (all, some, none, paid) <!-- parity:admin-allowed-reactions -->
+- [ ] Link or unlink a discussion group <!-- parity:admin-linked-discussion -->
+- [ ] Join-to-send and approve-to-join for discussion groups <!-- parity:admin-join-to-send -->
+- [ ] Hide the members list <!-- parity:admin-hide-members -->
+- [ ] Restrict saving content (protected content) toggle <!-- parity:admin-protected-content -->
+- [ ] Upgrade a basic group to a supergroup <!-- parity:admin-upgrade-basic -->
+- [ ] Transfer ownership with password confirmation <!-- parity:admin-transfer-ownership -->
+- [ ] Pick a new owner when leaving as owner <!-- parity:admin-new-owner-on-leave -->
+- [ ] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
+- [ ] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
+- [ ] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
+- [ ] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
+- [ ] Boosts list, boost link, boost features table and unrestrict-by-boosts setting <!-- parity:admin-boosts-list -->
+- [ ] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
+- [ ] Monetization, revenue and earnings sections (deferred: low impact) <!-- parity:admin-monetization -->
+- [ ] Channel direct messages settings and paid-message price <!-- parity:admin-direct-messages -->
+- [ ] Auto-translate channel and sponsored-messages toggles <!-- parity:admin-auto-translate -->
+- [ ] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
+- [ ] Restrict until a custom date and per-right exception lists <!-- parity:admin-restrict-until-custom -->
+- [ ] Admin custom title length counter and default "Admin" label <!-- parity:admin-title-counter -->
+- [ ] Recent actions: server-side admin filter, export and explainer <!-- parity:admin-log-extras -->
+- [ ] Typed confirmation before deleting a large group or channel <!-- parity:admin-delete-confirm-typing -->
+
+### Forums, Saved Messages & threads
+
+- [ ] Topic icon picker with default icons, custom emoji and color <!-- parity:forum-topic-icon-picker -->
+- [ ] Forum topics as a second column next to the chat list <!-- parity:forum-second-column -->
+- [ ] View as topics or as messages toggle <!-- parity:forum-view-as-topics -->
+- [ ] Copy topic link, reorder pinned topics, read all mentions and reactions in a topic, unpin all in a topic <!-- parity:forum-topic-extras -->
+- [ ] Saved Messages sublists by original chat, pinned sublists, delete a sublist <!-- parity:saved-sublists -->
+- [ ] Saved tags: rename a tag, filter by tag, search by tag <!-- parity:saved-tags-manage -->
+- [ ] Reply threads as a full section with a composer <!-- parity:thread-section -->
 
 ### Secret chats
 
@@ -356,7 +594,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Chat-level self-destruct timer for secret chats (incl. text messages): ⏱ picker (Off/5s/30s/1m/1h/1d/1w), timer status line, "X set timer …" service rows, per-message auto_delete_in countdown chips (setChatMessageAutoDeleteTime; connect.rs:2513, ui/mod.rs:12882/11611, envelope.rs:3137) <!-- parity:secret-ttl-timer -->
 - [x] Incoming/outgoing "X took a screenshot" rendered as a chat service message (messageScreenshotTaken parsed in envelope.rs; "You took a screenshot" for own, "{name} took a screenshot" for peer) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:secret-screenshot-notify -->
 - [ ] Send screenshot-taken notification when the user screenshots (blocked: Linux desktop has no OS-level screenshot-detection API to trigger it; the TDLib mechanism exists — viewMessages with messageSourceScreenshot, td_api.tl:13230/:3234, as Telegram X's sendScreenshotMessage does — but nothing on Linux can tell us a screenshot happened) <!-- parity:secret-screenshot-send -->
-- [ ] Screenshot capture prevention for secret chats on the desktop (blocked: no OS-level screen-capture prevention API on Linux — no FLAG_SECURE equivalent on X11/Wayland; verified 2026-09-27) <!-- parity:secret-screenshot-block -->
+- [x] Screenshot capture prevention for secret chats on the desktop (macOS and Windows; Linux has no OS-level screen-capture prevention API — no FLAG_SECURE equivalent on X11/Wayland) <!-- parity:secret-screenshot-block -->
 - [x] Forwarding to/from secret chats: destination gate in submit_forward_to shows TGX's verbatim "This message cannot be forwarded to secret chats." (picker stays open); source gate hides the Forward/Select buttons on secret-chat messages, mirroring TGX only offering Forward when messageProperties.canBeForwarded (MessagesController.java:5287) (src/ui/mod.rs) <!-- parity:secret-no-forward -->
 - [x] Inline-bot warning alert in secret chats (Telegram X's `SecretChatContextBotAlert`: gates the `SwitchInline` button path and the typed `@bot` inline-mode path in secret chats — first inline use in a session shows the verbatim TGX warning above the composer with Confirm-only behavior before any query is sent) <!-- parity:secret-bot-alert -->
 - [x] Link previews off in secret chats: sendMessage emits explicit linkPreviewOptions{is_disabled:true} for secret chats (previews are generated on Telegram servers, which can't see E2E content); the TGX opt-in alert to enable server-side previews is not yet surfaced (src/telegram/requests.rs, src/connect.rs) <!-- parity:secret-link-preview -->
@@ -414,6 +652,20 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Post stories on behalf of a channel/supergroup (getChatsToPostStories, canPostStory target chat, Phase 9.5) <!-- parity:stories-post-as-channel -->
 - [x] Admin story rights management (post / edit / delete others' stories; TGX strings RightStories*; covered by the existing admin-rights UI which reads/writes can_post/edit/delete_stories) <!-- parity:stories-admin-rights -->
 - [x] Repost / re-share a story (storyRepostInfo / storyInteractionTypeRepost parsed; repost via postStory from_story_full_id, Phase 9.5) <!-- parity:stories-repost -->
+
+#### More story features
+
+- [ ] Story video playback (partial: video stories show a thumbnail in some cases) <!-- parity:stories-video-playback -->
+- [ ] Share or forward a story to a chat <!-- parity:stories-share-to-chat -->
+- [ ] Save story media and copy a story link <!-- parity:stories-save-copy-link -->
+- [ ] Post to Profile and Archive actions on your own stories <!-- parity:stories-post-to-profile-archive -->
+- [ ] Mute story audio, pause on hold, arrow keys and Space <!-- parity:stories-keyboard-mute -->
+- [ ] Close friends list editor <!-- parity:stories-close-friends-editor -->
+- [ ] Hide and unhide a contact's stories <!-- parity:stories-hide-peer -->
+- [ ] Story replies with stickers, emoji or voice <!-- parity:stories-reply-media -->
+- [ ] Search stories by hashtag, location or venue <!-- parity:stories-search -->
+- [ ] Story statistics and public forwards <!-- parity:stories-statistics -->
+- [ ] Live story stream playback (deferred: low impact) <!-- parity:stories-live-stream-playback -->
 
 ### Calls
 
@@ -474,6 +726,20 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Notify me when a scheduled video chat starts (`toggleVideoChatEnabledStartNotification`, scheduled-only, any viewer; new flag arrives via `updateGroupCall`; code + demo only, live round-trip unverified) <!-- parity:calls-schedule-notify -->
 - [x] Video chat invite link (`getVideoChatInviteLink` with Copy, `revokeGroupCallInviteLink`; code + demo only, live unverified) <!-- parity:calls-invite-link -->
 - [x] In-call chat messages for group calls (`sendGroupCallMessage` + live `updateNewGroupCallMessage` feed with composer, gated on `can_send_messages`/`are_messages_allowed`; no history getter exists in the schema, so live feed only; code + demo only, live unverified) <!-- parity:calls-group-messages -->
+- [ ] Push-to-talk with a shortcut and release delay <!-- parity:calls-push-to-talk -->
+- [ ] Noise suppression toggle in group calls <!-- parity:calls-noise-suppression -->
+- [ ] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
+- [ ] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
+- [ ] Screen source chooser with window and screen thumbnails <!-- parity:calls-screen-source-chooser -->
+- [ ] Pause screen sharing <!-- parity:calls-screen-share-pause -->
+- [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls <!-- parity:calls-conference -->
+- [ ] Detect when you speak in a group call and show it to others <!-- parity:calls-speaking-detection -->
+- [ ] Call window options: stay on top, device settings inside the call <!-- parity:calls-window-options -->
+- [ ] Battery-low and microphone-off indicators for the other person <!-- parity:calls-peer-indicators -->
+- [ ] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
+- [ ] Watch channel live streams (RTMP) (deferred: low impact) <!-- parity:calls-rtmp-viewing -->
+- [ ] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
+- [ ] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 
 ### Stickers, emoji & GIFs
 
@@ -523,6 +789,25 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
 - [x] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
 - [x] Group sticker/custom emoji pack selection and removal for eligible supergroups; current confirmed pack, installed choices, safe refusal and retry; live changes unverified <!-- parity:stickers-group-set -->
+- [ ] Remove a single recent sticker or emoji, and reset recent emoji <!-- parity:stickers-remove-recent -->
+- [ ] Sticker set box: share link, copy link, report, archive <!-- parity:stickers-set-box-actions -->
+- [ ] Tapping a sticker in a chat opens its set <!-- parity:stickers-tap-opens-set -->
+- [ ] Tapping a custom emoji shows "This emoji is from X pack" with a View button <!-- parity:stickers-custom-emoji-toast -->
+- [ ] Masks tab and mask stickers <!-- parity:stickers-masks -->
+- [ ] Emoji search by keyword in all languages <!-- parity:emoji-keyword-search -->
+- [ ] Emoji set style picker <!-- parity:emoji-set-style -->
+- [ ] "Replace emoji automatically" setting <!-- parity:emoji-replace-auto -->
+- [ ] Quick reaction on double-click and choose the default quick reaction <!-- parity:reactions-quick-double-click -->
+- [ ] Double-click-to-reply setting and reply or reaction corner buttons <!-- parity:reactions-corner-settings -->
+- [ ] Reaction animation when you send a reaction <!-- parity:reactions-fly-animation -->
+- [ ] Send paid (star) reactions with toast and undo <!-- parity:reactions-paid-send -->
+- [ ] Who reacted: hover tooltip and full list per emoji <!-- parity:reactions-who-reacted -->
+- [ ] Reaction strip updates when available and default reactions change <!-- parity:reactions-live-updates -->
+- [ ] Sticker or emoji flies from the panel into the chat when sent <!-- parity:stickers-send-animation -->
+- [ ] Recent, favorite and trending stickers update when changed on another device <!-- parity:stickers-live-updates -->
+- [ ] Sticker and custom emoji set creator (deferred: low impact) <!-- parity:stickers-creator -->
+- [ ] Premium stickers section with locked previews <!-- parity:stickers-premium-section -->
+- [ ] Animated emoji status next to names and in headers <!-- parity:emoji-status-animated -->
 
 ### Bots, polls & payments
 
@@ -579,6 +864,90 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Clear payment/shipping info (privacy) <!-- parity:bots-payment-clear -->
 - [x] Signed gifts: personal comment when buying a collectible gift via Marketplace (sendResoldGift text) <!-- parity:gifts-signed-comment --> (merged #292: price-bound Stars/TON quotes, personal comment and receiver-only/public visibility; core and native AX checks passed; live purchase unverified)
 - [ ] Signed gifts: custom signature on Marketplace gift purchase (blocked: no TDLib/raw API for a gift signature field — concept-level search: sendResoldGift/inputInvoiceStarGiftResale carry text/message only) <!-- parity:gifts-signed-signature -->
+- [ ] Mini Apps in an in-app window (blocked: needs a per-platform web view; GPUI has none) <!-- parity:bots-miniapp-inline -->
+- [ ] Add a bot to a group or channel with admin rights <!-- parity:bots-add-to-group -->
+- [ ] Bot verification badges and verify via bot <!-- parity:bots-verification-badge -->
+- [ ] Share a game to a chat <!-- parity:bots-share-game -->
+- [ ] Allow-messages consent for web apps (write access) <!-- parity:bots-allow-write -->
+- [ ] Keys 1 to 9 press inline buttons <!-- parity:bots-fast-buttons -->
+- [ ] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
+- [ ] Bot earnings and affiliate programs (deferred: low impact) <!-- parity:bots-earn-affiliate -->
+- [ ] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
+- [ ] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
+- [ ] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
+- [ ] Links and media in poll options <!-- parity:polls-option-media -->
+- [ ] Poll statistics, "Show more" voters and admin vote view <!-- parity:polls-stats -->
+- [ ] Unread poll-vote badges and "Read all poll votes" <!-- parity:polls-unread-votes -->
+- [ ] Retract a vote from the message menu <!-- parity:polls-retract-menu -->
+- [ ] Checklists: mark tasks done, add tasks, create <!-- parity:polls-checklist-tasks -->
+
+### Premium, Stars & gifts
+
+- [ ] Premium promo page with features, limits and subscribe flow <!-- parity:premium-promo-page -->
+- [ ] Premium limit upsell boxes (pins, folders, links, caption, GIFs) <!-- parity:premium-limit-upsell -->
+- [ ] Stars: balance, transactions, top-up, send stars <!-- parity:premium-stars-balance -->
+- [ ] Send gifts and gift Premium <!-- parity:premium-send-gift -->
+- [ ] Received gifts on a profile: show or hide, pin, convert, upgrade, transfer, sell, collections <!-- parity:premium-received-gifts -->
+- [ ] Gift auctions, crafting and resale filters (deferred: low impact) <!-- parity:premium-gift-auctions -->
+- [ ] Create and view giveaways <!-- parity:premium-giveaways -->
+- [ ] Check and apply Premium gift codes <!-- parity:premium-gift-codes -->
+- [ ] Bank card info when tapping a card number <!-- parity:premium-bank-card-info -->
+- [ ] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
+- [ ] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
+- [ ] Disable sponsored messages (Premium) <!-- parity:premium-disable-sponsored -->
+- [ ] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
+- [ ] Fragment and TON wallet flows (blocked: external web services, link-out only) <!-- parity:premium-fragment-ton -->
+
+### Scheduled messages
+
+- [ ] Send now on a scheduled message <!-- parity:scheduled-send-now -->
+- [ ] Reschedule a scheduled message to a new time <!-- parity:scheduled-reschedule -->
+- [ ] Date and time picker for scheduling (today only the +1h, +8h and +24h presets) <!-- parity:scheduled-date-picker -->
+- [ ] "Set a reminder" wording when scheduling in Saved Messages <!-- parity:scheduled-reminder-wording -->
+- [ ] Send when online stays available next to the date picker in the schedule popup <!-- parity:scheduled-send-when-online -->
+- [ ] Scheduled-messages icon next to the composer when a chat has scheduled messages <!-- parity:scheduled-composer-icon -->
+- [ ] Select several scheduled messages to send now, reschedule or delete <!-- parity:scheduled-select-many -->
+
+### Deep links
+
+- [ ] Every t.me and tg:// link is classified by Telegram itself, not by a small local parser (today five link forms are handled) <!-- parity:deeplink-internal-link-type -->
+- [ ] addstickers and addemoji links open the sticker or emoji set <!-- parity:deeplink-stickers-emoji -->
+- [ ] proxy and socks links offer to add the proxy <!-- parity:deeplink-proxy -->
+- [ ] share and msg_url links open a chat picker with the draft text <!-- parity:deeplink-share-draft -->
+- [ ] Settings links open the matching settings page <!-- parity:deeplink-settings -->
+- [ ] Login code links fill in the code <!-- parity:deeplink-login-code -->
+- [ ] Invoice links open the payment checkout <!-- parity:deeplink-invoice -->
+- [ ] Boost links open the boost dialog <!-- parity:deeplink-boost -->
+- [ ] Premium gift code links offer to apply the code <!-- parity:deeplink-giftcode -->
+- [ ] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
+- [ ] addlist links add a shared folder <!-- parity:deeplink-addlist -->
+- [ ] Background and theme links preview and apply them <!-- parity:deeplink-bg-theme -->
+- [ ] +phone links open a chat with that number <!-- parity:deeplink-phone -->
+- [ ] ?startgroup and ?startchannel links add a bot to a group or channel <!-- parity:deeplink-startgroup -->
+- [ ] Message links with ?thread, ?comment, ?single and topic ids open the right thread <!-- parity:deeplink-thread-comment -->
+- [ ] Story and story album links open the story viewer <!-- parity:deeplink-story -->
+- [ ] ?t= timestamp links seek the media to that time <!-- parity:deeplink-timestamp -->
+- [ ] Premium offer, privacy policy and language pack links <!-- parity:deeplink-premium-language -->
+- [ ] Register the tg:// scheme on Linux and Windows <!-- parity:deeplink-scheme-registration -->
+
+### Data freshness (TDLib updates)
+
+- [x] Server popups (service notifications) are shown <!-- parity:updates-service-notification -->
+- [x] Updated Terms of Service can be read and accepted <!-- parity:updates-terms-of-service -->
+- [ ] Server-defined chat themes, backgrounds and accent colors are applied <!-- parity:updates-theme-colors -->
+- [ ] Chat sender, view-as-topics and default-disable-notification changes apply live <!-- parity:updates-chat-flags -->
+- [ ] Downloads list stays in sync with file download updates <!-- parity:updates-downloads-sync -->
+- [ ] Dice emoji list and animated emoji click updates <!-- parity:updates-dice-emoji -->
+- [ ] Frozen-account banner <!-- parity:updates-freeze-state -->
+- [ ] Free transcription quota hints <!-- parity:updates-speech-trial -->
+- [ ] Owned Stars count and chat boost updates <!-- parity:updates-stars-boosts -->
+- [ ] Active live location and viewed-live-location updates <!-- parity:updates-live-location -->
+- [ ] Age verification parameters <!-- parity:updates-age-verification -->
+
+### Business
+
+- [ ] Quick replies (/shortcut messages) <!-- parity:business-quick-replies -->
+- [ ] Greeting and away messages, opening hours, location, start page, chat links, connected bots and chat automation <!-- parity:business-away-greeting -->
 
 ### Settings
 
@@ -617,6 +986,85 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Enter-to-send toggle (Settings → Appearance → Send messages with; `composer::SendKeyMode`, `chat_prefs.json`) <!-- parity:settings-enter-send -->
 - [x] Send by Cmd/Ctrl+Enter option (same setting; Ctrl/Cmd+Enter sends in CtrlEnter mode) <!-- parity:settings-ctrlenter-send -->
 
+### Settings: account & profile
+
+- [ ] Set or remove your birthday and open birthday privacy <!-- parity:settings-birthday -->
+- [ ] Choose or remove your personal channel <!-- parity:settings-personal-channel -->
+- [ ] Name color, profile color, reply icon and collectible wear <!-- parity:settings-name-color -->
+- [ ] Emoji status from the main menu with durations <!-- parity:settings-emoji-status-menu -->
+- [ ] Profile photo from camera, emoji avatar builder and video avatar with frame choice <!-- parity:settings-photo-sources -->
+- [ ] Profile music (saved music) management <!-- parity:settings-profile-music -->
+- [ ] Choose the main profile tab <!-- parity:settings-main-profile-tab -->
+- [ ] Phone number display and "Is this still your number?" suggestion <!-- parity:settings-phone-suggestion -->
+- [ ] Ask a Question, FAQ, Features and Privacy Policy links <!-- parity:settings-support-links -->
+- [ ] Version and changelog in the Settings footer <!-- parity:settings-version-footer -->
+
+### Settings: privacy & security
+
+- [ ] More privacy settings: bio, date of birth, voice messages, gifts, who can message me, saved music, find me by phone <!-- parity:settings-privacy-extra-keys -->
+- [ ] Privacy rule types: Premium users, bots and chat members in exceptions <!-- parity:settings-privacy-rule-types -->
+- [ ] Editable call privacy exceptions <!-- parity:settings-privacy-call-exceptions -->
+- [x] Local passcode with auto-lock, lock screen and biometric unlock <!-- parity:settings-passcode -->
+- [x] Enter the recovery email confirmation code <!-- parity:settings-recovery-email-code -->
+- [x] Forgot password in Settings and password reset with a waiting period <!-- parity:settings-password-reset -->
+- [x] Set or change the login email <!-- parity:settings-login-email -->
+- [ ] "Do you still remember your password?" check <!-- parity:settings-password-remember -->
+- [ ] Terminate old sessions if inactive for a chosen time <!-- parity:settings-inactive-sessions -->
+- [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
+- [ ] Session details box and rename this device <!-- parity:settings-session-details -->
+- [ ] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
+- [ ] Bots and websites: mini-app permissions and delete cloud drafts <!-- parity:settings-bots-websites -->
+- [ ] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
+- [ ] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
+- [ ] Passkeys (blocked: Telegram only allows passkeys in its signed apps) <!-- parity:settings-passkeys -->
+- [ ] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
+
+### Settings: notifications
+
+- [ ] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
+- [ ] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
+- [ ] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
+- [ ] Desktop notification options: position, count, display, volume <!-- parity:notify-desktop-options -->
+- [ ] Flash the taskbar or bounce the Dock for new messages <!-- parity:notify-alert-attention -->
+- [ ] Show notifications from all accounts <!-- parity:notify-all-accounts -->
+- [ ] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
+- [ ] Events: contact joined Telegram, pinned messages <!-- parity:notify-events -->
+- [ ] Include muted chats in folder counters <!-- parity:notify-muted-counters -->
+- [ ] Sender avatar in OS notifications <!-- parity:notify-avatar -->
+
+### Settings: appearance & chat
+
+- [ ] Wallpapers: gallery, patterns, from file, blur, motion, tile, remove <!-- parity:appearance-wallpapers -->
+- [ ] Built-in themes (Day, Classic, Tinted, Night), custom and cloud themes, theme editor <!-- parity:appearance-themes -->
+- [ ] System accent color option <!-- parity:appearance-system-accent -->
+- [ ] Interface scale <!-- parity:appearance-scale -->
+- [ ] Font family choice <!-- parity:appearance-font -->
+- [ ] Interface language packs (English only today) <!-- parity:appearance-localization -->
+- [ ] Adaptive layout for wide screens (centered column) <!-- parity:appearance-wide-layout -->
+- [ ] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
+- [ ] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
+- [ ] Spellcheck dictionaries manager with language downloads <!-- parity:appearance-dictionaries -->
+
+### Settings: data, proxy & advanced
+
+- [x] Clear cache removes TDLib cached files <!-- parity:data-clear-cache-real -->
+- [ ] Storage limits: total size, media cache, clear older than <!-- parity:data-storage-limits -->
+- [ ] Clear storage per file type and per chat from the breakdown <!-- parity:data-clear-per-type -->
+- [ ] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
+- [ ] Network usage statistics with reset <!-- parity:data-network-usage -->
+- [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
+- [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip <!-- parity:data-proxy-extras -->
+- [ ] Try IPv6 option <!-- parity:data-ipv6 -->
+- [ ] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
+- [ ] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
+- [ ] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
+- [ ] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
+- [ ] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
+- [ ] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
+- [ ] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
+- [ ] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
+- [ ] Hardware decoding and renderer toggles (blocked: tdesktop-specific renderer options do not apply to GPUI) <!-- parity:data-hw-decode -->
+
 ### Platform & edge cases
 
 - [x] Global keyboard shortcuts: 22 bindings wired in `bind_keys` (Quit, focus sidebar/composer, chat search, media viewer nav/zoom) (src/ui/mod.rs:125) <!-- parity:platform-keyboard-shortcuts -->
@@ -651,6 +1099,21 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Copy text to clipboard (inline keyboard copy-text button src/ui/mod.rs:3932; invite link src/ui/mod.rs:6357) <!-- parity:platform-copy-clipboard -->
 - [x] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
 - [x] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
+- [ ] Ctrl+Up and Ctrl+Down reply to the previous or next message <!-- parity:platform-shortcut-reply-nav -->
+- [ ] Ctrl+O opens the attach picker <!-- parity:platform-shortcut-attach -->
+- [ ] Ctrl+L locks the app <!-- parity:platform-shortcut-lock -->
+- [ ] Ctrl+PageUp and Ctrl+PageDown switch chats; Ctrl+Alt+Home and End jump to the first or last chat <!-- parity:platform-shortcut-chat-nav -->
+- [ ] Ctrl+1 to 8 open pinned chats, Ctrl+0 Saved Messages, Ctrl+9 Archive, Ctrl+J Contacts <!-- parity:platform-shortcut-pinned -->
+- [ ] Ctrl+Shift+Up and Down switch folders <!-- parity:platform-shortcut-folders -->
+- [ ] Ctrl+R mark chat read, Ctrl+\ chat menu <!-- parity:platform-shortcut-chat-actions -->
+- [ ] Shortcuts for scheduled messages, silent send, schedule, link preview toggle, round video, archive chat, admin log and reopen closed window <!-- parity:platform-shortcut-commands -->
+- [ ] Open a chat in a new window <!-- parity:platform-new-window -->
+- [ ] Dock menu on macOS (deferred: low impact) <!-- parity:platform-dock-menu -->
+- [ ] Touch Bar and extra window menu items (deferred: low impact) <!-- parity:platform-touch-bar -->
+- [x] Online status follows window focus and idle time <!-- parity:platform-idle-presence -->
+- [x] Online status is set so contacts see you as online while you are active <!-- parity:platform-online-option -->
+- [ ] Windows "Send to" menu and share extension <!-- parity:platform-sendto-menu -->
+- [ ] Screen reader announcements for new messages (deferred: low impact) <!-- parity:platform-screen-reader-announce -->
 
 ## License
 
