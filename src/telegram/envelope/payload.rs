@@ -1030,6 +1030,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 },
             ))
         }
+        // `countries` — the `getCountries` answer for the sign-in picker.
+        "countries" => Ok(EnvelopePayload::Countries {
+            countries: crate::phone::countries_from_json(&value),
+        }),
         // Phase C3a: `text` (schema 1.8.67, line 10071) — the
         // `joinVideoChat` / `joinGroupCall` answer ("join response
         // payload for tgcalls"). Quill stores it, never consumes it

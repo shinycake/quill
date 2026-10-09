@@ -49,7 +49,7 @@ fn email_login_transitions_errors_resend_and_transport_retry() {
         json!({"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitEmailCode","code_info":{"email_address_pattern":"a***@example.com","length":6}}}),
     );
     assert!(
-        matches!(&driver.session.auth,AuthorizationState::WaitEmailCode { email_pattern, code_length:Some(6) } if email_pattern=="a***@example.com")
+        matches!(&driver.session.auth,AuthorizationState::WaitEmailCode { email_pattern, code_length:Some(6), .. } if email_pattern=="a***@example.com")
     );
     assert!(driver.session.last_auth_error.is_none());
     ingest(
@@ -121,6 +121,7 @@ fn email_login_transitions_errors_resend_and_transport_retry() {
             .has_purpose(RequestPurpose::SetAuthenticationEmail)
     );
     failing.session.auth = AuthorizationState::WaitEmailCode {
+        reset: Default::default(),
         email_pattern: String::new(),
         code_length: None,
     };

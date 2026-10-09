@@ -25,7 +25,19 @@ pub fn is_device_login_qr(link: &str) -> bool {
         .is_ok_and(|bytes| !bytes.is_empty() && bytes.len() <= 1024)
 }
 
-use crate::telegram::envelope::AuthorizationState;
+use crate::telegram::envelope::{AuthorizationState, ErrorClass};
+
+/// Sign-in errors whose raw message is dropped later but which the UI
+/// needs to tell apart (tdesktop `PhoneWidget::phoneSubmitFail`).
+pub fn classify_sign_in_message(message: &str) -> Option<ErrorClass> {
+    match message {
+        "PHONE_NUMBER_BANNED" => Some(ErrorClass::PhoneBanned),
+        "PHONE_NUMBER_INVALID" => Some(ErrorClass::PhoneInvalid),
+        "PHONE_NUMBER_FLOOD" => Some(ErrorClass::PhoneFlood),
+        "TASK_ALREADY_EXISTS" => Some(ErrorClass::TaskAlreadyExists),
+        _ => None,
+    }
+}
 
 /// Screen + permitted actions derived from `updateAuthorizationState`, not from the last click.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,7 +82,7 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             action: AuthAction::EnterPhone,
             blocking: true,
         },
-        AuthorizationState::WaitCode { code_length } => AuthView {
+        AuthorizationState::WaitCode { code_length, .. } => AuthView {
             title: "Enter the code",
             body: match code_length {
                 Some(len) => format!("Enter the {len}-digit code from Telegram."),
@@ -113,7 +125,11 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             action: AuthAction::EnterEmail,
             blocking: true,
         },
-        AuthorizationState::WaitEmailCode { email_pattern, code_length } => AuthView {
+        AuthorizationState::WaitEmailCode {
+            email_pattern,
+            code_length,
+            ..
+        } => AuthView {
             title: "Email verification code",
             body: match code_length {
                 Some(len) => format!("Enter the {len}-character code sent to {email_pattern}."),

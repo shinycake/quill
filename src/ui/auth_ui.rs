@@ -14,6 +14,7 @@ impl QuillApp {
         self.auth_demo = match &self.auth_demo {
             AuthorizationState::WaitPhoneNumber => AuthorizationState::WaitCode {
                 code_length: Some(5),
+                delivery: Default::default(),
             },
             AuthorizationState::WaitCode { .. } => AuthorizationState::WaitPassword {
                 has_recovery_email: true,
@@ -45,26 +46,39 @@ impl QuillApp {
     }
 
     pub(super) fn submit_phone(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
+        let allowed = match live.driver.session.auth {
+            AuthorizationState::WaitPhoneNumber => true,
+            // "Wrong number?" re-sends from the code step.
+            AuthorizationState::WaitCode { .. } => self.signin.editing_phone,
+            _ => false,
+        };
+        if !allowed {
+            return;
+        }
+        let Some((number, shown)) = self.signin_checked_phone(cx) else {
+            return;
+        };
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        if !matches!(
-            live.driver.session.auth,
-            AuthorizationState::WaitPhoneNumber
-        ) {
-            return;
-        }
-        let phone = self.phone_input.read(cx).value().to_string();
-        match live.driver.submit_phone(&phone) {
+        match live.driver.submit_phone(&number) {
             Ok(_) => {
-                self.phone_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
+                // The field keeps the number so "Wrong number?" can edit it.
+                self.signin.submitted_phone = shown;
+                self.signin.editing_phone = false;
+                self.signin.code_clock = None;
+                self.signin.error_clock = None;
+                self.signin.banned_dismissed = false;
                 self.status_note = "phone submitted — waiting for Telegram".into();
             }
             Err(_) => {
                 self.status_note = "could not submit phone".into();
             }
         }
+        let _ = window;
         cx.notify();
     }
 
@@ -120,8 +134,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice A1: resend the login code. TDLib enforces the server-side
-    /// cooldown (429 surfaces via `last_auth_error`); no local countdown.
+    /// Resend the login code by the next delivery type. The button is only
+    /// enabled once the server-specified timeout (shown as a countdown)
+    /// has passed; a too-early call still surfaces via `last_auth_error`.
     pub(super) fn resend_code(&mut self, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
             return;
@@ -134,6 +149,7 @@ impl QuillApp {
         }
         match live.driver.resend_code() {
             Ok(_) => {
+                self.signin.code_clock = None;
                 self.status_note = "code resent — waiting for Telegram".into();
             }
             Err(_) => {

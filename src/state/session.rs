@@ -325,6 +325,10 @@ pub struct Session {
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
     /// self-destruct-if-away picker (UI half ships post-Phase-9).
     pub account_ttl_days: Option<i32>,
+    /// `getCountries` rows for the sign-in picker (`None` until answered).
+    pub countries: Option<Vec<crate::phone::Country>>,
+    /// Uppercase ISO code from `getCountryCode`: the default country guess.
+    pub guessed_country_iso: Option<String>,
     /// Slice A7: a `getAccountTtl` round trip is in flight.
     pub account_ttl_loading: bool,
     /// Slice A7: a `deleteAccount` / `setAccountTtl` round trip is in
@@ -1258,6 +1262,8 @@ impl Session {
             sessions_error: None,
             sessions_stale: false,
             account_ttl_days: None,
+            countries: None,
+            guessed_country_iso: None,
             account_ttl_loading: false,
             account_mutating: false,
             account_error: None,
