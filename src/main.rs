@@ -1099,6 +1099,15 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             (w > 0.0 && h > 0.0).then_some((w, h))
         })
         .unwrap_or((1200.0, 740.0));
+    // `QUILL_DEMO_WINDOW_ORIGIN=x,y` moves the demo window (points), e.g. to
+    // record it somewhere other windows don't open.
+    let (demo_x, demo_y) = std::env::var("QUILL_DEMO_WINDOW_ORIGIN")
+        .ok()
+        .and_then(|value| {
+            let (x, y) = value.split_once(',')?;
+            Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?))
+        })
+        .unwrap_or((20.0, 20.0));
 
     gpui_kit::application()
         .with_assets(QuillAssets)
@@ -1124,7 +1133,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     .open_window(
                         WindowOptions {
                             window_bounds: Some(WindowBounds::Windowed(Bounds {
-                                origin: point(px(20.), px(20.)),
+                                origin: point(px(demo_x), px(demo_y)),
                                 size: size(px(demo_w), px(demo_h)),
                             })),
                             app_id: Some("org.shinycake.quill".into()),
@@ -1179,7 +1188,24 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     // root view while the event dispatches, and a handler
                     // reading it (a kit button) panicked.
                     use gpui_kit::gpui::AnyWindowHandle;
+                    // `QUILL_DEMO_CLICK_LOG=path` records when each step ran
+                    // (Unix ms), so a recording can be lined up with it.
+                    let mut step_log = std::env::var_os("QUILL_DEMO_CLICK_LOG").and_then(|path| {
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                            .ok()
+                    });
                     for point in clicks.split(';') {
+                        if let Some(log) = step_log.as_mut() {
+                            use std::io::Write;
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis())
+                                .unwrap_or_default();
+                            let _ = writeln!(log, "{now} {}", point.trim());
+                        }
                         // `p:ms` waits, to pace a scripted recording.
                         if let Some(ms) = point.strip_prefix("p:") {
                             if let Ok(ms) = ms.trim().parse::<u64>() {
