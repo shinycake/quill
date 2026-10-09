@@ -803,6 +803,7 @@ impl QuillApp {
                             this.child(chip)
                         })
                         .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
+                        .when_some(self.text_limit_bar(cx), |this, bar| this.child(bar))
                         // kit Phase 5: the composer input row — attach and
                         // emoji/sticker pickers, the borderless growing
                         // kit Textarea (auto_grow(2, 6) on the state sizes

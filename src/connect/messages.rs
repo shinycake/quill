@@ -1162,6 +1162,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if matches!(edit.kind, ComposerEditKind::Caption) {
             self.check_caption_length(caption)?;
         }
+        // R8: text edits are bounded by `message_text_length_max`
+        // (counted after markup parsing, in UTF-16 units).
+        if matches!(edit.kind, ComposerEditKind::Text) {
+            let limit = self.session.message_text_length_max;
+            if crate::text_split::units_over_limit(caption, limit) > 0 {
+                return Err(ConnectSendError::TextTooLong { limit });
+            }
+        }
         // M1 fix-up: secret chats strip `textEntityTypeBlockQuote` from
         // the edited caption too (unsupported in secret chats).
         let strip_blockquote = self
