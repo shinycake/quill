@@ -267,6 +267,12 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) draft_clock: DraftSaveClock,
     pub(crate) draft_save_token: u64,
     pub(crate) pending_draft: Option<PendingDraft>,
+    /// Q1: idempotent reads waiting out a 429 before being re-sent.
+    pub(crate) flood_retries: Vec<super::flood_retry::FloodRetry>,
+    /// Q1: re-send count per request id that hit a rate limit.
+    pub(crate) flood_attempts: HashMap<u64, u8>,
+    /// R5: when the stale-request sweep last scanned the registry.
+    pub(crate) last_request_sweep: Option<std::time::Instant>,
 }
 
 pub(crate) struct OutgoingTyping {

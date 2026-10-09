@@ -1345,6 +1345,11 @@ impl Session {
             } => {
                 if let Some(notice) = error.send_permission_notice() {
                     self.send_permission_error = Some(notice.into());
+                } else if let Some(notice) = error.flood_notice() {
+                    // Q1: the failed row keeps its retry affordance
+                    // (`can_retry` comes from TDLib, which marks rate
+                    // limits retryable); the text stays in the history.
+                    self.flood_notice = Some(notice);
                 }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;

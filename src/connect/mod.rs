@@ -11,6 +11,7 @@ mod contacts;
 mod core;
 mod deep_links;
 mod emoji_sets;
+mod flood_retry;
 mod gifs;
 mod group_calls;
 mod groups;
@@ -42,6 +43,7 @@ mod typing;
 
 pub use connect_flow::*;
 pub use deep_links::detect_deep_link_arg;
+pub use flood_retry::{FLOOD_RETRY_MAX_ATTEMPTS, FLOOD_RETRY_MAX_WAIT};
 pub use live::*;
 pub use message_menu::{ADDED_REACTIONS_PAGE, ModerationChoice};
 pub use sender::*;

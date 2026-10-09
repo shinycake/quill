@@ -304,6 +304,13 @@ impl QuillApp {
             progressed = true;
             need = RedrawNeed::Now;
         }
+        // Q1/R5: re-send rate-limited reads whose wait is over and sweep
+        // requests whose answer never came (no timers of their own; the
+        // poll loop already ticks).
+        if live.driver.request_tick(std::time::Instant::now()) {
+            progressed = true;
+            need = RedrawNeed::Now;
+        }
         // `parity:proxy-settings`: first `getProxies` + auto-switch.
         if live.driver.proxy_tick(quill::state::unix_ms_now()) {
             progressed = true;
@@ -587,6 +594,14 @@ impl QuillApp {
             .live
             .as_mut()
             .and_then(|live| live.driver.session.send_permission_error.take())
+        {
+            self.status_note = notice;
+            progressed = true;
+        }
+        if let Some(notice) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.flood_notice.take())
         {
             self.status_note = notice;
             progressed = true;

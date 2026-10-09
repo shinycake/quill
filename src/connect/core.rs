@@ -68,6 +68,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             draft_clock: DraftSaveClock::idle(),
             draft_save_token: 0,
             pending_draft: None,
+            flood_retries: Vec::new(),
+            flood_attempts: HashMap::new(),
+            last_request_sweep: None,
         }
     }
 
@@ -102,6 +105,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
+        // Q1: a rate-limited read is re-sent later; the reducer never sees
+        // the 429 and the request stays pending.
+        if self.absorb_flood(&owned.envelope, std::time::Instant::now()) {
+            return Ok(());
+        }
         let was_ready = matches!(self.session.auth, AuthorizationState::Ready);
         let active_call_before = self.session.active_call.as_ref().map(|call| call.id);
         let active_group_call_before = self.session.active_group_call.as_ref().map(|call| call.id);

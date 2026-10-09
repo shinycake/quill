@@ -176,6 +176,10 @@ pub struct Session {
     /// followed by silence.
     pub resend_error: Option<String>,
     pub send_permission_error: Option<String>,
+    /// Q1: one-shot; "Too many attempts. Try again in N seconds." after a
+    /// user action (send, edit, join, ...) hit a rate limit. The UI drains
+    /// it into the status note; the composer text is left untouched.
+    pub flood_notice: Option<String>,
     /// Slice G1 fix-up: one-shot; set when an invite-link mutation
     /// (create/edit/revoke/replace-primary) errors. The UI drains it into
     /// the status note — the previously loaded list is kept, not wiped.
@@ -1104,6 +1108,7 @@ impl Session {
             recognize_speech_error: None,
             resend_error: None,
             send_permission_error: None,
+            flood_notice: None,
             invite_link_error: None,
             scheduled_messages: Vec::new(),
             open_chat: None,
