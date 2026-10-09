@@ -898,6 +898,27 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
 - [ ] Fragment and TON wallet flows (blocked: external web services, link-out only) <!-- parity:premium-fragment-ton -->
 
+### TON wallet (low priority)
+
+Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display comes first: Quill never holds keys and never sends funds. Everything else waits for a security and legal review. See docs/decisions/research-ton-wallet.md.
+
+- [ ] TON addresses in messages are highlighted, with Copy Address and Open in Explorer (planned: phase 1, read-only) <!-- parity:wallet-address-entity -->
+- [ ] TON addresses in Instant View pages are highlighted and copyable (planned: phase 1, read-only) <!-- parity:wallet-address-richtext -->
+- [ ] Wallet transfer messages show as a card with amount, direction, peer and public comment (planned: phase 1, read-only) <!-- parity:wallet-transfer-card -->
+- [ ] TON Connect request messages show the app name and request state, with no approve or reject (planned: phase 1, read-only) <!-- parity:wallet-tonconnect-card -->
+- [ ] Chat-list, reply and notification previews for wallet transfers and TON Connect requests (planned: phase 1, read-only) <!-- parity:wallet-previews -->
+- [ ] A user's public wallet address on their profile, with copy (planned: phase 1, read-only) <!-- parity:wallet-profile-address -->
+- [ ] Own wallet address and balance, with fiat value and backup status (planned: phase 1, read-only) <!-- parity:wallet-own-overview -->
+- [ ] Own wallet transaction history and NFTs, view only (planned: phase 1, read-only) <!-- parity:wallet-own-history -->
+- [ ] TON transfer and TON Connect links show a notice instead of acting (planned: phase 1, read-only) <!-- parity:wallet-links-notice -->
+- [ ] First incoming transfer hint (planned: phase 1, read-only) <!-- parity:wallet-first-transfer-hint -->
+- [ ] Decrypt encrypted transfer comments (deferred: needs security & legal review) <!-- parity:wallet-decrypt-comments -->
+- [ ] Create, import, replace or delete a wallet (deferred: needs security & legal review) <!-- parity:wallet-create-import -->
+- [ ] Secret phrase backup, export and restore (deferred: needs security & legal review) <!-- parity:wallet-secret-backup -->
+- [ ] Send Grams to a user or address, including gasless transfers (deferred: needs security & legal review) <!-- parity:wallet-send -->
+- [ ] Connect the wallet to apps with TON Connect, approve requests, manage sessions (deferred: needs security & legal review) <!-- parity:wallet-tonconnect-sessions -->
+- [ ] Buy Grams through on-ramp providers (deferred: needs security & legal review) <!-- parity:wallet-onramp -->
+
 ### Scheduled messages
 
 - [x] Send now on a scheduled message <!-- parity:scheduled-send-now -->
