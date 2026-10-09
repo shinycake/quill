@@ -33,6 +33,7 @@ mod search;
 mod secret_chats;
 mod sender;
 mod settings;
+mod share;
 mod stickers;
 mod stories;
 mod subsection_tabs;

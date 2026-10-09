@@ -203,6 +203,18 @@ pub struct Session {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
+    /// Chats whose OS notification should be withdrawn (read elsewhere or
+    /// removed by TDLib); drained by the UI, which dismisses the toast.
+    pub pending_notification_clears: Vec<ChatId>,
+    /// Chats with an OS notification we showed (or TDLib reports active
+    /// from a previous launch); only these produce a clear.
+    pub shown_notification_chats: std::collections::HashSet<ChatId>,
+    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off).
+    pub default_auto_delete_secs: Option<i32>,
+    /// A default auto-delete fetch or write is in flight.
+    pub default_auto_delete_busy: bool,
+    /// Honest one-line failure of the last default auto-delete request.
+    pub default_auto_delete_error: Option<String>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
     pub saved_notification_sounds: Vec<NotificationSound>,
@@ -512,6 +524,16 @@ pub struct Session {
     pub last_auth_error: Option<AuthRequestError>,
     /// In-flight `forwardMessages` (dest / source / requested count).
     pub in_flight_forward: Option<ForwardFlight>,
+    /// Further `forwardMessages` in flight while the share box sends to
+    /// several chats at once (`in_flight_forward` holds the first).
+    pub queued_forward_flights: Vec<ForwardFlight>,
+    /// `chat.message_sender_id` / `updateChatMessageSender`: the "send as"
+    /// identity selected per chat (absent when the user cannot change it).
+    pub chat_message_sender: HashMap<i64, MessageSender>,
+    /// `getChatAvailableMessageSenders` answers per chat.
+    pub send_as_options: HashMap<i64, Vec<AvailableMessageSender>>,
+    /// Share box search (local `searchChats` + `searchChatsOnServer`).
+    pub share_search: ShareSearch,
     /// Last `forwardMessages` outcome for the dest picker success surface.
     pub last_forward: Option<ForwardResult>,
     /// Last `callbackQueryAnswer` to an inline keyboard callback-button press
@@ -1131,6 +1153,11 @@ impl Session {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
+            pending_notification_clears: Vec::new(),
+            shown_notification_chats: std::collections::HashSet::new(),
+            default_auto_delete_secs: None,
+            default_auto_delete_busy: false,
+            default_auto_delete_error: None,
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
             saved_sounds_stale: false,
@@ -1228,6 +1255,10 @@ impl Session {
             last_seq: 0,
             last_auth_error: None,
             in_flight_forward: None,
+            queued_forward_flights: Vec::new(),
+            chat_message_sender: HashMap::new(),
+            send_as_options: HashMap::new(),
+            share_search: ShareSearch::default(),
             last_forward: None,
             last_callback_answer: None,
             last_login_url_info: None,

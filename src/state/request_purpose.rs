@@ -80,6 +80,23 @@ pub enum RequestPurpose {
     /// all public chats (not just known ones). Sent alongside `searchChats`.
     SearchPublicChats,
     AddRecentlyFoundChat,
+    /// `searchChatsOnServer`: the server's title/username hits, merged
+    /// behind `SearchChats` (never gates the search status).
+    SearchChatsOnServer,
+    /// `searchPublicPosts` (the "Public posts" scope of a plain query).
+    SearchPublicPosts,
+    /// `searchPublicMessagesByTag` (the "Public posts" scope of a hashtag).
+    SearchPublicMessagesByTag,
+    /// `getTopChats(topChatCategoryUsers)`: the "Frequent contacts" strip.
+    GetTopChats,
+    /// `removeTopChat`; response is `ok`, the entry left the strip
+    /// optimistically.
+    RemoveTopChat,
+    /// `removeRecentlyFoundChat`; response is `ok`, the row left the Recent
+    /// list optimistically.
+    RemoveRecentlyFoundChat,
+    /// `setOption(disable_top_chats)`; the truth arrives as `updateOption`.
+    SetTopChatsDisabled,
     SearchChatMessages,
     /// The next older page of the open in-chat search (appended to the
     /// hits; carries the search generation).
@@ -1033,6 +1050,17 @@ pub enum RequestPurpose {
     /// Phase 9.5: `getChatsToPostStories`. Response is `chats`;
     /// stored in `Session::story_post_as_chats`.
     GetChatsToPostStories,
+    /// Share box: `searchChats` for the typed query. Response is `chats`;
+    /// stored in `Session::share_search`.
+    SearchShareChats,
+    /// Share box: `searchChatsOnServer` for the typed query.
+    SearchShareChatsOnServer,
+    /// `getChatAvailableMessageSenders`. Response is `chatMessageSenders`;
+    /// stored in `Session::send_as_options[chat_id]`.
+    GetChatAvailableMessageSenders,
+    /// `setChatMessageSender`. Response is `ok`; the choice arrives via
+    /// `updateChatMessageSender`.
+    SetChatMessageSender,
     /// Phase 9.7: `getChatStoryAlbums`. Response is `storyAlbums`;
     /// replaces `Session::story_albums[chat_id]`.
     GetChatStoryAlbums,
@@ -1332,6 +1360,14 @@ pub enum RequestPurpose {
     /// new timer arrives as `updateChatMessageAutoDeleteTime` (plus a
     /// `messageChatSetMessageAutoDeleteTime` service message in history).
     SetChatMessageAutoDeleteTime,
+    /// `getDefaultMessageAutoDeleteTime`. Response is `messageAutoDeleteTime`,
+    /// stored in `Session::default_auto_delete_secs`.
+    GetDefaultAutoDelete,
+    /// `setDefaultMessageAutoDeleteTime`. Response is `ok`; the confirmed
+    /// `seconds` are stored (the server accepted exactly this value).
+    SetDefaultAutoDelete {
+        seconds: i32,
+    },
     /// Phase S2: `getStorageStatistics`. Response is `storageStatistics`;
     /// aggregated by file type into `Session::storage_stats` (TGX
     /// `SettingsCacheController` / `TGStorageStats` style, including the

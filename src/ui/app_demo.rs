@@ -197,6 +197,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — forward message(s) (injected forwardMessages)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyShareBox
+        | ScreenshotDemo::ReadyForwardBar
+        | ScreenshotDemo::ReadySendAs => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — share box, forward bar and send as (injected)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadySelectMode => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -602,7 +610,9 @@ pub(super) fn demo_seed_for(
         ScreenshotDemo::ReadyJumpDate
         | ScreenshotDemo::ReadySearchFrom
         | ScreenshotDemo::ReadySearchFromHits
-        | ScreenshotDemo::ReadySearchFilters => (
+        | ScreenshotDemo::ReadySearchFilters
+        | ScreenshotDemo::ReadySearchFrequent
+        | ScreenshotDemo::ReadySearchPublic => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — find in history (injected, no live Telegram)".into(),
@@ -1017,6 +1027,20 @@ pub(super) fn demo_seed_for(
             "screenshot demo — reconnecting call audio (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyMuteCustom => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — mute menu with custom duration (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyAutoDelete => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — auto-delete timer in a regular chat (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyChatTtl => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1306,6 +1330,12 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
+        let share_comment_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Add a comment")
+                .auto_grow(1, 3)
+                .submit_on_enter(false)
+        });
         let story_reply_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Reply to story")
@@ -1414,7 +1444,10 @@ impl QuillApp {
                             // Enter inserted the highlighted hashtag/emoji.
                         } else if this.pick_command_menu_selection(window, cx) {
                             // Enter was consumed by the open menu.
-                        } else if !text.trim().is_empty() || !this.pending_attachments.is_empty() {
+                        } else if !text.trim().is_empty()
+                            || !this.pending_attachments.is_empty()
+                            || this.forward_bar_here()
+                        {
                             this.submit_composer(
                                 quill::composer::send_text_on_enter(
                                     text,
@@ -1556,6 +1589,10 @@ impl QuillApp {
             &forward_search_input,
             window,
             |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let text = state.read(cx).value().to_string();
+                    this.sync_share_search(&text, cx);
+                }
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if should_send_on_enter(
@@ -1695,6 +1732,7 @@ impl QuillApp {
             search_input,
             chat_search_input,
             forward_search_input,
+            share_comment_input,
             story_reply_input,
             story_viewers_open: false,
             story_report_open: false,
@@ -1825,11 +1863,20 @@ impl QuillApp {
             chat_filter: ChatListFilter::All,
             new_secret_picker_open: false,
             pending_forward: None,
+            selection_anchor: None,
+            selection_drag: None,
             forward_picker_open: false,
+            share_selection: quill::share_box::ShareSelection::default(),
+            forward_bar_dest: None,
+            send_as_open: false,
             forward_result: None,
             reactions_expanded: false,
             mute_menu_open: false,
+            mute_custom_open: false,
+            mute_custom: quill::mute_menu::CustomMute::default(),
             ttl_picker_open: false,
+            ttl_custom_open: false,
+            ttl_custom_secs: 86_400,
             pinned_cursor: HashMap::new(),
             hidden_pinned: HashMap::new(),
             pinned_list_open: false,
@@ -2064,6 +2111,7 @@ impl QuillApp {
         app.demo_setup_chat_list(demo, window, cx);
         app.demo_setup_media(demo, window, cx);
         app.demo_setup_groups(demo, window, cx);
+        app.demo_setup_share(demo, window, cx);
         app.demo_setup_security(demo, window, cx);
         app.demo_setup_calls(demo, window, cx);
         app.demo_setup_privacy_media(demo, window, cx);
@@ -2230,8 +2278,11 @@ impl QuillApp {
                 {
                     return;
                 }
+                let action = quill::notify::NotificationAction::from_id(
+                    response.action_id.as_ref().map(|id| id.as_ref()),
+                );
                 if let Ok(mut clicks) = this.notify_clicks.lock() {
-                    clicks.push(chat_id);
+                    clicks.push((chat_id, action));
                 }
                 cx.notify();
             });

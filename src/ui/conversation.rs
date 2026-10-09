@@ -608,6 +608,7 @@ impl QuillApp {
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
                 let sendable = !show_attach
+                    || self.forward_bar_here()
                     || !self.pending_attachments.is_empty()
                     || !self.composer.read(cx).value().trim().is_empty();
                 this.child(
@@ -674,6 +675,7 @@ impl QuillApp {
                         .when(
                             self.pending_forward.is_some()
                                 && !self.forward_picker_open
+                                && !self.forward_bar_here()
                                 // Selecting here: the header carries the buttons.
                                 && !self
                                     .session()
@@ -685,6 +687,10 @@ impl QuillApp {
                                 })
                             },
                         )
+                        .when(self.forward_bar_here(), |this| {
+                            this.child(self.forward_bar(cx))
+                        })
+                        .when(self.send_as_open, |this| this.child(self.send_as_panel(cx)))
                         .when_some(self.pending_delete.clone(), |this, _| {
                             this.child(self.delete_confirm_banner(cx))
                         })
@@ -844,6 +850,9 @@ impl QuillApp {
                                 .when_some(self.scheduled_messages_button(cx), |row, button| {
                                     row.child(button)
                                 })
+                                // "Send as" identity of the chat
+                                // (`chat.message_sender_id`).
+                                .when_some(self.send_as_button(cx), |row, button| row.child(button))
                                 // Telegram Desktop's round button: the mic
                                 // while there's nothing to send, Send once
                                 // there is, Save when editing, the slow-mode

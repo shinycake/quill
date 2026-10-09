@@ -172,6 +172,35 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         unread_reaction_count: i32,
     },
+    /// `messageAutoDeleteTime` — `getDefaultMessageAutoDeleteTime` response
+    /// (schema 1.8.67, line 9057).
+    MessageAutoDeleteTime {
+        seconds: i32,
+    },
+    /// `updateMessageUnreadReactions` (schema 1.8.67, line 10450): the
+    /// chat's new reaction counter plus the newest unread reaction (the
+    /// notification source). `newest` is `None` when the list is empty
+    /// (a reaction was read).
+    UpdateMessageUnreadReactions {
+        chat_id: ChatId,
+        message_id: MessageId,
+        unread_reaction_count: i32,
+        newest: Option<UnreadReaction>,
+    },
+    /// `updateNotificationGroup` (schema 1.8.67, line 10685), reduced to
+    /// what clearing shown notifications needs: the chat, how many
+    /// notifications remain in the group and how many were added.
+    UpdateNotificationGroup {
+        chat_id: ChatId,
+        total_count: i32,
+        added_count: usize,
+        removed_count: usize,
+    },
+    /// `updateActiveNotifications` (schema 1.8.67, line 10688): chats that
+    /// still have notifications from a previous launch.
+    UpdateActiveNotifications {
+        chat_ids: Vec<ChatId>,
+    },
     /// Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594) —
     /// `blocked` is true when the new `block_list` is `blockListMain`.
     UpdateChatBlockList {
@@ -247,6 +276,10 @@ pub enum EnvelopePayload {
         /// chat has scheduled messages; refreshed by
         /// `updateChatHasScheduledMessages`.
         has_scheduled_messages: bool,
+        /// `chat.message_sender_id` (schema 1.8.67, line 3627) — the "send
+        /// as" identity selected for the chat; `None` when the user can't
+        /// change it. Refreshed by `updateChatMessageSender`.
+        message_sender: Option<MessageSender>,
         /// `chat.is_translatable` (schema 1.8.67, lines 3599 / 3627) —
         /// translation of the chat's messages must be suggested.
         /// Refreshed by `updateChatIsTranslatable` (line 10585).
@@ -574,6 +607,12 @@ pub enum EnvelopePayload {
         total_count: i32,
         messages: Vec<ParsedMessage>,
         next_offset: String,
+    },
+    /// `foundPublicPosts` — `searchPublicPosts` (schema 1.8.67, line 3182).
+    FoundPublicPosts {
+        messages: Vec<ParsedMessage>,
+        next_offset: String,
+        are_limits_exceeded: bool,
     },
     /// Phase C2i: `userPrivacySettingRules` — `getUserPrivacySettingRules`.
     /// Slice S3: now carries the parsed rule details (exception user ids),
@@ -1196,6 +1235,16 @@ pub enum EnvelopePayload {
     UpdateChatHasScheduledMessages {
         chat_id: i64,
         has_scheduled_messages: bool,
+    },
+    /// `updateChatMessageSender` (schema 1.8.67, line 10546) — the "send as"
+    /// identity of the chat changed.
+    UpdateChatMessageSender {
+        chat_id: i64,
+        message_sender: Option<MessageSender>,
+    },
+    /// `chatMessageSenders` — answer of `getChatAvailableMessageSenders`.
+    ChatMessageSenders {
+        senders: Vec<AvailableMessageSender>,
     },
     /// `updateChatIsTranslatable` (schema 1.8.67, line 10585) — translation
     /// of the chat's messages was enabled or disabled.
