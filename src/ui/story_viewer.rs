@@ -790,10 +790,10 @@ impl QuillApp {
     /// Phase 9.1: close the story viewer; `closeStory` marks the current
     /// story as no longer being viewed.
     pub(super) fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
-        if let Some(item) = self.story_viewer.current().cloned() {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.close_story(item.chat_id, item.story_id);
-            }
+        if let Some(item) = self.story_viewer.current().cloned()
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.close_story(item.chat_id, item.story_id);
         }
         self.story_viewer.close();
         self.pending_story_open = None;
@@ -821,13 +821,12 @@ impl QuillApp {
             self.story_viewer.next();
         }
         let next = self.story_viewer.current().cloned();
-        if let (Some(prev), Some(next)) = (prev, next) {
-            if (prev.chat_id, prev.story_id) != (next.chat_id, next.story_id) {
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.close_story(prev.chat_id, prev.story_id);
-                    let _ = live.driver.open_story(next.chat_id, next.story_id);
-                }
-            }
+        if let (Some(prev), Some(next)) = (prev, next)
+            && (prev.chat_id, prev.story_id) != (next.chat_id, next.story_id)
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.close_story(prev.chat_id, prev.story_id);
+            let _ = live.driver.open_story(next.chat_id, next.story_id);
         }
         self.story_reaction_picker_open = false;
         self.story_reply_open = false;
@@ -878,10 +877,10 @@ impl QuillApp {
                         let now = Instant::now();
                         this.story_playback
                             .set_paused(this.story_playback_paused(), now);
-                        if let Some(item) = this.story_viewer.current().cloned() {
-                            if this.story_playback.finished(&item, now) {
-                                this.advance_story_playback(cx);
-                            }
+                        if let Some(item) = this.story_viewer.current().cloned()
+                            && this.story_playback.finished(&item, now)
+                        {
+                            this.advance_story_playback(cx);
                         }
                         // Phase 9.2+: keep custom-emoji reaction stickers
                         // warm while the viewer is open (picker options +

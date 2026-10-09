@@ -106,10 +106,8 @@ impl PasscodeUi {
             window,
             |this, _, event: &InputEvent, window, cx| match event {
                 InputEvent::PressEnter { .. } => this.submit_unlock(window, cx),
-                InputEvent::Change => {
-                    if this.passcode_ui.lock_error.take().is_some() {
-                        cx.notify();
-                    }
+                InputEvent::Change if this.passcode_ui.lock_error.take().is_some() => {
+                    cx.notify();
                 }
                 _ => {}
             },

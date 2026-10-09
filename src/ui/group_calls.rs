@@ -262,7 +262,7 @@ impl QuillApp {
                 c.participants
                     .iter()
                     .find(|p| p.is_current_user)
-                    .map(|p| p.participant_id.clone())
+                    .map(|p| p.participant_id)
             });
         let Some(me) = me else {
             cx.notify();
@@ -278,16 +278,14 @@ impl QuillApp {
                 .into(),
                 Err(_) => "Couldn't change the hand state.".into(),
             };
-        } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(call) = session.active_group_call.as_mut() {
-                if let Some(p) = call
-                    .participants
-                    .iter_mut()
-                    .find(|p| p.participant_id == me)
-                {
-                    p.is_hand_raised = raise;
-                }
-            }
+        } else if let Some(session) = self.demo_session.as_mut()
+            && let Some(call) = session.active_group_call.as_mut()
+            && let Some(p) = call
+                .participants
+                .iter_mut()
+                .find(|p| p.participant_id == me)
+        {
+            p.is_hand_raised = raise;
         }
         cx.notify();
     }

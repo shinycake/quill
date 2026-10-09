@@ -22,10 +22,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.welcome_dialog = Some(WelcomeDialog::new(window, cx, chat_id));
-        if let Some(live) = self.live.as_mut() {
-            if live.driver.load_chat_welcome_messages(chat_id).is_err() {
-                self.status_note = "could not load welcome messages".into();
-            }
+        if let Some(live) = self.live.as_mut()
+            && live.driver.load_chat_welcome_messages(chat_id).is_err()
+        {
+            self.status_note = "could not load welcome messages".into();
         }
         cx.notify();
     }

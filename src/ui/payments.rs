@@ -776,7 +776,7 @@ impl QuillApp {
                         &regular.saved_credentials,
                         regular.can_save_credentials,
                         regular.need_password,
-                        &session,
+                        session,
                         cx,
                     );
                 }
@@ -1200,19 +1200,19 @@ fn subscription_row(
         // Schema 1.8.67: `reuseStarSubscription` reuses an ACTIVE
         // subscription, so an expired channel sub renews through the
         // type's `invite_link` instead, opened in the OS browser.
-        if let StarSubscriptionTypeData::Channel { invite_link, .. } = &sub.sub_type {
-            if !invite_link.is_empty() {
-                let link = invite_link.clone();
-                let id = sub.id.clone();
-                row = row.child(
-                    Button::new(format!("subs-renew-{id}"))
-                        .label("Renew")
-                        .disabled(mutating)
-                        .on_click(cx.listener(move |_, _, _, cx| {
-                            cx.open_url(&link);
-                        })),
-                );
-            }
+        if let StarSubscriptionTypeData::Channel { invite_link, .. } = &sub.sub_type
+            && !invite_link.is_empty()
+        {
+            let link = invite_link.clone();
+            let id = sub.id.clone();
+            row = row.child(
+                Button::new(format!("subs-renew-{id}"))
+                    .label("Renew")
+                    .disabled(mutating)
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.open_url(&link);
+                    })),
+            );
         }
     } else if sub.is_canceled {
         let id = sub.id.clone();

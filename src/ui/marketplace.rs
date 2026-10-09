@@ -62,7 +62,7 @@ impl QuillApp {
                     }
                     body=body.child(Textarea::new(&this.marketplace_comment_input).disabled(busy || gift.completed).aria_label("Personal comment"))
                         .child(div().text_xs().child(limit.map(|l|format!("Up to {l} characters. Paid-message recipients may require an empty comment.")).unwrap_or("Comment limit unavailable. Reload the gift before sending a comment.".into())))
-                        .child(Button::new("gift-private").label(if this.marketplace_private { "Comment and sender: receiver only" } else { "Comment and sender: visible to everyone" }).selected(this.marketplace_private).disabled(busy || gift.completed).on_click(cx.listener(|this,_,_,cx|{this.marketplace_private=!this.marketplace_private;cx.notify();})));
+                        .child(Button::new("gift-private").label(if this.marketplace_private { "Comment and sender: receiver only" } else { "Comment and sender: visible to everyone" }).selected(this.marketplace_private).disabled(busy || gift.completed).on_click(cx.listener(|this,_,_,cx|{this.marketplace_private = !this.marketplace_private;cx.notify();})));
                     if let Some(price)=gift.price {
                         let quoted_name=quote.name.clone();
                         body=body.child(Button::new("gift-buy").label(format!("Buy for {} and send to {}",price.label(),gift.recipient_name)).disabled(busy || gift.completed).on_click(cx.listener(move|this,_,_,cx|{

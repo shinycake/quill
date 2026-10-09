@@ -484,6 +484,13 @@ pub enum RequestPurpose {
     ReportChatSponsoredMessage,
     /// `viewSponsoredChat`. Response is `ok`.
     ViewSponsoredChat,
+    /// `viewMessages` carrying a sponsored message id (TDLib 1.8.67 has no
+    /// `viewSponsoredMessage`; the schema says sponsored messages are marked
+    /// viewed through `viewMessages`). Response is `ok`; fire-and-forget.
+    ViewSponsoredMessages,
+    /// `toggleHasSponsoredMessagesEnabled(false)`: the Premium "hide ads"
+    /// action. Response is `ok`; the reducer then hides all ads.
+    ToggleHasSponsoredMessagesEnabled,
     /// `clickChatSponsoredMessage`. Response is `ok`; fire-and-forget.
     ClickChatSponsoredMessage,
     /// `getMe`. Response is `user`; only the id is kept.

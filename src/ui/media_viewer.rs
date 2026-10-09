@@ -397,7 +397,7 @@ impl QuillApp {
                     .map_err(|err| format!("{}: {err}", path.display()))?
                     .into_rgba8();
                 // RenderImage stores BGRA, as does the shared call-frame decoder below.
-                for pixel in rgba.chunks_exact_mut(4) {
+                for pixel in rgba.as_chunks_mut::<4>().0 {
                     pixel.swap(0, 2);
                 }
                 Ok(Arc::new(RenderImage::new(SmallVec::from_buf([
@@ -420,7 +420,7 @@ impl QuillApp {
         )?;
         // GPUI holds RenderImage pixels in BGRA (its own decoder swaps
         // R<->B after into_rgba8); the engine delivers RGBA, so swap here.
-        for pixel in rgba.chunks_exact_mut(4) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
         Some(Arc::new(RenderImage::new(SmallVec::from_buf([
@@ -580,6 +580,7 @@ impl QuillApp {
         let extract_path = path.clone();
         let task_slot = slot.clone();
         let task_cancel = cancel.clone();
+        #[allow(clippy::let_underscore_future)]
         let _ = cx.spawn(async move |this, cx| {
             let extracted = cx
                 .background_executor()
@@ -2054,7 +2055,7 @@ impl QuillApp {
             // a rotated photo renders from the eagerly-decoded
             // `viewer_rotated` cache (90°/180°/270° clockwise).
             let rotated: Option<ImageSource> = (item.kind == MediaViewerKind::Photo)
-                .then(|| self.viewer_rotated.as_ref())
+                .then_some(self.viewer_rotated.as_ref())
                 .flatten()
                 .filter(|(path, turns, _)| {
                     *turns == self.viewer_orientation.code()

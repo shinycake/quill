@@ -1062,7 +1062,7 @@ impl QuillApp {
                     Some(value.as_str())
                 } else {
                     self.username_dialog = Some(dialog);
-                    self.status_note = format!("file not found: {value}").into();
+                    self.status_note = format!("file not found: {value}");
                     cx.notify();
                     return;
                 };

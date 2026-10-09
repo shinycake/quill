@@ -466,7 +466,7 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        chats.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        chats.sort_by_key(|a| a.1.to_lowercase());
         let mut chat_list = div()
             .id("folder-editor-chats")
             .flex()

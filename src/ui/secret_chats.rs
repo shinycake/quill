@@ -391,7 +391,7 @@ impl QuillApp {
             self.status_note = if secs == 0 {
                 "timer off".into()
             } else {
-                format!("timer {}", format_ttl_setting(secs)).into()
+                format!("timer {}", format_ttl_setting(secs))
             };
             cx.notify();
         }
