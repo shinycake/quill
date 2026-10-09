@@ -1266,3 +1266,141 @@ fn sender_identity_survives_history_and_search() {
     let searched = SearchMessageHit::from_parsed(&crate::telegram::envelope::parse_message(&serde_json::json!({"id":711,"chat_id":11,"sender_id":{"@type":"messageSenderChat","chat_id":99},"content":{"@type":"messageText","text":{"text":"Hello","entities":[]}}})).unwrap()).into_history();
     assert_eq!(searched.sender, Some(MessageSender::Chat { chat_id: 99 }));
 }
+
+fn scheduled_entry(id: i64, send_date: i32) -> ParsedMessage {
+    use crate::telegram::envelope::MessageSchedulingState;
+    ParsedMessage {
+        sender: None,
+        id: MessageId(id),
+        chat_id: ChatId(7),
+        date: 0,
+        is_outgoing: true,
+        is_pinned: false,
+        topic_id: None,
+        thread_id: None,
+        ephemeral: None,
+        media_album_id: 0,
+        author_signature: None,
+        scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date }),
+        can_retry: false,
+        send_state: Default::default(),
+        content: MessageContent::Text("later".into()),
+        files: Vec::new(),
+        reply_to: None,
+        forward_info: None,
+        extras: Default::default(),
+        interaction_info: None,
+        reply_markup: None,
+        self_destruct: None,
+        auto_delete: None,
+    }
+}
+
+#[test]
+fn reschedule_ok_rewrites_the_scheduled_entry() {
+    use crate::composer::ComposerScheduling;
+    use crate::telegram::envelope::MessageSchedulingState;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.scheduled_messages.push(scheduled_entry(70, 1000));
+    session.scheduled_messages.push(scheduled_entry(71, 2000));
+    let extra = session.request(
+        RequestPurpose::EditMessageSchedulingState {
+            message_id: MessageId(70),
+            scheduling: ComposerScheduling::SendAtDate(5000),
+        },
+        Some(ChatId(7)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert_eq!(
+        session.scheduled_messages[0].scheduling_state,
+        Some(MessageSchedulingState::SendAtDate { send_date: 5000 })
+    );
+    assert_eq!(
+        session.scheduled_messages[1].scheduling_state,
+        Some(MessageSchedulingState::SendAtDate { send_date: 2000 })
+    );
+}
+
+#[test]
+fn send_now_ok_drops_the_scheduled_entry() {
+    use crate::composer::ComposerScheduling;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.scheduled_messages.push(scheduled_entry(70, 1000));
+    session.scheduled_messages.push(scheduled_entry(71, 2000));
+    let extra = session.request(
+        RequestPurpose::EditMessageSchedulingState {
+            message_id: MessageId(70),
+            scheduling: ComposerScheduling::None,
+        },
+        Some(ChatId(7)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    let ids: Vec<i64> = session.scheduled_messages.iter().map(|m| m.id.0).collect();
+    assert_eq!(ids, vec![71]);
+}
+
+#[test]
+fn scheduling_edit_error_keeps_the_entry_and_surfaces() {
+    use crate::composer::ComposerScheduling;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.scheduled_messages.push(scheduled_entry(70, 1000));
+    let extra = session.request(
+        RequestPurpose::EditMessageSchedulingState {
+            message_id: MessageId(70),
+            scheduling: ComposerScheduling::None,
+        },
+        Some(ChatId(7)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_ID_INVALID"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.scheduled_messages.len(), 1);
+    let err = session.resend_error.expect("error surfaced");
+    assert!(err.contains("Could not send the message now"), "{err}");
+}
+
+#[test]
+fn has_scheduled_messages_tracks_chat_and_update() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"g","type":{"@type":"chatTypePrivate","user_id":14},"unread_count":0,"has_scheduled_messages":true}}"#,
+    );
+    assert!(session.chat_has_scheduled_messages(ChatId(14)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatHasScheduledMessages","chat_id":14,"has_scheduled_messages":false}"#,
+    );
+    assert!(!session.chat_has_scheduled_messages(ChatId(14)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatHasScheduledMessages","chat_id":15,"has_scheduled_messages":true}"#,
+    );
+    assert!(session.chat_has_scheduled_messages(ChatId(15)));
+}

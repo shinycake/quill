@@ -900,21 +900,21 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Scheduled messages
 
-- [ ] Send now on a scheduled message <!-- parity:scheduled-send-now -->
-- [ ] Reschedule a scheduled message to a new time <!-- parity:scheduled-reschedule -->
-- [ ] Date and time picker for scheduling (today only the +1h, +8h and +24h presets) <!-- parity:scheduled-date-picker -->
-- [ ] "Set a reminder" wording when scheduling in Saved Messages <!-- parity:scheduled-reminder-wording -->
-- [ ] Send when online stays available next to the date picker in the schedule popup <!-- parity:scheduled-send-when-online -->
-- [ ] Scheduled-messages icon next to the composer when a chat has scheduled messages <!-- parity:scheduled-composer-icon -->
+- [x] Send now on a scheduled message <!-- parity:scheduled-send-now -->
+- [x] Reschedule a scheduled message to a new time <!-- parity:scheduled-reschedule -->
+- [x] Date and time picker for scheduling (today only the +1h, +8h and +24h presets) <!-- parity:scheduled-date-picker -->
+- [x] "Set a reminder" wording when scheduling in Saved Messages <!-- parity:scheduled-reminder-wording -->
+- [x] Send when online stays available next to the date picker in the schedule popup <!-- parity:scheduled-send-when-online -->
+- [x] Scheduled-messages icon next to the composer when a chat has scheduled messages <!-- parity:scheduled-composer-icon -->
 - [ ] Select several scheduled messages to send now, reschedule or delete <!-- parity:scheduled-select-many -->
 
 ### Deep links
 
-- [ ] Every t.me and tg:// link is classified by Telegram itself, not by a small local parser (today five link forms are handled) <!-- parity:deeplink-internal-link-type -->
-- [ ] addstickers and addemoji links open the sticker or emoji set <!-- parity:deeplink-stickers-emoji -->
-- [ ] proxy and socks links offer to add the proxy <!-- parity:deeplink-proxy -->
-- [ ] share and msg_url links open a chat picker with the draft text <!-- parity:deeplink-share-draft -->
-- [ ] Settings links open the matching settings page <!-- parity:deeplink-settings -->
+- [x] Every t.me and tg:// link is classified by Telegram itself, not by a small local parser (today five link forms are handled) <!-- parity:deeplink-internal-link-type -->
+- [x] addstickers and addemoji links open the sticker or emoji set <!-- parity:deeplink-stickers-emoji -->
+- [x] proxy and socks links offer to add the proxy <!-- parity:deeplink-proxy -->
+- [x] share and msg_url links open a chat picker with the draft text <!-- parity:deeplink-share-draft -->
+- [x] Settings links open the matching settings page <!-- parity:deeplink-settings -->
 - [ ] Login code links fill in the code <!-- parity:deeplink-login-code -->
 - [ ] Invoice links open the payment checkout <!-- parity:deeplink-invoice -->
 - [ ] Boost links open the boost dialog <!-- parity:deeplink-boost -->
@@ -922,11 +922,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
 - [ ] addlist links add a shared folder <!-- parity:deeplink-addlist -->
 - [ ] Background and theme links preview and apply them <!-- parity:deeplink-bg-theme -->
-- [ ] +phone links open a chat with that number <!-- parity:deeplink-phone -->
+- [x] +phone links open a chat with that number <!-- parity:deeplink-phone -->
 - [ ] ?startgroup and ?startchannel links add a bot to a group or channel <!-- parity:deeplink-startgroup -->
-- [ ] Message links with ?thread, ?comment, ?single and topic ids open the right thread <!-- parity:deeplink-thread-comment -->
-- [ ] Story and story album links open the story viewer <!-- parity:deeplink-story -->
-- [ ] ?t= timestamp links seek the media to that time <!-- parity:deeplink-timestamp -->
+- [x] Message links with ?thread, ?comment, ?single and topic ids open the right thread <!-- parity:deeplink-thread-comment -->
+- [x] Story and story album links open the story viewer <!-- parity:deeplink-story -->
+- [x] ?t= timestamp links seek the media to that time <!-- parity:deeplink-timestamp -->
 - [ ] Premium offer, privacy policy and language pack links <!-- parity:deeplink-premium-language -->
 - [ ] Register the tg:// scheme on Linux and Windows <!-- parity:deeplink-scheme-registration -->
 

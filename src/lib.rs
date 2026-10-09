@@ -53,6 +53,7 @@ pub mod privacy;
 pub mod proxy;
 pub mod rich;
 pub mod row_fx;
+pub mod schedule;
 pub mod search_filters;
 pub mod send_button;
 pub mod service_text;

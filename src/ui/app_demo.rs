@@ -575,6 +575,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — proxy settings (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyScheduled => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — scheduled messages (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyJumpDate
         | ScreenshotDemo::ReadySearchFrom
         | ScreenshotDemo::ReadySearchFromHits
@@ -1735,6 +1741,7 @@ impl QuillApp {
             composer_preview_token: 0,
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
+            schedule_picker: None,
             scheduled_dialog_open: false,
             rich_editor_open: false,
             message_menu: None,

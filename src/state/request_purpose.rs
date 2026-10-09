@@ -289,6 +289,13 @@ pub enum RequestPurpose {
     /// M1: `getChatScheduledMessages`. Response is `messages`, stored in
     /// `Session::scheduled_messages` instead of merged into history.
     GetChatScheduledMessages,
+    /// `editMessageSchedulingState`. Response is `ok`; `scheduling` is the
+    /// new state (`None` = send now). The scheduled list entry is updated
+    /// or dropped on success.
+    EditMessageSchedulingState {
+        message_id: MessageId,
+        scheduling: ComposerScheduling,
+    },
     /// `setChatNotificationSettings`. Response is `ok`; mute via
     /// `updateChatNotificationSettings`.
     SetChatNotificationSettings,
