@@ -48,7 +48,9 @@ impl Render for QuillApp {
         // one) and swept no player orphans them.
         let history_drawn = self.slices.conversation_rendered.replace(false)
             || !self.slices.conversation_shown.replace(false);
-        self.inline_videos.borrow_mut().frame_start(history_drawn);
+        self.inline_videos
+            .borrow_mut()
+            .frame_start(history_drawn, window.scale_factor());
         let active = window.is_window_active() || super::frame_clock::assume_active();
         if self.window_active.replace(active) != active {
             self.inline_videos.borrow_mut().set_window_active(active);

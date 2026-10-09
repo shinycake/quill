@@ -69,9 +69,116 @@ const SEEK_HIDE: f32 = 0.15;
 const SEEK_GRAB: f32 = 0.15;
 
 /// Pictures of an inline clip are decoded at most this many px on their
-/// longer side (the largest tile, twice for HiDPI); the AVPlayer backend
-/// draws its own buffers and ignores it.
-const INLINE_MAX_EDGE: u32 = 720;
+/// longer side: the tallest tile (`media_frame`'s 400 pt) at 2x. Below
+/// that they are decoded at the tile's own size in device pixels
+/// ([`InlineTile::decode_edge`]); the AVPlayer backend draws its own
+/// buffers and ignores it.
+const INLINE_MAX_EDGE: u32 = 800;
+const INLINE_MIN_EDGE: u32 = 16;
+
+/// Telegram Desktop's `kMaxInlineArea` (`history_view_gif.cpp`): a clip
+/// whose frames are larger than 1080p doesn't play inline (its still
+/// shows; the viewer plays it). Applied where clips are decoded in
+/// software (FFmpeg), as tdesktop does everywhere.
+const MAX_INLINE_AREA: i64 = 1920 * 1080;
+
+/// Decoded picture memory (queued pictures plus the one shown) all inline
+/// players together may hold. Past it a further tile keeps its still until
+/// a running clip stops; with tiles sized to the screen it takes a dozen
+/// or more large clips on screen at once to get there.
+const INLINE_DECODE_BUDGET: usize = 64 * 1024 * 1024;
+
+/// Where an inline clip is drawn: its media's size in pixels (Telegram's
+/// metadata; 0 when unknown) and its tile in points.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct InlineTile {
+    media: (i32, i32),
+    tile: (f32, f32),
+}
+
+impl InlineTile {
+    /// A video or GIF tile: the media fitted by `media_frame`.
+    pub(super) fn media(width: i32, height: i32) -> Self {
+        let (w, h) = super::message_media::media_frame(width, height);
+        Self {
+            media: (width, height),
+            tile: (f32::from(w), f32::from(h)),
+        }
+    }
+
+    /// A round video message: a square clip in a fixed circle.
+    pub(super) fn round(length: i32) -> Self {
+        let diameter = super::message_media::VIDEO_NOTE_DIAMETER;
+        Self {
+            media: (length, length),
+            tile: (diameter, diameter),
+        }
+    }
+
+    /// The longer side, in device pixels, to decode pictures at so that,
+    /// drawn with `ObjectFit::Cover`, they fill the tile without upscaling
+    /// on a `scale` display; bounded by [`INLINE_MAX_EDGE`].
+    fn decode_edge(self, scale: f32) -> u32 {
+        let scale = if scale.is_finite() && scale > 0. {
+            scale
+        } else {
+            2.
+        };
+        let (tw, th) = (self.tile.0 * scale, self.tile.1 * scale);
+        let longer = match self.media {
+            (w, h) if w > 0 && h > 0 => {
+                let (w, h) = (w as f32, h as f32);
+                w.max(h) * (tw / w).max(th / h)
+            }
+            // Unknown proportions: the cap keeps any shape sharp.
+            _ => INLINE_MAX_EDGE as f32,
+        };
+        longer
+            .ceil()
+            .clamp(INLINE_MIN_EDGE as f32, INLINE_MAX_EDGE as f32) as u32
+    }
+
+    /// The decoded picture size: the media scaled down (never up) to fit
+    /// an `edge` box, as the decoder does.
+    fn decoded_size(self, edge: u32) -> (u32, u32) {
+        match self.media {
+            (w, h) if w > 0 && h > 0 => {
+                let (w, h) = (w as u32, h as u32);
+                let longer = w.max(h);
+                if longer <= edge {
+                    (w, h)
+                } else {
+                    let fit = |side: u32| {
+                        ((u64::from(side) * u64::from(edge)).div_ceil(u64::from(longer)) as u32)
+                            .max(1)
+                    };
+                    (fit(w), fit(h))
+                }
+            }
+            _ => (edge, edge),
+        }
+    }
+
+    /// Bytes of BGRA a player decoding at `edge` holds at most: `queued`
+    /// pictures ahead plus the one shown.
+    fn decode_bytes(self, edge: u32, queued: usize) -> usize {
+        let (w, h) = self.decoded_size(edge);
+        w as usize * h as usize * 4 * (queued + 1)
+    }
+
+    /// Whether the clip is small enough to play inline in software
+    /// ([`MAX_INLINE_AREA`]); unknown sizes may try.
+    pub(super) fn within_inline_area(self) -> bool {
+        let (w, h) = self.media;
+        w <= 0 || h <= 0 || i64::from(w) * i64::from(h) <= MAX_INLINE_AREA
+    }
+}
+
+/// Whether a new player holding `more` bytes fits next to players holding
+/// `held` ([`INLINE_DECODE_BUDGET`]). The first one always does.
+fn admits(held: usize, more: usize) -> bool {
+    held == 0 || held.saturating_add(more) <= INLINE_DECODE_BUDGET
+}
 
 /// `anim::easeOutBack`: overshoots a little, then settles.
 fn ease_out_back(t: f32) -> f32 {
@@ -131,10 +238,16 @@ pub(super) struct InlineVideos {
     swept: bool,
     /// The window is in the background: muted loops hold still.
     inactive: bool,
+    /// The window's display scale (device pixels per point); 0 until the
+    /// first frame reports it.
+    scale: f32,
 }
 
 struct Slot {
     video: NativeVideo,
+    /// Decoded picture memory it may hold (0 for AVPlayer, whose buffers
+    /// aren't ours).
+    bytes: usize,
     seen: u64,
     sound: bool,
     /// Paused by a click while playing with sound.
@@ -160,11 +273,19 @@ impl InlineVideos {
     /// show a clip, so every player stops. Without this, a clip that was
     /// playing when you left the chat kept decoding and kept the frame
     /// clock at 30 fps forever.
-    pub(super) fn frame_start(&mut self, history_drawn: bool) {
+    /// `scale` is the window's display scale, for the size new players
+    /// decode at.
+    pub(super) fn frame_start(&mut self, history_drawn: bool, scale: f32) {
         if history_drawn && !self.swept {
             self.clear();
         }
         self.swept = false;
+        self.scale = scale;
+    }
+
+    /// Decoded picture memory the running players may hold.
+    fn held_bytes(&self) -> usize {
+        self.players.values().map(|slot| slot.bytes).sum()
     }
 
     /// Whether any clip is playing: the frame clock keeps ticking, also
@@ -282,21 +403,34 @@ impl InlineVideos {
     }
 
     /// The current frame of this message's clip, starting its muted,
-    /// looping player on first use (`path` is only resolved then).
+    /// looping player on first use (`path` is only resolved then), sized
+    /// for `tile`. A clip that would take the decoded memory past
+    /// [`INLINE_DECODE_BUDGET`] doesn't start (its still shows).
     pub(super) fn frame(
         &mut self,
         chat_id: i64,
         message_id: i64,
+        tile: InlineTile,
         path: impl FnOnce() -> Option<PathBuf>,
     ) -> Option<InlineFrame> {
         let render = self.render;
         let inactive = self.inactive;
+        let held = self.held_bytes();
+        let scale = self.scale;
         let slot = match self.players.entry((chat_id, message_id)) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
-                let purpose = Purpose::Inline {
-                    max_edge: INLINE_MAX_EDGE,
+                let max_edge = tile.decode_edge(scale);
+                let bytes = if super::native_video::decodes_in_process() {
+                    let queued = quill::video_decode::OpenOptions::inline(max_edge).video_frames;
+                    tile.decode_bytes(max_edge, queued)
+                } else {
+                    0
                 };
+                if !admits(held, bytes) {
+                    return None;
+                }
+                let purpose = Purpose::Inline { max_edge };
                 let mut video = NativeVideo::open(&path()?, purpose).ok()?;
                 video.set_volume(0.0);
                 // Behind another app a new muted loop waits for activation.
@@ -305,6 +439,7 @@ impl InlineVideos {
                 }
                 entry.insert(Slot {
                     video,
+                    bytes,
                     seen: render,
                     sound: false,
                     paused: false,
@@ -391,16 +526,19 @@ impl QuillApp {
         if prefs.data_saver {
             return None;
         }
-        let file_id = match &message.content {
+        let (file_id, tile) = match &message.content {
             MessageContent::Video(video)
                 if prefs.autoplay_videos && !video.is_secret && !video.has_spoiler =>
             {
-                video.play_file_id()?
+                (
+                    video.play_file_id()?,
+                    InlineTile::media(video.width, video.height),
+                )
             }
             // The player takes Telegram's MP4 GIFs; true `image/gif`
             // files keep the frame-extraction path.
             MessageContent::VideoNote(note) if prefs.autoplay_videos && !note.is_secret => {
-                note.play_file_id()?
+                (note.play_file_id()?, InlineTile::round(note.length))
             }
             MessageContent::Animation(animation)
                 if prefs.autoplay_gifs
@@ -408,10 +546,17 @@ impl QuillApp {
                     && !animation.has_spoiler
                     && animation.mime_type != "image/gif" =>
             {
-                animation.play_file_id()?
+                (
+                    animation.play_file_id()?,
+                    InlineTile::media(animation.width, animation.height),
+                )
             }
             _ => return None,
         };
+        // Software decoding (FFmpeg) leaves clips above 1080p to the viewer.
+        if super::native_video::decodes_in_process() && !tile.within_inline_area() {
+            return None;
+        }
         let file = session.files.get(&file_id.0)?;
         if file.usable_path().is_none() {
             // Like Telegram Desktop, fetch a clip that should autoplay
@@ -433,7 +578,7 @@ impl QuillApp {
         let frame = self
             .inline_videos
             .borrow_mut()
-            .frame(chat_id.0, message_id.0, || {
+            .frame(chat_id.0, message_id.0, tile, || {
                 self.playable_clip_path(chat_id, message_id, file_id)
             });
         // A muted loop in the conversation is drawn by its animation layer
@@ -594,7 +739,74 @@ pub(super) fn corner_mask(
 
 #[cfg(test)]
 mod tests {
-    use super::{circle_mask, corner_mask};
+    use super::{
+        INLINE_DECODE_BUDGET, INLINE_MAX_EDGE, InlineTile, admits, circle_mask, corner_mask,
+    };
+
+    #[test]
+    fn clips_decode_at_their_tile_size_in_device_pixels() {
+        // A 720p GIF fills a 360 x 202.5 pt tile: 360 px wide at 1x, 720 at 2x.
+        let gif = InlineTile::media(1280, 720);
+        assert_eq!(gif.decode_edge(1.), 360);
+        assert_eq!(gif.decode_edge(2.), 720);
+        assert_eq!(gif.decoded_size(360), (360, 203));
+        // A round video message: the 220 pt circle.
+        let round = InlineTile::round(640);
+        assert_eq!(round.decode_edge(1.), 220);
+        assert_eq!(round.decode_edge(1.5), 330);
+        assert_eq!(round.decode_edge(2.), 440);
+        // A tall portrait clip covers its 400 pt height at 2x, at the cap.
+        assert_eq!(
+            InlineTile::media(1080, 1920).decode_edge(2.),
+            INLINE_MAX_EDGE
+        );
+        // A very wide clip cropped into the minimum height, or a clip of
+        // unknown proportions, decodes at the cap.
+        assert_eq!(
+            InlineTile::media(1000, 100).decode_edge(1.),
+            INLINE_MAX_EDGE
+        );
+        assert_eq!(InlineTile::media(0, 0).decode_edge(1.), INLINE_MAX_EDGE);
+        // Before the first frame reports a scale, assume 2x.
+        assert_eq!(gif.decode_edge(0.), 720);
+        assert_eq!(gif.decode_edge(f32::NAN), 720);
+    }
+
+    #[test]
+    fn small_clips_are_never_upscaled() {
+        let tiny = InlineTile::media(100, 80);
+        assert_eq!(tiny.decoded_size(tiny.decode_edge(2.)), (100, 80));
+        assert_eq!(tiny.decode_bytes(720, 3), 100 * 80 * 4 * 4);
+        assert_eq!(InlineTile::media(0, 0).decoded_size(300), (300, 300));
+    }
+
+    #[test]
+    fn clips_above_1080p_stay_still_in_software() {
+        assert!(InlineTile::media(1920, 1080).within_inline_area());
+        assert!(InlineTile::media(1080, 1920).within_inline_area());
+        assert!(!InlineTile::media(2560, 1440).within_inline_area());
+        assert!(!InlineTile::media(3840, 2160).within_inline_area());
+        // Unknown sizes may try.
+        assert!(InlineTile::media(0, 0).within_inline_area());
+        assert!(InlineTile::round(640).within_inline_area());
+    }
+
+    #[test]
+    fn players_share_a_decoded_memory_budget() {
+        // The first clip always plays, however large.
+        assert!(admits(0, INLINE_DECODE_BUDGET * 2));
+        // Players at 1x 720p-GIF size: dozens fit.
+        let each = InlineTile::media(1280, 720).decode_bytes(360, 3);
+        let fit = (1..).take_while(|n| admits(each * n, each)).count();
+        assert!(fit >= 40, "{fit}");
+        // At 2x they cost four times as much, still a dozen.
+        let each = InlineTile::media(1280, 720).decode_bytes(720, 3);
+        let fit = (1..).take_while(|n| admits(each * n, each)).count();
+        assert!((12..40).contains(&fit), "{fit}");
+        // AVPlayer players hold nothing of ours.
+        assert!(admits(INLINE_DECODE_BUDGET, 0));
+        assert!(!admits(INLINE_DECODE_BUDGET, 1));
+    }
 
     #[test]
     fn corner_mask_cuts_only_the_corner_outsides() {
