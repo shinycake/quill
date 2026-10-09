@@ -1,2 +1,0 @@
-# B8 join requests: approve all, dismiss all, search (invite-link admin item stays open: no QR, no per-admin drill-down)
-parity:admin-join-requests-bulk
