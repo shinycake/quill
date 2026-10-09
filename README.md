@@ -377,9 +377,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Tapping a hashtag searches this chat, my messages or public posts <!-- parity:chatlist-hashtag-search -->
 - [x] In-chat search: filter by sender, calendar, and "N of M" result counter <!-- parity:chatlist-inchat-search-from -->
 - [ ] Shareable folders: invite links, add folder by link, "N new chats" bar <!-- parity:chatlist-folder-share -->
-- [ ] Recommended folders <!-- parity:chatlist-folder-recommended -->
-- [ ] Folder icon picker and tab display (text, icons, or both) <!-- parity:chatlist-folder-icons -->
-- [ ] Folders sidebar layout (tabs on the left) <!-- parity:chatlist-folder-sidebar -->
+- [x] Recommended folders <!-- parity:chatlist-folder-recommended -->
+- [x] Folder icon picker and tab display (text, icons, or both) <!-- parity:chatlist-folder-icons -->
+- [x] Folders sidebar layout (tabs on the left) <!-- parity:chatlist-folder-sidebar -->
 - [ ] Folder tag color picker <!-- parity:chatlist-folder-tag-color -->
 - [ ] Folder context menu: Edit, Remove, Mark all as read, Share <!-- parity:chatlist-folder-context-menu -->
 - [ ] Folder limit boxes with a Premium upsell <!-- parity:chatlist-folder-limits -->
@@ -943,7 +943,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Boost links open the boost dialog <!-- parity:deeplink-boost -->
 - [ ] Premium gift code links offer to apply the code <!-- parity:deeplink-giftcode -->
 - [ ] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
-- [ ] addlist links add a shared folder <!-- parity:deeplink-addlist -->
+- [x] addlist links add a shared folder <!-- parity:deeplink-addlist -->
 - [ ] Background and theme links preview and apply them <!-- parity:deeplink-bg-theme -->
 - [x] +phone links open a chat with that number <!-- parity:deeplink-phone -->
 - [ ] ?startgroup and ?startchannel links add a bot to a group or channel <!-- parity:deeplink-startgroup -->

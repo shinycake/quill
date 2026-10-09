@@ -1,4 +1,0 @@
-parity:chatlist-folder-recommended
-parity:chatlist-folder-icons
-parity:chatlist-folder-sidebar
-parity:deeplink-addlist
