@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.0 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 //! Text input: the shared editing engine and the three states built on it.
 //!
 //! Nothing here should be `pub` unless it is reachable from outside the crate.
@@ -27,7 +25,6 @@ mod decorations;
 mod diagnostics;
 #[path = "editor/display_map/mod.rs"]
 mod display_map;
-pub mod bidi_paragraph;
 mod editor;
 #[path = "base/element.rs"]
 mod element;
@@ -43,7 +40,8 @@ mod token_presentation;
 pub use inline_tokens::{InlineToken, InlineTokenError, InlineTokenSpan, InputContent};
 pub(crate) use token_presentation::InlineTokenPresentation;
 pub use token_presentation::{
-    InlineTokenClickEvent, InlineTokenClickListener, InlineTokenContext, InlineTokenRenderer,
+    InlineTokenClickEvent, InlineTokenClickListener, InlineTokenContext, InlineTokenHoverEvent,
+    InlineTokenHoverListener, InlineTokenRenderer,
 };
 #[path = "base/kind.rs"]
 mod kind;
