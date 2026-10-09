@@ -387,8 +387,37 @@ impl Session {
             Some(VideoChatInfo {
                 group_call_id: video_chat.group_call_id,
                 has_participants: video_chat.has_participants,
+                default_participant_id: video_chat.default_participant_id,
             })
         };
+    }
+
+    /// `getVideoChatAvailableParticipants` answer: store the "join as"
+    /// choices on the tracked call and settle the current pick.
+    pub(crate) fn set_group_call_join_as_options(
+        &mut self,
+        group_call_id: i32,
+        senders: Vec<MessageSender>,
+    ) {
+        let default = self.chats.values().find_map(|chat| {
+            chat.video_chat
+                .as_ref()
+                .filter(|vc| vc.group_call_id == group_call_id)
+                .and_then(|vc| vc.default_participant_id)
+        });
+        if let Some(tracked) = self.active_group_call.as_mut()
+            && tracked.id == group_call_id
+        {
+            tracked.join_as = pick_join_as(&senders, tracked.join_as, default);
+            tracked.join_as_options = senders;
+        }
+    }
+
+    /// Choose the identity for the next join (also `None` = yourself).
+    pub fn set_group_call_join_as(&mut self, sender: Option<MessageSender>) {
+        if let Some(tracked) = self.active_group_call.as_mut() {
+            tracked.join_as = sender;
+        }
     }
 
     /// Phase C3a: drop the tracked group call after the local user
@@ -445,5 +474,46 @@ impl Session {
         {
             tracked.invite_link = Some(link);
         }
+    }
+}
+
+/// The "join as" identity to preselect: an earlier pick that is still on
+/// offer wins, then the chat's saved default, otherwise nothing (the
+/// server joins as the current user).
+pub(crate) fn pick_join_as(
+    options: &[MessageSender],
+    current: Option<MessageSender>,
+    default: Option<MessageSender>,
+) -> Option<MessageSender> {
+    current
+        .filter(|c| options.contains(c))
+        .or_else(|| default.filter(|d| options.contains(d)))
+}
+
+#[cfg(test)]
+mod join_as_tests {
+    use super::pick_join_as;
+    use crate::telegram::envelope::MessageSender;
+
+    const ME: MessageSender = MessageSender::User { user_id: 1 };
+    const CHANNEL: MessageSender = MessageSender::Chat { chat_id: -100 };
+    const OTHER: MessageSender = MessageSender::Chat { chat_id: -200 };
+
+    #[test]
+    fn earlier_pick_beats_the_saved_default() {
+        let options = [ME, CHANNEL];
+        assert_eq!(pick_join_as(&options, Some(ME), Some(CHANNEL)), Some(ME));
+    }
+
+    #[test]
+    fn saved_default_is_used_when_nothing_was_picked() {
+        let options = [ME, CHANNEL];
+        assert_eq!(pick_join_as(&options, None, Some(CHANNEL)), Some(CHANNEL));
+    }
+
+    #[test]
+    fn identities_that_are_no_longer_offered_are_dropped() {
+        let options = [ME];
+        assert_eq!(pick_join_as(&options, Some(OTHER), Some(CHANNEL)), None);
     }
 }

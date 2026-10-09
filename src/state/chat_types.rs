@@ -273,6 +273,8 @@ pub struct ChatSummary {
 pub struct VideoChatInfo {
     pub group_call_id: i32,
     pub has_participants: bool,
+    /// The "join as" chosen last time (`videoChat.default_participant_id`).
+    pub default_participant_id: Option<MessageSender>,
 }
 
 impl ChatSummary {

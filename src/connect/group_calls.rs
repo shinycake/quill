@@ -7,12 +7,13 @@ use crate::telegram::envelope::{ChatKind, MessageSender};
 use crate::telegram::requests::{
     GroupCallJoinParams, InputGroupCallRef, MessageSenderRef, ban_group_call_participants,
     create_video_chat, decline_group_call_invitation, end_group_call, end_group_call_recording,
-    end_group_call_screen_sharing, get_group_call, get_video_chat_invite_link,
-    get_video_chat_rtmp_url, invite_group_call_participant, join_group_call,
-    join_live_story as join_live_story_request, join_video_chat, leave_group_call,
+    end_group_call_screen_sharing, get_group_call, get_video_chat_available_participants,
+    get_video_chat_invite_link, get_video_chat_rtmp_url, invite_group_call_participant,
+    join_group_call, join_live_story as join_live_story_request, join_video_chat, leave_group_call,
     load_group_call_participants, replace_video_chat_rtmp_url, revoke_group_call_invite_link,
-    send_group_call_message, set_group_call_participant_volume_level, set_video_chat_title,
-    start_group_call_recording, start_group_call_screen_sharing, start_scheduled_video_chat,
+    send_group_call_message, set_group_call_participant_volume_level,
+    set_video_chat_default_participant, set_video_chat_title, start_group_call_recording,
+    start_group_call_screen_sharing, start_scheduled_video_chat,
     toggle_group_call_are_messages_allowed, toggle_group_call_is_my_video_enabled,
     toggle_group_call_is_my_video_paused, toggle_group_call_participant_is_hand_raised,
     toggle_group_call_participant_is_muted, toggle_video_chat_enabled_start_notification,
@@ -331,8 +332,104 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             join_live_story_request(extra, id, params)
         } else {
-            join_video_chat(extra, id, None, params, "")
+            let as_ref = self
+                .session
+                .active_group_call
+                .as_ref()
+                .and_then(|call| call.join_as)
+                .map(|sender| match sender {
+                    MessageSender::User { user_id } => MessageSenderRef::User(user_id),
+                    MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
+                });
+            join_video_chat(extra, id, as_ref.as_ref(), params, "")
         }
+    }
+
+    /// The chat a tracked voice chat belongs to (`groupCall` carries no
+    /// chat id; the chat's `video_chat` association does).
+    fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
+        self.session
+            .chats
+            .values()
+            .find(|chat| {
+                chat.video_chat
+                    .as_ref()
+                    .is_some_and(|video_chat| video_chat.group_call_id == group_call_id)
+            })
+            .map(|chat| chat.id.0)
+    }
+
+    /// `getVideoChatAvailableParticipants`, once per unjoined chat-bound
+    /// call, so the join screen can offer "join as". Called from `ingest`.
+    pub(crate) fn maybe_fetch_join_as(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call)
+                if !call.is_joined
+                    && !call.join_as_requested
+                    && !call.is_live_story
+                    && call.is_video_chat =>
+            {
+                call.id
+            }
+            _ => return Ok(()),
+        };
+        let Some(chat_id) = self.group_call_chat_id(group_call_id) else {
+            return Ok(());
+        };
+        if let Some(call) = self.session.active_group_call.as_mut() {
+            call.join_as_requested = true;
+        }
+        let extra = self.session.request(
+            RequestPurpose::GetVideoChatAvailableParticipants { group_call_id },
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&get_video_chat_available_participants(extra, chat_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Pick the identity to join as and remember it as the chat default
+    /// (`setVideoChatDefaultParticipant`), as tdesktop's join-as box does.
+    pub fn choose_group_call_join_as(
+        &mut self,
+        sender: MessageSender,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let group_call_id = match &self.session.active_group_call {
+            Some(call) if !call.is_joined => call.id,
+            _ => return Err(ConnectSendError::InvalidRequest),
+        };
+        let chat_id = self
+            .group_call_chat_id(group_call_id)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        self.session.set_group_call_join_as(Some(sender));
+        let sender_ref = match sender {
+            MessageSender::User { user_id } => MessageSenderRef::User(user_id),
+            MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
+        };
+        let extra = self.session.request(
+            RequestPurpose::SetVideoChatDefaultParticipant { group_call_id },
+            None,
+        );
+        if let Err(err) = self.sender.send_json(&set_video_chat_default_participant(
+            extra,
+            chat_id,
+            &sender_ref,
+        )) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
     }
 
     /// stories-live-play: the story viewer's "Join live" sets
@@ -713,7 +810,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(call) = self.session.active_group_call.as_ref() else {
             return;
         };
-        let (group_call_id, muted) = (call.id, !call.is_muted_self);
+        let muted = !call.is_muted_self;
+        self.set_group_call_self_mute(muted);
+    }
+
+    /// Set (rather than flip) the self-mute state; push-to-talk drives
+    /// this. A no-op when the state already matches.
+    pub fn set_group_call_self_mute(&mut self, muted: bool) {
+        let Some(call) = self.session.active_group_call.as_ref() else {
+            return;
+        };
+        if call.is_muted_self == muted {
+            return;
+        }
+        let group_call_id = call.id;
         let me = call
             .participants
             .iter()

@@ -28,7 +28,7 @@ use quill::playback::PlaybackClock;
 use quill::settings::MediaPrefs;
 use quill::state::HistoryMessage;
 use quill::state::SharedMediaTab;
-use quill::telegram::envelope::{MessageSender, ParsedFile};
+use quill::telegram::envelope::ParsedFile;
 use quill::voice::format_voice_duration;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
@@ -491,41 +491,6 @@ impl QuillApp {
             .into_iter()
             .map(|(_, image)| image);
         super::image_budget::retire_all(images);
-    }
-
-    /// Phase C2g: newest frame for one group participant slot. Live
-    /// mode reads the driver's retained slot; demo mode reads the
-    /// fixture's synthetic frames. Prefers the screen-sharing slot when
-    /// the participant is sharing and a screen frame exists, otherwise
-    /// the camera slot. `None` when the participant isn't sending
-    /// video or no frame arrived yet.
-    pub(super) fn group_participant_frame(
-        &self,
-        call_id: i32,
-        participant: &quill::telegram::envelope::ParsedGroupCallParticipant,
-    ) -> Option<(i64, bool, quill::calls::engine::VideoFrame)> {
-        let MessageSender::User { user_id } = participant.participant_id else {
-            return None;
-        };
-        let slot = |screen: bool| {
-            if let Some(live) = self.live.as_ref() {
-                live.driver
-                    .latest_group_video_frame(call_id, user_id, screen)
-            } else {
-                self.demo_group_frames.get(&(user_id, screen)).cloned()
-            }
-        };
-        if participant.screen_sharing_enabled
-            && let Some(frame) = slot(true)
-        {
-            return Some((user_id, true, frame));
-        }
-        if participant.video_enabled
-            && let Some(frame) = slot(false)
-        {
-            return Some((user_id, false, frame));
-        }
-        None
     }
 
     /// Kill a running viewer frame extraction (ffmpeg child), if any, and

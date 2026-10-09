@@ -1964,8 +1964,13 @@ impl Session {
             EnvelopePayload::BlockedMessageSenders {
                 total_count,
                 sender_ids,
+                senders,
             } => {
-                if let Some(RequestPurpose::GetBlockedSenders { offset }) =
+                if let Some(RequestPurpose::GetVideoChatAvailableParticipants { group_call_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.set_group_call_join_as_options(group_call_id, senders);
+                } else if let Some(RequestPurpose::GetBlockedSenders { offset }) =
                     pending.map(|p| p.purpose)
                 {
                     self.blocked_total = total_count;

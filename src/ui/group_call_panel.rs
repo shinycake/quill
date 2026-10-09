@@ -169,48 +169,8 @@ impl QuillApp {
             );
         }
 
-        // Video tiles: everyone streaming, you included.
-        let mut tiles: Vec<AnyElement> = Vec::new();
-        for participant in &call.participants {
-            let name = self.group_call_participant_name(&participant.participant_id);
-            let picture = if participant.is_current_user && call.is_my_video_enabled {
-                Some(self.group_self_tile_content(&call, participant, &name))
-            } else {
-                self.group_participant_frame(call.id, participant)
-                    .and_then(|(user_id, screen, frame)| {
-                        self.cached_group_video_image(call.id, user_id, screen, &frame)
-                    })
-                    .map(|image| {
-                        img(ImageSource::Render(image))
-                            .size_full()
-                            .rounded(px(10.))
-                            .object_fit(ObjectFit::Cover)
-                            .into_any_element()
-                    })
-            };
-            if let Some(picture) = picture {
-                tiles.push(
-                    div()
-                        .relative()
-                        .w(relative(0.49))
-                        .h(px(120.))
-                        .overflow_hidden()
-                        .rounded(px(10.))
-                        .bg(rgb(0x000000))
-                        .child(picture)
-                        .child(
-                            div()
-                                .absolute()
-                                .left(px(8.))
-                                .bottom(px(6.))
-                                .text_size(px(12.))
-                                .text_color(rgba(0xffffffe0))
-                                .child(name),
-                        )
-                        .into_any_element(),
-                );
-            }
-        }
+        // Video tiles: every stream, yours included; one can be pinned.
+        let tiles = self.group_call_tiles(&call, cx);
 
         let can_invite = call.is_joined;
         let invite_row = can_invite.then(|| {
@@ -251,9 +211,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap(px(8.))
-            .when(!tiles.is_empty(), |this| {
-                this.child(div().flex().flex_wrap().gap(px(6.)).children(tiles))
-            })
+            .children(tiles)
             .child(
                 div()
                     .rounded(px(12.))
@@ -484,6 +442,7 @@ impl QuillApp {
             .children(banner)
             .children(error)
             .children(stream)
+            .children(self.group_call_join_as_row(&call, cx))
             .child(members)
             .child(self.group_call_controls(&call, state, cx))
             .children(invite)
@@ -901,7 +860,18 @@ impl QuillApp {
                     .text_size(px(12.))
                     .text_color(rgb(MEMBER_NOT_JOINED))
                     .child(sub)
-            }));
+            }))
+            .children(
+                matches!(state, MuteState::Live | MuteState::Muted)
+                    .then(|| self.ptt_hint())
+                    .flatten()
+                    .map(|hint| {
+                        div()
+                            .text_size(px(12.))
+                            .text_color(rgb(MEMBER_NOT_JOINED))
+                            .child(hint)
+                    }),
+            );
         div()
             .flex_none()
             .h(px(190.))
@@ -980,9 +950,25 @@ impl QuillApp {
                         });
                         true
                     });
-                    let view = cx.new(|cx| GroupCallPanel {
-                        owner: render_owner.downgrade(),
-                        _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
+                    let view = cx.new(|cx| {
+                        let activation_owner = render_owner.downgrade();
+                        GroupCallPanel {
+                            owner: render_owner.downgrade(),
+                            _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
+                            focus: cx.focus_handle(),
+                            // A key-up can't arrive once the window is in
+                            // the background: close the push-to-talk mic.
+                            _activation: cx.observe_window_activation(
+                                window,
+                                move |_, window, cx| {
+                                    if !window.is_window_active() {
+                                        let _ = activation_owner.update(cx, |app, cx| {
+                                            app.group_call_ptt_release_all(cx)
+                                        });
+                                    }
+                                },
+                            ),
+                        }
                     });
                     cx.new(|cx| Root::new(view, window, cx))
                 },
@@ -1102,6 +1088,9 @@ impl QuillApp {
 struct GroupCallPanel {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
+    /// Takes keyboard focus so push-to-talk key events reach the window.
+    focus: FocusHandle,
+    _activation: Subscription,
 }
 
 impl Render for GroupCallPanel {
@@ -1110,7 +1099,33 @@ impl Render for GroupCallPanel {
             window.remove_window();
             return div().into_any_element();
         };
-        owner.update(cx, |app, cx| app.group_call_panel_body(cx))
+        if self.focus.is_focused(window) || window.focused(cx).is_none() {
+            self.focus.focus(window, cx);
+        }
+        let body = owner.update(cx, |app, cx| app.group_call_panel_body(cx));
+        div()
+            .size_full()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                let Some(owner) = this.owner.upgrade() else {
+                    return;
+                };
+                let key = event.keystroke.key.clone();
+                if owner.update(cx, |app, cx| app.group_call_key_down(&key, cx)) {
+                    cx.stop_propagation();
+                }
+            }))
+            .on_key_up(cx.listener(|this, event: &KeyUpEvent, _, cx| {
+                let Some(owner) = this.owner.upgrade() else {
+                    return;
+                };
+                let key = event.keystroke.key.clone();
+                if owner.update(cx, |app, cx| app.group_call_key_up(&key, cx)) {
+                    cx.stop_propagation();
+                }
+            }))
+            .child(body)
+            .into_any_element()
     }
 }
 

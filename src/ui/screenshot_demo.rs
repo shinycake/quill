@@ -665,6 +665,12 @@ pub enum ScreenshotDemo {
     /// indicator live, RTMP URL + key fetched, and two in-call chat
     /// messages with the composer.
     ReadyGroupCallManage,
+    /// Calls polish: a pinned video tile plus paused camera and screen
+    /// streams in a joined voice chat (injected, no live Telegram).
+    ReadyGroupCallPolish,
+    /// Calls polish: the "Join as" picker on an unjoined voice chat
+    /// (injected, no live Telegram).
+    ReadyGroupCallJoinAs,
     /// "Notify me when a scheduled video chat starts" (injected, no
     /// live Telegram) — a scheduled (not yet started) video chat, so
     /// the overlay renders the "Scheduled voice chat" card with the

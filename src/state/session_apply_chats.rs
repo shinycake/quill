@@ -171,6 +171,7 @@ impl Session {
         chat.video_chat = video_chat.map(|v| VideoChatInfo {
             group_call_id: v.group_call_id,
             has_participants: v.has_participants,
+            default_participant_id: v.default_participant_id,
         });
         // Slice G2: `chat.has_welcome_messages` (schema 1.8.67,
         // line 3627).
