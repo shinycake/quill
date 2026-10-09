@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "crates/ntgcalls-sys"]
+exclude = ["web-demo"]
 resolver = "2"
 
 [package]

@@ -1,0 +1,24 @@
+[package]
+name = "quill-web-demo"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Feasibility spike: GPUI/gpui-kit UI running in the browser via WebAssembly"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gpui-kit = { version = "=0.7.0", default-features = false, features = ["component"] }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Event", "MouseEvent", "KeyboardEvent", "WheelEvent", "EventTarget", "console", "Performance"] }
+getrandom = { version = "0.2", features = ["js"] }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
