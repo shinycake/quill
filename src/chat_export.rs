@@ -169,7 +169,15 @@ pub fn write_export(state: &ChatExportState, dir: &Path) -> io::Result<PathBuf> 
         "messages": state.messages,
     });
     std::fs::create_dir_all(dir)?;
-    std::fs::write(&target, serde_json::to_string_pretty(&payload)?)?;
+    // Write beside the target and rename at the end so a failed export never
+    // leaves a half-written file under the final name.
+    let tmp = dir.join(format!(".{now}-{}.export.tmp", std::process::id()));
+    let written = std::fs::write(&tmp, serde_json::to_string_pretty(&payload)?)
+        .and_then(|()| std::fs::rename(&tmp, &target));
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err);
+    }
     Ok(target)
 }
 

@@ -309,13 +309,7 @@ pub fn save_data_storage_prefs(
     paths: &AccountPaths,
     prefs: &DataStoragePrefs,
 ) -> std::io::Result<()> {
-    let path = data_storage_prefs_path(paths);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let bytes = serde_json::to_vec_pretty(prefs)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, bytes)
+    crate::settings::write_json_atomic(&data_storage_prefs_path(paths), prefs)
 }
 
 /// Slice S4: top-N chats by storage size, descending (the usage
