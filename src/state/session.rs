@@ -1113,6 +1113,11 @@ pub struct Session {
     /// the TDLib answer lands). The story page renders it as its status
     /// line.
     pub story_page_op: Option<StoryPageOp>,
+    /// B14: the close-friends list (`getCloseFriends` / `setCloseFriends`);
+    /// `None` until loaded.
+    pub close_friends: Option<Vec<i64>>,
+    /// B14: ids sent by an in-flight `setCloseFriends`, applied on `ok`.
+    pub close_friends_pending: Option<Vec<i64>>,
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
@@ -1475,6 +1480,8 @@ impl Session {
             chat_page_stories: HashMap::new(),
             archived_stories: HashMap::new(),
             story_page_op: None,
+            close_friends: None,
+            close_friends_pending: None,
             diagnostics,
         }
     }

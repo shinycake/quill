@@ -20,9 +20,12 @@ use crate::telegram::requests::{
 };
 use crate::telegram::requests_story::{
     add_story_album_stories, create_story_album, delete_story_album, get_chat_archived_stories,
-    get_chat_posted_to_chat_page_stories, get_chat_story_albums, get_story_album_stories,
+    get_chat_posted_to_chat_page_stories, get_chat_story_albums,
+    get_close_friends as get_close_friends_request, get_story_album_stories,
     remove_story_album_stories, reorder_story_album_stories, reorder_story_albums,
-    set_chat_pinned_stories, set_story_album_name,
+    set_chat_active_stories_list, set_chat_pinned_stories,
+    set_close_friends as set_close_friends_request, set_story_album_name,
+    toggle_story_is_posted_to_chat_page,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -715,6 +718,83 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .begin_story_page_op(story_page_op_label(purpose));
         let json = set_chat_pinned_stories(extra, chat_id, story_ids);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// B14: `getCloseFriends`. Deduped while in flight.
+    pub fn get_close_friends(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::GetCloseFriends;
+        if self.session.requests.has_purpose(purpose) {
+            return Ok(None);
+        }
+        let extra = self.session.request(purpose, None);
+        self.session
+            .begin_story_page_check(story_page_op_label(purpose));
+        let json = get_close_friends_request(extra);
+        self.send_story_page(purpose, extra, &json).map(Some)
+    }
+
+    /// B14: `setCloseFriends` with the full new list; the ids are staged
+    /// in `Session::close_friends_pending` and applied on `ok`.
+    pub fn set_close_friends(&mut self, user_ids: &[i64]) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::SetCloseFriends;
+        let extra = self.session.request(purpose, None);
+        self.session.close_friends_pending = Some(user_ids.to_vec());
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = set_close_friends_request(extra, user_ids);
+        let sent = self.send_story_page(purpose, extra, &json);
+        if sent.is_err() {
+            self.session.close_friends_pending = None;
+        }
+        sent
+    }
+
+    /// B14: `setChatActiveStoriesList` — hide (`archive`) or unhide a
+    /// peer's stories.
+    pub fn set_chat_active_stories_list(
+        &mut self,
+        chat_id: ChatId,
+        archive: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.story_page_chat(chat_id) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::SetChatActiveStoriesList;
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = set_chat_active_stories_list(extra, chat_id, archive);
+        self.send_story_page(purpose, extra, &json)
+    }
+
+    /// B14: `toggleStoryIsPostedToChatPage`, gated on
+    /// `story.can_toggle_is_posted_to_chat_page`.
+    pub fn toggle_story_is_posted_to_chat_page(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+        posted: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        let allowed = self
+            .session
+            .stories
+            .get(&(chat_id.0, story_id))
+            .is_some_and(|story| story.can_toggle_is_posted_to_chat_page);
+        if !self.story_page_chat(chat_id) || !allowed {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let purpose = RequestPurpose::ToggleStoryIsPostedToChatPage;
+        let extra = self.session.request_for_story(purpose, chat_id, story_id);
+        self.session
+            .begin_story_page_op(story_page_op_label(purpose));
+        let json = toggle_story_is_posted_to_chat_page(extra, chat_id, story_id, posted);
         self.send_story_page(purpose, extra, &json)
     }
 

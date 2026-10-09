@@ -204,6 +204,7 @@ mod stickers_ui;
 mod stories_strip_ui;
 mod story_albums;
 mod story_composer;
+mod story_more;
 mod story_ring;
 mod story_viewer;
 mod subsection_tabs;

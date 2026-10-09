@@ -500,6 +500,8 @@ impl QuillApp {
             "story-composer" => self.toggle_story_composer_user(user_id, cx),
             // Phase 9.5: the viewer privacy editor's "Selected users" picker.
             "story-privacy" => self.toggle_story_privacy_user(user_id, cx),
+            // B14: the story viewer's close-friends editor.
+            "story-close-friends" => self.toggle_close_friend(user_id, cx),
             _ => {}
         }
     }
