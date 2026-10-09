@@ -119,6 +119,10 @@ pub struct Session {
     pub searched_background: Option<Background>,
     /// One-shot: a wallpaper request failed; shown in Appearance.
     pub background_error: Option<String>,
+    /// Acknowledged (`ok`) chat-look requests (`setChatTheme`,
+    /// `setChatBackground`, `deleteChatBackground`); the chat colors dialog
+    /// waits for them before it closes.
+    pub chat_look_oks: u32,
     pub histories: HashMap<i64, HistoryState>,
     /// History page requests issued for a window that has since been
     /// replaced (`reset_history_window`): their answers are dropped so an
@@ -1250,6 +1254,7 @@ impl Session {
             emoji_chat_themes: Vec::new(),
             searched_background: None,
             background_error: None,
+            chat_look_oks: 0,
             histories: HashMap::new(),
             stale_history_requests: HashSet::new(),
             revision: 0,

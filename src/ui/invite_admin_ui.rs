@@ -4,7 +4,6 @@
 //! and `edit_peer_invite_link.cpp`).
 
 use super::app::QuillApp;
-use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
