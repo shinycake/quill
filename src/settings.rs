@@ -123,17 +123,35 @@ pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> std::io
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("prefs.json");
-    let tmp = parent.join(format!(".{file_name}.tmp-{}", std::process::id()));
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = parent.join(format!(".{file_name}.tmp-{}-{seq}", std::process::id()));
     let result = (|| {
         let mut file = std::fs::File::create(&tmp)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
+        drop(file);
+        // `std::fs::rename` replaces an existing target on every platform
+        // (POSIX rename; MoveFileExW with MOVEFILE_REPLACE_EXISTING on Windows).
         std::fs::rename(&tmp, path)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
+        return result;
     }
+    sync_dir(parent);
     result
+}
+
+/// Persist the rename itself (directory entry) where the platform lets a
+/// directory be opened and synced; best effort, a no-op on Windows.
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(handle) = std::fs::File::open(dir) {
+        let _ = handle.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
 }
 
 /// Main-window geometry, app-wide (`window_state.json` at the app root):
@@ -604,13 +622,7 @@ pub fn load_contact_prefs(paths: &AccountPaths) -> ContactPrefs {
 /// Persist contacts prefs; failures are returned to the caller to surface
 /// in the status note.
 pub fn save_contact_prefs(paths: &AccountPaths, prefs: &ContactPrefs) -> std::io::Result<()> {
-    let path = contact_prefs_path(paths);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let bytes = serde_json::to_vec_pretty(prefs)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, bytes)
+    write_json_atomic(&contact_prefs_path(paths), prefs)
 }
 
 /// Chat-composer behavior prefs, persisted as JSON next to the account
@@ -876,10 +888,14 @@ fn registry_path(app_root: &Path) -> PathBuf {
 
 /// Load the registry; missing or corrupt ⇒ `[primary]` (never a hard error).
 fn load_registry(app_root: &Path) -> AccountRegistry {
-    let raw = std::fs::read(registry_path(app_root)).ok();
-    let mut registry: AccountRegistry = raw
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
+    let path = registry_path(app_root);
+    let mut registry: AccountRegistry = match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+            quarantine_registry(&path);
+            AccountRegistry::default()
+        }),
+        Err(_) => AccountRegistry::default(),
+    };
     // Drop hand-edited garbage and duplicate keys.
     registry
         .accounts
@@ -900,12 +916,34 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
 }
 
 fn save_registry(app_root: &Path, registry: &AccountRegistry) -> std::io::Result<()> {
-    std::fs::create_dir_all(app_root)?;
-    std::fs::write(
-        registry_path(app_root),
-        serde_json::to_vec_pretty(registry)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-    )
+    write_json_atomic(&registry_path(app_root), registry)
+}
+
+/// Move an unreadable `accounts.json` aside as `accounts.json.corrupt-<ts>`
+/// (never over an existing backup) so the account list stays recoverable
+/// instead of being overwritten by the next save.
+fn quarantine_registry(path: &Path) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let base = format!("{}.corrupt-{ts}", path.display());
+    let mut backup = PathBuf::from(&base);
+    for n in 1.. {
+        if !backup.exists() {
+            break;
+        }
+        backup = PathBuf::from(format!("{base}-{n}"));
+    }
+    match std::fs::rename(path, &backup) {
+        Ok(()) => eprintln!(
+            "quill: accounts.json is unreadable; moved it to {} and starting from defaults",
+            backup.display()
+        ),
+        Err(err) => {
+            eprintln!("quill: accounts.json is unreadable and could not be backed up: {err}")
+        }
+    }
 }
 
 /// All known accounts; missing or corrupt registry ⇒ `[primary]`.
@@ -1440,13 +1478,7 @@ pub fn load_badge_prefs(paths: &AccountPaths) -> BadgePrefs {
 /// Persist badge prefs; failures are returned to the caller to surface
 /// in the status note.
 pub fn save_badge_prefs(paths: &AccountPaths, prefs: &BadgePrefs) -> std::io::Result<()> {
-    let path = badge_prefs_path(paths);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let bytes = serde_json::to_vec_pretty(prefs)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(path, bytes)
+    write_json_atomic(&badge_prefs_path(paths), prefs)
 }
 
 #[cfg(test)]
@@ -1515,6 +1547,89 @@ mod account_registry_tests {
             list_accounts(&tmp_root("missing-never-written"))
         );
         assert_eq!(active_account(&root), AccountKey::primary());
+        let backups = corrupt_backups(&root);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), b"not json{{");
+        assert!(!root.join("accounts.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn corrupt_backups(root: &Path) -> Vec<PathBuf> {
+        let mut found: Vec<PathBuf> = std::fs::read_dir(root)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("accounts.json.corrupt-"))
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn truncated_registry_is_backed_up_and_never_overwrites_old_backup() {
+        let root = tmp_root("truncated");
+        add_account(&root, "Work").expect("add works");
+        let good = std::fs::read(root.join("accounts.json")).unwrap();
+        std::fs::write(root.join("accounts.json"), &good[..good.len() / 2]).unwrap();
+        assert_eq!(list_accounts(&root).len(), 1);
+        assert_eq!(corrupt_backups(&root).len(), 1);
+        // A second corruption in the same second must keep both backups.
+        std::fs::write(root.join("accounts.json"), b"{").unwrap();
+        let _ = list_accounts(&root);
+        let backups = corrupt_backups(&root);
+        assert_eq!(backups.len(), 2);
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), &good[..good.len() / 2]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_file_and_leaves_no_temp() {
+        let root = tmp_root("atomic-replace");
+        let path = root.join("x.json");
+        write_json_atomic(&path, &vec![1, 2]).unwrap();
+        write_json_atomic(&path, &vec![3]).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Vec<i32>>(&std::fs::read(&path).unwrap()).unwrap(),
+            vec![3]
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn atomic_write_failure_keeps_old_file() {
+        let root = tmp_root("atomic-fail");
+        let path = root.join("x.json");
+        write_json_atomic(&path, &vec![1]).unwrap();
+        let old = std::fs::read(&path).unwrap();
+        // Fail at the rename step: the target path is now a directory.
+        let blocked = root.join("blocked.json");
+        std::fs::create_dir_all(blocked.join("child")).unwrap();
+        assert!(write_json_atomic(&blocked, &vec![2]).is_err());
+        assert_eq!(
+            std::fs::read_dir(&root).unwrap().count(),
+            2,
+            "temp file cleaned up"
+        );
+        // Fail at the create step: read-only directory (Unix permissions).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&root).unwrap().permissions();
+            perms.set_mode(0o555);
+            std::fs::set_permissions(&root, perms.clone()).unwrap();
+            let denied = write_json_atomic(&path, &vec![9]);
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&root, perms).unwrap();
+            // Root can write anywhere; only assert when the OS denied it.
+            if denied.is_err() {
+                assert_eq!(std::fs::read(&path).unwrap(), old);
+            }
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), old);
         let _ = std::fs::remove_dir_all(&root);
     }
 
