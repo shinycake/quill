@@ -219,6 +219,49 @@ pub(super) fn media_frame(width: i32, height: i32) -> (Pixels, Pixels) {
     (px(w.max(MIN_SIDE)), px(h.max(MIN_SIDE)))
 }
 
+/// Smallest content width of a media bubble (`historyPhotoBubbleMinWidth`).
+const MEDIA_BUBBLE_MIN_WIDTH: f32 = 100.;
+
+/// Content width of a bubble led by media of `media` width: the media
+/// decides it (Telegram Desktop `Photo::countCurrentSize`), never less
+/// than the bubble minimum or the width the footer needs (`footer_min`,
+/// `minWidthForMedia`). Captions and reactions wrap to this width.
+pub(super) fn media_content_width(media: Pixels, footer_min: Pixels) -> Pixels {
+    media.max(footer_min).max(px(MEDIA_BUBBLE_MIN_WIDTH))
+}
+
+/// Outer bubble width for `content` width: a media-led bubble keeps only
+/// its 1 px border around the picture, a padded one adds the text padding
+/// (`px_3`) too, the plain look has neither.
+pub(super) fn bubble_outer_width(content: Pixels, media_led: bool, plain: bool) -> Pixels {
+    if plain {
+        content
+    } else if media_led {
+        content + px(2.)
+    } else {
+        content + px(26.)
+    }
+}
+
+/// Display width of a single photo / video / GIF, `None` for content that
+/// doesn't lead with such media.
+pub(super) fn single_media_width(
+    content: &quill::telegram::envelope::MessageContent,
+) -> Option<Pixels> {
+    use quill::telegram::envelope::MessageContent;
+    let (w, _) = match content {
+        MessageContent::Photo(photo) => photo
+            .largest_size()
+            .or_else(|| photo.thumb_size())
+            .map(|size| media_frame(size.width, size.height))
+            .unwrap_or_else(|| media_frame(0, 0)),
+        MessageContent::Video(video) => media_frame(video.width, video.height),
+        MessageContent::Animation(animation) => media_frame(animation.width, animation.height),
+        _ => return None,
+    };
+    Some(w)
+}
+
 /// Hover group for a media frame: the pause disc shows only on hover
 /// while the clip plays.
 const MEDIA_VISUAL_GROUP: &str = "media-visual";
@@ -2427,7 +2470,24 @@ fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
 
 #[cfg(test)]
 mod tests {
-    use super::document_kind_label;
+    use super::{bubble_outer_width, document_kind_label, media_content_width};
+    use gpui_kit::px;
+
+    #[test]
+    fn media_decides_the_bubble_width() {
+        // A wide photo is never widened by its caption or footer.
+        assert_eq!(media_content_width(px(360.), px(120.)), px(360.));
+        // Tiny media keeps a usable minimum and room for the footer.
+        assert_eq!(media_content_width(px(40.), px(0.)), px(100.));
+        assert_eq!(media_content_width(px(100.), px(140.)), px(140.));
+    }
+
+    #[test]
+    fn outer_width_adds_only_the_bubble_chrome() {
+        assert_eq!(bubble_outer_width(px(360.), true, false), px(362.));
+        assert_eq!(bubble_outer_width(px(360.), false, false), px(386.));
+        assert_eq!(bubble_outer_width(px(360.), true, true), px(360.));
+    }
 
     #[test]
     fn document_kind_prefers_extension_then_mime_subtype() {
