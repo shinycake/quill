@@ -27,6 +27,7 @@ mod motion;
 mod native_video;
 mod photo_edit;
 mod photo_editor;
+mod pin_box;
 mod presence;
 mod privacy;
 mod rtl_demo;

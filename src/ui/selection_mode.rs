@@ -87,9 +87,36 @@ impl QuillApp {
                 .when(interactive, |this| {
                     this.occlude()
                         .cursor_pointer()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_forward_select(chat_id, message_id, pending, cx);
+                        // Press toggles the row (Shift extends a range from
+                        // the last row) and starts a drag that applies the
+                        // same state to the rows it crosses.
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                this.selection_press(
+                                    chat_id,
+                                    message_id,
+                                    pending,
+                                    event.modifiers.shift,
+                                    cx,
+                                );
+                            }),
+                        )
+                        .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                            if event.pressed_button == Some(MouseButton::Left) {
+                                this.selection_drag_over(chat_id, message_id, pending, cx);
+                            } else {
+                                this.selection_drag = None;
+                            }
                         }))
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(|this, _: &MouseUpEvent, _, _| this.selection_drag = None),
+                        )
+                        .on_mouse_up_out(
+                            MouseButton::Left,
+                            cx.listener(|this, _: &MouseUpEvent, _, _| this.selection_drag = None),
+                        )
                 })
                 .child(super::anim_layer::occluder(
                     div()
@@ -187,6 +214,44 @@ impl QuillApp {
                         this.confirm_delete_selection(window, cx);
                     })),
             )
+            .child(
+                Button::new("selection-copy")
+                    .label("Copy as Text")
+                    .ghost()
+                    .tooltip("Copy Selected as Text")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.copy_selection_text(cx);
+                    })),
+            )
+            .when(self.selection_has_media(chat_id), |bar| {
+                bar.child(
+                    Button::new("selection-save")
+                        .label("Save")
+                        .ghost()
+                        .tooltip("Save Selected")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.save_selection(cx);
+                        })),
+                )
+            })
+            .when(self.selection_unpinnable(chat_id), |bar| {
+                bar.child(
+                    Button::new("selection-unpin")
+                        .label("Unpin")
+                        .ghost()
+                        .tooltip("Unpin Selected")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if let Some(draft) = this.pending_forward.clone() {
+                                this.confirm_unpin(
+                                    draft.from_chat_id,
+                                    draft.message_ids,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        })),
+                )
+            })
             .when(self.selection_reportable(chat_id), |bar| {
                 bar.child(
                     Button::new("selection-report")
@@ -212,6 +277,198 @@ impl QuillApp {
             .child(header)
             .child(bar)
             .into_any_element()
+    }
+
+    /// Mouse press on a row in selection mode.
+    fn selection_press(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        pending: bool,
+        shift: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor = self.selection_anchor.filter(|_| shift);
+        if let Some(anchor) = anchor {
+            let ids = self.loaded_selectable_ids(chat_id);
+            let range = quill::selection_pin::range_between(&ids, anchor, message_id);
+            if let Some(draft) = self.pending_forward.as_mut() {
+                for id in range {
+                    if !draft.contains(id) {
+                        draft.toggle(chat_id, id, false);
+                    }
+                }
+            }
+            self.selection_drag = None;
+            cx.notify();
+            return;
+        }
+        let selected = self
+            .pending_forward
+            .as_ref()
+            .is_some_and(|draft| draft.contains(message_id));
+        self.toggle_forward_select(chat_id, message_id, pending, cx);
+        self.selection_anchor = Some(message_id);
+        self.selection_drag = Some(!selected);
+    }
+
+    /// The pointer crossed a row while pressed: give it the drag's state.
+    fn selection_drag_over(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        pending: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(want) = self.selection_drag else {
+            return;
+        };
+        if self.selection_anchor == Some(message_id) {
+            return;
+        }
+        let selected = self
+            .pending_forward
+            .as_ref()
+            .is_some_and(|draft| draft.contains(message_id));
+        if selected != want {
+            self.toggle_forward_select(chat_id, message_id, pending, cx);
+        }
+        self.selection_anchor = Some(message_id);
+    }
+
+    /// Loaded, sent messages of the chat in history order.
+    fn loaded_selectable_ids(&self, chat_id: ChatId) -> Vec<MessageId> {
+        self.session()
+            .and_then(|s| s.histories.get(&chat_id.0))
+            .map(|history| {
+                history
+                    .ordered()
+                    .into_iter()
+                    .filter(|m| m.can_pin())
+                    .map(|m| m.id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// "Copy Selected as Text" (Cmd/Ctrl+C does the same).
+    fn copy_selection_text(&mut self, cx: &mut Context<Self>) {
+        let Some((chat_id, text)) = self.selected_messages_text() else {
+            return;
+        };
+        if self.refuse_protected_copy(chat_id, cx) {
+            return;
+        }
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.status_note = "copied".into();
+        cx.notify();
+    }
+
+    /// The media messages of the selection, oldest first.
+    fn selected_media(&self) -> Vec<(MessageId, quill::message_menu::MediaTarget)> {
+        let Some(draft) = self.pending_forward.as_ref() else {
+            return Vec::new();
+        };
+        let Some(history) = self
+            .session()
+            .and_then(|s| s.histories.get(&draft.from_chat_id.0))
+        else {
+            return Vec::new();
+        };
+        let mut ids = draft.message_ids.clone();
+        ids.sort_by_key(|id| id.0);
+        ids.into_iter()
+            .filter_map(|id| {
+                let message = history.messages.get(&id.0)?;
+                let target = quill::message_menu::media_target(effective_content(
+                    &message.content,
+                    message.ephemeral.as_ref(),
+                ))?;
+                Some((id, target))
+            })
+            .collect()
+    }
+
+    /// Whether the selection holds anything to save.
+    fn selection_has_media(&self, chat_id: ChatId) -> bool {
+        self.selecting_in(chat_id) && !self.selected_media().is_empty()
+    }
+
+    /// "Save Selected": pick a folder and copy the downloaded media of the
+    /// selection into it; media still downloading is requested first.
+    fn save_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.pending_forward.as_ref().map(|d| d.from_chat_id) else {
+            return;
+        };
+        if self.refuse_protected_copy(chat_id, cx) {
+            return;
+        }
+        let media = self.selected_media();
+        if media.is_empty() {
+            return;
+        }
+        let mut files = Vec::new();
+        let mut missing = Vec::new();
+        for (id, target) in &media {
+            match self.menu_media_local(chat_id, *id) {
+                Some((_, path)) => {
+                    let local = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("file")
+                        .to_string();
+                    files.push((
+                        path,
+                        quill::message_menu::suggested_save_name(target, &local),
+                    ));
+                }
+                None => missing.push(target.file_id),
+            }
+        }
+        if !missing.is_empty() {
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.ensure_media_files(&missing);
+            }
+            self.status_note = "downloading… choose Save again when it finishes".into();
+            cx.notify();
+            return;
+        }
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Save".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(dirs))) = picker.await else {
+                return;
+            };
+            let Some(dir) = dirs.into_iter().next() else {
+                return;
+            };
+            let saved = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut used = std::collections::HashSet::new();
+                    let mut saved = 0usize;
+                    for (path, name) in files {
+                        let dest = unique_destination(&dir, &name, &mut used);
+                        if std::fs::copy(&path, dest).is_ok() {
+                            saved += 1;
+                        }
+                    }
+                    saved
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.status_note = match saved {
+                    1 => "saved 1 file".into(),
+                    n => format!("saved {n} files"),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Whether the selection can be reported: other people's sent
@@ -531,5 +788,30 @@ impl QuillApp {
                     true
                 })
         });
+    }
+}
+
+/// `dir/name`, or `dir/name (2).ext` when the name is taken on disk or by an
+/// earlier file of the same save.
+fn unique_destination(
+    dir: &std::path::Path,
+    name: &str,
+    used: &mut std::collections::HashSet<std::path::PathBuf>,
+) -> std::path::PathBuf {
+    let path = std::path::Path::new(name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = path.extension().and_then(|e| e.to_str());
+    let mut n = 1;
+    loop {
+        let file = match (n, ext) {
+            (1, _) => name.to_string(),
+            (n, Some(ext)) => format!("{stem} ({n}).{ext}"),
+            (n, None) => format!("{stem} ({n})"),
+        };
+        let candidate = dir.join(file);
+        if !candidate.exists() && used.insert(candidate.clone()) {
+            return candidate;
+        }
+        n += 1;
     }
 }
