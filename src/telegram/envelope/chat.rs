@@ -140,6 +140,12 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("is_translatable")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // `chat.reply_markup_message_id` (schema 1.8.67, line 3624).
+        reply_markup_message_id: MessageId(
+            chat.get("reply_markup_message_id")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+        ),
         // Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67,
         // lines 3600/3627).
         is_marked_as_unread: chat

@@ -24,6 +24,7 @@ mod payments;
 mod profile_panels;
 mod proxy;
 mod registration;
+mod reply_keyboard;
 mod search;
 mod settings;
 mod sponsored;

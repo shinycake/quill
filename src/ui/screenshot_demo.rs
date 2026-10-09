@@ -320,6 +320,10 @@ pub enum ScreenshotDemo {
     /// settings. `QUILL_DEMO_TRANSLATE_VIEW=bar|translated|box|rtl|selection|chooser|settings|skip`
     /// (default `bar`).
     ReadyTranslate,
+    /// A bot chat whose reply keyboard comes from `updateChatReplyMarkup`
+    /// (message outside the window), with request buttons and the share
+    /// dialogs. `QUILL_DEMO_KEYBOARD_VIEW=keyboard|hidden|phone|users|chat|confirm`.
+    ReadyReplyKeyboard,
     /// README showcase scene: a populated account (generated avatars and
     /// photos, a lively group conversation); `QUILL_DEMO_SHOWCASE` picks
     /// the view.

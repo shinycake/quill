@@ -110,7 +110,9 @@ gpui_kit::assets::icon_assets!(
         Images,
         Share2,
         NotebookPen,
-        Contact
+        Contact,
+        Keyboard,
+        KeyboardOff
     ]
 );
 
@@ -719,6 +721,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-threads" => ScreenshotDemo::ReadyThreads,
                 "ready-bubble-headers" => ScreenshotDemo::ReadyBubbleHeaders,
                 "ready-translate" => ScreenshotDemo::ReadyTranslate,
+                "ready-reply-keyboard" => ScreenshotDemo::ReadyReplyKeyboard,
                 "ready-showcase" => ScreenshotDemo::ReadyShowcase,
                 "ready-message-menu" => ScreenshotDemo::ReadyMessageMenu,
                 "ready-avatar-profile" => ScreenshotDemo::ReadyAvatarProfile,
@@ -814,7 +817,7 @@ fn parse_screenshot_demo(args: &[String]) -> Option<(ui::ScreenshotDemo, std::pa
                 "ready-lock-screen" => ScreenshotDemo::ReadyLockScreen,
                 _ => {
                     eprintln!(
-                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-premium|wait-qr|ready-chats|ready-chats-composer|ready-suggest-hashtag|ready-suggest-emoji|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-paste-image|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-select-mode|ready-reply-media|ready-edit-media|ready-reveal|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-game-card|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-player-bar|ready-sponsored|ready-custom-emoji|ready-animated-emoji|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-inline-results|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-viewer-gif|ready-viewer-shared|ready-stories|ready-story-post|ready-story-viewers|ready-story-areas|ready-story-composer|ready-story-albums|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-bot-topics|ready-bot-topics-bottom|ready-bot-topics-left|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-rich-ai-tools|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-appearance|ready-spellcheck|ready-spellcheck-panel|ready-spellcheck-toggle|ready-accounts|ready-group-manage|ready-group-info-edit|ready-groups2|ready-community-create|ready-community-hub|ready-community-info|ready-2fa-manage|ready-recovery-email|ready-new-login|ready-login-prevented|ready-service-notice|ready-terms|ready-local-storage|ready-2fa-forgot|ready-2fa-reset|ready-login-email|ready-account|ready-group-call-scheduled|ready-rich-premium-gate|ready-keybindings|ready-blockquote-expandable|ready-avatar-profile|ready-rtl-composer|ready-rtl-polish|ready-bubble-headers|ready-showcase|ready-service-messages|ready-message-menu|ready-threads|ready-proxy|ready-translate|ready-profile-panels)"
+                        "unknown screenshot demo '{kind}' (expected need-tdjson|wait-phone|wait-code|wait-password|wait-premium|wait-qr|ready-chats|ready-chats-composer|ready-suggest-hashtag|ready-suggest-emoji|ready-unread|ready-unread-read|ready-media|ready-downloads|ready-send-media|ready-paste-image|ready-search|ready-search-in-chat|ready-reply|ready-edit-delete|ready-forward|ready-select-mode|ready-reply-media|ready-edit-media|ready-reveal|ready-reactions|ready-pin|ready-mute-archive|ready-chat-list|ready-chat-preview|ready-typing|ready-stickers|ready-voice|ready-game-card|ready-link-preview|ready-gifs|ready-video|ready-video-note|ready-video-send|ready-video-note-send|ready-drafts|ready-albums|ready-audio|ready-player-bar|ready-sponsored|ready-custom-emoji|ready-animated-emoji|ready-channels|ready-channels-admin|ready-channel-stats|ready-bot-chat|ready-bot-keyboard|ready-bot-command-menu|ready-inline-results|ready-bot-profile|ready-text-entities|ready-poll|ready-payments|ready-location|ready-dice|ready-media-viewer|ready-video-playback|ready-viewer-gif|ready-viewer-shared|ready-stories|ready-story-post|ready-story-viewers|ready-story-areas|ready-story-composer|ready-story-albums|ready-story-edit|ready-seek-bars|ready-forum-topics|ready-topic-post|ready-bot-topics|ready-bot-topics-bottom|ready-bot-topics-left|ready-contacts|ready-contacts-manage|ready-block-user|ready-folders|ready-folders-manage|ready-chat-avatars|ready-notification-sound|ready-slow-mode|ready-secret-chat|ready-key-verification|ready-self-destruct|ready-sessions|ready-web-sessions|ready-session-toggles|ready-call|ready-call-video|ready-call-screenshare|ready-call-devices|ready-chat-ttl|ready-group-call|ready-group-call-invite|ready-group-call-invitation|ready-group-call-manage|ready-calls-settings|ready-rich-message|ready-rich-editor|ready-rich-ai-tools|ready-admin-management|ready-admin-log|ready-secret-bot-alert|ready-storage-usage|ready-appearance|ready-spellcheck|ready-spellcheck-panel|ready-spellcheck-toggle|ready-accounts|ready-group-manage|ready-group-info-edit|ready-groups2|ready-community-create|ready-community-hub|ready-community-info|ready-2fa-manage|ready-recovery-email|ready-new-login|ready-login-prevented|ready-service-notice|ready-terms|ready-local-storage|ready-2fa-forgot|ready-2fa-reset|ready-login-email|ready-account|ready-group-call-scheduled|ready-rich-premium-gate|ready-keybindings|ready-blockquote-expandable|ready-avatar-profile|ready-rtl-composer|ready-rtl-polish|ready-bubble-headers|ready-showcase|ready-service-messages|ready-message-menu|ready-threads|ready-proxy|ready-translate|ready-reply-keyboard|ready-profile-panels)"
                     );
                     std::process::exit(2);
                 }
@@ -1005,6 +1008,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadyThreads => ".quill-ready-ready-threads",
         ScreenshotDemo::ReadyBubbleHeaders => ".quill-ready-ready-bubble-headers",
         ScreenshotDemo::ReadyTranslate => ".quill-ready-ready-translate",
+        ScreenshotDemo::ReadyReplyKeyboard => ".quill-ready-ready-reply-keyboard",
         ScreenshotDemo::ReadyShowcase => ".quill-ready-ready-showcase",
         ScreenshotDemo::ReadyMessageMenu => ".quill-ready-ready-message-menu",
         ScreenshotDemo::ReadyPoll => ".quill-ready-ready-poll",

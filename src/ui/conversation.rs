@@ -844,6 +844,10 @@ impl QuillApp {
                                 .when_some(self.scheduled_messages_button(cx), |row, button| {
                                     row.child(button)
                                 })
+                                // Show / hide the bot's reply keyboard.
+                                .when_some(self.keyboard_toggle_button(cx), |row, button| {
+                                    row.child(button)
+                                })
                                 // Telegram Desktop's round button: the mic
                                 // while there's nothing to send, Send once
                                 // there is, Save when editing, the slow-mode

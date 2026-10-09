@@ -1405,6 +1405,22 @@ pub enum RequestPurpose {
     /// 15289). Response is `ok`; same no-local-state treatment as
     /// `DeleteSavedOrderInfo`.
     DeleteSavedCredentials,
+    /// `getMessage` for `chat.reply_markup_message_id` when that message is
+    /// not in the loaded history; the `message` answer feeds the chat's
+    /// reply keyboard.
+    GetChatReplyMarkupMessage,
+    /// `shareUsersWithBot` / `shareChatWithBot` / `sharePhoneNumber`
+    /// (schema 1.8.67, lines 13001 / 13010 / 14584). Response is `ok`.
+    ShareWithBot,
+    /// `getRecentInlineBots` (schema 1.8.67, line 14776). Response is
+    /// `users`.
+    GetRecentInlineBots,
+    /// `toggleChatIsTranslatable` (schema 1.8.67, line 13516). Response is
+    /// `ok`; `updateChatIsTranslatable` carries the new flag.
+    ToggleChatIsTranslatable,
+    /// `toggleSupergroupHasAutomaticTranslation` (schema 1.8.67, line
+    /// 15202). Response is `ok`; `updateSupergroup` carries the flag.
+    ToggleSupergroupAutoTranslate,
     /// `translateText` / `translateMessageText` (schema 1.8.67). Response
     /// is `formattedText`; `job` indexes `Session::translate.jobs`.
     TranslateJob {

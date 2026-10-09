@@ -829,6 +829,8 @@ pub struct Session {
     /// Translation state (`translateText` / `translateMessageText`, the
     /// chat translate bar).
     pub translate: TranslateState,
+    /// Bot reply keyboards as TDLib reports them, and recent inline bots.
+    pub reply_keyboards: ReplyKeyboardState,
     /// Slice G2: the welcome-message pack per chat
     /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
     pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
@@ -1312,6 +1314,7 @@ impl Session {
             protected_chats: HashSet::new(),
             scheduled_chats: HashSet::new(),
             translate: TranslateState::default(),
+            reply_keyboards: ReplyKeyboardState::default(),
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),

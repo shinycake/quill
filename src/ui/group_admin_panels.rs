@@ -494,6 +494,21 @@ impl QuillApp {
                 }
             );
         }
+        // tdesktop `edit_peer_info_box` "Auto-translate messages": channels,
+        // `toggleSupergroupHasAutomaticTranslation` (needs can_change_info
+        // and boosts; TDLib's refusal rolls the switch back).
+        if is_channel && session.is_some_and(|session| session.chat_can_change_info(chat_id)) {
+            let auto = session.is_some_and(|session| session.chat_auto_translate(chat_id));
+            toggle_row!(
+                "tr-toggle-auto-translate",
+                I::Languages,
+                "Auto-translate messages",
+                auto,
+                |this, _window, cx| {
+                    this.set_auto_translate(chat_id, cx);
+                }
+            );
+        }
         // Slice G2: aggressive anti-spam toggle (supergroups only;
         // gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`).
         if !is_channel

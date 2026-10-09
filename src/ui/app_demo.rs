@@ -669,6 +669,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — bubble headers".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyReplyKeyboard => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — bot reply keyboard".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyTranslate => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1939,6 +1945,8 @@ impl QuillApp {
             link_popup: None,
             pending_viewer_seek: None,
             dismissed_keyboards: std::collections::HashSet::new(),
+            collapsed_keyboards: std::collections::HashSet::new(),
+            request_share: None,
             permissions_dialog: None,
             username_dialog: None,
             community_ui: CommunityUi::default(),
