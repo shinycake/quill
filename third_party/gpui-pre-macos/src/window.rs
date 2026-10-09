@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.7 (Apache-2.0):
+// the display link stops while the window is idle. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 use crate::{
     BoolExt, MacDisplay, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
@@ -77,7 +79,7 @@ use std::{
         Arc, Once, Weak,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const WINDOW_STATE_IVAR: &str = "windowState";
@@ -654,6 +656,24 @@ unsafe fn apply_simple_fullscreen_plan(
     }
 }
 
+/// Quill: how long the display link keeps running after the last frame
+/// that drew, presented or asked for another frame. Animations at 4 fps
+/// and up keep it running; after high-rate input GPUI keeps presenting
+/// for a second, which counts as activity. A change after a stop draws at
+/// once (the frame waker) and restarts the link.
+const FRAME_IDLE_AFTER: Duration = Duration::from_millis(250);
+
+/// Quill: lock-free state shared by the display link, `schedule_frame`
+/// and the frame waker (see `step`).
+#[derive(Default)]
+struct FrameIdle {
+    /// Something drew, presented or asked for a frame during this step.
+    activity: AtomicBool,
+    /// The display link was stopped because nothing needed frames; the
+    /// frame waker requests one step to start it again.
+    stopped: AtomicBool,
+}
+
 struct MacWindowState {
     handle: AnyWindowHandle,
     foreground_executor: ForegroundExecutor,
@@ -665,6 +685,8 @@ struct MacWindowState {
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
+    frame_idle: Arc<FrameIdle>,
+    last_frame_activity: Instant,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
@@ -833,6 +855,7 @@ impl MacWindowState {
 
     fn start_display_link(&mut self) {
         self.stop_display_link();
+        self.last_frame_activity = Instant::now();
         unsafe {
             if !self
                 .native_window
@@ -854,6 +877,9 @@ impl MacWindowState {
     }
 
     fn stop_display_link(&mut self) {
+        // Stopped for a reason other than idling (occlusion, a direct
+        // draw): only `start_display_link` restarts it.
+        self.frame_idle.stopped.store(false, Ordering::Relaxed);
         if let Some(frame_source) = self.frame_source.as_mut() {
             frame_source.stop();
         }
@@ -953,7 +979,12 @@ impl MacWindowState {
 
 unsafe impl Send for MacWindowState {}
 
-pub(crate) struct MacWindow(Arc<Mutex<MacWindowState>>, MainThreadMarker);
+pub(crate) struct MacWindow(
+    Arc<Mutex<MacWindowState>>,
+    MainThreadMarker,
+    // Quill: shared with the state, for `schedule_frame` without the lock.
+    Arc<FrameIdle>,
+);
 
 impl MacWindow {
     pub fn open(
@@ -1087,6 +1118,7 @@ impl MacWindow {
             let native_view = NSView::initWithFrame_(native_view, NSView::bounds(content_view));
             assert!(!native_view.is_null());
 
+            let frame_idle = Arc::new(FrameIdle::default());
             let state = Arc::new(Mutex::new(MacWindowState {
                 handle,
                 foreground_executor,
@@ -1098,6 +1130,8 @@ impl MacWindow {
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
                 frame_source: None,
+                frame_idle: frame_idle.clone(),
+                last_frame_activity: Instant::now(),
                 renderer: renderer::new_renderer(
                     renderer_context,
                     native_window as *mut _,
@@ -1146,7 +1180,7 @@ impl MacWindow {
                 accesskit_adapter: None,
                 sheet_parent: None,
             }));
-            let mut window = Self(state, marker);
+            let mut window = Self(state, marker, frame_idle);
 
             (*native_window).set_ivar(
                 WINDOW_STATE_IVAR,
@@ -2111,8 +2145,35 @@ impl PlatformWindow for MacWindow {
     }
 
     fn draw(&self, scene: &gpui::Scene) {
+        self.2.activity.store(true, Ordering::Relaxed);
         let mut this = self.0.lock();
         this.renderer.draw(scene);
+    }
+
+    // Quill: GPUI asks for another frame (the window is still dirty, or
+    // next-frame callbacks are queued): keep the display link running.
+    fn schedule_frame(&self) {
+        self.2.activity.store(true, Ordering::Relaxed);
+    }
+
+    // Quill: GPUI calls this when the window becomes dirty or queues a
+    // next-frame callback. While the display link is stopped for idling,
+    // ask for one step now; `step` draws and restarts the link. While it
+    // runs (or is stopped because the window is hidden) this does nothing,
+    // so frames stay paced by the display.
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let mut lock = self.0.lock();
+        let data = lock.native_view.as_ptr() as *mut c_void;
+        let requests = lock
+            .frame_source
+            .get_or_insert_with(|| WindowFrameSource::new(data, step))
+            .requests();
+        let idle = self.2.clone();
+        Some(Rc::new(move || {
+            if idle.stopped.load(Ordering::Relaxed) {
+                requests.merge_data(1);
+            }
+        }))
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
@@ -3303,11 +3364,37 @@ extern "C" fn step(view: *mut c_void) {
     let view = view as id;
     let window_state = unsafe { get_window_state(&*view) };
     let mut lock = window_state.lock();
+    let idle = lock.frame_idle.clone();
+    // Quill: the display link runs only while frames are wanted. A step
+    // that neither draws, presents nor asks for another frame is idle;
+    // after `FRAME_IDLE_AFTER` of those the link stops (each tick woke
+    // the main thread and a CoreVideo thread 60–120 times a second for
+    // nothing). The frame waker brings it back on the next change.
+    idle.activity.store(false, Ordering::Relaxed);
+    let woken = idle.stopped.load(Ordering::Relaxed);
 
     if let Some(mut callback) = lock.request_frame_callback.take() {
         drop(lock);
         callback(Default::default());
-        window_state.lock().request_frame_callback = Some(callback);
+        lock = window_state.lock();
+        lock.request_frame_callback = Some(callback);
+    }
+
+    if idle.activity.load(Ordering::Relaxed) {
+        lock.last_frame_activity = Instant::now();
+        if woken {
+            // Back from idle: pace the next frames by the display again.
+            lock.start_display_link();
+        }
+    } else if !woken
+        && lock.last_frame_activity.elapsed() >= FRAME_IDLE_AFTER
+        && lock
+            .frame_source
+            .as_ref()
+            .is_some_and(WindowFrameSource::is_running)
+    {
+        lock.stop_display_link();
+        idle.stopped.store(true, Ordering::Relaxed);
     }
 }
 

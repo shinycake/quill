@@ -295,3 +295,10 @@ priority = -1
 [lints.rust.unexpected_cfgs]
 level = "allow"
 priority = 0
+
+# Quill: upstream builds this crate from crates.io, where Cargo caps lints;
+# as a path dependency its cocoa-era deprecation warnings would flood every
+# build.
+[lints.rust.deprecated]
+level = "allow"
+priority = 0
