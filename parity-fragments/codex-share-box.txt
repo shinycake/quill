@@ -1,0 +1,4 @@
+# B4 share box, forward bar, send as
+parity:composer-send-as
+parity:composer-forward-bar
+parity:composer-share-box

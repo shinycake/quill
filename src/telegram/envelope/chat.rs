@@ -131,10 +131,15 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("has_protected_content")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // B7: `chat.available_reactions` (schema 1.8.67, line 3627).
+        available_reactions: super::message_reactions::parse_chat_available_reactions(
+            chat.get("available_reactions"),
+        ),
         has_scheduled_messages: chat
             .get("has_scheduled_messages")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        message_sender: parse_message_sender(chat.get("message_sender_id")).ok(),
         // `chat.is_translatable` (schema 1.8.67, line 3599).
         is_translatable: chat
             .get("is_translatable")

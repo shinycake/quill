@@ -63,6 +63,14 @@ impl Session {
             .collect();
     }
 
+    /// The chat's first history page failed or timed out and the window is
+    /// still empty: the UI offers "Couldn't load messages · Retry".
+    pub fn history_load_failed(&self, chat_id: ChatId) -> bool {
+        self.histories
+            .get(&chat_id.0)
+            .is_some_and(|h| h.load_failed && h.messages.is_empty())
+    }
+
     /// The open history has nothing to show yet because its first page is
     /// still on the way (no entry yet, or an empty window with a page in
     /// flight) — the UI shows a skeleton rather than "No messages".
@@ -71,6 +79,7 @@ impl Session {
             None => true,
             Some(history) => {
                 history.messages.is_empty()
+                    && !history.load_failed
                     && !self
                         .requests
                         .ids_for_chat(&WINDOW_PURPOSES, chat_id)
@@ -111,6 +120,41 @@ impl Session {
             self.stale_history_requests.insert(id.0);
         }
         self.histories.entry(chat_id.0).or_default().reset_window();
+    }
+
+    /// R5: drop sweepable requests that never got an answer (see
+    /// [`RequestRegistry::sweep_stale`]) and settle the state they guarded:
+    /// an empty history window switches from the skeleton to the retry
+    /// row, a newer-page request stops auto-paging. Skipped while the
+    /// connection is not up — TDLib legitimately queues requests until the
+    /// network is back. Returns whether anything was dropped.
+    pub fn sweep_stale_requests(
+        &mut self,
+        now: std::time::Instant,
+        ttl: std::time::Duration,
+        keep: impl Fn(RequestId) -> bool,
+    ) -> bool {
+        if !matches!(
+            self.connection,
+            ConnectionState::Ready | ConnectionState::Updating
+        ) {
+            return false;
+        }
+        let dropped = self.requests.sweep_stale(now, ttl, keep);
+        for pending in &dropped {
+            match pending.purpose {
+                RequestPurpose::GetHistory | RequestPurpose::GetHistoryAround => {
+                    if !self.take_stale_history_request(pending)
+                        && let Some(chat_id) = pending.chat_id
+                    {
+                        self.histories.entry(chat_id.0).or_default().load_failed = true;
+                    }
+                }
+                RequestPurpose::GetHistoryNewer => self.fail_history_newer(pending),
+                _ => {}
+            }
+        }
+        !dropped.is_empty()
     }
 
     /// Whether `pending` was issued for a window that has since been

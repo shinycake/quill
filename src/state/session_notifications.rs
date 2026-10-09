@@ -135,10 +135,70 @@ impl Session {
         notification: OsNotification,
         sound: Option<notify::NotificationSoundKind>,
     ) {
+        self.shown_notification_chats.insert(notification.chat_id);
         notify::coalesce_notification_with_sound(
             &mut self.pending_notifications,
             notification,
             sound,
         );
+    }
+
+    /// The chat was read (here or elsewhere) or TDLib removed its
+    /// notifications: drop what is still queued and ask the UI to
+    /// withdraw anything already shown.
+    pub(crate) fn clear_chat_notifications(&mut self, chat_id: ChatId) {
+        self.pending_notifications
+            .retain(|queued| queued.chat_id != chat_id);
+        if self.shown_notification_chats.remove(&chat_id)
+            && !self.pending_notification_clears.contains(&chat_id)
+        {
+            self.pending_notification_clears.push(chat_id);
+        }
+    }
+
+    /// A new unread reaction on one of our messages: notify when the
+    /// reaction settings allow it (`updateReactionNotificationSettings`;
+    /// nothing is shown until they have arrived, as their default source
+    /// is "none").
+    pub(crate) fn queue_reaction_notification(
+        &mut self,
+        chat_id: ChatId,
+        reaction: &crate::telegram::envelope::UnreadReaction,
+    ) {
+        if !self.desktop_notifications {
+            return;
+        }
+        let (Some(settings), Some(chat)) = (
+            self.reaction_notification_settings.as_ref(),
+            self.chats.get(&chat_id.0),
+        ) else {
+            return;
+        };
+        let (sender_name, sender_is_contact) = match reaction.sender {
+            Some(MessageSender::User { user_id }) => match self.user(user_id) {
+                Some(user) => (Some(user.display_name()), user.is_contact),
+                None => (None, false),
+            },
+            Some(MessageSender::Chat { .. }) | None => (None, false),
+        };
+        let notification = notify::decide_reaction_notify(&notify::ReactionNotifyInput {
+            chat_id,
+            chat_title: &chat.title,
+            source: settings.message_reaction_source,
+            sender_name: sender_name.as_deref(),
+            sender_is_contact,
+            emoji: reaction.reaction_type.emoji_text(),
+            show_preview: settings.show_preview && !self.hide_notification_previews,
+            chat_muted: self.effective_muted(chat),
+            app_active: self.app_active,
+            open_chat: self.open_chat,
+        });
+        if let Some(notification) = notification {
+            // The reaction sound follows `reactionNotificationSettings`:
+            // 0 = silent, anything else the default tone.
+            let sound = (self.inapp_sounds_enabled && settings.sound_id != 0 && !self.app_active)
+                .then_some(notify::NotificationSoundKind::Default);
+            self.queue_notification_with_sound(notification, sound);
+        }
     }
 }

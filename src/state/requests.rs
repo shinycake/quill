@@ -1,5 +1,12 @@
 //! Request plumbing: errors, registry, forwarding and payment flights.
 use super::*;
+use std::time::{Duration, Instant};
+
+/// How long a sweepable request may stay unanswered before the periodic
+/// sweep drops it (R5). TDLib answers every request (even offline ones
+/// wait for the network), so a minute with a ready connection means the
+/// answer is lost.
+pub const PENDING_REQUEST_TTL: Duration = Duration::from_secs(60);
 
 /// Slice A2: which 2FA management request a `PasswordStateOp` purpose
 /// carries. Used for honest per-action error lines and for the driver's
@@ -100,6 +107,20 @@ pub enum RequestRollback {
         supergroup_id: i64,
         previous: Option<bool>,
     },
+    /// B7: a supergroup toggle (join-to-send, history for new members,
+    /// hidden members): the previous value (`None` = unknown).
+    GroupToggle {
+        supergroup_id: i64,
+        toggle: GroupToggle,
+        previous: Option<bool>,
+    },
+    /// B7: `toggleChatHasProtectedContent`: the previous flag.
+    ProtectedContent { chat_id: i64, previous: bool },
+    /// B7: `setChatAvailableReactions`: the previous setting.
+    AvailableReactions {
+        chat_id: i64,
+        previous: Option<crate::telegram::envelope::ChatAvailableReactions>,
+    },
     /// Slice CL1: `toggleChatIsPinned` — the previous pinned flag and
     /// which list it belonged to (`archived` = archive list). The
     /// authoritative state arrives via `updateChatPosition`.
@@ -122,6 +143,37 @@ pub enum RequestRollback {
     ArchiveChatListSettings {
         previous: Option<ArchiveChatListSettings>,
     },
+}
+
+impl RequestPurpose {
+    /// R5: whether an unanswered request of this purpose may be dropped by
+    /// the periodic sweep. Only dedupe-guarded lookups (history pages,
+    /// searches, shared media, per-entity info) qualify: dropping them
+    /// frees the guard so the next attempt can go out. Downloads, uploads,
+    /// calls, auth and every mutation answer on their own schedule (or are
+    /// meaningful whenever they land), so they are never swept.
+    pub fn is_sweepable(self) -> bool {
+        matches!(
+            self,
+            RequestPurpose::GetHistory
+                | RequestPurpose::GetHistoryAround
+                | RequestPurpose::GetHistoryNewer
+                | RequestPurpose::GetTopicHistory
+                | RequestPurpose::GetMessageThreadHistory { .. }
+                | RequestPurpose::SearchMessages
+                | RequestPurpose::SearchChatMessages
+                | RequestPurpose::SearchChatMessagesMore
+                | RequestPurpose::SearchChats
+                | RequestPurpose::SearchPublicChats
+                | RequestPurpose::GetSharedMedia { .. }
+                | RequestPurpose::GetSharedMediaMore { .. }
+                | RequestPurpose::GetPinnedMessages
+                | RequestPurpose::GetUserFullInfo
+                | RequestPurpose::GetSupergroupFullInfo
+                | RequestPurpose::GetBasicGroupFullInfo
+                | RequestPurpose::GetChatMember
+        )
+    }
 }
 
 pub fn is_auth_submit(purpose: RequestPurpose) -> bool {
@@ -540,6 +592,10 @@ pub struct PendingRequest {
     /// TDLib error the pre-request value is restored so the UI never
     /// keeps showing a change the server rejected.
     pub rollback: Option<RequestRollback>,
+    /// When the request was registered. The periodic sweep
+    /// ([`RequestRegistry::sweep_stale`]) drops dedupe-guard entries whose
+    /// answer never came, so a lost response cannot block a chat forever.
+    pub created_at: Instant,
 }
 
 #[derive(Debug, Default)]
@@ -593,6 +649,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                created_at: Instant::now(),
             },
         );
         id
@@ -628,6 +685,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                created_at: Instant::now(),
             },
         );
         id
@@ -664,6 +722,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                created_at: Instant::now(),
             },
         );
         id
@@ -700,6 +759,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                created_at: Instant::now(),
             },
         );
         id
@@ -734,6 +794,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                created_at: Instant::now(),
             },
         );
         id
@@ -759,6 +820,41 @@ impl RequestRegistry {
     pub(crate) fn invalidate_auth(&mut self) {
         self.pending
             .retain(|_, request| !is_auth_submit(request.purpose));
+    }
+
+    /// R5: drop sweepable requests (see [`RequestPurpose::is_sweepable`])
+    /// registered at least `ttl` before `now` that `keep` does not exempt
+    /// (the driver keeps requests waiting for a flood retry). Returns the
+    /// dropped entries so the reducer can settle their UI state. Long
+    /// running operations (downloads, uploads, calls, mutations) are never
+    /// touched.
+    pub fn sweep_stale(
+        &mut self,
+        now: Instant,
+        ttl: Duration,
+        keep: impl Fn(RequestId) -> bool,
+    ) -> Vec<PendingRequest> {
+        let stale: Vec<u64> = self
+            .pending
+            .values()
+            .filter(|p| {
+                p.purpose.is_sweepable()
+                    && now.saturating_duration_since(p.created_at) >= ttl
+                    && !keep(p.id)
+            })
+            .map(|p| p.id.0)
+            .collect();
+        stale
+            .into_iter()
+            .filter_map(|key| self.pending.remove(&key))
+            .collect()
+    }
+
+    /// Restart the TTL clock of a request that was re-sent (flood retry).
+    pub fn touch(&mut self, id: RequestId, now: Instant) {
+        if let Some(pending) = self.pending.get_mut(&id.0) {
+            pending.created_at = now;
+        }
     }
 
     pub fn invalidate_account(&mut self) {

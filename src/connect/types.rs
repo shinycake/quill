@@ -47,6 +47,9 @@ pub const USER_DOWNLOAD_PRIORITY: i32 = 32;
 pub const SEARCH_LIMIT: i32 = 20;
 /// `searchRecentlyFoundChats.limit` — schema/Unigram cap is 50.
 pub const RECENT_SEARCH_LIMIT: i32 = 50;
+/// `getTopChats.limit` for the "Frequent contacts" strip (tdesktop shows the
+/// first row and expands on "Show all"; TDLib allows up to 30).
+pub const TOP_CHATS_LIMIT: i32 = 20;
 /// tdesktop `kSearchRequestDelay` / `AutoSearchTimeout` (config.h): 900 ms.
 /// ComposeSearch `requestSearchDelayed` uses the same `AutoSearchTimeout`.
 pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
@@ -79,6 +82,9 @@ pub enum SearchFlight {
     Recents(RequestId),
     /// `searchChats` + `searchMessages` + `searchPublicChats` extras.
     Query(RequestId, RequestId, RequestId),
+    /// The "Public posts" scope: one `searchPublicPosts` /
+    /// `searchPublicMessagesByTag` request.
+    PublicPosts(RequestId),
 }
 
 /// Empty/open recents send immediately; typed queries wait for [`SEARCH_DEBOUNCE`].
@@ -267,6 +273,12 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) draft_clock: DraftSaveClock,
     pub(crate) draft_save_token: u64,
     pub(crate) pending_draft: Option<PendingDraft>,
+    /// Q1: idempotent reads waiting out a 429 before being re-sent.
+    pub(crate) flood_retries: Vec<super::flood_retry::FloodRetry>,
+    /// Q1: re-send count per request id that hit a rate limit.
+    pub(crate) flood_attempts: HashMap<u64, u8>,
+    /// R5: when the stale-request sweep last scanned the registry.
+    pub(crate) last_request_sweep: Option<std::time::Instant>,
 }
 
 pub(crate) struct OutgoingTyping {

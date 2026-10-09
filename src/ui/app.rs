@@ -239,7 +239,7 @@ pub struct QuillApp {
     pub(super) demo_sink: Arc<MemorySink>,
     /// Phase 8.1: chat ids whose OS notification was clicked (set by the
     /// notification worker threads); the next render focuses the chat.
-    pub(super) notify_clicks: Arc<Mutex<Vec<ChatId>>>,
+    pub(super) notify_clicks: Arc<Mutex<Vec<(ChatId, quill::notify::NotificationAction)>>>,
     /// Phase 8.1: in-flight OS notification workers; capped so a message
     /// burst cannot stack threads.
     pub(super) notify_inflight: Arc<AtomicUsize>,
@@ -542,6 +542,15 @@ pub struct QuillApp {
     pub(super) selection_drag: Option<bool>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
     pub(super) forward_picker_open: bool,
+    /// Destinations ticked in the share box.
+    pub(super) share_selection: quill::share_box::ShareSelection,
+    /// The share box's optional comment, sent before the forwards.
+    pub(super) share_comment_input: Entity<TextareaState>,
+    /// The forward bar is showing above this chat's composer
+    /// (`pending_forward` follows the user into the destination).
+    pub(super) forward_bar_dest: Option<ChatId>,
+    /// The composer's "send as" identity list is open.
+    pub(super) send_as_open: bool,
     /// Last successful (or failed) `forwardMessages` result.
     pub(super) forward_result: Option<ForwardResult>,
     /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
@@ -549,9 +558,17 @@ pub struct QuillApp {
     pub(super) reactions_expanded: bool,
     /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
     pub(super) mute_menu_open: bool,
+    /// The Mute submenu's "Custom..." duration row is expanded.
+    pub(super) mute_custom_open: bool,
+    /// The custom mute duration being edited (tdesktop `ChooseTimeWidget`).
+    pub(super) mute_custom: quill::mute_menu::CustomMute,
     /// Phase B4: self-destruct / auto-delete timer picker below the
     /// conversation header (`setChatMessageAutoDeleteTime`).
     pub(super) ttl_picker_open: bool,
+    /// The auto-delete picker's "Custom" stepper is expanded.
+    pub(super) ttl_custom_open: bool,
+    /// The custom auto-delete period being edited, in seconds.
+    pub(super) ttl_custom_secs: i32,
     /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`).
     pub(super) group_call_title_dialog: Option<GroupCallTitleDialog>,
     /// Phase C2h: `createVideoChat` start/schedule dialog.
@@ -968,6 +985,9 @@ pub struct QuillApp {
     /// B10: edit-contact / birthday / personal-channel / share-contact
     /// dialog behind the profile panels.
     pub(super) profile_dialog: Option<ProfileDialog>,
+    /// B7: group / channel settings dialog (topics, history, reactions,
+    /// discussion group, ...).
+    pub(super) group_settings_dialog: Option<GroupSettingsDialog>,
     /// B10: a profile photo gallery whose list was requested; the viewer
     /// opens when it lands (checked by the poll loop).
     pub(super) pending_profile_gallery: Option<i64>,

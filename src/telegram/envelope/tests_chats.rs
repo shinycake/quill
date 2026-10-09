@@ -280,6 +280,7 @@ fn update_supergroup_parses_forum_flag() {
             sign_messages: _,
             show_message_sender: _,
             is_broadcast_group,
+            join_to_send_messages: _,
         } => {
             assert_eq!(supergroup_id, 16);
             assert!(is_forum);
@@ -328,6 +329,7 @@ fn update_supergroup_parses_username() {
             sign_messages: _,
             show_message_sender: _,
             is_broadcast_group,
+            join_to_send_messages: _,
         } => {
             assert_eq!(supergroup_id, 18);
             assert!(!is_forum);
@@ -369,6 +371,7 @@ fn supergroup_response_parses_forum_flag() {
             sign_messages: _,
             show_message_sender: _,
             is_broadcast_group,
+            join_to_send_messages: _,
         } => {
             assert_eq!(supergroup_id, 17);
             assert!(!is_forum);

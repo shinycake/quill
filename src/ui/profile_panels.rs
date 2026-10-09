@@ -501,6 +501,9 @@ impl QuillApp {
                 ProfileChatsKind::SuitablePersonalChats => {
                     live.driver.fetch_suitable_personal_chats()
                 }
+                ProfileChatsKind::SuitableDiscussionChats => {
+                    live.driver.fetch_suitable_discussion_chats()
+                }
             };
         }
         cx.notify();

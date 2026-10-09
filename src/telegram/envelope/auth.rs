@@ -66,6 +66,25 @@ impl TdError {
         }
     }
 
+    /// Whether this is a rate-limit answer (code 429 / `FLOOD_WAIT`).
+    pub fn is_flood(&self) -> bool {
+        self.class == ErrorClass::Flood || self.code == 429
+    }
+
+    /// tdesktop's `lng_flood_error` for a user action that hit a rate
+    /// limit: "Too many attempts. Try again in N seconds." (generic line
+    /// when TDLib gave no wait).
+    pub fn flood_notice(&self) -> Option<String> {
+        if !self.is_flood() {
+            return None;
+        }
+        Some(match self.flood_wait_secs {
+            Some(1) => "Too many attempts. Try again in 1 second.".to_string(),
+            Some(secs) => format!("Too many attempts. Try again in {secs} seconds."),
+            None => "Too many attempts. Try again later.".to_string(),
+        })
+    }
+
     /// Slice parity:platform-flood-errors — the retry countdown line for
     /// a flood error: "try again in N seconds" when the wait is known,
     /// otherwise the honest generic line.
@@ -230,6 +249,16 @@ pub(crate) fn parse_connection(value: Option<&Value>) -> ConnectionState {
     }
 }
 
+/// Retry-after seconds from a TDLib flood message: `FLOOD_WAIT_<n>`
+/// (login flow) or `Too Many Requests: retry after <n>` (code 429 on any
+/// other request).
+pub(crate) fn parse_flood_wait_secs(message: &str) -> Option<u64> {
+    message
+        .strip_prefix("FLOOD_WAIT_")
+        .or_else(|| message.strip_prefix("Too Many Requests: retry after "))
+        .and_then(|n| n.trim().parse::<u64>().ok())
+}
+
 pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     let code = value
         .and_then(|v| v.get("code"))
@@ -245,8 +274,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     let flood_wait_secs = value
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
-        .and_then(|m| m.strip_prefix("FLOOD_WAIT_"))
-        .and_then(|n| n.parse::<u64>().ok());
+        .and_then(parse_flood_wait_secs);
     if let Some(class) = value
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
