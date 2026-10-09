@@ -224,6 +224,10 @@ impl QuillApp {
                         for fetch in [
                             live.driver.fetch_chat_invite_links(chat_id).map(|_| ()),
                             live.driver.fetch_chat_join_requests(chat_id).map(|_| ()),
+                            // B8: other admins' link counts (owner only).
+                            live.driver
+                                .fetch_chat_invite_link_counts(chat_id)
+                                .map(|_| ()),
                             live.driver.fetch_chat_administrators(chat_id).map(|_| ()),
                             live.driver.fetch_chat_event_log(chat_id).map(|_| ()),
                         ] {

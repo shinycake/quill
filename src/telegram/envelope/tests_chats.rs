@@ -721,3 +721,40 @@ fn message_calendar_parses_days() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn invite_link_counts_and_members_parsed() {
+    // B8: `chatInviteLinkCounts` (schema line 2949) and
+    // `chatInviteLinkMembers` (line 2959).
+    let counts = parse_envelope(
+        r#"{"@type":"chatInviteLinkCounts","invite_link_counts":[{"@type":"chatInviteLinkCount","user_id":5,"invite_link_count":3,"revoked_invite_link_count":2},{"@type":"chatInviteLinkCount","invite_link_count":1}]}"#,
+    )
+    .unwrap();
+    match counts.payload {
+        EnvelopePayload::ChatInviteLinkCounts { counts } => {
+            // The row without a user id is dropped, not defaulted.
+            assert_eq!(counts.len(), 1);
+            assert_eq!(counts[0].user_id, 5);
+            assert_eq!(counts[0].invite_link_count, 3);
+            assert_eq!(counts[0].revoked_invite_link_count, 2);
+        }
+        other => panic!("{other:?}"),
+    }
+    let members = parse_envelope(
+        r#"{"@type":"chatInviteLinkMembers","total_count":9,"members":[{"@type":"chatInviteLinkMember","user_id":7,"joined_chat_date":123,"via_chat_folder_invite_link":true,"approver_user_id":4}]}"#,
+    )
+    .unwrap();
+    match members.payload {
+        EnvelopePayload::ChatInviteLinkMembers {
+            total_count,
+            members,
+        } => {
+            assert_eq!(total_count, 9);
+            assert_eq!(members[0].user_id, 7);
+            assert_eq!(members[0].joined_chat_date, 123);
+            assert!(members[0].via_chat_folder_invite_link);
+            assert_eq!(members[0].approver_user_id, 4);
+        }
+        other => panic!("{other:?}"),
+    }
+}

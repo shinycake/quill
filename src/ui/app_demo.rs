@@ -2006,6 +2006,8 @@ impl QuillApp {
             poll_dialog: None,
             payment_dialog: None,
             invite_link_dialog: None,
+            invite_link_details: None,
+            revoked_links_open: false,
             admin_dialog: None,
             create_chat_dialog: None,
             member_dialog: None,

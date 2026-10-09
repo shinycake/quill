@@ -137,6 +137,7 @@ mod groups_welcome;
 mod history;
 mod inline_mode;
 mod inline_playback;
+mod invite_admin_ui;
 mod jump_buttons;
 mod jump_date;
 mod keyboard_demo;

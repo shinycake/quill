@@ -733,6 +733,25 @@ pub enum RequestPurpose {
     ProcessChatJoinRequest {
         user_id: i64,
     },
+    /// B8: next page of `getChatJoinRequests`; the answer is appended.
+    GetMoreChatJoinRequests,
+    /// B8: `processChatJoinRequests` for every pending request.
+    ProcessAllChatJoinRequests {
+        approve: bool,
+    },
+    /// B8: `getChatInviteLinks` with `is_revoked = true`.
+    GetRevokedChatInviteLinks,
+    /// B8: `getChatInviteLinkCounts`. Response is `chatInviteLinkCounts`.
+    GetChatInviteLinkCounts,
+    /// B8: `getChatInviteLinkMembers`; `append` marks a later page.
+    GetChatInviteLinkMembers {
+        append: bool,
+    },
+    /// B8: `deleteRevokedChatInviteLink`; the link is looked up in
+    /// `Session::revoked_link_deletions` by request id.
+    DeleteRevokedChatInviteLink,
+    /// B8: `deleteAllRevokedChatInviteLinks`.
+    DeleteAllRevokedChatInviteLinks,
     /// Phase D3b: `getChatAdministrators`. Response is
     /// `chatAdministrators`; correlated via `PendingRequest::chat_id`.
     GetChatAdministrators,

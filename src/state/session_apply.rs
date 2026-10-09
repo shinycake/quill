@@ -561,16 +561,60 @@ impl Session {
             // Phase D3a: `getChatInviteLinks` / `revokeChatInviteLink`
             // answer — replaces the cached list.
             EnvelopePayload::ChatInviteLinks { total_count, links } => {
-                if matches!(
-                    pending.map(|p| p.purpose),
-                    Some(RequestPurpose::GetChatInviteLinks | RequestPurpose::RevokeChatInviteLink)
-                ) && let Some(pending) = pending
+                if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
-                    self.invite_links.insert(
-                        chat_id.0,
-                        InviteLinkFetch::Loaded(InviteLinkList { total_count, links }),
-                    );
+                    match pending.purpose {
+                        RequestPurpose::GetChatInviteLinks => {
+                            self.invite_links.insert(
+                                chat_id.0,
+                                InviteLinkFetch::Loaded(InviteLinkList { total_count, links }),
+                            );
+                        }
+                        // B8: the revoke answer holds only the revoked link
+                        // (and the replacement primary), not the whole list.
+                        RequestPurpose::RevokeChatInviteLink => {
+                            self.apply_revoke_answer(chat_id.0, links);
+                        }
+                        RequestPurpose::GetRevokedChatInviteLinks => {
+                            self.revoked_invite_links.insert(
+                                chat_id.0,
+                                InviteLinkFetch::Loaded(InviteLinkList { total_count, links }),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // B8: `getChatInviteLinkCounts` answer.
+            EnvelopePayload::ChatInviteLinkCounts { counts } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatInviteLinkCounts)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.invite_link_counts
+                        .insert(chat_id.0, InviteLinkCountsFetch::Loaded(counts));
+                }
+            }
+            // B8: `getChatInviteLinkMembers` answer; stale replies (the
+            // details were opened for another link meanwhile) are dropped.
+            EnvelopePayload::ChatInviteLinkMembers {
+                total_count,
+                members,
+            } => {
+                if let Some(pending) = pending
+                    && let RequestPurpose::GetChatInviteLinkMembers { append } = pending.purpose
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(state) = self.invite_link_members.get_mut(&chat_id.0)
+                    && state.request == Some(pending.id)
+                {
+                    if !append {
+                        state.members.clear();
+                    }
+                    state.members.extend(members);
+                    state.total_count = total_count;
+                    state.loading = false;
+                    state.error = None;
+                    state.request = None;
                 }
             }
             // Phase D3a: `getChatJoinRequests` answer.
@@ -578,15 +622,32 @@ impl Session {
                 total_count,
                 requests,
             } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatJoinRequests)
-                    && let Some(pending) = pending
+                if let Some(pending) = pending
+                    && matches!(
+                        pending.purpose,
+                        RequestPurpose::GetChatJoinRequests
+                            | RequestPurpose::GetMoreChatJoinRequests
+                    )
                     && let Some(chat_id) = pending.chat_id
+                    && self
+                        .join_request_latest
+                        .get(&chat_id.0)
+                        .is_none_or(|latest| *latest == pending.id)
                 {
+                    self.join_request_latest.remove(&chat_id.0);
+                    let mut all = Vec::new();
+                    if pending.purpose == RequestPurpose::GetMoreChatJoinRequests
+                        && let Some(JoinRequestFetch::Loaded(old)) =
+                            self.join_requests.get(&chat_id.0)
+                    {
+                        all = old.requests.clone();
+                    }
+                    all.extend(requests);
                     self.join_requests.insert(
                         chat_id.0,
                         JoinRequestFetch::Loaded(JoinRequestList {
                             total_count,
-                            requests,
+                            requests: all,
                         }),
                     );
                 }
@@ -741,7 +802,13 @@ impl Session {
                         .iter()
                         .any(|existing| existing.user_id == request.user_id)
                 {
-                    list.requests.insert(0, request);
+                    if self
+                        .join_request_queries
+                        .get(&chat_id)
+                        .is_none_or(|q| q.is_empty())
+                    {
+                        list.requests.insert(0, request);
+                    }
                     list.total_count = list.total_count.saturating_add(1);
                     self.join_requests
                         .insert(chat_id, JoinRequestFetch::Loaded(list));

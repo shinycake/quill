@@ -941,6 +941,71 @@ impl Session {
                     );
                 }
             }
+            // B8: failures of the new link/request admin calls keep the
+            // last good data and surface the error line.
+            Some(RequestPurpose::GetMoreChatJoinRequests) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.join_request_latest.remove(&chat_id.0);
+                }
+                self.invite_link_error = Some(call_request_error_line(
+                    &err,
+                    "Could not load more join requests",
+                ));
+            }
+            Some(RequestPurpose::ProcessAllChatJoinRequests { .. }) => {
+                self.invite_link_error = Some(call_request_error_line(
+                    &err,
+                    "Could not process join requests",
+                ));
+            }
+            Some(RequestPurpose::GetRevokedChatInviteLinks) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.revoked_invite_links.insert(
+                        chat_id.0,
+                        InviteLinkFetch::Failed(call_request_error_line(
+                            &err,
+                            "Could not load revoked links",
+                        )),
+                    );
+                }
+            }
+            Some(RequestPurpose::GetChatInviteLinkCounts) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.invite_link_counts.insert(
+                        chat_id.0,
+                        InviteLinkCountsFetch::Failed(call_request_error_line(
+                            &err,
+                            "Could not load link counts",
+                        )),
+                    );
+                }
+            }
+            Some(RequestPurpose::GetChatInviteLinkMembers { .. }) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(state) = self.invite_link_members.get_mut(&chat_id.0)
+                    && state.request == Some(pending.id)
+                {
+                    state.loading = false;
+                    state.request = None;
+                    state.error = Some(call_request_error_line(&err, "Could not load members"));
+                }
+            }
+            Some(RequestPurpose::DeleteRevokedChatInviteLink) => {
+                if let Some(pending) = pending {
+                    self.revoked_link_deletions.remove(&pending.id);
+                }
+                self.invite_link_error = Some(call_request_error_line(
+                    &err,
+                    "Could not delete invite link",
+                ));
+            }
+            Some(RequestPurpose::DeleteAllRevokedChatInviteLinks) => {
+                self.invite_link_error = Some(call_request_error_line(
+                    &err,
+                    "Could not delete revoked links",
+                ));
+            }
             Some(RequestPurpose::ProcessChatJoinRequest { .. }) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.join_requests.insert(

@@ -14,10 +14,28 @@ pub struct InviteLinkDialog {
     pub(crate) expiration_days_input: Entity<TextareaState>,
     pub(crate) member_limit_input: Entity<TextareaState>,
     pub(crate) creates_join_request: bool,
+    /// B8: Stars per month for a subscription link (channels only).
+    pub(crate) stars_input: Entity<TextareaState>,
+    /// B8: whether the viewer can create Stars subscription links here.
+    pub(crate) allow_subscription: bool,
+    /// B8: set when renaming an existing subscription link (only the
+    /// name of those can change, `editChatSubscriptionInviteLink`).
+    pub(crate) edit_link: Option<String>,
 }
 
 impl InviteLinkDialog {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>, chat_id: ChatId) -> Self {
+    pub(crate) fn new(
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+        chat_id: ChatId,
+        allow_subscription: bool,
+    ) -> Self {
+        let stars_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Stars per month (0 = free link)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Link name (optional)")
@@ -42,6 +60,9 @@ impl InviteLinkDialog {
             expiration_days_input,
             member_limit_input,
             creates_join_request: false,
+            stars_input,
+            allow_subscription,
+            edit_link: None,
         }
     }
 }

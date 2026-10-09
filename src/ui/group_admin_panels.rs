@@ -808,6 +808,13 @@ impl QuillApp {
                         let expiry = Self::invite_link_expiry(link.expiration_date);
                         let copy_link = link.invite_link.clone();
                         let revoke_link = link.invite_link.clone();
+                        let details_link = link.invite_link.clone();
+                        let rename_link = link.invite_link.clone();
+                        let rename_name = link.name.clone();
+                        let joined_count = link.member_count;
+                        let subscription = link.subscription_pricing.clone();
+                        let members_block =
+                            self.invite_link_members_block(chat_id, &link.invite_link, cx);
                         let mut row = div()
                             .id(("invite-link-row", index as u64))
                             .flex()
@@ -834,6 +841,17 @@ impl QuillApp {
                                     .text_color(cx.theme().muted_foreground)
                                     .child(link.invite_link),
                             );
+                        if let Some(pricing) = &subscription {
+                            row = row.child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(super::invite_admin_ui::subscription_price_label(
+                                        pricing,
+                                    )),
+                            );
+                        }
                         if link.pending_join_request_count > 0 {
                             row = row.child(
                                 div()
@@ -849,6 +867,7 @@ impl QuillApp {
                         row = row.child(
                             div()
                                 .flex()
+                                .flex_wrap()
                                 .items_center()
                                 .gap_1()
                                 .child(
@@ -859,6 +878,36 @@ impl QuillApp {
                                             this.copy_invite_link(&copy_link, cx);
                                         })),
                                 )
+                                .when(joined_count > 0, |actions| {
+                                    actions.child(
+                                        Button::new(format!("invite-link-joined-{index}"))
+                                            .label(format!("Joined ({joined_count})"))
+                                            .ghost()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.toggle_invite_link_details(
+                                                    chat_id,
+                                                    &details_link,
+                                                    cx,
+                                                );
+                                            })),
+                                    )
+                                })
+                                .when(subscription.is_some(), |actions| {
+                                    actions.child(
+                                        Button::new(format!("invite-link-rename-{index}"))
+                                            .label("Rename")
+                                            .ghost()
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.open_subscription_link_rename(
+                                                    chat_id,
+                                                    &rename_link,
+                                                    &rename_name,
+                                                    window,
+                                                    cx,
+                                                );
+                                            })),
+                                    )
+                                })
                                 .child(
                                     Button::new(format!("invite-link-revoke-{index}"))
                                         .label("Revoke")
@@ -868,11 +917,18 @@ impl QuillApp {
                                         })),
                                 ),
                         );
+                        if let Some(block) = members_block {
+                            row = row.child(block);
+                        }
                         section = section.child(row);
                     }
                 }
             }
         }
+        if let Some(counts) = self.invite_link_counts_block(chat_id, cx) {
+            section = section.child(counts);
+        }
+        section = section.child(self.revoked_invite_links_block(chat_id, cx));
         section.into_any_element()
     }
 
