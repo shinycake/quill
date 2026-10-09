@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.8 (Apache-2.0):
+// the display link stops while the window is idle. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 //! Frame pacing for macOS windows, built on `CVDisplayLink`.
 //!
 //! CVDisplayLink has no safe teardown: `CVDisplayLinkStop` merely flags the
@@ -343,6 +345,18 @@ impl WindowFrameSource {
             unsubscribe(display_id, subscriber_id);
         }
         self.signal.take();
+    }
+
+    /// Quill: whether the display is pacing this window's frames.
+    pub fn is_running(&self) -> bool {
+        self.registration.is_some()
+    }
+
+    /// Quill: the dispatch source that delivers this window's steps on the
+    /// main queue; `merge_data(1)` on it requests one step now, from any
+    /// thread, whether or not the display link runs.
+    pub fn requests(&self) -> DispatchRetained<DispatchSource> {
+        self.frame_requests.clone()
     }
 }
 
