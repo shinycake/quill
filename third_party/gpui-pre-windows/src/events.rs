@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
-// windows stop receiving vsync frames while idle. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
 
 use anyhow::Context as _;
@@ -1324,9 +1322,6 @@ impl WindowsWindowInner {
 
     fn handle_dm_pointer_hit_test(&self, wparam: WPARAM) -> Option<isize> {
         self.state.direct_manipulation.on_pointer_hit_test(wparam);
-        // Quill: the gesture advances only in `draw_window`; resume vsync
-        // frames if they were parked.
-        self.demand_frames();
         None
     }
 
@@ -1343,9 +1338,6 @@ impl WindowsWindowInner {
             // re-invalidates every window on each vsync (see
             // `begin_vsync_thread`), so the deferred frame still gets drawn,
             // at most one vsync late.
-            // Quill: unpark the window if its vsync frames were parked, so
-            // that re-invalidation happens.
-            self.demand_frames();
             unsafe { ValidateRect(Some(handle), None).ok().log_err() };
             return Some(0);
         };
@@ -1369,20 +1361,18 @@ impl WindowsWindowInner {
             // will rebuild the scene with fresh atlas textures.
             self.state.renderer.borrow_mut().mark_drawable();
         }
+        let (signal_at, signal_source) = self.state.frame_signal.take().map_or(
+            (None, FrameRequestSource::NativeCallback),
+            |(at, source)| (Some(at), source),
+        );
         request_frame(RequestFrameOptions {
             require_presentation: false,
             force_render,
+            signal_at,
+            signal_source,
         });
 
         self.state.callbacks.request_frame.set(Some(request_frame));
-        // Quill: idle frames park this window's vsync invalidations. A forced
-        // render still pending (device-loss recovery) and a touchpad gesture
-        // (Direct Manipulation advances only in `update` above) keep them
-        // coming.
-        self.frames_after_draw(
-            self.state.force_render_pending.get()
-                || self.state.direct_manipulation.keeps_frames_running(),
-        );
         self.update_ime_enabled(handle);
         unsafe { ValidateRect(Some(handle), None).ok().log_err() };
 

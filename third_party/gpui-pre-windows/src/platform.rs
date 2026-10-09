@@ -1,6 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
-// the vsync thread skips idle windows and sleeps while all are idle.
-// See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
     ffi::{OsStr, OsString},
@@ -11,7 +8,6 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
 };
 
 use anyhow::{Context as _, Result, anyhow};
@@ -43,10 +39,26 @@ use windows::{
 use crate::*;
 use gpui::*;
 
+struct TrackedWindow {
+    handle: SafeHwnd,
+    frame_signal: Arc<PlatformFrameSignal>,
+}
+
+impl TrackedWindow {
+    fn as_raw(&self) -> HWND {
+        self.handle.as_raw()
+    }
+}
+
 pub struct WindowsPlatform {
     inner: Rc<WindowsPlatformInner>,
-    raw_window_handles: Arc<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+    raw_window_handles: Arc<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    /// The windowing mode to start in, applied when `run` starts. Windowed when unset.
+    initial_windowing: RefCell<Option<WindowingRequest>>,
+    /// Set to stop the current `VSyncProvider` thread, which runs while windowed.
+    vsync_stop: RefCell<Option<Arc<AtomicBool>>>,
     // The below members will never change throughout the entire lifecycle of the app.
+    /// Created with `headless()`: never windowed, and without a real text system.
     headless: bool,
     icon: HICON,
     background_executor: BackgroundExecutor,
@@ -67,7 +79,7 @@ pub struct WindowsPlatform {
 
 struct WindowsPlatformInner {
     state: WindowsPlatformState,
-    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     // The below members will never change throughout the entire lifecycle of the app.
     validation_number: usize,
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
@@ -169,20 +181,18 @@ impl WindowsPlatform {
         unsafe {
             OleInitialize(None).context("unable to initialize Windows OLE")?;
         }
-        let (directx_devices, text_system, direct_write_text_system) = if !headless {
-            let devices = DirectXDevices::new().context("Creating DirectX devices")?;
+        // A platform that can become windowed needs the real text system from the start: the app
+        // keeps the one it's created with. It gets DirectX devices when it becomes windowed.
+        let (text_system, direct_write_text_system) = if !headless {
             let dw_text_system = Arc::new(
-                DirectWriteTextSystem::new(&devices)
-                    .context("Error creating DirectWriteTextSystem")?,
+                DirectWriteTextSystem::new(None).context("Error creating DirectWriteTextSystem")?,
             );
             (
-                Some(devices),
                 dw_text_system.clone() as Arc<dyn PlatformTextSystem>,
                 Some(dw_text_system),
             )
         } else {
             (
-                None,
                 Arc::new(gpui::NoopTextSystem::new()) as Arc<dyn PlatformTextSystem>,
                 None,
             )
@@ -203,7 +213,7 @@ impl WindowsPlatform {
             validation_number,
             main_sender: Some(main_sender),
             main_receiver: Some(main_receiver),
-            directx_devices,
+            directx_devices: None,
             dispatcher: None,
         };
         let result = unsafe {
@@ -255,6 +265,8 @@ impl WindowsPlatform {
             inner,
             handle,
             raw_window_handles,
+            initial_windowing: RefCell::new(None),
+            vsync_stop: RefCell::new(None),
             headless,
             icon,
             background_executor,
@@ -367,6 +379,57 @@ impl WindowsPlatform {
             .map(|hwnd| hwnd.as_raw())
     }
 
+    fn is_windowed(&self) -> bool {
+        self.inner.state.directx_devices.borrow().is_some()
+    }
+
+    /// Connects in the initial windowing mode, before the app finishes launching.
+    ///
+    /// # Panics
+    ///
+    /// Panics if DirectX can't be initialized, since the app can't start. Starts headless if this
+    /// process can't show windows, for example when started over SSH.
+    fn connect_initially(&self) {
+        let request = self
+            .initial_windowing
+            .borrow_mut()
+            .take()
+            .unwrap_or_else(|| WindowingRequest::Windowed(GraphicalEnvironment::detect()));
+        let WindowingRequest::Windowed(environment) = request else {
+            return;
+        };
+        if let Err(error) = check_can_show_windows(&environment) {
+            log::info!("starting headless: {error:#}");
+            return;
+        }
+        self.attach_gpu()
+            .unwrap_or_else(|error| panic!("failed to initialize DirectX: {error:#}"));
+    }
+
+    /// Creates the DirectX devices that windows draw with, and starts vsync.
+    fn attach_gpu(&self) -> Result<()> {
+        let devices = DirectXDevices::new().context("Creating DirectX devices")?;
+        if let Some(text_system) = &self.direct_write_text_system {
+            text_system.handle_gpu_lost(&devices)?;
+        }
+        *self.inner.state.directx_devices.borrow_mut() = Some(devices);
+        self.begin_vsync_thread();
+        Ok(())
+    }
+
+    /// Stops vsync and releases the DirectX devices. No window may be open.
+    fn detach_gpu(&self) {
+        if let Some(stop) = self.vsync_stop.borrow_mut().take() {
+            // Not joined: the thread can be sending this thread a message. It exits after its
+            // next vsync, and drops its reference to the devices then.
+            stop.store(true, Ordering::Release);
+        }
+        if let Some(text_system) = &self.direct_write_text_system {
+            text_system.release_gpu();
+        }
+        self.inner.state.directx_devices.borrow_mut().take();
+    }
+
     fn begin_vsync_thread(&self) {
         let Some(directx_devices) = self.inner.state.directx_devices.borrow().clone() else {
             return;
@@ -374,6 +437,8 @@ impl WindowsPlatform {
         let Some(direct_write_text_system) = &self.direct_write_text_system else {
             return;
         };
+        let stop = Arc::new(AtomicBool::new(false));
+        *self.vsync_stop.borrow_mut() = Some(stop.clone());
         let mut directx_device = directx_devices;
         let platform_window: SafeHwnd = self.handle.into();
         let validation_number = self.inner.validation_number;
@@ -381,23 +446,16 @@ impl WindowsPlatform {
         let text_system = Arc::downgrade(direct_write_text_system);
         let invalidate_devices = self.invalidate_devices.clone();
 
-        // Quill: read the idle-frames kill switch at startup.
-        if !idle_frames_enabled() {
-            log::info!("{IDLE_FRAMES_ENV} is off: windows will get vsync frames even when idle");
-        }
         std::thread::Builder::new()
             .name("VSyncProvider".to_owned())
             .spawn(move || {
                 let vsync_provider = VSyncProvider::new();
-                // Quill: parked windows still get one invalidation this often.
-                let mut next_heartbeat = Instant::now() + PARKED_HEARTBEAT;
                 loop {
-                    // Quill: sleep while every window's frames are parked
-                    // (see `FrameGate`), until one unparks or the heartbeat.
-                    if !FRAME_GATE.wait_for_frames(&all_windows, next_heartbeat) {
+                    let signal_source = vsync_provider.wait_for_vsync();
+                    let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
+                    if stop.load(Ordering::Acquire) {
                         break;
                     }
-                    vsync_provider.wait_for_vsync();
                     if check_device_lost(&directx_device.device)
                         || invalidate_devices.fetch_and(false, Ordering::Acquire)
                     {
@@ -414,18 +472,21 @@ impl WindowsPlatform {
                     let Some(all_windows) = all_windows.upgrade() else {
                         break;
                     };
-                    // Quill: skip parked windows, except on the heartbeat.
-                    let heartbeat = Instant::now() >= next_heartbeat;
-                    if heartbeat {
-                        next_heartbeat = Instant::now() + PARKED_HEARTBEAT;
-                    }
-                    let windows: SmallVec<[SafeHwnd; 4]> = all_windows.read().clone();
-                    for hwnd in windows.iter() {
-                        if heartbeat || !FRAME_GATE.is_parked(hwnd.as_raw()) {
-                            unsafe {
-                                let _ =
-                                    RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE);
+                    for hwnd in all_windows.read().iter() {
+                        unsafe {
+                            if let Some(signal_at) = signal_at {
+                                if IsWindowVisible(hwnd.as_raw()).as_bool()
+                                    && !IsIconic(hwnd.as_raw()).as_bool()
+                                {
+                                    hwnd.frame_signal.record(signal_at, signal_source);
+                                } else {
+                                    // Hidden windows may not consume WM_PAINT until shown again.
+                                    hwnd.frame_signal.take();
+                                }
                             }
+                            RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE)
+                                .ok()
+                                .log_err();
                         }
                     }
                 }
@@ -530,10 +591,10 @@ impl Platform for WindowsPlatform {
     }
 
     fn run(&self, on_finish_launching: Box<dyn 'static + FnOnce()>) {
-        on_finish_launching();
         if !self.headless {
-            self.begin_vsync_thread();
+            self.connect_initially();
         }
+        on_finish_launching();
 
         let mut msg = MSG::default();
         unsafe {
@@ -557,6 +618,34 @@ impl Platform for WindowsPlatform {
         self.foreground_executor()
             .spawn(async { unsafe { PostQuitMessage(0) } })
             .detach();
+    }
+
+    fn set_initial_windowing(&self, request: WindowingRequest) {
+        *self.initial_windowing.borrow_mut() = Some(request);
+    }
+
+    fn request_windowing(&self, request: WindowingRequest) -> Task<Result<()>> {
+        if self.headless {
+            return Task::ready(Err(anyhow!(
+                "a platform created headless can't switch windowing modes"
+            )));
+        }
+        let windowed = self.is_windowed();
+        Task::ready(match request {
+            WindowingRequest::Headless if !windowed => Err(anyhow!("already headless")),
+            WindowingRequest::Headless => {
+                self.detach_gpu();
+                Ok(())
+            }
+            WindowingRequest::Windowed(_) if windowed => Err(anyhow!("already windowed")),
+            WindowingRequest::Windowed(environment) => {
+                check_can_show_windows(&environment).and_then(|()| self.attach_gpu())
+            }
+        })
+    }
+
+    fn graphical_environment(&self) -> Option<GraphicalEnvironment> {
+        self.is_windowed().then(GraphicalEnvironment::detect)
     }
 
     fn restart(&self, binary_path: Option<PathBuf>, arguments: Vec<OsString>) {
@@ -665,12 +754,15 @@ impl Platform for WindowsPlatform {
         handle: AnyWindowHandle,
         options: WindowParams,
     ) -> Result<Box<dyn PlatformWindow>> {
+        if !self.is_windowed() {
+            return Err(anyhow!("cannot open windows while headless"));
+        }
         let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
         let handle = window.get_raw_handle();
-        self.raw_window_handles.write().push(handle.into());
-        // Quill: a new window starts with frames running; wake the vsync
-        // thread if every other window is parked.
-        FRAME_GATE.unpark(handle);
+        self.raw_window_handles.write().push(TrackedWindow {
+            handle: handle.into(),
+            frame_signal: window.state.frame_signal.clone(),
+        });
 
         Ok(Box::new(window))
     }
@@ -1148,11 +1240,7 @@ impl WindowsPlatformInner {
             .unwrap();
         lock.remove(index);
 
-        let is_empty = lock.is_empty();
-        // Quill: never take the frame gate while holding the window list.
-        drop(lock);
-        FRAME_GATE.forget(target_window);
-        is_empty
+        lock.is_empty()
     }
 
     #[inline]
@@ -1265,8 +1353,11 @@ impl WindowsPlatformInner {
     fn handle_device_lost(&self, lparam: LPARAM) -> Option<isize> {
         let directx_devices = lparam.0 as *const DirectXDevices;
         let directx_devices = unsafe { &*directx_devices };
-        self.state.directx_devices.borrow_mut().take();
-        *self.state.directx_devices.borrow_mut() = Some(directx_devices.clone());
+        let mut current = self.state.directx_devices.borrow_mut();
+        // The platform may have switched to headless while the device was being recovered.
+        if current.is_some() {
+            *current = Some(directx_devices.clone());
+        }
 
         Some(0)
     }
@@ -1274,6 +1365,9 @@ impl WindowsPlatformInner {
 
 impl Drop for WindowsPlatform {
     fn drop(&mut self) {
+        if let Some(stop) = self.vsync_stop.borrow_mut().take() {
+            stop.store(true, Ordering::Release);
+        }
         unsafe {
             if let Some(notification) = self.suspend_resume_notification.borrow_mut().take() {
                 // SAFETY: notification was returned by RegisterSuspendResumeNotification.
@@ -1307,7 +1401,7 @@ pub(crate) struct WindowCreationInfo {
 
 struct PlatformWindowCreateContext {
     inner: Option<Result<Rc<WindowsPlatformInner>>>,
-    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     validation_number: usize,
     main_sender: Option<PriorityQueueSender<RunnableVariant>>,
     main_receiver: Option<PriorityQueueReceiver<RunnableVariant>>,
@@ -1531,11 +1625,54 @@ fn check_device_lost(device: &ID3D11Device) -> bool {
     }
 }
 
+/// Checks that this process can show windows in the session `environment` names.
+fn check_can_show_windows(environment: &GraphicalEnvironment) -> Result<()> {
+    let current = GraphicalEnvironment::detect().session_id;
+    if let (Some(requested), Some(current)) = (environment.session_id, current)
+        && requested != current
+    {
+        return Err(anyhow!(
+            "windows can only be shown in this process's session ({current}), not session \
+             {requested}"
+        ));
+    }
+    if !is_window_station_visible() {
+        return Err(anyhow!(
+            "this process's window station is not interactive, so it can't show windows"
+        ));
+    }
+    Ok(())
+}
+
+/// Whether this process's window station has a visible desktop. A service's, or an SSH login's,
+/// doesn't.
+fn is_window_station_visible() -> bool {
+    use windows::Win32::System::StationsAndDesktops::{
+        GetProcessWindowStation, GetUserObjectInformationW, UOI_FLAGS, USEROBJECTFLAGS,
+    };
+
+    let Ok(station) = (unsafe { GetProcessWindowStation() }) else {
+        return false;
+    };
+    let mut flags = USEROBJECTFLAGS::default();
+    // SAFETY: `flags` is valid for writes of the size passed.
+    let result = unsafe {
+        GetUserObjectInformationW(
+            HANDLE(station.0),
+            UOI_FLAGS,
+            Some(&mut flags as *mut USEROBJECTFLAGS as *mut std::ffi::c_void),
+            std::mem::size_of::<USEROBJECTFLAGS>() as u32,
+            None,
+        )
+    };
+    result.is_ok() && flags.dwFlags & WSF_VISIBLE as u32 != 0
+}
+
 fn handle_gpu_device_lost(
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
     validation_number: usize,
-    all_windows: &std::sync::Weak<RwLock<SmallVec<[SafeHwnd; 4]>>>,
+    all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     text_system: &std::sync::Weak<DirectWriteTextSystem>,
 ) -> Result<()> {
     // Here we wait a bit to ensure the system has time to recover from the device lost state.
@@ -1787,5 +1924,16 @@ mod tests {
         let item = ClipboardItem::new_string_with_json_metadata("abcdef".to_string(), vec![3, 4]);
         write_to_clipboard(item.clone());
         assert_eq!(read_from_clipboard(), Some(item));
+
+        let item =
+            ClipboardItem::new_string_with_json_metadata("before\0after".to_string(), vec![12]);
+        write_to_clipboard(item);
+        assert_eq!(
+            read_from_clipboard(),
+            Some(ClipboardItem::new_string_with_json_metadata(
+                "before after".to_string(),
+                vec![12],
+            )),
+        );
     }
 }

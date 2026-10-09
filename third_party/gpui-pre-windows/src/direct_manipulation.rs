@@ -1,8 +1,5 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
-// reports when a touchpad gesture needs vsync frames. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui::*;
@@ -21,13 +18,6 @@ use crate::*;
 /// visual output.
 const DEFAULT_VIEWPORT_SIZE: i32 = 1000;
 
-/// Quill: how long a touchpad contact handed to Direct Manipulation keeps the
-/// window's vsync frames running before the gesture is recognized. The
-/// viewport runs in manual-update mode, so it only advances when
-/// `draw_window` calls `update`; a parked window would not recognize the
-/// gesture until the next heartbeat.
-const CONTACT_KEEPS_FRAMES: Duration = Duration::from_secs(5);
-
 pub(crate) struct DirectManipulationHandler {
     manager: IDirectManipulationManager,
     update_manager: IDirectManipulationUpdateManager,
@@ -36,10 +26,6 @@ pub(crate) struct DirectManipulationHandler {
     window: HWND,
     scale_factor: Rc<Cell<f32>>,
     pending_events: Rc<RefCell<Vec<PlatformInput>>>,
-    /// Quill: the viewport is running or in inertia.
-    gesture_active: Rc<Cell<bool>>,
-    /// Quill: when a touchpad contact was last handed to the viewport.
-    last_contact: Cell<Option<Instant>>,
 }
 
 impl DirectManipulationHandler {
@@ -79,14 +65,12 @@ impl DirectManipulationHandler {
 
             let scale_factor = Rc::new(Cell::new(scale_factor));
             let pending_events = Rc::new(RefCell::new(Vec::new()));
-            let gesture_active = Rc::new(Cell::new(false));
 
             let event_handler: IDirectManipulationViewportEventHandler =
                 DirectManipulationEventHandler::new(
                     window,
                     Rc::clone(&scale_factor),
                     Rc::clone(&pending_events),
-                    Rc::clone(&gesture_active),
                 )
                 .into();
 
@@ -102,21 +86,8 @@ impl DirectManipulationHandler {
                 window,
                 scale_factor,
                 pending_events,
-                gesture_active,
-                last_contact: Cell::new(None),
             })
         }
-    }
-
-    /// Quill: whether a touchpad gesture may be in progress, so the window
-    /// must keep calling `update` every vblank: the viewport is running or
-    /// in inertia, or a contact was handed to it recently.
-    pub fn keeps_frames_running(&self) -> bool {
-        self.gesture_active.get()
-            || self
-                .last_contact
-                .get()
-                .is_some_and(|contact| contact.elapsed() < CONTACT_KEEPS_FRAMES)
     }
 
     pub fn set_scale_factor(&self, scale_factor: f32) {
@@ -130,7 +101,6 @@ impl DirectManipulationHandler {
             if GetPointerType(pointer_id, &mut pointer_type).is_ok() && pointer_type == PT_TOUCHPAD
             {
                 self.viewport.SetContact(pointer_id).log_err();
-                self.last_contact.set(Some(Instant::now()));
             }
         }
     }
@@ -173,7 +143,6 @@ struct DirectManipulationEventHandler {
     last_y_offset: Cell<f32>,
     scroll_phase: Cell<TouchPhase>,
     pending_events: Rc<RefCell<Vec<PlatformInput>>>,
-    gesture_active: Rc<Cell<bool>>,
 }
 
 impl DirectManipulationEventHandler {
@@ -181,7 +150,6 @@ impl DirectManipulationEventHandler {
         window: HWND,
         scale_factor: Rc<Cell<f32>>,
         pending_events: Rc<RefCell<Vec<PlatformInput>>>,
-        gesture_active: Rc<Cell<bool>>,
     ) -> Self {
         Self {
             window,
@@ -192,7 +160,6 @@ impl DirectManipulationEventHandler {
             last_y_offset: Cell::new(0.0),
             scroll_phase: Cell::new(TouchPhase::Started),
             pending_events,
-            gesture_active,
         }
     }
 
@@ -246,10 +213,6 @@ impl IDirectManipulationViewportEventHandler_Impl for DirectManipulationEventHan
         if current == previous {
             return Ok(());
         }
-
-        // Quill: a running or coasting viewport needs `update` every vblank.
-        self.gesture_active
-            .set(current == DIRECTMANIPULATION_RUNNING || current == DIRECTMANIPULATION_INERTIA);
 
         // A new gesture interrupted inertia, so end the old sequence.
         if current == DIRECTMANIPULATION_RUNNING && previous == DIRECTMANIPULATION_INERTIA {
