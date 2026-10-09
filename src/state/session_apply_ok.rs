@@ -458,21 +458,13 @@ impl Session {
                     kind: MemberStatusChange::Restrict
                         | MemberStatusChange::Ban
                         | MemberStatusChange::Unban
-                        | MemberStatusChange::Remove
-                        | MemberStatusChange::Kick,
+                        | MemberStatusChange::Remove,
                     ..
                 })
             ) {
                 self.supergroup_members
                     .retain(|(id, _), _| *id != chat_id.0);
                 self.basic_group_members.remove(&chat_id.0);
-            }
-            if let Some(RequestPurpose::SetChatMemberStatus {
-                user_id,
-                kind: MemberStatusChange::Kick,
-            }) = pending.map(|p| p.purpose)
-            {
-                self.kick_unbans.push((chat_id.0, user_id));
             }
         }
         // Slice G1: `setChatMemberTag` confirmed — the custom

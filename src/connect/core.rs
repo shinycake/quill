@@ -576,7 +576,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_probe_channel_membership()?;
         // Slice G2: chain `boostChat` once the slots answer arrives.
         self.maybe_continue_boost()?;
-        self.maybe_finish_kicks()?;
         // Slice G2: refetch caches the state dropped after a confirmed
         // mutation. A dropped cache is the success signal — on a TDLib
         // error the cache stays and nothing refetches.

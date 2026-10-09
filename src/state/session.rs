@@ -98,9 +98,6 @@ pub struct Session {
     pub ownership: OwnershipState,
     /// Own status and admin rights in each basic group (`updateBasicGroup`).
     pub basic_group_own: HashMap<i64, BasicGroupOwn>,
-    /// Kicks whose ban was confirmed: `(chat_id, user_id)` pairs the driver
-    /// now lifts to `Left` (`maybe_finish_kicks`).
-    pub kick_unbans: Vec<(i64, i64)>,
     /// Member counts from `updateSupergroup` / `updateBasicGroup` (the
     /// header's fallback before full info loads), keyed by group id.
     pub supergroup_member_counts: HashMap<i64, i32>,
@@ -1089,7 +1086,6 @@ impl Session {
             message_action_note: None,
             ownership: OwnershipState::default(),
             basic_group_own: HashMap::new(),
-            kick_unbans: Vec::new(),
             supergroup_member_counts: HashMap::new(),
             basic_group_member_counts: HashMap::new(),
             chat_online_counts: HashMap::new(),

@@ -12,12 +12,11 @@ use crate::telegram::envelope::{
 use crate::telegram::requests::{
     ChatEventLogFilterSet, MessageSenderRef, add_chat_member, add_chat_members, ban_chat_member,
     can_transfer_ownership, chat_member_status_administrator_json, chat_member_status_banned_json,
-    chat_member_status_left_json, chat_member_status_member_json,
-    chat_member_status_restricted_json, create_chat_invite_link, edit_chat_invite_link,
-    get_basic_group_full_info, get_chat_administrators, get_chat_event_log, get_chat_invite_links,
-    get_chat_join_requests, get_chat_member, get_chat_owner_after_leaving, get_supergroup_members,
-    process_chat_join_request, replace_primary_chat_invite_link, revoke_chat_invite_link,
-    set_chat_member_status, set_chat_permissions, set_supergroup_username,
+    chat_member_status_member_json, chat_member_status_restricted_json, create_chat_invite_link,
+    edit_chat_invite_link, get_basic_group_full_info, get_chat_administrators, get_chat_event_log,
+    get_chat_invite_links, get_chat_join_requests, get_chat_member, get_chat_owner_after_leaving,
+    get_supergroup_members, process_chat_join_request, replace_primary_chat_invite_link,
+    revoke_chat_invite_link, set_chat_member_status, set_chat_permissions, set_supergroup_username,
     supergroup_members_filter_administrators_json, supergroup_members_filter_banned_json,
     supergroup_members_filter_recent_json, supergroup_members_filter_restricted_json,
     supergroup_members_filter_search_json, toggle_supergroup_join_by_request,
@@ -930,10 +929,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
-    /// "Remove from group" (tdesktop `kickParticipant`). A basic group has
-    /// one removal, `banChatMember`; a supergroup or channel member is
-    /// banned and, once TDLib confirms, set back to `Left` so they can come
-    /// back on their own (`maybe_finish_kicks`). Needs `can_restrict_members`.
+    /// "Remove from group" (tdesktop `kickParticipant`). A basic group uses
+    /// `banChatMember`; a supergroup or channel member is banned for good
+    /// (they show under Banned and cannot rejoin until unbanned), with no
+    /// automatic lift. Needs `can_restrict_members`.
     pub fn remove_chat_member(
         &mut self,
         chat_id: ChatId,
@@ -953,7 +952,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let kind = if basic {
             MemberStatusChange::Remove
         } else {
-            MemberStatusChange::Kick
+            MemberStatusChange::Ban
         };
         let purpose = RequestPurpose::SetChatMemberStatus { user_id, kind };
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
@@ -976,29 +975,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
-    }
-
-    /// Second half of a kick: the ban landed, so lift it to `Left`.
-    pub(crate) fn maybe_finish_kicks(&mut self) -> Result<(), ConnectSendError> {
-        while let Some((chat, user_id)) = self.session.kick_unbans.pop() {
-            let chat_id = ChatId(chat);
-            let purpose = RequestPurpose::SetChatMemberStatus {
-                user_id,
-                kind: MemberStatusChange::Unban,
-            };
-            let extra = self.session.request(purpose, Some(chat_id));
-            let member_id = MessageSenderRef::User(user_id).to_value();
-            if let Err(err) = self.sender.send_json(&set_chat_member_status(
-                extra,
-                chat,
-                &member_id,
-                &chat_member_status_left_json(),
-            )) {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
-        }
-        Ok(())
     }
 
     /// `canTransferOwnership`: the 2-step-verification and session-age

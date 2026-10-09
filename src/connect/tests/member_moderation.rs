@@ -81,7 +81,7 @@ const ADMIN: &str = r#"{"@type":"chatMemberStatusAdministrator","rights":{"@type
 const CREATOR: &str = r#"{"@type":"chatMemberStatusCreator","is_member":true}"#;
 
 #[test]
-fn removing_from_a_supergroup_bans_then_lifts_the_ban() {
+fn removing_from_a_supergroup_bans_and_nothing_more() {
     let (mut driver, recorder, sink, seq) = group_driver();
     feed(&mut driver, &seq, &sink, GROUP_CHAT);
     feed(&mut driver, &seq, &sink, &supergroup_status(ADMIN));
@@ -93,8 +93,6 @@ fn removing_from_a_supergroup_bans_then_lifts_the_ban() {
     assert_eq!(ban["status"]["@type"], "chatMemberStatusBanned");
     assert_eq!(ban["status"]["banned_until_date"], 0);
     assert_eq!(ban["member_id"]["user_id"], 8);
-    // The lift waits for the ban to be confirmed.
-    assert_eq!(count_sent(&recorder, "setChatMemberStatus"), 1);
     answer(
         &mut driver,
         &recorder,
@@ -103,14 +101,12 @@ fn removing_from_a_supergroup_bans_then_lifts_the_ban() {
         "setChatMemberStatus",
         r#"{"@type":"ok"}"#,
     );
-    assert_eq!(count_sent(&recorder, "setChatMemberStatus"), 2);
-    let lift = sent_request(&recorder, "setChatMemberStatus");
-    assert_eq!(lift["status"]["@type"], "chatMemberStatusLeft");
-    assert_eq!(lift["member_id"]["user_id"], 8);
+    // Like Telegram Desktop: the member stays banned, no unban follows.
+    assert_eq!(count_sent(&recorder, "setChatMemberStatus"), 1);
 }
 
 #[test]
-fn a_failed_ban_does_not_lift_anything() {
+fn a_failed_ban_reports_the_error() {
     let (mut driver, recorder, sink, seq) = group_driver();
     feed(&mut driver, &seq, &sink, GROUP_CHAT);
     feed(&mut driver, &seq, &sink, &supergroup_status(ADMIN));
@@ -124,7 +120,6 @@ fn a_failed_ban_does_not_lift_anything() {
         r#"{"@type":"error","code":400,"message":"USER_ADMIN_INVALID"}"#,
     );
     assert_eq!(count_sent(&recorder, "setChatMemberStatus"), 1);
-    assert!(driver.session.kick_unbans.is_empty());
     assert!(driver.session.member_action_error.contains_key(&-100));
 }
 
@@ -165,7 +160,6 @@ fn removing_from_a_basic_group_uses_ban_chat_member() {
     assert_eq!(ban["member_id"]["user_id"], 8);
     assert_eq!(ban["banned_until_date"], 0);
     assert_eq!(count_sent(&recorder, "setChatMemberStatus"), 0);
-    // A basic group has nothing to lift afterwards.
     answer(
         &mut driver,
         &recorder,
@@ -174,7 +168,6 @@ fn removing_from_a_basic_group_uses_ban_chat_member() {
         "banChatMember",
         r#"{"@type":"ok"}"#,
     );
-    assert!(driver.session.kick_unbans.is_empty());
     assert_eq!(count_sent(&recorder, "setChatMemberStatus"), 0);
 }
 

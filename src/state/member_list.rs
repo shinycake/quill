@@ -22,9 +22,6 @@ pub enum MemberStatusChange {
     Unban,
     /// "Remove from group" in a basic group (`banChatMember`).
     Remove,
-    /// "Remove from group" in a supergroup or channel: the ban half of a
-    /// kick; the confirmed ban queues the lift to `Left`.
-    Kick,
 }
 
 /// Slice G1: which `getSupergroupMembers` filter backs one cached member

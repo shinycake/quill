@@ -386,12 +386,6 @@ pub fn chat_member_status_restricted_json(
     })
 }
 
-/// `chatMemberStatusLeft = ChatMemberStatus` (schema line 2523): lifts a ban
-/// without adding the person back, which is the second half of a kick.
-pub fn chat_member_status_left_json() -> Value {
-    json!({ "@type": "chatMemberStatusLeft" })
-}
-
 /// Slice G1: `chatMemberStatusBanned` JSON (TDLib 1.8.67,
 /// `schema/td_api.tl:2517`):
 /// `chatMemberStatusBanned banned_until_date:int32 = ChatMemberStatus;`
