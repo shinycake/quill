@@ -1,3 +1,2 @@
 # calls polish: join-as picker + in-window push-to-talk (global hotkey not claimed)
 parity:calls-join-as
-parity:calls-push-to-talk
