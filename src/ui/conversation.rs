@@ -256,7 +256,12 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .min_w_0()
-                    .child(div().font_semibold().truncate().child(title_text))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(title_text)),
+                    )
                     .when_some(status_line, |this, line| {
                         this.child(
                             div()
@@ -276,7 +281,12 @@ impl QuillApp {
                                         "header-activity".into(),
                                     ))
                                 })
-                                .child(div().min_w_0().truncate().child(line)),
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .child(super::bidi_line::one_line_plain(line)),
+                                ),
                         )
                     }),
             )

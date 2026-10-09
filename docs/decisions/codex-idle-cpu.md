@@ -238,7 +238,7 @@ whatever still arrives.
   link also keeps waking at the display rate.
 - A full redraw is still 5–8 ms at idle clock speeds (history prepaint and
   layout dominate); urgent updates in a busy open group pay it per batch.
-- X11 and Windows frame loops (above).
+- X11 and Windows frame loops (above): addressed in `codex-idle-frames-x11-windows.md`.
 
 ## Risks
 

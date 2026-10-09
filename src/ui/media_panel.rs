@@ -730,7 +730,11 @@ impl QuillApp {
                                 if let Some(file) = item.display_file_id() {
                                     need_files.push(file);
                                 }
-                                self.custom_emoji_cell(id, item, cx)
+                                let on_screen = row_on_screen(
+                                    self.media_panel.list.item_is_above_viewport(ix),
+                                    self.media_panel.list.item_is_below_viewport(ix),
+                                );
+                                self.custom_emoji_cell(id, item, on_screen, cx)
                             }
                             None => placeholder_cell(EMOJI_CELL, cx),
                         },
@@ -829,11 +833,23 @@ impl QuillApp {
         .into_any_element()
     }
 
-    fn custom_emoji_cell(&self, id: u64, item: StickerItem, cx: &mut Context<Self>) -> AnyElement {
+    fn custom_emoji_cell(
+        &self,
+        id: u64,
+        item: StickerItem,
+        on_screen: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         // Every visible custom emoji animates (Telegram Desktop); the
-        // small emoji playback cache keeps that affordable.
+        // small emoji playback cache keeps that affordable. Rows the list
+        // built beyond the viewport (overdraw) hold still and do not ask
+        // the frame clock for redraws.
         let file_id = item.file_id;
-        let animated = self.custom_emoji_image(file_id, item.format, cx);
+        let animated = if on_screen {
+            self.custom_emoji_image(file_id, item.format, cx)
+        } else {
+            self.custom_emoji_image_parked(file_id, item.format, cx)
+        };
         let still = self.panel_still(&item);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         let fallback: SharedString = item.emoji.clone().into();
@@ -1285,6 +1301,12 @@ impl QuillApp {
     }
 }
 
+/// Whether a list row touches the viewport; unknown (not laid out yet)
+/// counts as visible so the first frame still animates.
+fn row_on_screen(above: Option<bool>, below: Option<bool>) -> bool {
+    above != Some(true) && below != Some(true)
+}
+
 fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
     div()
         .size(px(size))
@@ -1296,4 +1318,18 @@ fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
                 .bg(cx.theme().muted.opacity(0.4)),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::row_on_screen;
+
+    #[test]
+    fn overdraw_rows_do_not_count_as_on_screen() {
+        assert!(!row_on_screen(Some(true), Some(false)));
+        assert!(!row_on_screen(Some(false), Some(true)));
+        assert!(row_on_screen(Some(false), Some(false)));
+        // Not laid out yet: animate rather than flash a still.
+        assert!(row_on_screen(None, None));
+    }
 }

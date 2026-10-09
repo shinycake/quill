@@ -3,6 +3,7 @@ pub mod envelope;
 pub mod envelope_emoji;
 pub mod envelope_story;
 pub mod ffi;
+pub mod name_accent;
 pub mod profile_accent;
 pub mod requests;
 pub mod requests_data_settings;
@@ -28,6 +29,7 @@ pub use envelope::{
 };
 pub use envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem, UpgradedGiftEmojiStatus};
 pub use ffi::{LibraryOrigin, TdJson, loaded_library_origin, resolve_tdjson_path};
+pub use name_accent::{NameAccentColor, parse_name_accent_color};
 pub use profile_accent::{ProfileAccentColor, parse_profile_accent_color};
 pub use requests::{
     PollSend, SendReply, SetTdlibParameters, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,

@@ -437,6 +437,29 @@ fn update_profile_accent_colors_stores_palette_and_ids() {
 }
 
 #[test]
+fn update_accent_colors_stores_name_palette() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateAccentColors","colors":[{"@type":"accentColor","id":4242,"built_in_accent_color_id":3,"light_theme_colors":[1122867],"dark_theme_colors":[11189196],"min_channel_chat_boost_level":0}],"available_accent_color_ids":[4242]}"#,
+    );
+    assert_eq!(session.name_accent_colors.len(), 1);
+    assert_eq!(session.name_accent_colors[0].id, 4242);
+    // The renderer's lookup sees the server colors for a 7+ id.
+    assert_eq!(
+        crate::telegram::name_accent::name_color_rgb(4242, false),
+        0x112233
+    );
+    assert_eq!(
+        crate::telegram::name_accent::name_color_rgb(4242, true),
+        0xAABBCC
+    );
+}
+
+#[test]
 fn story_tray_keeps_main_entries_sorted_by_order() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

@@ -445,7 +445,9 @@ impl QuillApp {
                 .text_sm()
                 .truncate()
                 .text_color(cx.theme().muted_foreground)
-                .child(preview)
+                .child(super::bidi_line::one_line_plain(
+                    super::search_ui::one_line_preview(&preview),
+                ))
                 .into_any_element(),
             thumb,
             replace_button,
@@ -1096,7 +1098,9 @@ impl QuillApp {
             (Some(quote), _) => div()
                 .text_sm()
                 .truncate()
-                .child(format!("❝{}❞", quote.text))
+                .child(super::bidi_line::one_line_plain(
+                    super::search_ui::one_line_preview(&format!("❝{}❞", quote.text)),
+                ))
                 .into_any_element(),
             (None, Some(quill::telegram::envelope::MessageContent::Text(text))) => {
                 let emoji = self.custom_emoji_images(&text.entities, cx);
@@ -1114,7 +1118,9 @@ impl QuillApp {
             _ => div()
                 .text_sm()
                 .truncate()
-                .child(reply.preview.clone())
+                .child(super::bidi_line::one_line_plain(
+                    super::search_ui::one_line_preview(&reply.preview),
+                ))
                 .into_any_element(),
         };
         composer_context_bar_rich(
@@ -1163,7 +1169,9 @@ fn composer_context_bar(
             .text_sm()
             .truncate()
             .text_color(cx.theme().muted_foreground)
-            .child(preview)
+            .child(super::bidi_line::one_line_plain(
+                super::search_ui::one_line_preview(&preview),
+            ))
             .into_any_element(),
         None,
         trailing,
@@ -1218,7 +1226,8 @@ fn composer_context_bar_rich(
                                 .text_sm()
                                 .font_semibold()
                                 .text_color(color)
-                                .child(title.into()),
+                                .truncate()
+                                .child(super::bidi_line::one_line_plain(title.into())),
                         )
                         .child(
                             div()
@@ -1588,7 +1597,13 @@ impl QuillApp {
                         photo.as_deref(),
                         px(28.),
                     ))
-                    .child(div().text_sm().font_medium().truncate().child(name))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_medium()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(name)),
+                    )
                     .when(!username.is_empty(), |this| {
                         this.child(
                             div()

@@ -1118,6 +1118,9 @@ impl CallEngine for NtgcallsEngine {
         let Some(media) = self.group_calls.remove(&group_call_id) else {
             return Ok(());
         };
+        // Routing leaves with the call even when a native stop below fails
+        // (the early returns would otherwise strand the ssrc map).
+        self.callback.forget_group(media.chat_id);
         if let Some(instance) = self.instance {
             // Privacy: tear a live presentation down FIRST so screen
             // capture stops before the call itself.
@@ -1141,17 +1144,6 @@ impl CallEngine for NtgcallsEngine {
                 });
             }
         }
-        let mut maps = self
-            .callback
-            .group_chat_to_call
-            .lock()
-            .expect("ntgcalls group call map");
-        maps.remove(&media.chat_id);
-        self.callback
-            .group_video_ssrc_to_user
-            .lock()
-            .expect("ntgcalls group ssrc map")
-            .retain(|(chat_id, _), _| *chat_id != media.chat_id);
         Ok(())
     }
 

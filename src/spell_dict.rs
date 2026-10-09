@@ -253,6 +253,11 @@ impl HunspellBackend {
         (!entries.is_empty()).then_some(Self { entries })
     }
 
+    /// Whether every dictionary has been parsed (or failed to).
+    pub fn is_warm(&self) -> bool {
+        self.entries.iter().all(|e| e.dict.get().is_some())
+    }
+
     fn for_word(&self, word: &str) -> impl Iterator<Item = &Entry> {
         let script = word_script(word);
         self.entries
@@ -262,6 +267,12 @@ impl HunspellBackend {
 }
 
 impl SpellBackend for HunspellBackend {
+    fn warm(&self) {
+        for entry in &self.entries {
+            let _ = entry.dict();
+        }
+    }
+
     fn handles(&self, script: Script, _word: &str) -> bool {
         self.entries.iter().any(|e| e.script == script)
     }
@@ -344,6 +355,16 @@ pub fn select_backend(
     }
 }
 
+/// Parse the dictionaries off the calling thread. Until it finishes the
+/// checker's background pass simply waits on the same `OnceLock`, so the UI
+/// thread (which only paints cached underlines) never blocks on the parse.
+fn warm_in_background(backend: &Arc<dyn SpellBackend>) {
+    let backend = Arc::clone(backend);
+    let _ = std::thread::Builder::new()
+        .name("quill-spell-warm".into())
+        .spawn(move || backend.warm());
+}
+
 /// A checker plus what the settings page shows about it.
 pub struct SpellEngine {
     pub kind: EngineKind,
@@ -367,6 +388,7 @@ pub fn hunspell_engine(dirs: &[PathBuf], system: &[String], chosen: &[String]) -
         .collect();
     let hunspell = HunspellBackend::new(ordered).map(|b| Arc::new(b) as Arc<dyn SpellBackend>);
     let (kind, backend) = select_backend(None, hunspell);
+    warm_in_background(&backend);
     SpellEngine {
         kind,
         checker: Arc::new(SpellChecker::new(backend)),
@@ -563,6 +585,39 @@ mod tests {
         assert_eq!(engine.kind, EngineKind::None);
         assert!(engine.available.is_empty() && engine.active.is_empty());
         assert!(engine.checker.check_text("wrold teh").is_empty());
+    }
+
+    /// Manual timing probe: `cargo test --lib -- --ignored --nocapture
+    /// large_dictionary_parse_time`. Parses a synthetic 400k-word
+    /// dictionary (the size class of the big European ones).
+    #[test]
+    #[ignore = "timing probe"]
+    fn large_dictionary_parse_time() {
+        let dir = TempDir::new();
+        let mut dic = String::from("400000\n");
+        for i in 0..400_000u32 {
+            dic.push_str(&format!("word{i}abc/S\n"));
+        }
+        let aff = "SET UTF-8\nSFX S Y 1\nSFX S 0 s .\n";
+        std::fs::write(dir.path().join("xx.aff"), aff).unwrap();
+        std::fs::write(dir.path().join("xx.dic"), dic).unwrap();
+        let file = super::DictionaryFile {
+            code: "en_US".into(),
+            aff: dir.path().join("xx.aff"),
+            dic: dir.path().join("xx.dic"),
+        };
+        let start = std::time::Instant::now();
+        let loaded = super::load_dictionary(&file).is_some();
+        println!("parse 400k words: {:?} (ok={loaded})", start.elapsed());
+    }
+
+    #[test]
+    fn warm_parses_every_dictionary_once() {
+        let files = discover_dictionaries(&[fixtures()]);
+        let backend = super::HunspellBackend::new(files).expect("fixture dictionaries");
+        assert!(!backend.is_warm());
+        backend.warm();
+        assert!(backend.is_warm());
     }
 
     #[test]
