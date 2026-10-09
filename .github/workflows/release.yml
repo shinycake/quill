@@ -3,16 +3,21 @@ name: release
 # notes and latest.json, then creates a DRAFT GitHub release.
 # docs/decisions/codex-release-pipeline.md
 #
-#   git tag vX.Y.Z && git push origin vX.Y.Z     -> draft release vX.Y.Z (owner publishes it)
-#   gh workflow run release.yml -f version=X.Y.Z  -> dry run: same build, artifacts only,
-#                                                    never creates a release or a tag
+#   gh workflow run release.yml -f release=true   -> draft release (owner publishes it)
+#   gh workflow run release.yml                   -> dry run: same build, artifacts only
+#
+# The version is computed, never chosen: YEAR.MONTHDAY.COMMITS from the
+# commit being built, e.g. 2026.1009.1187 = committed 2026-10-09 (UTC), the
+# 1187th commit on main. It is valid semver, it only goes up, and the same
+# commit always gets the same version. The workflow stamps it into the
+# binaries (QUILL_RELEASE_VERSION, src/version.rs), so Cargo.toml never
+# changes. Pushing a vYEAR.MONTHDAY.COMMITS tag by hand also works.
 #
 # The release is ALWAYS created as a draft. Nothing here publishes it: the
-# owner reviews the draft and clicks Publish, which fires release-published.yml
-# (the site-refresh hook). X.Y.Z must equal the version in Cargo.toml, because
-# the in-app updater checks that the downloaded binary reports it.
+# owner reviews the draft and clicks Publish, which creates the tag and fires
+# release-published.yml (the site-refresh hook).
 #
-# Telegram credentials: tag builds compile the TELEGRAM_API_ID /
+# Telegram credentials: releases compile the TELEGRAM_API_ID /
 # TELEGRAM_API_HASH secrets into the binaries (src/credentials.rs). Missing
 # secrets give a credential-free build, which the release notes call out. Dry
 # runs embed nothing unless embed_credentials is set.
@@ -21,17 +26,18 @@ on:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version to dry-run (X.Y.Z, must match Cargo.toml). Uploads artifacts only.'
-        required: true
-        type: string
+      release:
+        description: 'Create a draft release (otherwise a dry run that only uploads artifacts)'
+        required: false
+        default: false
+        type: boolean
       embed_credentials:
-        description: 'Embed the Telegram credential secrets in the dry-run binaries'
+        description: 'Dry runs only: embed the Telegram credential secrets'
         required: false
         default: false
         type: boolean
 
-run-name: ${{ github.ref_type == 'tag' && format('release {0}', github.ref_name) || format('release dry run {0} ({1})', inputs.version, github.ref_name) }}
+run-name: ${{ github.ref_type == 'tag' && format('release {0}', github.ref_name) || (inputs.release && format('release ({0})', github.ref_name) || format('release dry run ({0})', github.ref_name)) }}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -49,27 +55,50 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       embed: ${{ steps.v.outputs.embed }}
       credentials: ${{ steps.v.outputs.credentials }}
+      publish: ${{ steps.v.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: v
         name: version, tag and credential mode
         env:
-          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE: ${{ inputs.release }}
           INPUT_EMBED: ${{ inputs.embed_credentials }}
           # Only "true"/"false" leave this step; the values never do.
           HAVE_SECRETS: ${{ secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}
         run: |
-          cargo_version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')"
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             version="${GITHUB_REF_NAME#v}"
             embed=true
+            publish=true
           else
-            version="${INPUT_VERSION:-$cargo_version}"
-            embed="${INPUT_EMBED:-false}"
+            # YEAR.MONTHDAY.COMMITS of the commit being built (UTC).
+            day="$(TZ=UTC git log -1 --format=%cd --date=format-local:'%Y.%-m%d' HEAD)"
+            version="$day.$(git rev-list --count HEAD)"
+            if [ "$INPUT_RELEASE" = true ]; then
+              [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::releases are cut from main, not $GITHUB_REF"; exit 1; }
+              embed=true
+              publish=true
+            else
+              embed="${INPUT_EMBED:-false}"
+              publish=false
+            fi
           fi
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z, got '$version'"; exit 1; }
-          if [ "$cargo_version" != "$version" ]; then
-            echo "::error::release $version does not match Cargo.toml version $cargo_version; bump Cargo.toml (and Cargo.lock) first"
+          python3 - "$version" <<'PY' || exit 1
+          import datetime, re, sys
+          v = sys.argv[1]
+          m = re.fullmatch(r"(\d{4})\.([1-9]\d?)(\d{2})\.(0|[1-9]\d*)", v)
+          if not m:
+              sys.exit(f"::error::version must be YEAR.MONTHDAY.COMMITS (e.g. 2026.1009.1187), got '{v}'")
+          try:
+              datetime.date(int(m[1]), int(m[2]), int(m[3]))
+          except ValueError:
+              sys.exit(f"::error::version {v} does not start with a real date")
+          PY
+          if [ "$publish" = true ] && gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release v$version already exists (this commit was released); delete its draft to rebuild it"
             exit 1
           fi
           credentials=none
@@ -80,16 +109,18 @@ jobs:
           {
             echo "version=$version"
             echo "tag=v$version"
+            echo "publish=$publish"
             echo "embed=$embed"
             echo "credentials=$credentials"
           } >> "$GITHUB_OUTPUT"
-          echo "Quill $version, tag v$version, credentials: $credentials, dry run: $([ "$GITHUB_REF_TYPE" = tag ] && echo no || echo yes)"
+          echo "Quill $version, tag v$version, credentials: $credentials, draft release: $publish"
 
   linux:
     name: linux
     needs: prepare
     uses: ./.github/workflows/package-linux.yml
     with:
+      version: ${{ needs.prepare.outputs.version }}
       embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
     secrets:
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -100,6 +131,7 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/package-windows.yml
     with:
+      version: ${{ needs.prepare.outputs.version }}
       embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
     secrets:
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -110,6 +142,7 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/package-macos.yml
     with:
+      version: ${{ needs.prepare.outputs.version }}
       embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
     secrets:
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -145,6 +178,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
       CREDENTIALS: ${{ needs.prepare.outputs.credentials }}
+      PUBLISH: ${{ needs.prepare.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -203,7 +237,7 @@ jobs:
           [ -n "$PREV" ] && args+=(--previous-tag "$PREV")
           python3 -I scripts/release-assemble.py "${args[@]}"
           {
-            echo "## Quill $VERSION ($([ "$GITHUB_REF_TYPE" = tag ] && echo 'draft release' || echo 'dry run, no release'))"
+            echo "## Quill $VERSION ($([ "$PUBLISH" = true ] && echo 'draft release' || echo 'dry run, no release'))"
             echo
             echo '| Asset | Size | SHA-256 |'
             echo '|---|---|---|'
@@ -216,14 +250,17 @@ jobs:
             assets/
             release-notes.md
           if-no-files-found: error
-      # Tag pushes only. Always a draft: the owner publishes it by hand.
+      # Releases only (release=true, or a pushed tag). Always a draft: the
+      # owner publishes it by hand, which creates the tag on this commit.
       - name: create DRAFT release
-        if: github.event_name == 'push' && github.ref_type == 'tag'
+        if: needs.prepare.outputs.publish == 'true'
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "::error::a release for $TAG already exists; delete the old draft before re-running"
             exit 1
           fi
-          gh release create "$TAG" --draft --verify-tag \
+          verify=()
+          [ "$GITHUB_REF_TYPE" = tag ] && verify=(--verify-tag)
+          gh release create "$TAG" --draft "${verify[@]}" --target "$GITHUB_SHA" \
             --title "Quill $VERSION" --notes-file release-notes.md assets/*
           gh release view "$TAG" --json isDraft,url --jq '"draft=\(.isDraft) \(.url)"'

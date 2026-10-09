@@ -8,6 +8,10 @@ name: package-windows
 on:
   workflow_call:
     inputs:
+      version:
+        description: 'Release version (the date, YYYY.M.D) stamped into the binary; empty for CI builds'
+        type: string
+        default: ''
       embed_credentials:
         description: 'Compile the Telegram api_id/api_hash secrets into the binary'
         type: boolean
@@ -44,6 +48,7 @@ jobs:
       # step, as compile-time env read by option_env! (src/credentials.rs).
       - name: build release ui
         env:
+          QUILL_RELEASE_VERSION: ${{ inputs.version }}
           QUILL_BUILD_TELEGRAM_API_ID: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID || '' }}
           QUILL_BUILD_TELEGRAM_API_HASH: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_HASH || '' }}
         run: cargo build --release --features ui --locked

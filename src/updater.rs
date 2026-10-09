@@ -44,7 +44,7 @@ pub enum UpdateState {
 impl UpdateState {
     pub fn label(&self) -> String {
         match self {
-            Self::Idle => format!("Quill {}", env!("CARGO_PKG_VERSION")),
+            Self::Idle => format!("Quill {}", crate::version::APP),
             Self::Checking => "Checking for updates…".into(),
             Self::Available(release) => format!("Quill {} is available", release.version),
             Self::Downloading(_) => "Downloading and verifying update…".into(),
@@ -151,7 +151,7 @@ pub fn check_latest_release() -> UpdateState {
         .new_agent();
     let response = agent
         .get(LATEST_API_URL)
-        .header("User-Agent", concat!("Quill/", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", format!("Quill/{}", crate::version::APP))
         .header("Accept", "application/vnd.github+json")
         .call();
     let Ok(mut response) = response else {
@@ -161,7 +161,7 @@ pub fn check_latest_release() -> UpdateState {
     };
     let status = response.status().as_u16();
     if status != 200 {
-        return interpret_release(status, &[], env!("CARGO_PKG_VERSION"));
+        return interpret_release(status, &[], crate::version::APP);
     }
     let Ok(body) = response
         .body_mut()
@@ -171,7 +171,7 @@ pub fn check_latest_release() -> UpdateState {
     else {
         return UpdateState::Failed("Could not read release information. Retry the check.");
     };
-    interpret_release(status, &body, env!("CARGO_PKG_VERSION"))
+    interpret_release(status, &body, crate::version::APP)
 }
 
 #[cfg(test)]

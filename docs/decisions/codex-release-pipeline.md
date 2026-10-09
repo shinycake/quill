@@ -315,3 +315,14 @@ Local gate before the first push: `GATE OK core=2044 0 ui=126 0`. actionlint
 and shellcheck are clean on every new or changed workflow and script
 (`.github/actionlint.yaml` declares the self-hosted `quill-ui-build` label so
 the existing `quill-ui-build.yml` lints clean too).
+
+## Versioning: computed from the commit (2026-10-09)
+
+The owner asked for versions based on the date, with nothing to choose or bump.
+
+- **Format:** the version is `YEAR.MONTHDAY.COMMITS` for the commit being built, for example `2026.1009.1187`: committed on 2026-10-09 (UTC), the 1187th commit on main.
+- **Why it's valid semver:** each part is a plain number. January 9 is `109`, which sorts before `1009`. A suffix like `2026.10.9-2` would be a pre-release that sorts before `2026.10.9`, and build metadata (`+2`) is ignored in comparisons. That is why the build number lives in the patch field.
+- **Ordering:** two builds on the same day differ by their commit count, and later commits always compare higher, so the in-app updater (semver precedence) offers them.
+- **Repeatable:** the same commit always gets the same version. The workflow refuses to create a second release for a version that already exists.
+- **Stamping:** `release.yml`'s prepare step computes the version and passes it to the packaging workflows as the `version` input. They set `QUILL_RELEASE_VERSION` for the release build, and `src/version.rs` (`quill::version::APP`) uses it instead of `Cargo.toml`'s version. `--version`, the macOS bundle version, the updater, the User-Agent and the version reported to Telegram all read `APP`. Local and CI builds keep `Cargo.toml`'s version, which never changes for a release.
+- **Cutting a release:** `gh workflow run release.yml -f release=true` (main only) creates a draft. Publishing the draft creates the tag `vYEAR.MONTHDAY.COMMITS` on the built commit. A dry run (no `release`) builds the same version and only uploads artifacts. A hand-pushed tag in this format still works, and its format and date are validated.
