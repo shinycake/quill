@@ -1,4 +1,3 @@
 parity:selection-copy-text
-parity:selection-drag-range
 parity:pin-confirm-options
 parity:pin-unpin-all-confirm
