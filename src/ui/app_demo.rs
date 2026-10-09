@@ -2628,6 +2628,11 @@ impl QuillApp {
         // (scheduled/system) once a minute. `apply_appearance` only
         // notifies when the effective theme actually changed, so the
         // tick is free when idle.
+        if demo.is_some()
+            && let Some(pct) = super::interface_zoom::demo_interface_scale()
+        {
+            app.appearance.interface_scale_pct = pct;
+        }
         app.apply_appearance(cx);
         app.init_slices(cx);
         // Animations stop behind another app and resume on activation:

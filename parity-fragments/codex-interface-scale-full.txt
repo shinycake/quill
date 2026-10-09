@@ -1,0 +1,2 @@
+# Interface scale 100-300% now zooms every window (text, avatars, rows, icons, media), live
+parity:appearance-scale
