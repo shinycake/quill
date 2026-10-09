@@ -1,6 +1,0 @@
-# B18 translate bar: server hide flag, channel auto-translate; B12 reply keyboards
-parity:chrome-translate-bar
-parity:composer-bot-keyboard-toggle
-parity:composer-reply-markup-update
-parity:composer-keyboard-request-buttons
-parity:composer-recent-inline-bots

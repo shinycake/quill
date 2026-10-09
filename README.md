@@ -221,7 +221,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Payment refunded, paid-message refunded and price-changed service rows <!-- parity:render-service-payment-refund -->
 - [ ] Forwarded story messages and story mentions <!-- parity:render-story-message -->
 - [ ] Paid media shows a blurred locked preview with an unlock button <!-- parity:render-paid-media -->
-- [ ] Checklist messages render with tasks and done marks <!-- parity:render-checklist -->
+- [x] Checklist messages render with tasks and done marks <!-- parity:render-checklist -->
 - [ ] Gift and giveaway messages render as cards (regular, unique, refunded, prize, winners, gift code) <!-- parity:render-gift-cards -->
 - [ ] Contact cards show an avatar with Message, Add contact and View buttons <!-- parity:render-contact-card-actions -->
 - [ ] Location and venue messages show a map thumbnail <!-- parity:render-map-thumbnail -->
@@ -249,7 +249,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Cancel Download / Cancel Upload from the message menu <!-- parity:menu-cancel-transfer -->
 - [x] Add to GIFs and Open GIF from the message menu <!-- parity:menu-gif-actions -->
 - [x] Add or remove favorite sticker, View Sticker Set and Add Stickers from the message menu <!-- parity:menu-sticker-actions -->
-- [ ] Attached Stickers for photos that contain stickers <!-- parity:menu-attached-stickers -->
+- [x] Attached Stickers for photos that contain stickers <!-- parity:menu-attached-stickers -->
 - [ ] "This message contains emoji from X pack" footer <!-- parity:menu-emoji-pack-footer -->
 - [x] Report a message with a reason flow, also from the selection bar <!-- parity:menu-report-message -->
 - [x] "N Seen / N Reacted" row with reader and reactor lists and read date <!-- parity:menu-seen-by -->
@@ -268,8 +268,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Poll menu: Retract vote, View results and ends-in note <!-- parity:menu-poll-actions -->
 - [ ] Saved Messages tag menu: Filter by Tag, Add or Edit Name, Remove Tag <!-- parity:menu-saved-tag-menu -->
 - [ ] Info line explaining why Forward and Copy are missing in protected chats <!-- parity:menu-noforwards-note -->
-- [ ] Admin delete box: delete all from user, ban and report spam in one step <!-- parity:menu-moderate-delete -->
-- [ ] Delete a member's reaction as an admin <!-- parity:menu-delete-reaction -->
+- [x] Admin delete box: delete all from user, ban and report spam in one step <!-- parity:menu-moderate-delete -->
+- [x] Delete a member's reaction as an admin <!-- parity:menu-delete-reaction -->
 - [x] Selection bar: Copy Selected as Text <!-- parity:selection-copy-text -->
 - [ ] Selection bar: Download, Save, Unpin, Report, Send Now and Reschedule selected messages <!-- parity:selection-bulk-actions -->
 - [ ] Drag-select across messages and Shift-click range selection <!-- parity:selection-drag-range -->
@@ -282,13 +282,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [ ] Formatting shows live in the input (bold appears bold, mentions as tags, custom emoji inline) <!-- parity:composer-wysiwyg -->
 - [ ] Mention without a username inserts a styled tag instead of raw markup <!-- parity:composer-mention-tags -->
-- [ ] Send as another identity (channel or anonymous) picker <!-- parity:composer-send-as -->
-- [ ] Forward bar in the composer: change recipient, hide sender or captions, add a comment <!-- parity:composer-forward-bar -->
-- [ ] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
+- [x] Send as another identity (channel or anonymous) picker <!-- parity:composer-send-as -->
+- [x] Forward bar in the composer: change recipient, hide sender or captions, add a comment <!-- parity:composer-forward-bar -->
+- [x] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
 - [ ] Repeating scheduled messages (Premium) <!-- parity:composer-repeat-schedule -->
 - [ ] Send a dice, dart, basketball, football, bowling or slot machine by sending its emoji alone <!-- parity:composer-send-dice -->
 - [x] Share a contact card from a profile <!-- parity:composer-share-contact -->
-- [ ] Create checklists <!-- parity:composer-checklist -->
+- [x] Create checklists <!-- parity:composer-checklist -->
 - [ ] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
 - [ ] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
 - [ ] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
@@ -296,12 +296,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
 - [ ] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->
 - [ ] Premium-only and paid-message gates ("charges N per message", "only accepts messages from contacts") <!-- parity:composer-paid-gates -->
-- [ ] Show and hide button for bot reply keyboards <!-- parity:composer-bot-keyboard-toggle -->
-- [ ] Reply keyboards update from the server outside the loaded history <!-- parity:composer-reply-markup-update -->
-- [ ] Keyboard buttons that request users, a chat or a phone number <!-- parity:composer-keyboard-request-buttons -->
+- [x] Show and hide button for bot reply keyboards <!-- parity:composer-bot-keyboard-toggle -->
+- [x] Reply keyboards update from the server outside the loaded history <!-- parity:composer-reply-markup-update -->
+- [x] Keyboard buttons that request users, a chat or a phone number <!-- parity:composer-keyboard-request-buttons -->
 - [ ] Inline bot results in a grid and the "switch to PM" button <!-- parity:composer-inline-grid -->
-- [ ] Recent inline bots suggested when typing @ <!-- parity:composer-recent-inline-bots -->
-- [ ] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
+- [x] Recent inline bots suggested when typing @ <!-- parity:composer-recent-inline-bots -->
+- [x] Greeting sticker in an empty private chat <!-- parity:composer-greeting-sticker -->
 - [ ] Up arrow on a pending media message opens its caption for editing <!-- parity:composer-up-edit-media -->
 - [ ] Insert Unicode, subscript, superscript, date formatting and formula menu (deferred: low impact) <!-- parity:composer-unicode-menu -->
 - [ ] Code-block language picker with auto-detect <!-- parity:composer-code-language -->
@@ -312,7 +312,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Action bar for new chats: Add contact, Block, Report spam, Share my phone, Add to group <!-- parity:chrome-action-bar -->
 - [x] "N requested to join" bar with avatars that opens the requests list <!-- parity:chrome-join-requests-bar -->
-- [ ] Translate bar at the top of a chat (partial: translate actions exist; no bar or per-chat toggle) <!-- parity:chrome-translate-bar -->
+- [x] Translate bar at the top of a chat (partial: translate actions exist; no bar or per-chat toggle) <!-- parity:chrome-translate-bar -->
 - [ ] Similar channels suggestions after leaving a channel <!-- parity:chrome-similar-channels -->
 - [ ] Business bot manage bar <!-- parity:chrome-business-bot-bar -->
 - [ ] Pin message from the pinned bar and hide-all confirmation wording <!-- parity:chrome-pinned-bar-confirm -->
@@ -320,8 +320,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Emoji status and premium badge beside the chat title <!-- parity:chrome-header-status -->
 - [ ] Restricted, Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
 - [ ] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
-- [ ] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
-- [ ] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
+- [x] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
+- [x] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
 - [ ] Per-chat wallpaper and chat themes <!-- parity:chrome-chat-wallpaper -->
 - [ ] "What can this bot do?" intro in an empty bot chat <!-- parity:chrome-bot-intro -->
 - [ ] Composer state buttons: Unblock, Start, Join, Apply to join, Mute and Unmute (partial: Join and Mute exist; Unblock and Apply to join unverified) <!-- parity:chrome-composer-states -->
@@ -369,13 +369,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] App badge counter settings: include muted chats, include archived chats, count messages vs chats (BadgePrefs in src/settings.rs persisted to badge_prefs.json; tray badge_count honors prefs; section in notification defaults dialog) <!-- parity:chatlist-badge-settings -->
 - [x] Chat list style settings: two/three lines, media icons, text formatting (Settings → Appearance → Chat list rows; src/chatlist_style.rs, src/ui/chatlist_style.rs, ui/appearance.rs) <!-- parity:chatlist-list-style --> (parity: chat-list style settings (two/three lines, media icons, formatted preview))
 - [x] Unread / Archived filter category chips beside the folder tabs (the folder/Main selection itself is the All view); Archived forces the archive section open (src/ui/mod.rs: ChatListFilter) <!-- parity:chatlist-category-filters -->
-- [ ] "Frequent contacts" row in search, with a setting to hide it <!-- parity:chatlist-frequent-contacts -->
-- [ ] Remove a single recent search entry <!-- parity:chatlist-remove-recent-search -->
-- [ ] Global search filters: private, groups, channels, archived, date range <!-- parity:chatlist-search-filters -->
+- [x] "Frequent contacts" row in search, with a setting to hide it <!-- parity:chatlist-frequent-contacts -->
+- [x] Remove a single recent search entry <!-- parity:chatlist-remove-recent-search -->
+- [x] Global search filters: private, groups, channels, archived, date range <!-- parity:chatlist-search-filters -->
 - [ ] Global search tabs: channels, apps, public posts, media, links, files, music, voice <!-- parity:chatlist-search-tabs -->
-- [ ] Server-side chat and contact search <!-- parity:chatlist-search-server -->
-- [ ] Tapping a hashtag searches this chat, my messages or public posts <!-- parity:chatlist-hashtag-search -->
-- [ ] In-chat search: filter by sender, calendar, and "N of M" result counter <!-- parity:chatlist-inchat-search-from -->
+- [x] Server-side chat and contact search <!-- parity:chatlist-search-server -->
+- [x] Tapping a hashtag searches this chat, my messages or public posts <!-- parity:chatlist-hashtag-search -->
+- [x] In-chat search: filter by sender, calendar, and "N of M" result counter <!-- parity:chatlist-inchat-search-from -->
 - [ ] Shareable folders: invite links, add folder by link, "N new chats" bar <!-- parity:chatlist-folder-share -->
 - [ ] Recommended folders <!-- parity:chatlist-folder-recommended -->
 - [ ] Folder icon picker and tab display (text, icons, or both) <!-- parity:chatlist-folder-icons -->
@@ -410,8 +410,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Shared media tabs: separate Photos and Videos, round videos, Polls, Stories, Gifts, Saved Music <!-- parity:profile-media-tabs -->
 - [ ] Shared media calendar and jump by month <!-- parity:profile-media-calendar -->
 - [ ] Members list inline in the group info panel with online first and admin badges <!-- parity:profile-members-inline -->
-- [ ] Member context menu: Mention, Search messages, Promote, Restrict, Ban, Remove <!-- parity:profile-member-menu -->
-- [ ] Remove from group (kick) as distinct from ban <!-- parity:profile-remove-member -->
+- [x] Member context menu: Mention, Search messages, Promote, Restrict, Ban, Remove <!-- parity:profile-member-menu -->
+- [x] Remove from group (kick) as distinct from ban <!-- parity:profile-remove-member -->
 - [ ] Add a bot to a group or channel as admin with chosen rights <!-- parity:profile-add-bot-to-group -->
 - [ ] Bot "Open App" main mini-app button <!-- parity:profile-bot-open-app -->
 - [ ] Profile action row: Message, Mute, Call, Video, Gift, More <!-- parity:profile-action-row -->
@@ -543,16 +543,16 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Communities: "chat removed from community" service message (`messageChatRemovedFromCommunity`; TGX `ActionChatRemovedFromCommunity` verbatim — `This chat was removed from community`) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:groups-removed-from-community -->
 - [x] Communities: community search filter (searchMessagesChatTypeFilterCommunity) <!-- parity:communities-search-filter -->
 - [x] Communities: community join service message (`messageChatJoinFromCommunity`; TGX `group_user_join_from_community*` verbatim — `{name} joined the group from the community "NAME"` / `You joined the group from the community "NAME"`, nameless fallbacks; sender kept uncollapsed so incoming rows attribute the join) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:communities-join-service-message -->
-- [ ] Chat history visible to new members toggle <!-- parity:admin-history-new-members -->
-- [ ] Turn on topics (forum) for an existing group <!-- parity:admin-enable-topics -->
-- [ ] Allowed reactions settings (all, some, none, paid) <!-- parity:admin-allowed-reactions -->
-- [ ] Link or unlink a discussion group <!-- parity:admin-linked-discussion -->
-- [ ] Join-to-send and approve-to-join for discussion groups <!-- parity:admin-join-to-send -->
-- [ ] Hide the members list <!-- parity:admin-hide-members -->
-- [ ] Restrict saving content (protected content) toggle <!-- parity:admin-protected-content -->
-- [ ] Upgrade a basic group to a supergroup <!-- parity:admin-upgrade-basic -->
-- [ ] Transfer ownership with password confirmation <!-- parity:admin-transfer-ownership -->
-- [ ] Pick a new owner when leaving as owner <!-- parity:admin-new-owner-on-leave -->
+- [x] Chat history visible to new members toggle <!-- parity:admin-history-new-members -->
+- [x] Turn on topics (forum) for an existing group <!-- parity:admin-enable-topics -->
+- [x] Allowed reactions settings (all, some, none, paid) <!-- parity:admin-allowed-reactions -->
+- [x] Link or unlink a discussion group <!-- parity:admin-linked-discussion -->
+- [x] Join-to-send and approve-to-join for discussion groups <!-- parity:admin-join-to-send -->
+- [x] Hide the members list <!-- parity:admin-hide-members -->
+- [x] Restrict saving content (protected content) toggle <!-- parity:admin-protected-content -->
+- [x] Upgrade a basic group to a supergroup <!-- parity:admin-upgrade-basic -->
+- [x] Transfer ownership with password confirmation <!-- parity:admin-transfer-ownership -->
+- [x] Pick a new owner when leaving as owner <!-- parity:admin-new-owner-on-leave -->
 - [ ] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
 - [ ] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
 - [ ] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
@@ -570,12 +570,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Forums, Saved Messages & threads
 
-- [ ] Topic icon picker with default icons, custom emoji and color <!-- parity:forum-topic-icon-picker -->
+- [x] Topic icon picker with default icons, custom emoji and color <!-- parity:forum-topic-icon-picker -->
 - [ ] Forum topics as a second column next to the chat list <!-- parity:forum-second-column -->
-- [ ] View as topics or as messages toggle <!-- parity:forum-view-as-topics -->
-- [ ] Copy topic link, reorder pinned topics, read all mentions and reactions in a topic, unpin all in a topic <!-- parity:forum-topic-extras -->
-- [ ] Saved Messages sublists by original chat, pinned sublists, delete a sublist <!-- parity:saved-sublists -->
-- [ ] Saved tags: rename a tag, filter by tag, search by tag <!-- parity:saved-tags-manage -->
+- [x] View as topics or as messages toggle <!-- parity:forum-view-as-topics -->
+- [x] Copy topic link, reorder pinned topics, read all mentions and reactions in a topic, unpin all in a topic <!-- parity:forum-topic-extras -->
+- [x] Saved Messages sublists by original chat, pinned sublists, delete a sublist <!-- parity:saved-sublists -->
+- [x] Saved tags: rename a tag, filter by tag, search by tag <!-- parity:saved-tags-manage -->
 - [ ] Reply threads as a full section with a composer <!-- parity:thread-section -->
 
 ### Secret chats
@@ -789,22 +789,22 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Emoji pack download states (Downloading…/Downloaded/Update Needed/Installing…) <!-- parity:emoji-pack-states -->
 - [x] "Send Stickers & GIFs" permission denied messaging in groups <!-- parity:stickers-permission-messaging -->
 - [x] Group sticker/custom emoji pack selection and removal for eligible supergroups; current confirmed pack, installed choices, safe refusal and retry; live changes unverified <!-- parity:stickers-group-set -->
-- [ ] Remove a single recent sticker or emoji, and reset recent emoji <!-- parity:stickers-remove-recent -->
+- [x] Remove a single recent sticker or emoji, and reset recent emoji <!-- parity:stickers-remove-recent -->
 - [ ] Sticker set box: share link, copy link, report, archive <!-- parity:stickers-set-box-actions -->
 - [ ] Tapping a sticker in a chat opens its set <!-- parity:stickers-tap-opens-set -->
 - [ ] Tapping a custom emoji shows "This emoji is from X pack" with a View button <!-- parity:stickers-custom-emoji-toast -->
 - [ ] Masks tab and mask stickers <!-- parity:stickers-masks -->
-- [ ] Emoji search by keyword in all languages <!-- parity:emoji-keyword-search -->
+- [x] Emoji search by keyword in all languages <!-- parity:emoji-keyword-search -->
 - [ ] Emoji set style picker <!-- parity:emoji-set-style -->
 - [ ] "Replace emoji automatically" setting <!-- parity:emoji-replace-auto -->
-- [ ] Quick reaction on double-click and choose the default quick reaction <!-- parity:reactions-quick-double-click -->
+- [x] Quick reaction on double-click and choose the default quick reaction <!-- parity:reactions-quick-double-click -->
 - [ ] Double-click-to-reply setting and reply or reaction corner buttons <!-- parity:reactions-corner-settings -->
-- [ ] Reaction animation when you send a reaction <!-- parity:reactions-fly-animation -->
+- [x] Reaction animation when you send a reaction <!-- parity:reactions-fly-animation -->
 - [ ] Send paid (star) reactions with toast and undo <!-- parity:reactions-paid-send -->
 - [ ] Who reacted: hover tooltip and full list per emoji <!-- parity:reactions-who-reacted -->
-- [ ] Reaction strip updates when available and default reactions change <!-- parity:reactions-live-updates -->
+- [x] Reaction strip updates when available and default reactions change <!-- parity:reactions-live-updates -->
 - [ ] Sticker or emoji flies from the panel into the chat when sent <!-- parity:stickers-send-animation -->
-- [ ] Recent, favorite and trending stickers update when changed on another device <!-- parity:stickers-live-updates -->
+- [x] Recent, favorite and trending stickers update when changed on another device <!-- parity:stickers-live-updates -->
 - [ ] Sticker and custom emoji set creator (deferred: low impact) <!-- parity:stickers-creator -->
 - [ ] Premium stickers section with locked previews <!-- parity:stickers-premium-section -->
 - [ ] Animated emoji status next to names and in headers <!-- parity:emoji-status-animated -->
@@ -873,13 +873,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
 - [ ] Bot earnings and affiliate programs (deferred: low impact) <!-- parity:bots-earn-affiliate -->
 - [ ] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
-- [ ] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
-- [ ] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
+- [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
+- [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
 - [ ] Links and media in poll options <!-- parity:polls-option-media -->
-- [ ] Poll statistics, "Show more" voters and admin vote view <!-- parity:polls-stats -->
-- [ ] Unread poll-vote badges and "Read all poll votes" <!-- parity:polls-unread-votes -->
+- [x] Poll statistics, "Show more" voters and admin vote view <!-- parity:polls-stats -->
+- [x] Unread poll-vote badges and "Read all poll votes" <!-- parity:polls-unread-votes -->
 - [ ] Retract a vote from the message menu <!-- parity:polls-retract-menu -->
-- [ ] Checklists: mark tasks done, add tasks, create <!-- parity:polls-checklist-tasks -->
+- [x] Checklists: mark tasks done, add tasks, create <!-- parity:polls-checklist-tasks -->
 
 ### Premium, Stars & gifts
 
@@ -1033,7 +1033,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Terminate old sessions if inactive for a chosen time <!-- parity:settings-inactive-sessions -->
 - [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
 - [ ] Session details box and rename this device <!-- parity:settings-session-details -->
-- [ ] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
+- [x] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
 - [ ] Bots and websites: mini-app permissions and delete cloud drafts <!-- parity:settings-bots-websites -->
 - [ ] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [ ] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
@@ -1043,8 +1043,8 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 ### Settings: notifications
 
 - [ ] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
-- [ ] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
-- [ ] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
+- [x] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
+- [x] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
 - [ ] Desktop notification options: position, count, display, volume <!-- parity:notify-desktop-options -->
 - [ ] Flash the taskbar or bounce the Dock for new messages <!-- parity:notify-alert-attention -->
 - [ ] Show notifications from all accounts <!-- parity:notify-all-accounts -->
