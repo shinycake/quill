@@ -224,20 +224,6 @@ impl QuillApp {
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }))
     }
 
-    /// M1 fix-up: whether the open chat is a 1:1 cloud chat.
-    /// `messageSchedulingStateSendWhenOnline` is private-chats-only
-    /// (schema 1.8.67 line 5905), so the schedule popup offers "When
-    /// contact comes online" only here — elsewhere the server 400s and
-    /// leaves a red failed row.
-    pub(super) fn open_chat_is_private(&self) -> bool {
-        let session = self.session();
-        session
-            .as_ref()
-            .and_then(|s| s.open_chat)
-            .and_then(|id| session.as_ref()?.chats.get(&id.0))
-            .is_some_and(|chat| matches!(chat.kind, ChatKind::Private { .. }))
-    }
-
     /// Phase B1: open the "Close secret chat" confirm banner for the
     /// given secret chat.
     pub(super) fn open_close_secret_chat_confirm(

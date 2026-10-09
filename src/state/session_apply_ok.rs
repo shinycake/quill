@@ -17,6 +17,10 @@ impl Session {
         }
         self.apply_proxy_ok(pending);
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::EditMessageSchedulingState {
+                message_id,
+                scheduling,
+            }) => self.finish_scheduling_edit(message_id, scheduling),
             Some(RequestPurpose::AddProfileAudio) => {
                 self.message_action_note = Some("saved to your profile".into());
             }
@@ -501,6 +505,14 @@ impl Session {
                     requests,
                 }),
             );
+        }
+        // B10: the own profile photos changed — refetch the gallery.
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::SetProfilePhoto | RequestPurpose::DeleteProfilePhoto)
+        ) && let Some(me) = self.my_user_id
+        {
+            self.user_profile_photos.remove(&me);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContact) {
             // Phase 6: the new contact arrives via `updateUser`

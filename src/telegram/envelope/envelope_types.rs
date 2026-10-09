@@ -240,6 +240,10 @@ pub enum EnvelopePayload {
         /// — the chat's content can't be saved, forwarded or copied.
         /// Refreshed by `updateChatHasProtectedContent` (line 10582).
         has_protected_content: bool,
+        /// `chat.has_scheduled_messages` (schema 1.8.67, line 3627) — the
+        /// chat has scheduled messages; refreshed by
+        /// `updateChatHasScheduledMessages`.
+        has_scheduled_messages: bool,
         /// `chat.is_translatable` (schema 1.8.67, lines 3599 / 3627) —
         /// translation of the chat's messages must be suggested.
         /// Refreshed by `updateChatIsTranslatable` (line 10585).
@@ -555,6 +559,12 @@ pub enum EnvelopePayload {
     Chats {
         total_count: i32,
         chat_ids: Vec<ChatId>,
+    },
+    /// B10: `chatPhotos` — `getUserProfilePhotos` (schema 1.8.67, line
+    /// 14591), newest first.
+    ChatPhotos {
+        total_count: i32,
+        photos: Vec<ParsedProfilePhoto>,
     },
     /// `foundMessages` — `searchMessages` (and secret-chat search).
     FoundMessages {
@@ -1152,6 +1162,12 @@ pub enum EnvelopePayload {
         chat_id: i64,
         has_protected_content: bool,
     },
+    /// `updateChatHasScheduledMessages` — the chat gained its first or lost
+    /// its last scheduled message.
+    UpdateChatHasScheduledMessages {
+        chat_id: i64,
+        has_scheduled_messages: bool,
+    },
     /// `updateChatIsTranslatable` (schema 1.8.67, line 10585) — translation
     /// of the chat's messages was enabled or disabled.
     UpdateChatIsTranslatable {
@@ -1200,6 +1216,18 @@ pub enum EnvelopePayload {
         text: String,
         need_update: bool,
         entities: Vec<TextEntity>,
+    },
+    /// `internalLinkType*` — the `getInternalLinkType` answer
+    /// (`parity:deeplink-internal-link-type`).
+    InternalLinkType(crate::deep_link_types::InternalLink),
+    /// `messageLinkInfo` (schema line 9677) — the `getMessageLinkInfo`
+    /// answer. `chat_id` is 0 when the link points nowhere the account can
+    /// see.
+    MessageLinkInfo {
+        chat_id: i64,
+        message_id: i64,
+        media_timestamp: Option<i32>,
+        thread_id: Option<i64>,
     },
     /// Phase D3a: `chatInviteLinks` (TDLib 1.8.67, line 2630) — the
     /// response of `getChatInviteLinks` / `revokeChatInviteLink`.
@@ -1566,10 +1594,34 @@ impl MessageActions {
 
 /// Profile details from `userFullInfo` beyond the bio: the birthday and
 /// how many groups you share with the user.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UserProfileExtras {
     pub birthdate: Option<Birthdate>,
     pub groups_in_common: i32,
+    /// B10: `personal_chat_id` (the user's personal channel); 0 = none.
+    pub personal_chat_id: i64,
+    /// B10: the private `note` added to the contact (plain text).
+    pub note: String,
+    /// B10: `need_phone_number_privacy_exception` — the edit-contact box
+    /// then offers "Share my phone number" (tdesktop `NeedContactsException`).
+    pub need_phone_exception: bool,
+}
+
+/// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
+/// `getUserProfilePhotos`. `files` holds every size; `thumb_file_id` is
+/// the grid size and `full_file_id` the largest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedProfilePhoto {
+    /// `chatPhoto.id` — the `chat_photo_id` for "Set as main photo".
+    pub id: i64,
+    /// Unix time the photo was added (`added_date`); 0 if unknown.
+    pub added_date: i32,
+    pub files: Vec<ParsedFile>,
+    pub thumb_file_id: crate::ids::FileId,
+    pub full_file_id: crate::ids::FileId,
+    /// Largest size's pixel dimensions.
+    pub width: i32,
+    pub height: i32,
 }
 
 /// `birthdate` (schema 1.8.67, line 868); the year is optional (0).
@@ -1608,6 +1660,15 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
     UserProfileExtras {
         birthdate,
         groups_in_common: field(info, "group_in_common_count").max(0) as i32,
+        personal_chat_id: info
+            .get("personal_chat_id")
+            .and_then(|v| super::json_helpers::int53(Some(v)).ok())
+            .unwrap_or(0),
+        note: super::message_content::parse_formatted_text(info.get("note")),
+        need_phone_exception: info
+            .get("need_phone_number_privacy_exception")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
     }
 }
 

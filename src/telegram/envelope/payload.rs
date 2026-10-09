@@ -1046,6 +1046,19 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .map(ChatId)
                 .collect(),
         }),
+        "chatPhotos" => Ok(EnvelopePayload::ChatPhotos {
+            total_count: value
+                .get("total_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            photos: value
+                .get("photos")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(super::users::parse_profile_photo)
+                .collect(),
+        }),
         "foundMessages" => {
             let messages = value
                 .get("messages")
@@ -2005,6 +2018,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        "updateChatHasScheduledMessages" => Ok(EnvelopePayload::UpdateChatHasScheduledMessages {
+            chat_id: int53(value.get("chat_id"))?,
+            has_scheduled_messages: value
+                .get("has_scheduled_messages")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         "updateChatIsTranslatable" => Ok(EnvelopePayload::UpdateChatIsTranslatable {
             chat_id: int53(value.get("chat_id"))?,
             is_translatable: value
@@ -2090,6 +2110,18 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_str)
                 == Some("inviteLinkChatTypeChannel"),
         }),
+        "messageLinkInfo" => Ok(EnvelopePayload::MessageLinkInfo {
+            chat_id: int53_or_zero(value.get("chat_id")),
+            message_id: int53_or_zero(value.get("message").and_then(|m| m.get("id"))),
+            media_timestamp: int53_or_zero(value.get("media_timestamp"))
+                .try_into()
+                .ok()
+                .filter(|t| *t > 0),
+            thread_id: value
+                .pointer("/topic_id/message_thread_id")
+                .and_then(Value::as_i64)
+                .filter(|id| *id > 0),
+        }),
         // `getDeepLinkInfo` answer (schema 1.8.67, line 10087).
         "deepLinkInfo" => {
             let text = parse_formatted_text(value.get("text"));
@@ -2101,6 +2133,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
             })
+        }
+        ty if ty.starts_with("internalLinkType") => {
+            crate::deep_link_types::parse_internal_link(&value)
+                .map(EnvelopePayload::InternalLinkType)
+                .ok_or(ParseError::MissingField)
         }
         "chatInviteLinks" => Ok(EnvelopePayload::ChatInviteLinks {
             total_count: int53(value.get("total_count")).map(|v| v as i32)?,

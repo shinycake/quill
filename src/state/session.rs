@@ -677,6 +677,13 @@ pub struct Session {
     /// for the similar-bots section of the bot profile, keyed by bot
     /// user id. The `users` ids resolve to names via `Session::users`.
     pub similar_bots: HashMap<i64, SimilarBotsFetch>,
+    /// B10: chat-id lists behind the profile panels, keyed by
+    /// `(kind, user/chat id)`: groups in common, similar channels and
+    /// the suitable personal channels. Chat objects themselves arrive via
+    /// `updateNewChat` before the `chats` answer.
+    pub profile_chat_lists: HashMap<(ProfileChatsKind, i64), ProfileChatsFetch>,
+    /// B10: profile photo galleries (`getUserProfilePhotos`) by user id.
+    pub user_profile_photos: HashMap<i64, ProfilePhotosFetch>,
     /// Slice bots-games: games seen via `messageGame` in a bot's chat,
     /// keyed by bot user id. Only short names TDLib actually delivered
     /// are cached — the bot info panel's Send buttons never offer an
@@ -815,6 +822,10 @@ pub struct Session {
     /// Chats whose content is protected (`chat.has_protected_content`,
     /// schema 1.8.67 line 3598): no saving, forwarding or copying.
     pub protected_chats: HashSet<i64>,
+    /// Chats with scheduled messages (`chat.has_scheduled_messages`,
+    /// `updateChatHasScheduledMessages`); drives the composer's
+    /// scheduled-messages button.
+    pub scheduled_chats: HashSet<i64>,
     /// Translation state (`translateText` / `translateMessageText`, the
     /// chat translate bar).
     pub translate: TranslateState,
@@ -891,6 +902,9 @@ pub struct Session {
     pub deep_link: Option<DeepLinkState>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
+    /// The link text being resolved by `getInternalLinkType` (the proxy
+    /// hand-off needs it back).
+    pub deep_link_original: String,
     /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
@@ -1044,7 +1058,7 @@ impl Session {
             account_generation: AccountGeneration(1),
             auth_view: view_for(&auth),
             auth,
-            connection: ConnectionState::WaitingForNetwork,
+            connection: ConnectionState::Initial,
             chats: HashMap::new(),
             main_order: Vec::new(),
             archive_order: Vec::new(),
@@ -1251,6 +1265,8 @@ impl Session {
             bot_info: HashMap::new(),
             bot_start_params: HashMap::new(),
             similar_bots: HashMap::new(),
+            profile_chat_lists: HashMap::new(),
+            user_profile_photos: HashMap::new(),
             bot_games: HashMap::new(),
             game_scores: HashMap::new(),
             bot_commands: HashMap::new(),
@@ -1294,6 +1310,7 @@ impl Session {
             supergroup_send_welcome_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
             protected_chats: HashSet::new(),
+            scheduled_chats: HashSet::new(),
             translate: TranslateState::default(),
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
@@ -1315,6 +1332,7 @@ impl Session {
             inline_bot_resolve_seq: 0,
             deep_link: None,
             deep_link_seq: 0,
+            deep_link_original: String::new(),
             proxy: Default::default(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
@@ -1383,7 +1401,7 @@ impl ConnectionIndicator {
 /// indicator visibility. `None` = `Ready` = connected, nothing renders.
 pub fn connection_indicator(state: ConnectionState) -> Option<ConnectionIndicator> {
     match state {
-        ConnectionState::Ready => None,
+        ConnectionState::Ready | ConnectionState::Initial => None,
         ConnectionState::WaitingForNetwork => Some(ConnectionIndicator::Offline),
         ConnectionState::ConnectingToProxy => {
             Some(ConnectionIndicator::Transitioning("Connecting to proxy…"))

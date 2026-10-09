@@ -26,6 +26,7 @@ impl QuillApp {
         let can_qr = quill::auth::can_request_qr_login(&self.current_auth())
             && (self.live.is_some() || self.demo_auth_inputs);
         let live_or_demo = self.live.is_some() || self.demo_auth_inputs;
+        let retry_available = self.live.is_some() || self.connection_lost || self.demo_auth_inputs;
         let mut card = div()
             .id("onboarding-card")
             .w(px(CARD_WIDTH))
@@ -181,6 +182,15 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.request_qr_login(cx))),
             );
         }
+        if matches!(auth.action, AuthAction::Closed) && retry_available {
+            form = form.child(
+                Button::new("retry-connection")
+                    .label("Retry")
+                    .primary()
+                    .w_full()
+                    .on_click(cx.listener(|this, _, _, cx| this.restart_live_connection(cx))),
+            );
+        }
         if let AuthAction::UnsupportedHalt { reason } = &auth.action {
             form = form.child(
                 div()
@@ -195,6 +205,7 @@ impl QuillApp {
             || show_code
             || show_password
             || show_qr
+            || (matches!(auth.action, AuthAction::Closed) && retry_available)
             || matches!(auth.action, AuthAction::UnsupportedHalt { .. });
         if has_form {
             card = card.child(form);

@@ -259,6 +259,52 @@ pub fn get_deep_link_info(extra: RequestId, link: &str) -> String {
     .to_string()
 }
 
+/// `getInternalLinkType link:string = InternalLinkType;` (schema 1.8.67,
+/// line 13260): what a `t.me` / `tg://` link means, without opening it.
+pub fn get_internal_link_type(extra: RequestId, link: &str) -> String {
+    json!({
+        "@type": "getInternalLinkType",
+        "@extra": extra.as_extra(),
+        "link": link,
+    })
+    .to_string()
+}
+
+/// `getMessageLinkInfo url:string = MessageLinkInfo;` (line 12073): the
+/// chat, message, thread and `?t=` timestamp a message link points to.
+pub fn get_message_link_info(extra: RequestId, url: &str) -> String {
+    json!({
+        "@type": "getMessageLinkInfo",
+        "@extra": extra.as_extra(),
+        "url": url,
+    })
+    .to_string()
+}
+
+/// `searchStickerSet name:string ignore_cache:Bool = StickerSet;` (line
+/// 14681): a set by its short name, for `addstickers` / `addemoji` links.
+pub fn search_sticker_set_by_name(extra: RequestId, name: &str) -> String {
+    json!({
+        "@type": "searchStickerSet",
+        "@extra": extra.as_extra(),
+        "name": name,
+        "ignore_cache": false,
+    })
+    .to_string()
+}
+
+/// `searchUserByPhoneNumber phone_number:string only_local:Bool = User;`
+/// (line 14580), for `+phone` links.
+pub fn search_user_by_phone_number(extra: RequestId, phone: &str) -> String {
+    json!({
+        "@type": "searchUserByPhoneNumber",
+        "@extra": extra.as_extra(),
+        "phone_number": phone,
+        "only_local": false,
+    })
+    .to_string()
+}
+
 /// Check an invite without joining (`schema/td_api.tl:14163`).
 pub fn check_chat_invite_link(extra: RequestId, invite_link: &str) -> String {
     json!({

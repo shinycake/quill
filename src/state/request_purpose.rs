@@ -191,6 +191,12 @@ pub enum RequestPurpose {
     DeepLinkInfo {
         generation: u64,
     },
+    /// `getInternalLinkType` for a link the local parsers do not cover
+    /// (`parity:deeplink-internal-link-type`). Same slot as
+    /// [`Self::DeepLinkInfo`] (`ResolvingInfo`).
+    DeepLinkInternalType {
+        generation: u64,
+    },
     /// `parity:platform-deep-links`: deep-link follow-up resolving to a
     /// chat (`searchPublicChat` / `createPrivateChat` / `getChat`). The
     /// `chat` answer is picked up in `apply_update_new_chat` and opens
@@ -283,6 +289,13 @@ pub enum RequestPurpose {
     /// M1: `getChatScheduledMessages`. Response is `messages`, stored in
     /// `Session::scheduled_messages` instead of merged into history.
     GetChatScheduledMessages,
+    /// `editMessageSchedulingState`. Response is `ok`; `scheduling` is the
+    /// new state (`None` = send now). The scheduled list entry is updated
+    /// or dropped on success.
+    EditMessageSchedulingState {
+        message_id: MessageId,
+        scheduling: ComposerScheduling,
+    },
     /// `setChatNotificationSettings`. Response is `ok`; mute via
     /// `updateChatNotificationSettings`.
     SetChatNotificationSettings,
@@ -908,6 +921,22 @@ pub enum RequestPurpose {
     /// the bot ids land in `Session::similar_bots` (keyed by the pending
     /// request's `user_id`).
     GetBotSimilarBots,
+    /// B10: a chat-id list for a profile panel — groups in common
+    /// (`getGroupsInCommon`, pending `user_id`), similar channels
+    /// (`getChatSimilarChats`, pending `chat_id`) or the channels that
+    /// can be a personal channel (`getSuitablePersonalChats`). Response
+    /// is `chats`; ids land in `Session::profile_chat_lists`.
+    GetProfileChats(ProfileChatsKind),
+    /// B10: `setBirthdate` (schema 1.8.67, line 14841). Response is
+    /// `ok`; the new value arrives via `updateUserFullInfo`.
+    SetBirthdate,
+    /// B10: `setPersonalChat` (line 14847). Response is `ok`.
+    SetPersonalChat,
+    /// B10: `setUserNote` (line 14553). Response is `ok`.
+    SetUserNote,
+    /// B10: `getUserProfilePhotos` (line 14591) for the profile photo
+    /// gallery; pending `user_id`. Response is `chatPhotos`.
+    GetUserProfilePhotos,
     /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
     /// 13421). Response is `archiveChatListSettings`; stored in
     /// `Session::archive_chat_list_settings`.

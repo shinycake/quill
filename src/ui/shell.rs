@@ -106,6 +106,8 @@ pub enum DialogKind {
     /// `parity:platform-deep-links`: TDLib's deep-link info / error text.
     DeepLinkInfo,
     DeepLinkInvite,
+    /// `msg` / `msg_url` share link: the chat chooser.
+    DeepLinkShare,
     /// "Open this link?" for a hidden or look-alike message link.
     OpenLink,
     PollVoters,
@@ -123,6 +125,8 @@ pub enum DialogKind {
     /// Batch 8: the chat's pending join requests.
     JoinRequests,
     EditProfile,
+    /// B10: profile and contact panel dialogs.
+    ProfilePanel,
     GroupCallStart,
     FolderEditor,
     FolderDelete,
@@ -215,6 +219,7 @@ impl QuillShell {
             DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
             DialogKind::DeepLinkInfo => app.deep_link_dialog.is_some(),
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
+            DialogKind::DeepLinkShare => app.share_link_text.is_some(),
             DialogKind::OpenLink => app.open_link_confirm.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
             DialogKind::MessageReport => app.message_menu_ui.report_open,
@@ -227,6 +232,7 @@ impl QuillShell {
             DialogKind::BlockBar => app.block_bar_dialog.is_some(),
             DialogKind::JoinRequests => app.join_requests_dialog.is_some(),
             DialogKind::EditProfile => app.edit_profile_dialog.is_some(),
+            DialogKind::ProfilePanel => app.profile_dialog.is_some(),
             DialogKind::GroupCallStart => app.group_call_start_dialog.is_some(),
             DialogKind::FolderEditor => app.folder_editor.is_some(),
             DialogKind::FolderDelete => app.folder_delete_confirm.is_some(),
@@ -275,6 +281,7 @@ impl QuillShell {
             DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
             DialogKind::DeepLinkInfo => QuillApp::build_deep_link_dialog,
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
+            DialogKind::DeepLinkShare => QuillApp::build_deep_link_share_dialog,
             DialogKind::OpenLink => QuillApp::build_open_link_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
             DialogKind::MessageReport => QuillApp::build_message_report_dialog,
@@ -287,6 +294,7 @@ impl QuillShell {
             DialogKind::BlockBar => QuillApp::build_block_bar_dialog,
             DialogKind::JoinRequests => QuillApp::build_join_requests_dialog,
             DialogKind::EditProfile => QuillApp::build_edit_profile_dialog,
+            DialogKind::ProfilePanel => QuillApp::build_profile_panel_dialog,
             DialogKind::GroupCallStart => QuillApp::build_group_call_start_dialog,
             DialogKind::FolderEditor => QuillApp::build_folder_editor_dialog,
             DialogKind::FolderDelete => QuillApp::build_folder_delete_dialog,
@@ -349,6 +357,7 @@ impl QuillShell {
         // low-priority informational dialogs.
         DialogKind::DeepLinkInfo,
         DialogKind::DeepLinkInvite,
+        DialogKind::DeepLinkShare,
         // The edit / link boxes open over the list, so they rank first.
         DialogKind::ProxyEdit,
         DialogKind::ProxyLink,
@@ -373,6 +382,7 @@ impl QuillShell {
         DialogKind::Welcome,
         DialogKind::ImportContacts,
         DialogKind::EditProfile,
+        DialogKind::ProfilePanel,
         DialogKind::AddContact,
         DialogKind::BlockBar,
         DialogKind::JoinRequests,

@@ -510,6 +510,21 @@ impl Session {
                 self.chat_action_error =
                     Some(format!("could not load similar bots (error {})", err.code));
             }
+            // B10: profile panel fetches keep the reason for a Retry row;
+            // refused edits surface as a toast.
+            Some(RequestPurpose::GetProfileChats(_) | RequestPurpose::GetUserProfilePhotos) => {
+                if let Some(pending) = pending {
+                    self.fail_profile_fetch(pending, error_reason(&err));
+                }
+            }
+            Some(
+                RequestPurpose::SetBirthdate
+                | RequestPurpose::SetPersonalChat
+                | RequestPurpose::SetUserNote,
+            ) => {
+                self.chat_action_error =
+                    Some(format!("could not save the change (error {})", err.code));
+            }
             Some(RequestPurpose::RemoveChatFromList) => {
                 self.chat_action_error =
                     Some(format!("could not delete the chat (error {})", err.code));
@@ -962,6 +977,7 @@ impl Session {
             // guard.
             Some(
                 RequestPurpose::DeepLinkInfo { generation }
+                | RequestPurpose::DeepLinkInternalType { generation }
                 | RequestPurpose::DeepLinkResolve { generation }
                 | RequestPurpose::DeepLinkJoin { generation }
                 | RequestPurpose::DeepLinkCheckInvite { generation },
@@ -1133,6 +1149,14 @@ impl Session {
             // status note instead of vanishing into `_ => {}` —
             // the menu item says "retrying send…" and the user
             // deserves an answer either way.
+            Some(RequestPurpose::EditMessageSchedulingState { scheduling, .. }) => {
+                let action = if scheduling == ComposerScheduling::None {
+                    "Could not send the message now"
+                } else {
+                    "Could not reschedule the message"
+                };
+                self.resend_error = Some(call_request_error_line(&err, action));
+            }
             Some(RequestPurpose::ResendMessages) => {
                 self.resend_error = Some(call_request_error_line(&err, "Could not retry the send"));
             }
@@ -1514,6 +1538,22 @@ pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> S
             action: DeepLinkAction::OpenUsername { domain, .. },
             ..
         }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::OpenPublicChatDraft { domain, .. },
+            ..
+        }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::UserPhone { phone, .. },
+            ..
+        }) if not_found => format!("The phone number +{phone} is not on Telegram yet."),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::StickerSet { .. },
+            ..
+        }) if not_found => "This sticker set doesn't exist.".to_string(),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::MessageLink { .. },
+            ..
+        }) if not_found => "This message link is broken or the chat is not available.".to_string(),
         Some(DeepLinkState::ResolvingChat {
             action: DeepLinkAction::JoinInvite { .. },
             ..

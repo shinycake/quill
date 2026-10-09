@@ -20,6 +20,49 @@ pub struct UserFullInfoData {
     pub extras: crate::telegram::envelope::UserProfileExtras,
 }
 
+/// B10: which chat-id list a profile panel fetched. The key of
+/// `Session::profile_chat_lists` is `(kind, id)`: the user id for groups
+/// in common, the channel chat id for similar channels, 0 for the
+/// current user's suitable personal channels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProfileChatsKind {
+    GroupsInCommon,
+    SimilarChats,
+    SuitablePersonalChats,
+}
+
+/// B10: fetch state of one `ProfileChatsKind` list. `Loading` is the
+/// in-flight guard; `Failed` keeps the reason for a Retry row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileChatsFetch {
+    Loading,
+    Loaded(Vec<i64>),
+    Failed(String),
+}
+
+/// B10: one profile photo in the gallery (`chatPhoto`). Both files are
+/// cached in `Session::files`; the thumb is the grid size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfilePhoto {
+    pub id: i64,
+    pub added_date: i32,
+    pub thumb_file_id: i32,
+    pub full_file_id: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// B10: fetch state of a user's profile photos (`getUserProfilePhotos`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfilePhotosFetch {
+    Loading,
+    Loaded {
+        total_count: i32,
+        photos: Vec<ProfilePhoto>,
+    },
+    Failed(String),
+}
+
 /// Phase 6: cached `supergroupFullInfo` subset (schema 1.8.67, line 2792).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SupergroupFullInfoData {
@@ -363,6 +406,29 @@ pub enum DeepLinkAction {
     OpenChannelPost { channel_id: i64, post: i64 },
     /// `tg://user?id=<id>`.
     OpenUser { user_id: i64 },
+    /// `internalLinkTypePublicChat` with a `text=` draft: open the chat and
+    /// prefill the composer (never sent).
+    OpenPublicChatDraft { domain: String, draft: String },
+    /// `internalLinkTypeMessage`: `getMessageLinkInfo(url)` finds the chat,
+    /// message, thread and `?t=` timestamp.
+    MessageLink { url: String },
+    /// Result of [`Self::MessageLink`]: `getChat`, then jump to the message,
+    /// open its thread and seek the media timestamp.
+    OpenChatById {
+        chat_id: i64,
+        message_id: i64,
+        media_timestamp: Option<i32>,
+        thread_id: Option<i64>,
+    },
+    /// `addstickers` / `addemoji`: `searchStickerSet(name)`, then the set
+    /// preview dialog.
+    StickerSet { name: String },
+    /// `+phone` / `tg://resolve?phone=`: `searchUserByPhoneNumber`.
+    UserPhone { phone: String, draft: String },
+    /// Result of [`Self::UserPhone`]: `createPrivateChat`, prefill `draft`.
+    OpenUserDraft { user_id: i64, draft: String },
+    /// Chosen share target: prefill the composer with `text`.
+    ShareDraft { text: String },
 }
 
 /// `parity:platform-deep-links`: the single active deep-link flow. One
@@ -403,4 +469,8 @@ pub enum DeepLinkState {
     },
     /// Info or error text for the UI to show in a dialog, consumed once.
     ShowText(String),
+    /// A link that needs no follow-up request; the UI acts on it once.
+    Ui(crate::deep_link_types::DeepLinkUi),
+    /// TDLib calls the link unknown: the UI asks `getDeepLinkInfo` for it.
+    Unknown { link: String },
 }

@@ -73,6 +73,12 @@ pub(super) fn demo_seed_for(
                 has_recovery_email: true,
             },
         ),
+        ScreenshotDemo::ConnectionClosed => (
+            None,
+            ConnectUiStatus::DemoWaitPhone,
+            "screenshot demo — Closed (injected auth, no live Telegram)".into(),
+            AuthorizationState::Closed,
+        ),
         ScreenshotDemo::WaitPremium => (
             None,
             ConnectUiStatus::DemoWaitPhone,
@@ -89,7 +95,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -553,6 +559,12 @@ pub(super) fn demo_seed_for(
             "Rich messages require Telegram Premium".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyProfilePanels => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — profile and contact panels (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyProfileEdit | ScreenshotDemo::ReadyUsername => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -573,6 +585,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — proxy settings (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyScheduled => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — scheduled messages (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyJumpDate
@@ -1609,6 +1627,7 @@ impl QuillApp {
             scroll_date: Default::default(),
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),
+            scroll_view_probe: Default::default(),
             group_call_composer,
             command_menu_open: false,
             command_menu_selected: 0,
@@ -1694,6 +1713,7 @@ impl QuillApp {
             context_menu_previous_focus: None,
             connect_status,
             connection_generation: 0,
+            connection_lost: false,
             live,
             status_note,
             status_seen: String::new(),
@@ -1706,6 +1726,7 @@ impl QuillApp {
                         | ScreenshotDemo::WaitPassword
                         | ScreenshotDemo::WaitPremium
                         | ScreenshotDemo::WaitQr
+                        | ScreenshotDemo::ConnectionClosed
                 )
             ),
             demo_session,
@@ -1734,6 +1755,7 @@ impl QuillApp {
             composer_preview_token: 0,
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,
+            schedule_picker: None,
             scheduled_dialog_open: false,
             rich_editor_open: false,
             message_menu: None,
@@ -1903,6 +1925,9 @@ impl QuillApp {
             pending_deep_link: None,
             deep_link_dialog: None,
             deep_link_invite: None,
+            pending_deep_link_ui: None,
+            share_link_text: None,
+            pending_media_seek: None,
             pending_deep_link_open: None,
             pending_link: None,
             right_clicked_link: None,
@@ -1982,6 +2007,8 @@ impl QuillApp {
             block_bar_dialog: None,
             join_requests_dialog: None,
             edit_profile_dialog: None,
+            profile_dialog: None,
+            pending_profile_gallery: None,
             import_contacts_dialog: None,
         };
 
@@ -2039,6 +2066,7 @@ impl QuillApp {
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
         app.demo_setup_proxy(demo, window, cx);
+        app.demo_setup_profile_panels(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);
         }

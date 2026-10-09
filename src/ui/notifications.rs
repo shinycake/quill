@@ -218,12 +218,14 @@ impl QuillApp {
     }
 
     /// The app state `poll_live` itself sets, outside the session, that
-    /// the window draws: compared before and after a poll.
-    fn polled_chrome(&self) -> (String, bool, Option<i32>) {
+    /// the window draws (status line, login-review box, folder tab, lost
+    /// connection): compared before and after a poll.
+    fn polled_chrome(&self) -> (String, bool, Option<i32>, bool) {
         (
             self.status_note.clone(),
             self.login_prevented.is_some(),
             self.folder_tab,
+            self.connection_lost,
         )
     }
 
@@ -264,6 +266,7 @@ impl QuillApp {
         // instead of freezing one. Leftovers stay queued and the loop comes
         // back at its busy cadence.
         let budget_start = std::time::Instant::now();
+        let mut budget_hit = false;
         while let Some(owned) = live.bridge.next_timeout(Duration::from_millis(0)) {
             if super::frame_clock::trace_notify() {
                 let payload = format!("{:?}", owned.envelope.payload);
@@ -284,8 +287,22 @@ impl QuillApp {
                 || matches!(live.driver.session.auth, AuthorizationState::LoggingOut);
             progressed = true;
             if budget_start.elapsed() >= INGEST_BUDGET {
+                budget_hit = true;
                 break;
             }
+        }
+        // The receive thread ended on its own (panic or closed channel):
+        // nothing more will arrive, so surface it like an unexpected
+        // Closed with a Retry instead of a UI that silently goes stale.
+        if bridge_lost(
+            live.bridge.stopped_unexpectedly(),
+            budget_hit,
+            self.connection_lost,
+        ) {
+            self.connection_lost = true;
+            self.status_note = "Connection to Telegram was closed".into();
+            progressed = true;
+            need = RedrawNeed::Now;
         }
         // `parity:proxy-settings`: first `getProxies` + auto-switch.
         if live.driver.proxy_tick(quill::state::unix_ms_now()) {
@@ -428,6 +445,10 @@ impl QuillApp {
             .and_then(|live| live.driver.session.message_link_error.take())
         {
             self.status_note = err;
+            progressed = true;
+        }
+        // B10: open a profile photo gallery that was waiting for its list.
+        if self.pump_profile_gallery(cx) {
             progressed = true;
         }
         // Slice CL1: a refused chat-list action (`toggleChatIsPinned`,
@@ -603,7 +624,8 @@ impl QuillApp {
     /// immediately instead of waiting out the 5s close timeout. If the
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
-    fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
+        self.connection_lost = false;
         self.marketplace_open = false;
         self.marketplace_error = None;
         self.marketplace_private = true;
@@ -777,9 +799,15 @@ fn logout_restart_trigger(saw_logging_out: bool, new_auth: &AuthorizationState) 
     saw_logging_out && matches!(new_auth, AuthorizationState::Closed)
 }
 
+/// Whether the poll should declare the receive bridge lost: it stopped on
+/// its own, its queue is fully drained, and it was not flagged already.
+fn bridge_lost(stopped: bool, budget_hit: bool, already_lost: bool) -> bool {
+    stopped && !budget_hit && !already_lost
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PolledAction, PolledRedraw, logout_restart_trigger};
+    use super::{PolledAction, PolledRedraw, bridge_lost, logout_restart_trigger};
     use quill::state::RedrawNeed;
     use quill::telegram::envelope::AuthorizationState;
     use std::time::{Duration, Instant};
@@ -1042,5 +1070,14 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn bridge_loss_waits_for_the_queue_and_fires_once() {
+        assert!(bridge_lost(true, false, false));
+        assert!(!bridge_lost(false, false, false));
+        // Updates are still queued behind the ingest budget.
+        assert!(!bridge_lost(true, true, false));
+        assert!(!bridge_lost(true, false, true));
     }
 }

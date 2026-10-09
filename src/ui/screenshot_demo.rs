@@ -11,6 +11,8 @@ pub enum ScreenshotDemo {
     /// Slice A1: injected `authorizationStateWaitOtherDeviceConfirmation`
     /// with a fake link, rendered as a real QR (no live Telegram).
     WaitQr,
+    /// Unexpected `authorizationStateClosed`: the Retry card.
+    ConnectionClosed,
     ReadyChats,
     ReadyTrayBehavior,
     ReadyUpdateInstall,
@@ -18,6 +20,8 @@ pub enum ScreenshotDemo {
     ReadyUpdateFailure,
     ReadyDeepLinkInfo,
     ReadyDeepLinkInvite,
+    /// The share-link chat chooser (typed deep links).
+    ReadyDeepLinkShare,
     /// Slice parity:platform-offline-indicator — the ReadyChats fixture
     /// with `connection` forced to `WaitingForNetwork`, so the offline
     /// banner renders below the title bar (injected, no live Telegram).
@@ -671,6 +675,10 @@ pub enum ScreenshotDemo {
     /// "Edit profile" dialog open on the current user (id 777) with a
     /// seeded name, bio, usernames and profile-photo id.
     ReadyProfileEdit,
+    /// B10: profile and contact panels (`QUILL_DEMO_PROFILE=contact|self|
+    /// edit-contact|birthday|channel|share|gallery|similar`; injected data,
+    /// no live Telegram).
+    ReadyProfilePanels,
     /// Slice A5: like `ReadyProfileEdit`, but the username field holds a
     /// freshly-checked value with a seeded `checkChatUsernameResultOk`
     /// verdict — intended for a taller capture
@@ -684,6 +692,10 @@ pub enum ScreenshotDemo {
     /// (`QUILL_DEMO_PROXY=list|edit|link|link-bad`; injected data, no live
     /// Telegram, no real proxy).
     ReadyProxy,
+    /// Scheduled messages; `QUILL_DEMO_SCHEDULED=button|picker|list|reminder|reminder-list`
+    /// (composer button, date+time picker, list with Send now / Reschedule,
+    /// Saved Messages reminder wording; injected, no live Telegram).
+    ReadyScheduled,
     /// Find in history: the "Jump to date" calendar box.
     ReadyJumpDate,
     /// Find in history: the in-chat "From:" member picker.

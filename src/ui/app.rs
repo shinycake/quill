@@ -119,6 +119,9 @@ pub struct QuillApp {
     /// Top visible row of the last paint: `(row, its day separator is at
     /// the top edge)`.
     pub(super) scroll_top_probe: std::rc::Rc<std::cell::Cell<Option<(usize, bool)>>>,
+    /// First and last row on screen at the last paint (the page keys scroll
+    /// by this many rows).
+    pub(super) scroll_view_probe: std::rc::Rc<std::cell::Cell<Option<(usize, usize)>>>,
     /// Phase 3.3: `/` command menu state. Open while the composer text
     /// ends with a `/`-led token and the open bot chat has commands;
     /// `command_menu_selected` is the highlighted row (Up/Down/Enter).
@@ -180,6 +183,8 @@ pub struct QuillApp {
     pub(super) context_menu_previous_focus: Option<FocusHandle>,
     pub(super) connect_status: ConnectUiStatus,
     pub(super) connection_generation: u64,
+    /// The TDLib receive bridge stopped; shows the Closed / Retry card.
+    pub(super) connection_lost: bool,
     pub(super) live: Option<LiveConnect>,
     pub(super) status_note: String,
     /// The `status_note` text the toast last showed, and when it appeared:
@@ -277,6 +282,9 @@ pub struct QuillApp {
     pub(super) composer_scheduling: ComposerScheduling,
     /// M1: the schedule picker popup above the composer.
     pub(super) schedule_popup_open: bool,
+    /// The date+time picker behind the schedule popup (created when the
+    /// popup opens, see `open_schedule_picker`).
+    pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
     /// codex:spellcheck-native: the spellcheck engine (macOS: the system
     /// NSSpellChecker; elsewhere the embedded English wordlist), shared
     /// with background check tasks.
@@ -702,6 +710,13 @@ pub struct QuillApp {
     /// deep link, shown in a dialog (`DialogKind::DeepLinkInfo`).
     pub(super) deep_link_dialog: Option<String>,
     pub(super) deep_link_invite: Option<quill::state::DeepLinkState>,
+    /// A typed link that needs the `Window` (`deep_link_routes`).
+    pub(super) pending_deep_link_ui: Option<quill::deep_link_types::DeepLinkUi>,
+    /// Text of a share link while its chat chooser is open.
+    pub(super) share_link_text: Option<String>,
+    /// A linked `?t=` media timestamp waiting for its message to load
+    /// (chat, message, seconds, polls waited).
+    pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, u32)>,
     /// `parity:platform-deep-links`: resolved chat + action waiting for
     /// render (which owns the `Window`) to open it.
     pub(super) pending_deep_link_open: Option<(ChatId, quill::state::DeepLinkAction)>,
@@ -942,6 +957,12 @@ pub struct QuillApp {
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,
+    /// B10: edit-contact / birthday / personal-channel / share-contact
+    /// dialog behind the profile panels.
+    pub(super) profile_dialog: Option<ProfileDialog>,
+    /// B10: a profile photo gallery whose list was requested; the viewer
+    /// opens when it lands (checked by the poll loop).
+    pub(super) pending_profile_gallery: Option<i64>,
     /// Slice A6: vCard import dialog opened from the Contacts tab
     /// settings section.
     pub(super) import_contacts_dialog: Option<ImportContactsDialog>,
@@ -1013,7 +1034,10 @@ impl QuillApp {
     }
 
     pub(super) fn current_auth(&self) -> AuthorizationState {
-        if let Some(live) = self.live.as_ref() {
+        if self.connection_lost {
+            // The receive bridge died: treat it like an unexpected Closed.
+            AuthorizationState::Closed
+        } else if let Some(live) = self.live.as_ref() {
             live.driver.session.auth.clone()
         } else if let Some(session) = self.demo_session.as_ref() {
             session.auth.clone()

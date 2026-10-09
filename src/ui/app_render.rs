@@ -1,17 +1,21 @@
 //! impl Render for QuillApp (root view composition).
 
 use super::actions::{
-    CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
-    ComposerPastePlain, FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear,
-    FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, LoadOlder,
-    LockApp, MinimizeWindow, NextChat, OpenChatSearch, OpenHelp, OpenSearch, OpenSettings,
-    OpenShortcuts, PrevChat, QuitApp, SpellingIgnore, SpellingLearn, SpellingReplace,
-    SpellingUnlearn, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme,
-    ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave,
-    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
+    ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer, FocusSidebar, FormatBlockQuote,
+    FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough,
+    FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat,
+    LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder, OpenArchive,
+    OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages, OpenSearch,
+    OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious,
+    ShowChatMenu, ShowChatPreview, SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn,
+    SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerCopy,
+    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
+    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
+use super::shortcut_pack::HistoryKey;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::input::{Copy as CopyAction, Paste as PasteAction};
 use gpui_kit::component::*;
@@ -164,6 +168,9 @@ impl Render for QuillApp {
         // resolved to (take-once; render owns the `Window`).
         if let Some((chat_id, action)) = self.pending_deep_link_open.take() {
             self.open_deep_link_chat(chat_id, &action, window, cx);
+        }
+        if let Some(ui) = self.pending_deep_link_ui.take() {
+            self.run_deep_link_ui(ui, window, cx);
         }
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
@@ -381,6 +388,103 @@ impl Render for QuillApp {
             }))
             .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {
                 window.focus(&this.focus_sidebar, cx);
+            }))
+            // Shortcut pack (see `shortcut_pack.rs`): a handler that has no
+            // use for the key propagates it to the focused input.
+            .on_action(cx.listener(|this, _: &ReplyToPrevious, window, cx| {
+                if !this.reply_by_key(false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ReplyToNext, window, cx| {
+                if !this.reply_by_key(true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &AttachFile, window, cx| {
+                if !this.attach_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryPageUp, window, cx| {
+                if !this.scroll_history_by_key(HistoryKey::PageUp, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryPageDown, window, cx| {
+                if !this.scroll_history_by_key(HistoryKey::PageDown, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryToTop, window, cx| {
+                if !this.scroll_history_by_key(HistoryKey::Top, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryToBottom, window, cx| {
+                if !this.scroll_history_by_key(HistoryKey::Bottom, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &DeleteSelection, window, cx| {
+                if !this.delete_selection_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, action: &OpenPinnedChat, window, cx| {
+                if !this.open_pinned_by_key(action.index, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenSavedMessages, window, cx| {
+                if !this.open_saved_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenArchive, window, cx| {
+                if !this.open_archive_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenContacts, window, cx| {
+                if !this.open_contacts_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FirstChat, window, cx| {
+                if !this.open_edge_chat_by_key(false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &LastChat, window, cx| {
+                if !this.open_edge_chat_by_key(true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &PrevFolder, window, cx| {
+                if !this.step_folder_by_key(false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &NextFolder, window, cx| {
+                if !this.step_folder_by_key(true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &MarkChatRead, window, cx| {
+                if !this.mark_read_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ShowChatMenu, window, cx| {
+                if !this.chat_menu_by_key(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ShowChatPreview, window, cx| {
+                if !this.chat_preview_by_key(window, cx) {
+                    cx.propagate();
+                }
             }))
             .on_action(cx.listener(|this, _: &LoadOlder, _, cx| {
                 this.load_older_action(cx);
