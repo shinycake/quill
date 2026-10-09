@@ -779,6 +779,30 @@ pub(super) fn demo_seed_for(
             "screenshot demo — ⭐ subscriptions (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyStars => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — Stars (fixture)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyGifts => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — received gifts (fixture)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyPremium => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — Premium features (fixture)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyGiftCards => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — gift cards (fixture)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyMarketplaceGift => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,

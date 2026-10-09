@@ -174,6 +174,8 @@ mod ownership;
 mod passcode;
 mod payments;
 mod polls;
+mod premium_demo;
+mod premium_ui;
 mod pressable;
 mod profile;
 mod profile_modal;

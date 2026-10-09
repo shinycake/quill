@@ -1166,6 +1166,21 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "starSubscriptions" => parse_star_subscriptions(&value)
             .map(EnvelopePayload::StarSubscriptions)
             .ok_or(ParseError::MissingField),
+        "starTransactions" => Ok(EnvelopePayload::StarTransactions(
+            crate::premium_hub::parse_star_transactions(&value),
+        )),
+        "receivedGifts" => Ok(EnvelopePayload::ReceivedGifts(
+            crate::premium_hub::parse_received_gifts(&value),
+        )),
+        "premiumFeatures" => Ok(EnvelopePayload::PremiumFeatures(
+            crate::premium_hub::parse_premium_features(&value),
+        )),
+        "premiumState" => Ok(EnvelopePayload::PremiumState(
+            crate::premium_hub::parse_premium_state(&value),
+        )),
+        "updateOwnedStarCount" => Ok(EnvelopePayload::UpdateOwnedStarCount(
+            crate::premium_hub::StarAmount::parse(value.get("star_amount")),
+        )),
         // Parity slice: `createChatFolder` / `editChatFolder` responses
         // (TDLib 1.8.67, `schema/td_api.tl:13358` / `:13361`).
         "chatFolderInfo" => parse_chat_folder_info(&value)

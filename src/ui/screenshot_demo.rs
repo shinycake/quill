@@ -555,6 +555,14 @@ pub enum ScreenshotDemo {
     /// (active channel, canceled bot, expired channel rows), dialog open
     /// (injected, no live Telegram).
     ReadySubscriptions,
+    /// Stars balance + transaction history dialog (fixture, no purchases).
+    ReadyStars,
+    /// Received gifts grid with the details of one gift (fixture).
+    ReadyGifts,
+    /// Read-only Premium features explainer (fixture).
+    ReadyPremium,
+    /// Gift/giveaway cards in a chat (fixture).
+    ReadyGiftCards,
     ReadyMarketplaceGift,
     /// Phase B2: key verification UI (injected, no live Telegram) — the
     /// same Ready secret chat as `ReadySecretChat` but with a real

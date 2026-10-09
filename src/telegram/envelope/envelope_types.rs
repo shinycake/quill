@@ -1592,6 +1592,16 @@ pub enum EnvelopePayload {
     /// Slice `parity:bots-payment-recurring`: `starSubscriptions` — the
     /// `getStarSubscriptions` answer (schema/td_api.tl:1269).
     StarSubscriptions(StarSubscriptionsData),
+    /// `starTransactions` — the `getStarTransactions` answer.
+    StarTransactions(crate::premium_hub::StarTxPage),
+    /// `receivedGifts` — the `getReceivedGifts` answer.
+    ReceivedGifts(crate::premium_hub::GiftsPage),
+    /// `premiumFeatures` — the `getPremiumFeatures` answer.
+    PremiumFeatures(crate::premium_hub::PremiumInfo),
+    /// `premiumState` — the `getPremiumState` answer.
+    PremiumState(crate::premium_hub::PremiumStateInfo),
+    /// `updateOwnedStarCount`: the signed-in user's Stars balance changed.
+    UpdateOwnedStarCount(crate::premium_hub::StarAmount),
     /// `updateChatFolders` (TDLib 1.8.67, `schema/td_api.tl:10606`) — the
     /// full ordered folder list. There is no `getChatFolders` function in
     /// 1.8.67; TDLib pushes this update after authorization and whenever
