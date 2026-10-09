@@ -191,6 +191,12 @@ fn main() {
         println!("{}", if cfg!(feature = "ui") { "ui" } else { "core" });
         return;
     }
+    if args.get(1).is_some_and(|a| a == "--embedded-credentials") {
+        // Release pipeline check; prints only whether a pair is embedded.
+        let embedded = quill::credentials::has_embedded();
+        println!("{}", if embedded { "embedded" } else { "none" });
+        return;
+    }
     if args.get(1).is_some_and(|a| a == "--apply-update") {
         let result = args
             .get(2)

@@ -1,0 +1,4 @@
+# actionlint: custom label of the owner's self-hosted Mac (quill-ui-build.yml).
+self-hosted-runner:
+  labels:
+    - quill-ui-build

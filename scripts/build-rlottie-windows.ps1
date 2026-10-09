@@ -11,7 +11,9 @@ Invoke-Native git @('-C', $srcDir, 'checkout', '--detach', $pin)
 $prefix = Join-Path $dest 'prefix'
 Invoke-Native cmake @('-S', $srcDir, '-B', (Join-Path $dest 'build'), '-A', 'x64',
     '-DCMAKE_POLICY_VERSION_MINIMUM=3.5', '-DBUILD_SHARED_LIBS=ON', '-DLOTTIE_MODULE=OFF', '-DLOTTIE_TEST=OFF',
-    '-DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON', "-DCMAKE_INSTALL_PREFIX=$prefix")
+    '-DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON', "-DCMAKE_INSTALL_PREFIX=$prefix",
+    # Static C runtime (/MT): the package ships no vcruntime140*/msvcp140* DLLs.
+    '-DCMAKE_POLICY_DEFAULT_CMP0091=NEW', '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded')
 Invoke-Native cmake @('--build', (Join-Path $dest 'build'), '--config', 'Release', '--parallel')
 Invoke-Native cmake @('--install', (Join-Path $dest 'build'), '--config', 'Release')
 $bin = Join-Path $prefix 'bin'
@@ -21,4 +23,8 @@ if (-not (Test-Path (Join-Path $bin 'rlottie.dll'))) {
     if (-not $dll) { throw 'rlottie.dll was not built' }
     Copy-Item $dll.FullName $bin
 }
+$deps = Get-PeDependents (Join-Path $bin 'rlottie.dll')
+Write-Host "rlottie.dll imports: $($deps -join ' ')"
+$dynamic = @($deps | Where-Object { $_ -match '^(vcruntime|msvcp|concrt)' })
+if ($dynamic.Count) { throw "rlottie.dll still imports $($dynamic -join ', ') (expected a static /MT build)" }
 Write-Host "Built $(Join-Path $bin 'rlottie.dll')"

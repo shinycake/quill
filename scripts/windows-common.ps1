@@ -44,28 +44,11 @@ function Get-PeDependents {
 }
 
 # DLLs that exist in System32 on a dev machine but are not guaranteed on a clean
-# Windows install (the VC runtime is bundled app-locally; the rest ships with us).
+# Windows install (the VC runtime is linked statically, OpenSSL/zlib live inside tdjson.dll).
 $script:NotSystem = '^(vcruntime|msvcp|concrt|vcomp|vccorlib|libcrypto|libssl|zlib|z\.dll|vulkan-1)'
 
 function Test-SystemDll([string]$Name) {
     if ($Name -match '^(api-ms-win-|ext-ms-win-)') { return $true }
     if ($Name -match $script:NotSystem) { return $false }
     return (Test-Path (Join-Path $env:SystemRoot "System32\$Name"))
-}
-
-function Get-VcRedistDir {
-    # Microsoft.VC14x.CRT directory holding the app-local VC++ runtime DLLs.
-    if ($env:VCToolsRedistDir) {
-        $d = Get-ChildItem -Directory (Join-Path $env:VCToolsRedistDir 'x64') -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($d) { return $d.FullName }
-    }
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-    if (Test-Path $vswhere) {
-        $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-        if ($vs) {
-            $d = Get-ChildItem -Directory (Join-Path $vs 'VC\Redist\MSVC\*\x64') -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
-            if ($d) { return $d.FullName }
-        }
-    }
-    throw 'VC++ redistributable directory not found'
 }

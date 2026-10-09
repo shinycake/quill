@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # macOS compile/package smoke: produce a layout that does not depend on Homebrew.
 set -euo pipefail
+# Say which command failed instead of exiting silently under set -e.
+trap 'echo "error: macos-package-smoke.sh line $LINENO failed: $BASH_COMMAND" >&2' ERR
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist/Quill.app"
@@ -11,17 +13,22 @@ if [[ -z "${QUILL_BIN:-}" ]]; then
   cargo build --features ui --release --locked --manifest-path "$ROOT/Cargo.toml"
 fi
 
+# Bundle version = the binary's own version (Cargo.toml), e.g. "Quill 0.2.0".
+VERSION="$("$BIN" --version | sed -n 's/^Quill \([0-9][0-9A-Za-z.+-]*\)$/\1/p')"
+[[ -n "$VERSION" ]] || { echo "error: $BIN --version did not print 'Quill <version>'" >&2; exit 1; }
+
 rm -rf "$DIST"
 mkdir -p "$DIST/Contents/MacOS" "$DIST/Contents/Frameworks" "$DIST/Contents/Resources"
 
-cat > "$DIST/Contents/Info.plist" <<'PLIST'
+cat > "$DIST/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key><string>Quill</string>
   <key>CFBundleIdentifier</key><string>org.shinycake.quill</string>
-  <key>CFBundleVersion</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>${VERSION}</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>quill</string>
   <key>CFBundleIconFile</key><string>Quill</string>

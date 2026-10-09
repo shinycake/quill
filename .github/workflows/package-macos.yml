@@ -1,0 +1,138 @@
+name: package-macos
+# Reusable: Quill.app for macOS 14+ on Apple Silicon, built on a GitHub-hosted
+# arm64 runner (never the personal self-hosted Mac). TDLib and rlottie are built
+# from source (cached), ntgcalls is the pinned upstream library, OpenSSL is
+# bundled from the runner's Homebrew by scripts/macos-package-smoke.sh.
+# Ad-hoc signed only: there is no Developer ID and no notarization
+# (docs/decisions/codex-release-pipeline.md).
+on:
+  workflow_call:
+    inputs:
+      embed_credentials:
+        description: 'Compile the Telegram api_id/api_hash secrets into the binary'
+        type: boolean
+        default: false
+    secrets:
+      TELEGRAM_API_ID:
+        required: false
+      TELEGRAM_API_HASH:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Matches LSMinimumSystemVersion in the Info.plist; CMake and rustc read it.
+  MACOSX_DEPLOYMENT_TARGET: '14.0'
+
+jobs:
+  macos-package:
+    name: macos-package
+    # macos-14 = Sonoma arm64, so the Homebrew OpenSSL bottles bundled into
+    # the app also target macOS 14.
+    runs-on: macos-14
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ !inputs.embed_credentials }}
+      - name: build tools
+        run: |
+          brew list gperf >/dev/null 2>&1 || brew install gperf
+          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      - name: restore TDLib build
+        id: tdlib-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: native/prefix
+          key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
+      - name: build TDLib
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        env:
+          TDLIB_BUILD_TARGET: tdjson tdjson_static
+        run: bash scripts/build-tdlib.sh
+      - name: save TDLib build
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native/prefix
+          key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
+      - name: restore rlottie build
+        id: rlottie-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/rlottie/prefix
+          key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
+      - name: build rlottie
+        if: steps.rlottie-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-rlottie.sh
+      - name: save rlottie build
+        if: steps.rlottie-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor/rlottie/prefix
+          key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
+      - name: vendor ntgcalls (checksum pinned)
+        run: bash scripts/vendor-ntgcalls.sh
+      # The secrets reach only this step, as compile-time env read by
+      # option_env! (src/credentials.rs).
+      - name: build release ui
+        env:
+          QUILL_BUILD_TELEGRAM_API_ID: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID || '' }}
+          QUILL_BUILD_TELEGRAM_API_HASH: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_HASH || '' }}
+        run: cargo build --release --features ui --locked
+      - name: package Quill.app (ad-hoc signed)
+        env:
+          # The hosted VM's Vision framework may not decode QR codes; the
+          # self-test stays a hard failure on real Macs (quill-ui-build.yml).
+          QUILL_QR_SELF_TEST: warn
+        run: |
+          QUILL_BIN="$PWD/target/release/quill" QUILL_TDJSON_PATH="$PWD/native/prefix/lib/libtdjson.dylib" \
+            bash scripts/macos-package-smoke.sh
+          for lib in libtdjson.dylib libntgcalls.dylib librlottie.dylib; do
+            test -f "dist/Quill.app/Contents/Frameworks/$lib" || { echo "missing Frameworks/$lib" >&2; exit 1; }
+          done
+          codesign --verify --deep --strict --verbose=2 dist/Quill.app
+      - name: run from the bundle
+        env:
+          WANT_EMBED: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}
+        run: |
+          exe=dist/Quill.app/Contents/MacOS/quill
+          "$exe" --version
+          test "$("$exe" --build-info)" = ui
+          test "$("$exe" --release-asset-name)" = quill-macos-aarch64
+          got="$("$exe" --embedded-credentials)"
+          want=none; [ "$WANT_EMBED" = true ] && want=embedded
+          echo "embedded credentials: $got"
+          test "$got" = "$want"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist/Quill.app/Contents/Info.plist
+      - name: zip
+        run: |
+          mkdir -p dist/macos
+          # ditto keeps the code signature, symlinks and extended attributes.
+          ditto -c -k --sequesterRsrc --keepParent dist/Quill.app dist/macos/quill-macos-aarch64.zip
+          (cd dist/macos && shasum -a 256 quill-macos-aarch64.zip > quill-macos-aarch64.zip.sha256)
+          du -h dist/macos/quill-macos-aarch64.zip
+      - name: smoke the extracted zip
+        run: |
+          mkdir -p "$RUNNER_TEMP/extract"
+          ditto -x -k dist/macos/quill-macos-aarch64.zip "$RUNNER_TEMP/extract"
+          codesign --verify --deep --strict "$RUNNER_TEMP/extract/Quill.app"
+          bash scripts/check-bundle-macho.sh "$RUNNER_TEMP/extract/Quill.app"
+          "$RUNNER_TEMP/extract/Quill.app/Contents/MacOS/quill" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-macos-aarch64
+          path: |
+            dist/macos/quill-macos-aarch64.zip
+            dist/macos/quill-macos-aarch64.zip.sha256
+          if-no-files-found: error
