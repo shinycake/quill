@@ -33,7 +33,7 @@ jobs:
       BUILDER_REF: ${{ inputs.ref }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, SHA-pinned
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7, SHA-pinned
         with:
           ref: ${{ inputs.ref }}
           # Keep the runner's cargo cache: the default clean (git clean

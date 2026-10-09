@@ -39,7 +39,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 150
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
@@ -55,7 +55,7 @@ jobs:
           echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
       - name: restore TDLib build
         id: tdlib-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: native/prefix
           key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
@@ -70,13 +70,13 @@ jobs:
         run: bash scripts/build-tdlib.sh
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: native/prefix
           key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
       - name: restore rlottie build
         id: rlottie-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: vendor/rlottie/prefix
           key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
@@ -85,7 +85,7 @@ jobs:
         run: bash scripts/build-rlottie.sh
       - name: save rlottie build
         if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: vendor/rlottie/prefix
           key: rlottie-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
@@ -138,7 +138,7 @@ jobs:
           codesign --verify --deep --strict "$RUNNER_TEMP/extract/Quill.app"
           bash scripts/check-bundle-macho.sh "$RUNNER_TEMP/extract/Quill.app"
           "$RUNNER_TEMP/extract/Quill.app/Contents/MacOS/quill" --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-macos-aarch64
           path: |
