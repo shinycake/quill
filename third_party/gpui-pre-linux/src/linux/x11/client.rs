@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-linux 0.3.7 (Apache-2.0):
+// the refresh timer parks while the window is idle. See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{
@@ -41,8 +43,8 @@ use xkbc::x11::ffi::{XKB_X11_MIN_MAJOR_XKB_VERSION, XKB_X11_MIN_MINOR_XKB_VERSIO
 use xkbcommon::xkb::{self as xkbc, STATE_LAYOUT_EFFECTIVE};
 
 use super::{
-    ButtonOrScroll, ScrollDirection, X11Display, X11WindowStatePtr, XcbAtoms, XimCallbackEvent,
-    XimHandler, button_or_scroll_from_event_detail, check_reply,
+    ButtonOrScroll, PARKED_HEARTBEAT, ScrollDirection, X11Display, X11WindowStatePtr, XcbAtoms,
+    XimCallbackEvent, XimHandler, button_or_scroll_from_event_detail, check_reply,
     clipboard::{self, Clipboard},
     get_reply, get_valuator_axis_index, handle_connection_error, modifiers_from_state,
     pressed_button_from_mask, xcb_flush,
@@ -84,6 +86,9 @@ pub(crate) struct WindowRef {
     refresh_state: Option<RefreshState>,
     last_visibility: Visibility,
     is_mapped: bool,
+    /// Quill: the ping source through which the frame waker resumes a parked
+    /// refresh timer (see `X11FrameIdle`).
+    frame_resume: Option<RegistrationToken>,
 }
 
 impl WindowRef {
@@ -249,12 +254,17 @@ impl X11ClientStatePtr {
         };
         let mut state = client.0.borrow_mut();
 
-        if let Some(window_ref) = state.windows.remove(&x_window)
-            && let Some(RefreshState::PeriodicRefresh {
+        if let Some(window_ref) = state.windows.remove(&x_window) {
+            if let Some(RefreshState::PeriodicRefresh {
                 event_loop_token, ..
             }) = window_ref.refresh_state
-        {
-            state.loop_handle.remove(event_loop_token);
+            {
+                state.loop_handle.remove(event_loop_token);
+            }
+            // Quill: the frame waker's ping source goes with the window.
+            if let Some(frame_resume) = window_ref.frame_resume {
+                state.loop_handle.remove(frame_resume);
+            }
         }
         if state.mouse_focused_window == Some(x_window) {
             state.mouse_focused_window = None;
@@ -1675,11 +1685,29 @@ impl LinuxClient for X11Client {
         .log_err();
         xcb_flush(&state.xcb_connection);
 
+        // Quill: a ping the frame waker sends to resume this window's parked
+        // refresh timer. Without it the window never parks.
+        let frame_resume = calloop::ping::make_ping()
+            .map_err(anyhow::Error::from)
+            .and_then(|(ping, source)| {
+                let token = state
+                    .loop_handle
+                    .insert_source(source, move |(), &mut (), client: &mut X11Client| {
+                        client.0.borrow_mut().resume_refresh_loop(x_window);
+                    })
+                    .map_err(|err| anyhow!("{}", err.error))?;
+                window.0.frame.resume.set(ping).ok();
+                Ok(token)
+            })
+            .context("X11: failed to set up the frame waker; the window will not idle")
+            .log_err();
+
         let window_ref = WindowRef {
             window: window.0.clone(),
             refresh_state: None,
             last_visibility: Visibility::UNOBSCURED,
             is_mapped: false,
+            frame_resume,
         };
 
         state.windows.insert(x_window, window_ref);
@@ -1994,15 +2022,44 @@ impl X11ClientState {
         }
     }
 
+    /// Quill: the frame waker's ping handler. Restarts a running refresh
+    /// timer so a parked one (ticking at the heartbeat) ticks now and then at
+    /// the refresh rate. A hidden window has no timer; showing it starts one.
+    fn resume_refresh_loop(&mut self, x_window: xproto::Window) {
+        let Some(window_ref) = self.windows.get_mut(&x_window) else {
+            return;
+        };
+        let Some(RefreshState::PeriodicRefresh {
+            refresh_rate,
+            event_loop_token,
+        }) = window_ref.refresh_state
+        else {
+            return;
+        };
+        self.loop_handle.remove(event_loop_token);
+        let event_loop_token = self.start_refresh_loop(x_window, refresh_rate);
+        if let Some(window_ref) = self.windows.get_mut(&x_window) {
+            window_ref.refresh_state = Some(RefreshState::PeriodicRefresh {
+                refresh_rate,
+                event_loop_token,
+            });
+        }
+    }
+
     #[must_use]
     fn start_refresh_loop(
         &self,
         x_window: xproto::Window,
         refresh_rate: Duration,
     ) -> RegistrationToken {
+        // Quill: a (re)started timer runs at the refresh rate.
+        if let Some(window_ref) = self.windows.get(&x_window) {
+            window_ref.window.frame.reset();
+        }
         self.loop_handle
             .insert_source(calloop::timer::Timer::immediate(), {
                 move |mut instant, (), client| {
+                    let mut parked = false;
                     let xcb_connection = {
                         let mut state = client.0.borrow_mut();
                         let xcb_connection = state.xcb_connection.clone();
@@ -2013,10 +2070,19 @@ impl X11ClientState {
                                 require_presentation: false,
                                 force_render: false,
                             });
+                            // Quill: idle frames park the timer.
+                            parked = window.frame_idle_after_refresh();
                         }
                         xcb_connection
                     };
                     client.process_x11_events(&xcb_connection).log_err();
+
+                    // Quill: parked, one heartbeat frame a second until the
+                    // frame waker restarts the timer (`resume_refresh_loop`).
+                    // A heartbeat that finds work resumes the refresh rate.
+                    if parked {
+                        return calloop::timer::TimeoutAction::ToDuration(PARKED_HEARTBEAT);
+                    }
 
                     // Take into account that some frames have been skipped
                     let now = Instant::now();

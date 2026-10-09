@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
+// adds the frame_idle module. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![cfg(target_os = "windows")]
 
 mod clipboard;
@@ -11,6 +13,7 @@ mod directx_renderer;
 mod dispatcher;
 mod display;
 mod events;
+mod frame_idle;
 mod keyboard;
 mod platform;
 mod system_notifications;
@@ -29,6 +32,7 @@ pub(crate) use directx_renderer::*;
 pub(crate) use dispatcher::*;
 pub(crate) use display::*;
 pub(crate) use events::*;
+pub(crate) use frame_idle::*;
 pub(crate) use keyboard::*;
 pub(crate) use platform::*;
 pub(crate) use system_notifications::*;

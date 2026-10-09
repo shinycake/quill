@@ -24,6 +24,8 @@ Notes on specific crates:
 | gpui-kit, gpui-component, gpui-pre (GPUI) and related crates | Apache-2.0 | crates.io 0.6.1 / gpui-pre 0.3.x |
 | gpui-base 0.7.0 | Apache-2.0 | Patched copy in `third_party/gpui-base`; the changes are listed in `third_party/gpui-base/QUILL-CHANGES.md` and marked in each changed file. |
 | gpui-pre-macos 0.3.7 | Apache-2.0 | Patched copy in `third_party/gpui-pre-macos`; the changes are listed in `third_party/gpui-pre-macos/QUILL-CHANGES.md` and marked in each changed file. |
+| gpui-pre-linux 0.3.7 | Apache-2.0 | Patched copy in `third_party/gpui-pre-linux`; the changes are listed in `third_party/gpui-pre-linux/QUILL-CHANGES.md` and marked in each changed file. |
+| gpui-pre-windows 0.3.7 | Apache-2.0 | Patched copy in `third_party/gpui-pre-windows`; the changes are listed in `third_party/gpui-pre-windows/QUILL-CHANGES.md` and marked in each changed file. |
 | gpui-kit-assets 0.7.0 | Apache-2.0; bundled Lucide icons ISC, some derived from Feather (MIT) | The icon license is in `licenses/lucide-ISC.txt` (copied from the crate's `LICENSE-LUCIDE`). |
 | spellbook, symphonia (via rodio), dwrote, option-ext | MPL-2.0 | Unmodified crates.io releases. MPL-2.0 is file-level copyleft; the source of these files is on crates.io and in each project's repository (links in `THIRD_PARTY_LICENSES.md`). |
 | webpki-roots | CDLA-Permissive-2.0 | Mozilla CA certificate data. |

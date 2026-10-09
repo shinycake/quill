@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
+// the vsync thread skips idle windows and sleeps while all are idle.
+// See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
     ffi::{OsStr, OsString},
@@ -8,6 +11,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 
 use anyhow::{Context as _, Result, anyhow};
@@ -381,7 +385,14 @@ impl WindowsPlatform {
             .name("VSyncProvider".to_owned())
             .spawn(move || {
                 let vsync_provider = VSyncProvider::new();
+                // Quill: parked windows still get one invalidation this often.
+                let mut next_heartbeat = Instant::now() + PARKED_HEARTBEAT;
                 loop {
+                    // Quill: sleep while every window's frames are parked
+                    // (see `FrameGate`), until one unparks or the heartbeat.
+                    if !FRAME_GATE.wait_for_frames(&all_windows, next_heartbeat) {
+                        break;
+                    }
                     vsync_provider.wait_for_vsync();
                     if check_device_lost(&directx_device.device)
                         || invalidate_devices.fetch_and(false, Ordering::Acquire)
@@ -399,9 +410,18 @@ impl WindowsPlatform {
                     let Some(all_windows) = all_windows.upgrade() else {
                         break;
                     };
-                    for hwnd in all_windows.read().iter() {
-                        unsafe {
-                            let _ = RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE);
+                    // Quill: skip parked windows, except on the heartbeat.
+                    let heartbeat = Instant::now() >= next_heartbeat;
+                    if heartbeat {
+                        next_heartbeat = Instant::now() + PARKED_HEARTBEAT;
+                    }
+                    let windows: SmallVec<[SafeHwnd; 4]> = all_windows.read().clone();
+                    for hwnd in windows.iter() {
+                        if heartbeat || !FRAME_GATE.is_parked(hwnd.as_raw()) {
+                            unsafe {
+                                let _ =
+                                    RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE);
+                            }
                         }
                     }
                 }
@@ -644,6 +664,9 @@ impl Platform for WindowsPlatform {
         let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
         let handle = window.get_raw_handle();
         self.raw_window_handles.write().push(handle.into());
+        // Quill: a new window starts with frames running; wake the vsync
+        // thread if every other window is parked.
+        FRAME_GATE.unpark(handle);
 
         Ok(Box::new(window))
     }
@@ -1121,7 +1144,11 @@ impl WindowsPlatformInner {
             .unwrap();
         lock.remove(index);
 
-        lock.is_empty()
+        let is_empty = lock.is_empty();
+        // Quill: never take the frame gate while holding the window list.
+        drop(lock);
+        FRAME_GATE.forget(target_window);
+        is_empty
     }
 
     #[inline]
