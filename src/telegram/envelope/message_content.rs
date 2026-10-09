@@ -634,6 +634,7 @@ pub(crate) fn parse_message_game(value: &Value) -> (MessageContent, Vec<ParsedFi
             text: parse_text_content(game.and_then(|g| g.get("text"))),
             description: field("description"),
             photo: PhotoContent {
+                has_stickers: false,
                 caption: String::new(),
                 caption_entities: Vec::new(),
                 show_caption_above_media: false,

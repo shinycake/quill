@@ -1017,9 +1017,11 @@ impl Session {
                 if let Some(RequestPurpose::GetMessageAddedReactions {
                     chat_id,
                     message_id,
+                    filter,
+                    append,
                 }) = pending.map(|p| p.purpose)
                 {
-                    self.accept_added_reactions(chat_id, message_id, page);
+                    self.accept_added_reactions(chat_id, message_id, filter, append, page);
                 }
             }
             EnvelopePayload::UpdateChatReadOutbox {
@@ -1901,7 +1903,15 @@ impl Session {
                 }
             }
             EnvelopePayload::StickerSets { sets, .. } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::GetAttachedStickerSets { .. })
+                ) {
+                    // B11: "Attached Stickers" of a photo or video.
+                    self.stickers.attached_answer = Some(sets.first().map(|set| set.id));
+                } else if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::GetInstalledStickerSets)
+                {
                     self.accept_installed_sticker_sets(sets);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchivedStickerSets)
                 {
@@ -1931,6 +1941,38 @@ impl Session {
                 is_regular,
             } => {
                 self.apply_installed_sticker_set_order(&sticker_set_ids, is_regular);
+            }
+            // B11: other devices changed recents, favorites, trending or the
+            // reaction lists; mark the loaded caches stale (the driver
+            // refetches) or store the pushed value.
+            EnvelopePayload::UpdateRecentStickers { is_attached } => {
+                if !is_attached {
+                    self.stickers.recent_stale = true;
+                }
+            }
+            EnvelopePayload::UpdateFavoriteStickers => self.stickers.favorites_stale = true,
+            EnvelopePayload::UpdateTrendingStickerSets { is_regular } => {
+                if is_regular {
+                    self.stickers.trending_stale = true;
+                } else {
+                    self.emoji.trending_stale = true;
+                }
+            }
+            EnvelopePayload::UpdateActiveEmojiReactions { emojis } => {
+                self.active_reactions = emojis;
+                self.reaction_options_stale = true;
+            }
+            EnvelopePayload::UpdateChatAvailableReactions { chat_id } => {
+                if self
+                    .message_reaction_options
+                    .as_ref()
+                    .is_some_and(|options| options.chat_id == chat_id)
+                {
+                    self.reaction_options_stale = true;
+                }
+            }
+            EnvelopePayload::UpdateDefaultReactionType { reaction_type } => {
+                self.default_reaction = ReactionChoice::from_type(&reaction_type);
             }
             // Slice S8: `getTrendingStickerSets` answers with
             // `trendingStickerSets`.
@@ -1963,6 +2005,9 @@ impl Session {
                     self.accept_favorite_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
                     self.accept_recent_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::GetGreetingStickers) {
+                    self.stickers.greeting = stickers;
+                    self.stickers.greeting_loaded = true;
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
                     // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
                     self.accept_custom_emoji_stickers(stickers);
@@ -1977,6 +2022,7 @@ impl Session {
             | EnvelopePayload::EmojiStatusCustomEmojis { .. }
             | EnvelopePayload::AnimatedEmoji { .. }
             | EnvelopePayload::EmojiKeywords { .. }
+            | EnvelopePayload::Emojis { .. }
             | EnvelopePayload::EmojiCategories { .. }) => {
                 self.dispatch_emoji_payload(pending.map(|p| p.purpose), payload);
             }

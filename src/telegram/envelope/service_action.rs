@@ -380,6 +380,7 @@ fn chat_photo(value: &Value, files: &mut Vec<ParsedFile>) -> Option<PhotoContent
     }
     files.extend(photo_files);
     Some(PhotoContent {
+        has_stickers: false,
         caption: String::new(),
         caption_entities: Vec::new(),
         show_caption_above_media: false,

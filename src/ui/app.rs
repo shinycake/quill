@@ -111,6 +111,8 @@ pub struct QuillApp {
     pub(super) last_highlight: Option<MessageId>,
     /// `(jump serial, start)` of the running jump-highlight fade.
     pub(super) highlight_fade: Option<(u64, std::time::Instant)>,
+    /// B11: the reaction that just flew from the message (message, glyph, start).
+    pub(super) reaction_fly: Option<super::history_fx::ReactionFly>,
     /// Floating date pill state (shown while scrolling the history).
     pub(super) scroll_date: super::history_fx::ScrollDate,
     /// Rows painted this frame: `(row, bounds, starts its day)`.

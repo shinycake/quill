@@ -1106,6 +1106,8 @@ impl QuillApp {
                         history_skeleton().into_any_element()
                     } else if is_secret {
                         self.secret_empty_explainer(cx).into_any_element()
+                    } else if let Some(intro) = self.greeting_intro(chat.as_ref(), cx) {
+                        intro
                     } else {
                         pane_placeholder(
                             "No messages yet",
@@ -2036,8 +2038,32 @@ impl QuillApp {
                             {
                                 this.begin_reply_from_message(chat_id, message_id, window, cx);
                             }
+                            // B11: double-click reacts with the quick
+                            // reaction (tdesktop `toggleFavoriteReaction`);
+                            // on selected text it selects the word instead.
+                            if event.click_count == 2
+                                && !this.selecting_in(row_chat)
+                                && !gpui_kit::base::TextSelection::has_selection(window, cx)
+                            {
+                                this.quick_react(row_chat, row_msg, cx);
+                            }
                             cx.notify();
                         }),
+                    )
+                    .when_some(
+                        self.reaction_fly_for(row_chat.0, row_msg.0, cx),
+                        |this, (glyph, frame)| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .bottom(px(12. + frame.rise))
+                                    .when(outgoing, |this| this.right(px(56.)))
+                                    .when(!outgoing, |this| this.left(px(64.)))
+                                    .opacity(frame.alpha)
+                                    .text_size(px(26. * frame.scale))
+                                    .child(glyph),
+                            )
+                        },
                     )
                     // Selecting slides an outgoing bubble aside for the check.
                     .child(if outgoing && selection_slide > 0. {

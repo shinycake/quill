@@ -415,6 +415,26 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
             ],
             next_offset: String::new(),
         });
+        // The per-reaction tabs of the "who reacted" list.
+        let mut tab = |emoji: &str, rows: Vec<AddedReaction>| {
+            audience.filtered.insert(
+                quill::state::reaction_filter_key(&ReactionType::emoji(emoji)),
+                Audience::Ready(AddedReactionsPage {
+                    total_count: rows.len() as i32,
+                    reactions: rows,
+                    next_offset: String::new(),
+                }),
+            );
+        };
+        tab(
+            "👍",
+            vec![
+                reaction(9, "👍", 3500),
+                reaction(10, "👍", 3000),
+                reaction(14, "👍", 90_000),
+            ],
+        );
+        tab("❤", vec![reaction(15, "❤", 1200)]);
         session.message_audience = Some(audience);
     }
     if chosen.message_id == 908 {
@@ -432,6 +452,11 @@ pub(super) fn seed_ready_message_menu_session(sink: Arc<MemorySink>) -> Session 
     // The reaction strip above the menu.
     {
         use quill::state::{MessageReactionOptions, ReactionChoice};
+        session.default_reaction = Some(ReactionChoice::Emoji("👍".into()));
+        session.active_reactions = ["👍", "❤", "🔥", "😂", "😮", "🎉", "🥰", "👏"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
         session.message_reaction_options = Some(MessageReactionOptions {
             chat_id: chat,
             message_id,

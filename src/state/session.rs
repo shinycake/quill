@@ -81,6 +81,12 @@ pub struct Session {
     pub media_library: MediaLibrary,
     /// Reaction options for the message whose reaction picker is open.
     pub message_reaction_options: Option<MessageReactionOptions>,
+    /// `updateActiveEmojiReactions`: the emoji reactions Telegram offers.
+    pub active_reactions: Vec<String>,
+    /// `updateDefaultReactionType`: the quick reaction (double-click).
+    pub default_reaction: Option<ReactionChoice>,
+    /// The reaction options of the open picker are out of date.
+    pub reaction_options_stale: bool,
     /// What the open message context menu may offer (`messageProperties`).
     pub message_menu_actions:
         Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)>,
@@ -1075,6 +1081,9 @@ impl Session {
             mention_search: None,
             media_library: MediaLibrary::default(),
             message_reaction_options: None,
+            active_reactions: Vec::new(),
+            default_reaction: None,
+            reaction_options_stale: false,
             message_menu_actions: None,
             message_report: None,
             message_audience: None,

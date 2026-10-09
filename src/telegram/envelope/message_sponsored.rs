@@ -300,6 +300,7 @@ pub(crate) fn parse_sponsored_photo(photo: &Value) -> (Option<PhotoContent>, Vec
     }
     (
         Some(PhotoContent {
+            has_stickers: false,
             caption: String::new(),
             caption_entities: Vec::new(),
             show_caption_above_media: false,

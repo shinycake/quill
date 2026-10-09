@@ -120,6 +120,98 @@ impl QuillApp {
         true
     }
 
+    /// Double-click on a message: react with the quick reaction
+    /// (tdesktop `HistoryInner::toggleFavoriteReaction`); nothing when
+    /// the message cannot take reactions or none is set.
+    pub(super) fn quick_react(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.session() else {
+            return;
+        };
+        let Some(choice) = session.default_reaction.clone() else {
+            return;
+        };
+        let can_react = session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|h| h.messages.get(&message_id.0))
+            .is_some_and(|m| m.can_react());
+        if can_react {
+            self.toggle_reaction(chat_id, message_id, choice, cx);
+        }
+    }
+
+    /// Settings, "Quick reaction": the reactions Telegram offers
+    /// (`updateActiveEmojiReactions`), the current one highlighted
+    /// (tdesktop `Settings::AddReactionsSection`: pick the double-click
+    /// reaction).
+    pub(super) fn quick_reaction_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        const FALLBACK: [&str; 8] = ["👍", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🎉"];
+        let session = self.session();
+        let active: Vec<String> = session
+            .map(|s| s.active_reactions.clone())
+            .filter(|list| !list.is_empty())
+            .unwrap_or_else(|| FALLBACK.iter().map(|e| e.to_string()).collect());
+        let current = session.and_then(|s| s.default_reaction.clone());
+        let muted = cx.theme().muted_foreground;
+        let mut strip = div().flex().flex_wrap().gap_1().px_2();
+        for (ix, emoji) in active.into_iter().take(24).enumerate() {
+            let selected = current == Some(ReactionChoice::Emoji(emoji.clone()));
+            let glyph = emoji_presentation(&emoji);
+            let pick = emoji.clone();
+            strip = strip.child(
+                div()
+                    .id(("quick-reaction", ix as u64))
+                    .size(px(34.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .cursor_pointer()
+                    .text_size(px(20.))
+                    .when(selected, |this| this.bg(accent().opacity(0.25)))
+                    .hover(|style| style.bg(bg_subtle()))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Quick reaction {glyph}"))
+                    .child(glyph)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_default_reaction(pick.clone(), cx);
+                    })),
+            );
+        }
+        div()
+            .id("quick-reaction")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .py_1()
+            .child(div().text_sm().font_medium().px_2().child("Quick reaction"))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .px_2()
+                    .child("Double-click a message to react with it"),
+            )
+            .child(strip)
+            .into_any_element()
+    }
+
+    /// Settings, "Quick reaction": make `emoji` the double-click reaction.
+    pub(super) fn set_default_reaction(&mut self, emoji: String, cx: &mut Context<Self>) {
+        let choice = ReactionChoice::Emoji(emoji);
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.set_default_reaction(&choice);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.default_reaction = Some(choice);
+        }
+        cx.notify();
+    }
+
     /// Add or remove the user's `choice` on a message.
     pub(super) fn toggle_reaction(
         &mut self,
@@ -140,6 +232,20 @@ impl QuillApp {
             self.status_note = "Custom emoji reactions need Telegram Premium".into();
             cx.notify();
             return;
+        }
+        // The reaction flies up from the message when it is added.
+        let adding = self
+            .session()
+            .and_then(|s| s.histories.get(&chat_id.0))
+            .and_then(|h| h.messages.get(&message_id.0))
+            .is_some_and(|m| !m.chosen_reaction(&choice));
+        if adding && let ReactionChoice::Emoji(emoji) = &choice {
+            self.reaction_fly = Some(super::history_fx::ReactionFly {
+                chat_id: chat_id.0,
+                message_id: message_id.0,
+                glyph: emoji_presentation(emoji).into(),
+                started: std::time::Instant::now(),
+            });
         }
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live

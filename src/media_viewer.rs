@@ -856,6 +856,7 @@ mod tests {
             chat,
             id,
             MessageContent::Photo(PhotoContent {
+                has_stickers: false,
                 caption: caption.to_string(),
                 caption_entities: Vec::new(),
                 show_caption_above_media: false,

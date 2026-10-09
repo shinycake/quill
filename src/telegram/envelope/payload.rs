@@ -1414,6 +1414,18 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "animatedEmoji" => Ok(crate::telegram::envelope_emoji::parse_animated_emoji(
             &value,
         )),
+        "emojis" => Ok(EnvelopePayload::Emojis {
+            emojis: value
+                .get("emojis")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
         "emojiKeywords" => Ok(crate::telegram::envelope_emoji::parse_emoji_keywords(
             &value,
         )),
@@ -1518,6 +1530,41 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(|t| t.get("@type"))
                 .and_then(Value::as_str)
                 == Some("stickerTypeRegular"),
+        }),
+        "updateRecentStickers" => Ok(EnvelopePayload::UpdateRecentStickers {
+            is_attached: value
+                .get("is_attached")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        "updateFavoriteStickers" => Ok(EnvelopePayload::UpdateFavoriteStickers),
+        "updateTrendingStickerSets" => Ok(EnvelopePayload::UpdateTrendingStickerSets {
+            is_regular: value
+                .get("sticker_type")
+                .and_then(|t| t.get("@type"))
+                .and_then(Value::as_str)
+                == Some("stickerTypeRegular"),
+        }),
+        "updateActiveEmojiReactions" => Ok(EnvelopePayload::UpdateActiveEmojiReactions {
+            emojis: value
+                .get("emojis")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        "updateChatAvailableReactions" => Ok(EnvelopePayload::UpdateChatAvailableReactions {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+        }),
+        "updateDefaultReactionType" => Ok(EnvelopePayload::UpdateDefaultReactionType {
+            reaction_type: super::message_reactions::parse_reaction_type(
+                value.get("reaction_type"),
+            )
+            .unwrap_or(ReactionType::Unknown),
         }),
         "notificationSounds" => {
             let sounds = value

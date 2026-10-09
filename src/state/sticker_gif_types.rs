@@ -39,6 +39,18 @@ pub struct StickerPanel {
     pub trending_offset: usize,
     pub trending_next_offset: usize,
     pub trending_is_premium: bool,
+    /// `updateRecentStickers` / `updateFavoriteStickers` /
+    /// `updateTrendingStickerSets` arrived (another device changed them):
+    /// refetch the loaded list.
+    /// `getGreetingStickers`: hello stickers for empty private chats.
+    pub greeting: Vec<StickerItem>,
+    pub greeting_loaded: bool,
+    /// `getAttachedStickerSets` answered: the sets (first opens in the
+    /// sticker set dialog; `None` inside: the media has none).
+    pub attached_answer: Option<Option<i64>>,
+    pub recent_stale: bool,
+    pub favorites_stale: bool,
+    pub trending_stale: bool,
     /// Slice S8: favorite stickers (`getFavoriteStickers`).
     pub favorites: Vec<StickerItem>,
     /// Slice S8: recent stickers (`getRecentStickers`).

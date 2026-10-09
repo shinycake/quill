@@ -121,6 +121,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::GetMessageAddedReactions {
                     chat_id,
                     message_id,
+                    filter: 0,
+                    append: false,
                 },
                 Some(chat_id),
             );
@@ -136,6 +138,82 @@ impl<S: JsonSender> ConnectDriver<S> {
                 ),
             )?;
             self.session.audience_reactions_loading(chat_id, message_id);
+        }
+        Ok(())
+    }
+
+    /// A "who reacted" tab: its first page when it was never asked, or
+    /// (`more`) the next page of what it lists. `reaction` `None` is the
+    /// "All" tab.
+    pub fn fetch_reactors_tab(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        reaction: Option<&crate::telegram::envelope::ReactionType>,
+        more: bool,
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let filter = reaction.map_or(0, crate::state::reaction_filter_key);
+        let Some(audience) = self
+            .session
+            .message_audience
+            .as_ref()
+            .filter(|a| a.chat_id == chat_id && a.message_id == message_id)
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let slot = if filter == 0 {
+            Some(&audience.reactions)
+        } else {
+            audience.filtered.get(&filter)
+        };
+        let offset = if more {
+            match slot.and_then(|slot| slot.ready()) {
+                Some(page)
+                    if !page.next_offset.is_empty() && !audience.more_loading.contains(&filter) =>
+                {
+                    page.next_offset.clone()
+                }
+                _ => return Ok(()),
+            }
+        } else if slot.is_some_and(|slot| {
+            !matches!(
+                slot,
+                crate::state::Audience::NotAsked | crate::state::Audience::Failed
+            )
+        }) {
+            return Ok(());
+        } else {
+            String::new()
+        };
+        let extra = self.session.request(
+            RequestPurpose::GetMessageAddedReactions {
+                chat_id,
+                message_id,
+                filter,
+                append: more,
+            },
+            Some(chat_id),
+        );
+        self.send_audience(
+            extra,
+            &get_message_added_reactions(
+                extra,
+                chat_id,
+                message_id,
+                reaction,
+                &offset,
+                ADDED_REACTIONS_PAGE,
+            ),
+        )?;
+        if more {
+            self.session
+                .audience_tab_loading_more(chat_id, message_id, filter);
+        } else {
+            self.session
+                .audience_tab_loading(chat_id, message_id, filter);
         }
         Ok(())
     }

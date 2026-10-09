@@ -23,6 +23,7 @@ mod messaging;
 mod payments;
 mod profile_panels;
 mod proxy;
+mod reactions_live;
 mod registration;
 mod search;
 mod search_upgrades;

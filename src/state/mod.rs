@@ -123,7 +123,7 @@ pub(crate) use session_chat_search::history_message;
 pub use session_history_window::MentionSearch;
 pub use session_message_menu::{
     Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
-    StickerSetViewStage,
+    StickerSetViewStage, reaction_filter_key,
 };
 pub use session_proxy::LINK_PING_ID;
 pub use session_reply::{
