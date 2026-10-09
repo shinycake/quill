@@ -773,6 +773,8 @@ pub struct QuillApp {
     pub(super) group_confirm_dialog: Option<GroupConfirmDialog>,
     /// Slice G2: forum-topic management dialog.
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
+    /// Saved Messages: "Add Name" / "Edit Name" for a tag.
+    pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
     /// B15: the inline "Add an Option" panel (`addPollOption`).

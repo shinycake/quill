@@ -77,6 +77,11 @@ pub enum GroupConfirmAction {
     DeleteForumTopic {
         forum_topic_id: i32,
     },
+    /// Saved Messages: "Delete chat" on a sublist —
+    /// `deleteSavedMessagesTopicHistory` (schema 1.8.67, line 11781).
+    DeleteSavedSublist {
+        topic_id: i64,
+    },
     /// Member list: "Remove from group" (tdesktop `lng_profile_sure_kick`)
     /// — `banChatMember` in a basic group, ban then lift in a supergroup.
     RemoveMember {

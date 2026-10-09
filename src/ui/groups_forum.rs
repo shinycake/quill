@@ -3,20 +3,25 @@
 use super::app::QuillApp;
 use super::app::pane_placeholder;
 use super::chat_row::unread_badge;
+use super::dialogs::TopicEditor;
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
+use quill::local_path::sandboxed_display_path;
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ForumTopic;
+use quill::telegram::requests::TOPIC_ICON_COLORS;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -150,41 +155,152 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice G2: create the topic named in the dialog's input
-    /// (`createForumTopic`); empty names are refused up front.
-    pub(super) fn submit_forum_topic_create(
+    /// Open the manage dialog straight on the topic editor (the topic
+    /// menu's "Edit Topic", the header's "New Topic").
+    pub(super) fn open_forum_topic_editor(
         &mut self,
+        chat_id: ChatId,
+        topic_id: Option<i32>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (chat_id, name) = match self.forum_manage_dialog.as_ref() {
-            Some(dialog) => (
-                dialog.chat_id,
-                dialog.new_topic_input.read(cx).value().trim().to_string(),
+        if self.forum_manage_dialog.is_none() {
+            self.open_forum_manage_dialog(chat_id, window, cx);
+        }
+        self.begin_topic_editor(topic_id, window, cx);
+    }
+
+    /// Start the editor for a new topic (`None`) or an existing one: the
+    /// name and icon of the topic fill the form; a new topic gets the next
+    /// of tdesktop's six colors.
+    pub(super) fn begin_topic_editor(
+        &mut self,
+        topic_id: Option<i32>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat_id) = self.forum_manage_dialog.as_ref().map(|d| d.chat_id) else {
+            return;
+        };
+        let topics = self
+            .session()
+            .map(|s| s.ordered_forum_topics(chat_id))
+            .unwrap_or_default();
+        let existing = topic_id.and_then(|id| topics.iter().find(|t| t.forum_topic_id == id));
+        let (name, color, emoji) = match existing {
+            Some(topic) => (
+                topic.name.clone(),
+                topic.icon_color,
+                topic.icon_custom_emoji_id,
             ),
-            None => return,
+            None => (
+                String::new(),
+                TOPIC_ICON_COLORS[topics.len() % TOPIC_ICON_COLORS.len()],
+                0,
+            ),
+        };
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_forum_topic_icons();
+        }
+        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
+            dialog.name_input.update(cx, |input, cx| {
+                input.set_value(name, window, cx);
+            });
+            dialog.editor = Some(TopicEditor {
+                target: topic_id,
+                color,
+                icon_emoji: emoji,
+                original_emoji: emoji,
+            });
+        }
+        cx.notify();
+    }
+
+    /// Clicking the icon preview picks the next color, while the topic is
+    /// new and has no custom emoji (tdesktop `ChooseNextColorId`).
+    fn cycle_topic_editor_color(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self
+            .forum_manage_dialog
+            .as_mut()
+            .and_then(|d| d.editor.as_mut())
+            .filter(|e| e.target.is_none() && e.icon_emoji == 0)
+        {
+            editor.color = next_topic_color(editor.color);
+        }
+        cx.notify();
+    }
+
+    fn set_topic_editor_emoji(&mut self, custom_emoji_id: i64, cx: &mut Context<Self>) {
+        if let Some(editor) = self
+            .forum_manage_dialog
+            .as_mut()
+            .and_then(|d| d.editor.as_mut())
+        {
+            editor.icon_emoji = custom_emoji_id;
+        }
+        cx.notify();
+    }
+
+    /// Leave the editor without sending anything.
+    fn cancel_topic_editor(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
+            dialog.editor = None;
+        }
+        cx.notify();
+    }
+
+    /// Create or save the topic (`createForumTopic` / `editForumTopic`
+    /// with the chosen icon); an empty name is refused up front.
+    pub(super) fn submit_topic_editor(&mut self, cx: &mut Context<Self>) {
+        let Some((chat_id, editor, name)) = self.forum_manage_dialog.as_ref().and_then(|d| {
+            Some((
+                d.chat_id,
+                d.editor.clone()?,
+                d.name_input.read(cx).value().trim().to_string(),
+            ))
+        }) else {
+            return;
         };
         if name.is_empty() {
             self.status_note = "topic name cannot be empty".into();
             cx.notify();
             return;
         }
+        let general = editor.target.is_some_and(|id| {
+            self.session().is_some_and(|s| {
+                s.forum_topics.get(&chat_id.0).is_some_and(|topics| {
+                    topics
+                        .iter()
+                        .any(|t| t.forum_topic_id == id && t.is_general)
+                })
+            })
+        });
         if let Some(live) = self.live.as_mut() {
-            match live.driver.create_forum_topic(chat_id, &name) {
-                // The topic list refetches after the server confirms
-                // (the render path reloads when the cache is dropped).
-                Ok(_) => {
-                    self.status_note = "topic created".into();
+            let result = match editor.target {
+                None => live.driver.create_forum_topic_with_icon(
+                    chat_id,
+                    &name,
+                    editor.color,
+                    editor.icon_emoji,
+                ),
+                // The General topic only has a name.
+                Some(id) if general => live.driver.edit_forum_topic(chat_id, id, &name),
+                Some(id) => {
+                    live.driver
+                        .edit_forum_topic_with_icon(chat_id, id, &name, editor.icon_emoji)
                 }
-                Err(_) => self.status_note = "could not create topic".into(),
-            }
+            };
+            self.status_note = match (result, editor.target) {
+                (Ok(_), None) => "topic created".into(),
+                (Ok(_), Some(_)) => "topic saved".into(),
+                (Err(_), None) => "could not create topic".into(),
+                (Err(_), Some(_)) => "could not save topic".into(),
+            };
         } else {
             self.status_note = "topics need a live connection (demo)".into();
         }
         if let Some(dialog) = self.forum_manage_dialog.as_mut() {
-            dialog.new_topic_input.update(cx, |input, cx| {
-                input.set_value("", window, cx);
-            });
+            dialog.editor = None;
         }
         cx.notify();
     }
@@ -234,58 +350,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice G2: begin an inline rename for one topic row.
-    pub(super) fn begin_forum_topic_rename(
-        &mut self,
-        topic_id: i32,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
-            dialog.editing_topic = Some(topic_id);
-            dialog.edit_input.update(cx, |input, cx| {
-                input.set_value("", window, cx);
-            });
-        }
-        cx.notify();
-    }
-
-    /// Slice G2: submit the inline rename (`editForumTopic`).
-    pub(super) fn submit_forum_topic_rename(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, topic_id, name) = match self.forum_manage_dialog.as_ref() {
-            Some(dialog) => match dialog.editing_topic {
-                Some(topic_id) => (
-                    dialog.chat_id,
-                    topic_id,
-                    dialog.edit_input.read(cx).value().trim().to_string(),
-                ),
-                None => return,
-            },
-            None => return,
-        };
-        if name.is_empty() {
-            self.status_note = "topic name cannot be empty".into();
-            cx.notify();
-            return;
-        }
-        if let Some(live) = self.live.as_mut() {
-            match live.driver.edit_forum_topic(chat_id, topic_id, &name) {
-                // The topic list refetches after the server confirms
-                // (the render path reloads when the cache is dropped).
-                Ok(_) => {
-                    self.status_note = "topic renamed".into();
-                }
-                Err(_) => self.status_note = "could not rename topic".into(),
-            }
-        } else {
-            self.status_note = "topics need a live connection (demo)".into();
-        }
-        if let Some(dialog) = self.forum_manage_dialog.as_mut() {
-            dialog.editing_topic = None;
-        }
-        cx.notify();
-    }
-
     /// kit Phase 2 (redo): forum manage hosted in a kit `Dialog` via
     /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
     pub(super) fn build_forum_manage_dialog(
@@ -299,55 +363,62 @@ impl QuillApp {
                 this.close_forum_manage_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title("Manage topics"));
             let Some(dialog_state) = this.forum_manage_dialog.as_ref() else {
-                return dialog.on_close(on_close);
+                return dialog.overlay(true).on_close(on_close);
             };
             let chat_id = dialog_state.chat_id;
-            let topics: Vec<ForumTopic> = this
-                .session()
-                .map(|session| session.ordered_forum_topics(chat_id))
-                .unwrap_or_default();
-            let editing = dialog_state.editing_topic;
-            let mut body =
-                div().flex().flex_col().gap_2().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .child(
-                            div().flex_1().child(
-                                Textarea::new(&dialog_state.new_topic_input)
-                                    .aria_label("New topic name")
-                                    .h(px(36.)),
-                            ),
-                        )
-                        .child(Button::new("g2-topic-create").label("Create").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.submit_forum_topic_create(window, cx);
-                                this.close_kit_dialog_if_done(DialogKind::ForumManage, window, cx);
-                            }),
-                        )),
-                );
-            let mut list = div()
-                .id("g2-topic-list")
-                .flex()
-                .flex_col()
-                .gap_1()
-                .max_h(px(320.))
-                .overflow_y_scroll();
-            for topic in &topics {
-                list = list.child(this.forum_topic_manage_row(chat_id, topic, editing, cx));
+            let editor = dialog_state.editor.clone();
+            let title = match &editor {
+                None => "Manage topics",
+                Some(e) if e.target.is_none() => "New Topic",
+                Some(_) => "Edit Topic",
+            };
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title(title));
+            if editor.is_some()
+                && let Some(live) = this.live.as_mut()
+            {
+                live.driver.download_forum_topic_icons();
             }
-            body = body.child(list);
-            let body = body.into_any_element();
+            let body =
+                match editor {
+                    Some(editor) => this.topic_editor_body(&editor, cx),
+                    None => {
+                        let topics: Vec<ForumTopic> = this
+                            .session()
+                            .map(|session| session.ordered_forum_topics(chat_id))
+                            .unwrap_or_default();
+                        let mut list = div()
+                            .id("g2-topic-list")
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .max_h(px(320.))
+                            .overflow_y_scroll();
+                        for topic in &topics {
+                            list = list.child(this.forum_topic_manage_row(chat_id, topic, cx));
+                        }
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(div().flex().justify_end().child(
+                                Button::new("g2-topic-new").label("New Topic").on_click(
+                                    cx.listener(|this, _, window, cx| {
+                                        this.begin_topic_editor(None, window, cx);
+                                    }),
+                                ),
+                            ))
+                            .child(list)
+                            .into_any_element()
+                    }
+                };
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {
                         let body = body
                             .borrow_mut()
@@ -360,6 +431,185 @@ impl QuillApp {
         })
     }
 
+    /// The create / edit form (tdesktop `EditForumTopicBox`): the icon
+    /// preview next to the name, then the icon choices, then the buttons.
+    fn topic_editor_body(&self, editor: &TopicEditor, cx: &mut Context<Self>) -> AnyElement {
+        let Some(dialog) = self.forum_manage_dialog.as_ref() else {
+            return div().into_any_element();
+        };
+        let session = self.session();
+        let name = dialog.name_input.read(cx).value().to_string();
+        let roots = self.media_display_roots();
+        let sticker_for = |id: i64| {
+            session.and_then(|s| {
+                s.forum_topic_icons
+                    .iter()
+                    .find(|sticker| sticker.custom_emoji_id == Some(id))
+            })
+        };
+        let path_for = |sticker: &quill::telegram::envelope::StickerItem| {
+            sticker
+                .display_file_id()
+                .and_then(|id| session.and_then(|s| s.files.get(&id.0)))
+                .and_then(|file| file.usable_path())
+                .and_then(|path| sandboxed_display_path(path, &roots))
+        };
+        let tile = |selected: bool| {
+            let base = div()
+                .size(px(40.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_md();
+            if selected {
+                base.bg(cx.theme().primary.opacity(0.25))
+            } else {
+                base
+            }
+        };
+        let visual = |emoji: i64, size: f32| -> AnyElement {
+            match sticker_for(emoji) {
+                Some(sticker) if emoji != 0 => match path_for(sticker) {
+                    Some(path) => img(path)
+                        .w(px(size))
+                        .h(px(size))
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element(),
+                    None => div()
+                        .text_size(px(size * 0.7))
+                        .child(sticker.emoji.clone())
+                        .into_any_element(),
+                },
+                _ => letter_icon(&name, editor.color, size),
+            }
+        };
+        let changeable = editor.target.is_none() && editor.icon_emoji == 0;
+        let mut grid = div()
+            .id("topic-icon-grid")
+            .flex()
+            .flex_wrap()
+            .gap_1()
+            .max_h(px(200.))
+            .overflow_y_scroll()
+            .role(Role::List)
+            .aria_label("Topic icons")
+            .child(
+                tile(editor.icon_emoji == 0)
+                    .id("topic-icon-default")
+                    .pressable(cx.theme())
+                    .role(Role::Button)
+                    .aria_label("Default icon")
+                    .tab_index(0)
+                    .on_click(cx.listener(|this, _, _, cx| this.set_topic_editor_emoji(0, cx)))
+                    .child(letter_icon(&name, editor.color, 28.)),
+            );
+        for (ix, sticker) in session
+            .map(|s| s.forum_topic_icons.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            let Some(id) = sticker.custom_emoji_id else {
+                continue;
+            };
+            grid = grid.child(
+                tile(editor.icon_emoji == id)
+                    .id(("topic-icon", ix))
+                    .pressable(cx.theme())
+                    .role(Role::Button)
+                    .aria_label(if sticker.emoji.is_empty() {
+                        "Topic icon".to_string()
+                    } else {
+                        format!("Topic icon {}", sticker.emoji)
+                    })
+                    .tab_index(0)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_topic_editor_emoji(id, cx);
+                    }))
+                    .child(visual(id, 28.)),
+            );
+        }
+        let loading = session.is_some_and(|s| {
+            s.forum_topic_icons.is_empty()
+                && s.requests
+                    .has_purpose(RequestPurpose::GetForumTopicDefaultIcons)
+        });
+        let creating = editor.target.is_none();
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("topic-icon-preview")
+                            .size(px(44.))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .role(Role::Button)
+                            .aria_label(if changeable {
+                                "Change icon color"
+                            } else {
+                                "Topic icon"
+                            })
+                            .when(changeable, |this| {
+                                this.pressable(cx.theme()).tab_index(0).on_click(
+                                    cx.listener(|this, _, _, cx| this.cycle_topic_editor_color(cx)),
+                                )
+                            })
+                            .child(visual(editor.icon_emoji, 36.)),
+                    )
+                    .child(
+                        div().flex_1().child(
+                            Textarea::new(&dialog.name_input)
+                                .aria_label("Topic name")
+                                .h(px(36.)),
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Choose a topic name and icon"),
+            )
+            .child(grid)
+            .when(loading, |this| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading icons"),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("topic-editor-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| this.cancel_topic_editor(cx))),
+                    )
+                    .child(
+                        Button::new("topic-editor-save")
+                            .label(if creating { "Create" } else { "Save" })
+                            .primary()
+                            .on_click(cx.listener(|this, _, _, cx| this.submit_topic_editor(cx))),
+                    ),
+            )
+            .into_any_element()
+    }
+
     /// Slice G2: one topic row in the management dialog — name +
     /// state badges and the applicable actions (General only gets
     /// Hide/Show).
@@ -367,7 +617,6 @@ impl QuillApp {
         &self,
         chat_id: ChatId,
         topic: &ForumTopic,
-        editing: Option<i32>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let topic_id = topic.forum_topic_id;
@@ -381,11 +630,12 @@ impl QuillApp {
         if topic.is_pinned {
             badges.push_str(" · pinned");
         }
-        let mut row = div().flex().flex_col().w_full().gap_1().child(
+        let row = div().flex().flex_col().w_full().gap_1().child(
             div()
                 .flex()
                 .items_center()
                 .gap_2()
+                .child(super::subsection_tabs::topic_icon(topic, 22., cx))
                 .child(
                     div()
                         .flex_1()
@@ -400,96 +650,59 @@ impl QuillApp {
                         .child(badges.trim_start_matches(" · ").to_string()),
                 ),
         );
-        if editing == Some(topic_id) {
-            let edit_input = self
-                .forum_manage_dialog
-                .as_ref()
-                .map(|dialog| dialog.edit_input.clone());
-            let mut edit_row = div().flex().items_center().gap_1();
-            if let Some(input) = edit_input {
-                edit_row = edit_row.child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&input).aria_label("Topic name").h(px(32.))),
-                );
-            }
-            edit_row = edit_row
-                .child(
-                    Button::new(format!("g2-topic-save-{topic_id}"))
-                        .label("Save")
-                        .on_click(cx.listener(|this, _, _window, cx| {
-                            this.submit_forum_topic_rename(cx);
-                        })),
-                )
-                .child(
-                    Button::new(format!("g2-topic-cancel-{topic_id}"))
-                        .label("Cancel")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(dialog) = this.forum_manage_dialog.as_mut() {
-                                dialog.editing_topic = None;
-                            }
-                            cx.notify();
-                        })),
-                );
-            row = row.child(edit_row);
-        } else {
-            let mut actions = div().flex().flex_wrap().gap_1();
-            // Rename opens the inline editor rather than sending.
+        let mut actions = div().flex().flex_wrap().gap_1();
+        actions = actions.child(
+            Button::new(format!("g2-topic-rename-{topic_id}"))
+                .label("Edit")
+                .ghost()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.begin_topic_editor(Some(topic_id), window, cx);
+                })),
+        );
+        if topic.is_general {
+            let hide_label = if topic.is_hidden { "Show" } else { "Hide" };
+            let hide_action = if topic.is_hidden {
+                ForumTopicAction::ShowGeneral
+            } else {
+                ForumTopicAction::HideGeneral
+            };
             actions = actions.child(
-                Button::new(format!("g2-topic-rename-{topic_id}"))
-                    .label("Rename")
+                Button::new(format!("g2-topic-hide-{topic_id}"))
+                    .label(hide_label)
                     .ghost()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.begin_forum_topic_rename(topic_id, window, cx);
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.forum_topic_action(chat_id, topic_id, hide_action, cx);
                     })),
             );
-            if topic.is_general {
-                let hide_label = if topic.is_hidden { "Show" } else { "Hide" };
-                let hide_action = if topic.is_hidden {
-                    ForumTopicAction::ShowGeneral
-                } else {
-                    ForumTopicAction::HideGeneral
-                };
+        } else {
+            let close_label = if topic.is_closed { "Reopen" } else { "Close" };
+            let close_action = if topic.is_closed {
+                ForumTopicAction::Reopen
+            } else {
+                ForumTopicAction::Close
+            };
+            let pin_label = if topic.is_pinned { "Unpin" } else { "Pin" };
+            let pin_action = if topic.is_pinned {
+                ForumTopicAction::Unpin
+            } else {
+                ForumTopicAction::Pin
+            };
+            for (id, label, action_kind) in [
+                ("close", close_label, close_action),
+                ("pin", pin_label, pin_action),
+                ("delete", "Delete", ForumTopicAction::Delete),
+            ] {
                 actions = actions.child(
-                    Button::new(format!("g2-topic-hide-{topic_id}"))
-                        .label(hide_label)
+                    Button::new(format!("g2-topic-{id}-{topic_id}"))
+                        .label(label)
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.forum_topic_action(chat_id, topic_id, hide_action, cx);
+                            this.forum_topic_action(chat_id, topic_id, action_kind, cx);
                         })),
                 );
-            } else {
-                let close_label = if topic.is_closed { "Reopen" } else { "Close" };
-                let close_action = if topic.is_closed {
-                    ForumTopicAction::Reopen
-                } else {
-                    ForumTopicAction::Close
-                };
-                let pin_label = if topic.is_pinned { "Unpin" } else { "Pin" };
-                let pin_action = if topic.is_pinned {
-                    ForumTopicAction::Unpin
-                } else {
-                    ForumTopicAction::Pin
-                };
-                for (id, label, action_kind) in [
-                    ("close", close_label, close_action),
-                    ("pin", pin_label, pin_action),
-                    ("delete", "Delete", ForumTopicAction::Delete),
-                ] {
-                    actions = actions.child(
-                        Button::new(format!("g2-topic-{id}-{topic_id}"))
-                            .label(label)
-                            .ghost()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.forum_topic_action(chat_id, topic_id, action_kind, cx);
-                            })),
-                    );
-                }
             }
-            row = row.child(actions);
         }
-        row.into_any_element()
+        row.child(actions).into_any_element()
     }
 
     /// Phase 5.1: strip shown above a topic's history — back to the topic
@@ -614,6 +827,15 @@ impl QuillApp {
                 topic.name.clone()
             };
             let preview = topic.last_message_preview.clone();
+            let extras = open
+                .map(|id| self.topic_extras(id, &topic))
+                .unwrap_or_default();
+            let can_pin = open.is_some_and(|id| {
+                self.session().is_some_and(|s| s.chat_can_manage_topics(id)) && !topic.is_general
+            });
+            let pinned = topic.is_pinned;
+            let owner = cx.entity().downgrade();
+            let chat_for_menu = open.unwrap_or(ChatId(0));
             list = list.child(
                 div()
                     .id(("forum-topic-row", topic_id as u64))
@@ -629,6 +851,42 @@ impl QuillApp {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_topic_ui(topic_id, cx);
                     }))
+                    .context_menu(move |menu, _, _| {
+                        let mut menu = menu;
+                        if can_pin {
+                            let pin_owner = owner.clone();
+                            menu = menu.item(
+                                PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" })
+                                    .icon(if pinned {
+                                        IconName::PinOff
+                                    } else {
+                                        IconName::Pin
+                                    })
+                                    .on_click(move |_, _, cx| {
+                                        let _ = pin_owner.update(cx, |this, cx| {
+                                            let action = if pinned {
+                                                ForumTopicAction::Unpin
+                                            } else {
+                                                ForumTopicAction::Pin
+                                            };
+                                            this.forum_topic_action(
+                                                chat_for_menu,
+                                                topic_id,
+                                                action,
+                                                cx,
+                                            );
+                                        });
+                                    }),
+                            );
+                        }
+                        super::forum_extras::add_topic_extras(
+                            menu,
+                            extras,
+                            owner.clone(),
+                            chat_for_menu,
+                            topic_id,
+                        )
+                    })
                     .child(
                         div()
                             .flex()
@@ -721,5 +979,71 @@ impl QuillApp {
         }
         self.status_note = "back to topics".into();
         cx.notify();
+    }
+}
+
+/// The color after `current` in tdesktop's list (`ChooseNextColorId`
+/// without the randomness, so a click always changes the color).
+fn next_topic_color(current: i32) -> i32 {
+    let at = TOPIC_ICON_COLORS.iter().position(|c| *c == current);
+    TOPIC_ICON_COLORS[at.map_or(0, |i| (i + 1) % TOPIC_ICON_COLORS.len())]
+}
+
+/// The first letter of a topic name for its round icon; "#" when the
+/// name has none yet.
+pub(super) fn topic_letter(name: &str) -> String {
+    name.chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_else(|| "#".to_string())
+}
+
+/// A colored round icon with the topic name's first letter.
+fn letter_icon(name: &str, color: i32, size: f32) -> AnyElement {
+    let fill: Hsla = if color > 0 {
+        rgb(color as u32).into()
+    } else {
+        accent().into()
+    };
+    div()
+        .size(px(size))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(fill)
+        .text_color(gpui_kit::white())
+        .text_size(px(size * 0.5))
+        .font_semibold()
+        .child(topic_letter(name))
+        .into_any_element()
+}
+
+#[cfg(test)]
+mod forum_editor_tests {
+    use super::{next_topic_color, topic_letter};
+    use quill::telegram::requests::TOPIC_ICON_COLORS;
+
+    #[test]
+    fn colors_cycle_through_the_six_defaults() {
+        let mut color = TOPIC_ICON_COLORS[0];
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            seen.push(color);
+            color = next_topic_color(color);
+        }
+        assert_eq!(color, TOPIC_ICON_COLORS[0]);
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), 6);
+        // An unknown color (an older topic) starts the cycle over.
+        assert_eq!(next_topic_color(1), TOPIC_ICON_COLORS[0]);
+    }
+
+    #[test]
+    fn the_icon_letter_skips_symbols() {
+        assert_eq!(topic_letter("  ideas"), "I");
+        assert_eq!(topic_letter("\u{1f525} news"), "N");
+        assert_eq!(topic_letter(""), "#");
     }
 }

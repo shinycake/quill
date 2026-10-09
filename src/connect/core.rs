@@ -257,7 +257,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .envelope
                 .extra
                 .and_then(|id| self.session.requests.purpose(id))
-                .is_some_and(|purpose| purpose == RequestPurpose::GetMessageLink)
+                .is_some_and(|purpose| {
+                    matches!(
+                        purpose,
+                        RequestPurpose::GetMessageLink | RequestPurpose::GetForumTopicLink
+                    )
+                })
                 .then(|| (link.clone(), *is_public)),
             _ => None,
         };

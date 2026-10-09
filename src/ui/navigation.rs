@@ -30,6 +30,8 @@ pub(super) enum NavigationAction {
     ChatFolders,
     SharedMedia,
     ExportChat,
+    ViewAsTopics,
+    NewTopic,
     NewStory,
     Appearance,
     Privacy,
@@ -80,6 +82,19 @@ impl QuillApp {
                 }
             }
             NavigationAction::SharedMedia => self.open_shared_media_ui(cx),
+            NavigationAction::ViewAsTopics => {
+                if let Some((chat_id, topics)) = self.session().and_then(|s| {
+                    let id = s.open_chat?;
+                    Some((id, s.chat_views_as_topics(id)))
+                }) {
+                    self.set_chat_view_as_topics_ui(chat_id, !topics, cx);
+                }
+            }
+            NavigationAction::NewTopic => {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                    self.open_forum_topic_editor(chat, None, window, cx);
+                }
+            }
             NavigationAction::ExportChat => {
                 if let Some(chat) = self.session().and_then(|s| s.open_chat) {
                     self.start_chat_export(chat, cx);
@@ -259,6 +274,33 @@ impl QuillApp {
                 self.session()
                     .is_some_and(|s| !s.chat_has_protected_content(id))
             });
+        // "View as Topics" / "View as Messages" for a forum without tabs
+        // (tdesktop `addViewAsTopics`), and "View as Chats" / "View as
+        // Messages" for Saved Messages.
+        let view_toggle: Option<&'static str> = chat_id.and_then(|id| {
+            let session = self.session()?;
+            let as_topics = session.chat_views_as_topics(id);
+            if session.is_saved_messages(id) {
+                return Some(if as_topics {
+                    "View as Messages"
+                } else {
+                    "View as Chats"
+                });
+            }
+            (chat?.is_forum_chat()
+                && !session.subsection_tabs_used_for(id)
+                && session.open_topic.is_none())
+            .then_some(if as_topics {
+                "View as Messages"
+            } else {
+                "View as Topics"
+            })
+        });
+        // "New Topic" for a forum whose topics the viewer may create.
+        let new_topic = live
+            && chat.is_some_and(|c| c.is_forum_chat())
+            && chat_id
+                .is_some_and(|id| self.session().is_some_and(|s| s.chat_can_manage_topics(id)));
         Button::new("chat-more-menu")
             .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
@@ -306,6 +348,24 @@ impl QuillApp {
                     let owner = owner.clone();
                     menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| this.navigate(action, window, cx));
+                    }));
+                }
+                if new_topic {
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new("New Topic").on_click(
+                        move |_, window, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.navigate(NavigationAction::NewTopic, window, cx)
+                            });
+                        },
+                    ));
+                }
+                if let Some(label) = view_toggle {
+                    let owner = owner.clone();
+                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.navigate(NavigationAction::ViewAsTopics, window, cx)
+                        });
                     }));
                 }
                 if let Some(discussion) = discussion {

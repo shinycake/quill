@@ -145,6 +145,9 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("is_translatable")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // `chat.view_as_topics` (schema 1.8.67, line 3627): a forum shown
+        // as topics, or Saved Messages shown as chats. Absent means unset.
+        view_as_topics: chat.get("view_as_topics").and_then(Value::as_bool),
         // `chat.reply_markup_message_id` (schema 1.8.67, line 3624).
         reply_markup_message_id: MessageId(
             chat.get("reply_markup_message_id")

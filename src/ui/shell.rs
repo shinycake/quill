@@ -150,6 +150,7 @@ pub enum DialogKind {
     /// B7: group and channel settings (topics, history, reactions, ...).
     GroupSettings,
     ForumManage,
+    SavedTagName,
     Welcome,
     Appearance,
     /// Slice A9: account lifecycle (delete account + self-destruct TTL).
@@ -260,6 +261,7 @@ impl QuillShell {
             DialogKind::GroupConfirm => app.group_confirm_dialog.is_some(),
             DialogKind::GroupSettings => app.group_settings_dialog.is_some(),
             DialogKind::ForumManage => app.forum_manage_dialog.is_some(),
+            DialogKind::SavedTagName => app.saved_tag_dialog.is_some(),
             DialogKind::Welcome => app.welcome_dialog.is_some(),
             DialogKind::Appearance => app.appearance_open,
             DialogKind::AccountLifecycle => app.account_lifecycle.open,
@@ -325,6 +327,7 @@ impl QuillShell {
             DialogKind::GroupConfirm => QuillApp::build_group_confirm_dialog,
             DialogKind::GroupSettings => QuillApp::build_group_settings_dialog,
             DialogKind::ForumManage => QuillApp::build_forum_manage_dialog,
+            DialogKind::SavedTagName => QuillApp::build_saved_tag_dialog,
             DialogKind::Welcome => QuillApp::build_welcome_dialog,
             DialogKind::Appearance => QuillApp::build_appearance_dialog,
             DialogKind::AccountLifecycle => QuillApp::build_account_lifecycle_dialog,
@@ -391,6 +394,7 @@ impl QuillShell {
         DialogKind::ArchivedStickers,
         DialogKind::EmojiSets,
         DialogKind::ForumManage,
+        DialogKind::SavedTagName,
         DialogKind::PollVoters,
         DialogKind::MessageReport,
         DialogKind::StickerSet,

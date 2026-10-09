@@ -113,6 +113,8 @@ impl Session {
         self.open_chat = Some(chat_id);
         // Phase 5.1: switching chats leaves the topic view.
         self.open_topic = None;
+        // ... and the Saved Messages sublist / tag filter.
+        self.saved.close_views();
         // ... and any comment thread that lives elsewhere.
         if self
             .thread

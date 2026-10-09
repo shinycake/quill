@@ -224,6 +224,26 @@ impl Session {
             edit(message);
             found = true;
         }
+        if self.my_user_id == Some(chat_id.0) {
+            if let Some(message) = self
+                .saved
+                .sublist
+                .as_mut()
+                .and_then(|view| view.history.messages.get_mut(&message_id.0))
+            {
+                edit(message);
+                found = true;
+            }
+            if let Some(message) = self
+                .saved
+                .tag_search
+                .as_mut()
+                .and_then(|search| search.history.messages.get_mut(&message_id.0))
+            {
+                edit(message);
+                found = true;
+            }
+        }
         found
     }
 

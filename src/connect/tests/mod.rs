@@ -14,6 +14,7 @@ mod email_login;
 mod emoji_sets;
 mod find_in_history;
 mod flood_retry;
+mod forum_saved;
 mod group_admin;
 mod group_calls;
 mod groups;

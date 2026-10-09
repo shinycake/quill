@@ -656,6 +656,31 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 value.get("notification_settings"),
             ),
         }),
+        "updateChatViewAsTopics" => Ok(EnvelopePayload::UpdateChatViewAsTopics {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            view_as_topics: value
+                .get("view_as_topics")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        "updateSavedMessagesTopic" => value
+            .get("topic")
+            .and_then(parse_saved_messages_topic)
+            .map(|topic| EnvelopePayload::UpdateSavedMessagesTopic(Box::new(topic)))
+            .ok_or(ParseError::MissingField),
+        "updateSavedMessagesTopicCount" => Ok(EnvelopePayload::UpdateSavedMessagesTopicCount {
+            topic_count: int53_or_zero(value.get("topic_count")) as i32,
+        }),
+        "updateSavedMessagesTags" => Ok(EnvelopePayload::UpdateSavedMessagesTags {
+            saved_messages_topic_id: int53_or_zero(value.get("saved_messages_topic_id")),
+            tags: value
+                .get("tags")
+                .map(parse_saved_messages_tags)
+                .unwrap_or_default(),
+        }),
+        "savedMessagesTags" => Ok(EnvelopePayload::SavedMessagesTags {
+            tags: parse_saved_messages_tags(&value),
+        }),
         "updateChatIsMarkedAsUnread" => Ok(EnvelopePayload::UpdateChatIsMarkedAsUnread {
             chat_id: ChatId(int53(value.get("chat_id"))?),
             is_marked_as_unread: value

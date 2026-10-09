@@ -315,6 +315,11 @@ pub enum ScreenshotDemo {
     /// bars, `thread` a post's comment thread in its discussion group,
     /// `group` a group message with replies.
     ReadyThreads,
+    /// Forums and Saved Messages sublists (injected, no live Telegram):
+    /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
+    /// sublist list, one sublist, a tag filter, or the forum topic editor
+    /// with its icon picker (default `sublists`).
+    ReadyForumsSaved,
     /// Bubble headers and footer (injected, no live Telegram): replies with
     /// a colored sender name, a quote, a media thumbnail, a reply from another
     /// chat and a deleted original; forwards from a user, a hidden account, a

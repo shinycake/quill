@@ -454,6 +454,8 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // Saved Messages: load the sublists and tags while it is open.
+        self.pump_saved_messages();
         // B7: a basic group became a supergroup: leave the old chat.
         if self.pump_chat_upgrades(cx) {
             progressed = true;

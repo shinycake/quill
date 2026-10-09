@@ -30,6 +30,20 @@ impl Session {
             Some(RequestPurpose::ReportSupergroupSpam) => {
                 self.message_action_note = Some("spam reported".into());
             }
+            // Forum extras and Saved Messages sublists (batch B16).
+            Some(RequestPurpose::DeleteSavedMessagesTopicHistory { topic_id }) => {
+                self.remove_saved_topic(topic_id);
+            }
+            Some(RequestPurpose::ReadAllForumTopicMentions { forum_topic_id }) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.clear_topic_marks(chat_id, forum_topic_id, true);
+                }
+            }
+            Some(RequestPurpose::ReadAllForumTopicReactions { forum_topic_id }) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.clear_topic_marks(chat_id, forum_topic_id, false);
+                }
+            }
             Some(RequestPurpose::DeleteMessageReactionsFromSender {
                 message_id,
                 user_id,

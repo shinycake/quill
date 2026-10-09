@@ -257,6 +257,8 @@ impl Session {
             last_message_id: 0,
             last_read_inbox_message_id: 0,
             notification_settings: Default::default(),
+            unread_mention_count: 0,
+            unread_reaction_count: 0,
         });
     }
 
@@ -278,6 +280,8 @@ impl Session {
         };
         topic.is_pinned = update.is_pinned;
         topic.notification_settings = update.notification_settings;
+        topic.unread_mention_count = update.unread_mention_count;
+        topic.unread_reaction_count = update.unread_reaction_count;
         if update.last_read_inbox_message_id > topic.last_read_inbox_message_id {
             topic.last_read_inbox_message_id = update.last_read_inbox_message_id;
             settle_topic_unread(topic);

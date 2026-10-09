@@ -1292,6 +1292,10 @@ impl QuillApp {
                         .driver
                         .delete_forum_topic(dialog.chat_id, forum_topic_id)
                         .map(|_| "deleting topic…".to_string()),
+                    GroupConfirmAction::DeleteSavedSublist { topic_id } => live
+                        .driver
+                        .delete_saved_topic_history(topic_id)
+                        .map(|_| "deleting saved messages…".to_string()),
                     GroupConfirmAction::RemoveInstalledStickerSets => {
                         let ids: Vec<_> = live
                             .driver
@@ -1712,6 +1716,24 @@ impl QuillApp {
                             "Delete".to_string(),
                         )
                     }
+                    GroupConfirmAction::DeleteSavedSublist { topic_id } => {
+                        let name = this
+                            .session()
+                            .and_then(|s| {
+                                s.saved
+                                    .topics
+                                    .get(&topic_id)
+                                    .map(|topic| s.saved_topic_title(topic))
+                            })
+                            .unwrap_or_else(|| "this chat".to_string());
+                        (
+                            "Delete chat".to_string(),
+                            format!(
+                                "Delete all messages saved from {name}? This cannot be undone."
+                            ),
+                            "Delete".to_string(),
+                        )
+                    }
                     GroupConfirmAction::RemoveSavedGif { .. } => (
                         "Remove saved GIF".to_string(),
                         "Remove this GIF from your saved GIFs?".to_string(),
@@ -1756,6 +1778,7 @@ impl QuillApp {
                     | GroupConfirmAction::ClearPaymentInfo
                     | GroupConfirmAction::RemoveSavedGif { .. }
                     | GroupConfirmAction::DeleteForumTopic { .. }
+                    | GroupConfirmAction::DeleteSavedSublist { .. }
                     | GroupConfirmAction::RemoveInstalledStickerSets
                     | GroupConfirmAction::RemoveStickerSet { .. }
                     | GroupConfirmAction::RemoveEmojiSet { .. }
