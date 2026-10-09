@@ -1,0 +1,274 @@
+name: package-windows
+# Reusable: the Windows zip (docs/decisions/codex-windows-package.md).
+# windows-build: the UI release binary + core tests. windows-native: TDLib
+# (static OpenSSL/zlib/CRT) from source, ntgcalls prebuilt. windows-rlottie and
+# windows-ffmpeg build in parallel. windows-package: assemble, check and smoke
+# the zip. Everything links the C runtime statically or uses the OS Universal
+# CRT, so no VC++ runtime DLL ships (docs/decisions/codex-release-pipeline.md).
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version (the date, YYYY.M.D) stamped into the binary; empty for CI builds'
+        type: string
+        default: ''
+      embed_credentials:
+        description: 'Compile the Telegram api_id/api_hash secrets into the binary'
+        type: boolean
+        default: false
+    secrets:
+      TELEGRAM_API_ID:
+        required: false
+      TELEGRAM_API_HASH:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  windows-build:
+    name: windows-build
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ !inputs.embed_credentials }}
+      # +crt-static comes from .cargo/config.toml. The secrets reach only this
+      # step, as compile-time env read by option_env! (src/credentials.rs).
+      - name: build release ui
+        env:
+          QUILL_RELEASE_VERSION: ${{ inputs.version }}
+          QUILL_BUILD_TELEGRAM_API_ID: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID || '' }}
+          QUILL_BUILD_TELEGRAM_API_HASH: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_HASH || '' }}
+        run: cargo build --release --features ui --locked
+      - name: tests (core + replay)
+        run: cargo test --no-default-features --locked -- --nocapture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-exe
+          path: target/release/quill.exe
+          retention-days: 3
+          if-no-files-found: error
+
+  windows-native:
+    name: windows-native
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: restore TDLib build
+        id: tdlib-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: native/prefix
+          key: tdlib-windows-mt-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
+      # Incremental state (sources + objects) so a failure late in the cold
+      # build does not cost another 45 minutes. Saved even when the build fails.
+      # The "-mt-" prefix keeps the old dynamic-CRT build tree (stale cached
+      # OpenSSL paths) from being restored.
+      - name: restore TDLib work tree
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            native/td
+            native/build
+          key: tdlib-windows-mt-work-${{ github.run_id }}
+          restore-keys: tdlib-windows-mt-work-
+      - name: build TDLib
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: scripts/build-tdlib-windows.ps1
+      - name: save TDLib work tree
+        if: always() && steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            native/td
+            native/build
+          key: tdlib-windows-mt-work-${{ github.run_id }}
+      - name: save TDLib build
+        if: steps.tdlib-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native/prefix
+          key: tdlib-windows-mt-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
+      - name: vendor ntgcalls (checksum pinned)
+        shell: bash
+        run: bash scripts/vendor-ntgcalls.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-native
+          path: |
+            native/prefix/bin/tdjson.dll
+            vendor/ntgcalls/lib/Release/ntgcalls.dll
+          retention-days: 3
+          if-no-files-found: error
+
+  windows-rlottie:
+    name: windows-rlottie
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: restore rlottie build
+        id: rlottie-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/rlottie/prefix
+          key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1') }}
+      - name: build rlottie
+        if: steps.rlottie-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: scripts/build-rlottie-windows.ps1
+      - name: save rlottie build
+        if: steps.rlottie-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor/rlottie/prefix
+          key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1') }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-rlottie
+          path: vendor/rlottie/prefix/bin/rlottie.dll
+          retention-days: 3
+          if-no-files-found: error
+
+  # FFmpeg (LGPL, shared, decoders only) + the quillvideo shim, built with
+  # MinGW-w64 (MSYS2 UCRT64): the DLLs import only Windows system DLLs
+  # (the Universal CRT is part of Windows 10+).
+  windows-ffmpeg:
+    name: windows-ffmpeg
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: restore FFmpeg build
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/ffmpeg/prefix
+          key: ffmpeg-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            git make diffutils
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-nasm
+      - name: build FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-ffmpeg.sh
+      - name: save FFmpeg build
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor/ffmpeg/prefix
+          key: ffmpeg-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-ffmpeg
+          path: |
+            vendor/ffmpeg/prefix/bin/*.dll
+            vendor/ffmpeg/prefix/share/quillvideo/*
+          retention-days: 3
+          if-no-files-found: error
+
+  windows-package:
+    name: windows-package
+    runs-on: windows-latest
+    needs: [windows-build, windows-native, windows-rlottie, windows-ffmpeg]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-exe
+          path: target/release
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-native
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-rlottie
+          path: vendor/rlottie/prefix/bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-ffmpeg
+          path: vendor/ffmpeg/prefix
+      - name: package
+        shell: pwsh
+        run: scripts/windows-package.ps1
+      - name: check package (PE dependencies, no VC++ runtime DLLs)
+        shell: pwsh
+        run: |
+          scripts/check-bundle-pe.ps1 dist/windows/quill-windows-x86_64
+          $vc = @(Get-ChildItem -File dist/windows/quill-windows-x86_64 | Where-Object { $_.Name -match '^(vcruntime|msvcp|concrt)' })
+          if ($vc.Count) { throw "package ships VC++ runtime DLLs: $($vc.Name -join ', ')" }
+      - name: checker negative test (unbundled FFmpeg DLL must fail)
+        shell: pwsh
+        run: |
+          Copy-Item -Recurse dist/windows/quill-windows-x86_64 "$env:RUNNER_TEMP/neg"
+          Get-ChildItem "$env:RUNNER_TEMP/neg" -Filter 'avutil-*.dll' | Remove-Item
+          pwsh -NoProfile -File scripts/check-bundle-pe.ps1 "$env:RUNNER_TEMP/neg"
+          if ($LASTEXITCODE -eq 0) { throw 'checker accepted a package missing avutil' }
+          $global:LASTEXITCODE = 0
+      - name: run from the extracted zip (clean PATH)
+        shell: pwsh
+        env:
+          WANT_EMBED: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}
+        run: |
+          $x = Join-Path $env:RUNNER_TEMP 'extract'
+          Expand-Archive dist/windows/quill-windows-x86_64.zip $x
+          $dir = Join-Path $x 'quill-windows-x86_64'
+          . scripts/windows-common.ps1
+          $v = Invoke-QuillExe (Join-Path $dir 'quill.exe') @('--version')
+          Write-Host $v
+          if ($v -notmatch '^Quill \d') { throw "unexpected --version output: $v" }
+          $info = Invoke-QuillExe (Join-Path $dir 'quill.exe') @('--build-info')
+          if ($info -ne 'ui') { throw "unexpected --build-info output: $info" }
+          $embedded = Invoke-QuillExe (Join-Path $dir 'quill.exe') @('--embedded-credentials')
+          $want = if ($env:WANT_EMBED -eq 'true') { 'embedded' } else { 'none' }
+          Write-Host "embedded credentials: $embedded"
+          if ($embedded -ne $want) { throw "embedded credentials: got $embedded, want $want" }
+          pwsh -NoProfile -File scripts/check-bundle-load.ps1 $dir
+          if ($LASTEXITCODE -ne 0) { throw 'bundle load check failed' }
+          foreach ($clip in 'tests/fixtures/clip-h264-aac.mp4', 'tests/fixtures/clip-vp9.webm') {
+            $probe = Invoke-QuillExe (Join-Path $dir 'quill.exe') @('--video-probe', (Resolve-Path $clip).Path)
+            Write-Host $probe
+            if ($probe -notmatch 'frames=10') { throw "video probe failed for ${clip}: $probe" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-windows-x86_64
+          path: |
+            dist/windows/quill-windows-x86_64.zip
+            dist/windows/quill-windows-x86_64.zip.sha256
+          if-no-files-found: error

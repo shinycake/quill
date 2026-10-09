@@ -75,18 +75,27 @@ Other values typed into the app (never committed):
 
 After `authorizationStateReady`, the live client pages `loadChats` for the main list and the composer sends `sendMessage`. Chat titles and message text are not written to diagnostics.
 
-Optional later (not required for personal Mac runs): Apple Developer ID, notarization credentials, a dedicated test chat with a second account. There is **no** App Store / notarization / distribution pipeline; ad-hoc Apple Developer signing only if needed on Idan's personal Mac.
+Optional later (not required for personal Mac runs): Apple Developer ID, notarization credentials, a dedicated test chat with a second account. There is **no** App Store or notarization pipeline: GitHub releases ship an ad-hoc signed `Quill.app` (`.github/workflows/release.yml`), and Apple Development signing is used only on Idan's personal Mac.
 
 ## Release builds
 
-Release packages do not contain an `api_id` / `api_hash`. Nothing in the build
-or packaging scripts embeds one, and CI never sees one. A packaged Quill
-therefore needs the same `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` environment
-variables (or a `quill.local.env` / `.env` file in the working directory) to
-connect. Telegram's API terms require each app to use its own `api_id`
-(https://core.telegram.org/api/terms, section 2.1), so the maintainer must
-decide how official builds get one before publishing them; see
-`docs/decisions/codex-legal-compliance.md`.
+Tagged releases (`.github/workflows/release.yml`) embed the project's
+`api_id` / `api_hash` at compile time from the `TELEGRAM_API_ID` /
+`TELEGRAM_API_HASH` repository secrets. The workflow passes them to the release
+`cargo build` only, as `QUILL_BUILD_TELEGRAM_API_ID` /
+`QUILL_BUILD_TELEGRAM_API_HASH`, which `credentials::embedded()` reads with
+`option_env!`. The embedded pair is a fallback: the process environment and the
+`.env` / `quill.local.env` files above still win, so developer builds behave as
+before and a user can override the release pair. `quill --embedded-credentials`
+prints `embedded` or `none` (never the values).
+
+Every other build embeds nothing: local `cargo build`, PR CI, and workflow
+dispatch dry runs unless the owner opts in. When the secrets are absent the
+release still builds; it is a credential-free build, and its release notes say
+so. A credential-free package needs `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` in
+the environment (or a `quill.local.env` / `.env` file in the working directory)
+to connect. Telegram's API terms require each app to use its own `api_id`
+(https://core.telegram.org/api/terms, section 2.1).
 
 Channels and bots are enabled. Sponsored messages in channels are fetched
 (`getChatSponsoredMessages`) but not yet shown in live chats; that gap is

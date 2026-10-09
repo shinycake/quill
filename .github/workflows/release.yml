@@ -1,0 +1,304 @@
+name: release
+# Builds the three platform packages, the LGPL source archives, the release
+# notes and latest.json, then creates a DRAFT GitHub release.
+# docs/decisions/codex-release-pipeline.md
+#
+#   gh workflow run release.yml -f release=true   -> draft release (owner publishes it)
+#   gh workflow run release.yml                   -> dry run: same build, artifacts only
+#
+# The version is computed, never chosen: YEAR.MONTHDAY.COMMITS from the
+# commit being built, e.g. 2026.1009.1187 = committed 2026-10-09 (UTC), the
+# 1187th commit on main. It is valid semver, it only goes up, and the same
+# commit always gets the same version. The workflow stamps it into the
+# binaries (QUILL_RELEASE_VERSION, src/version.rs), so Cargo.toml never
+# changes. Pushing a vYEAR.MONTHDAY.COMMITS tag by hand also works.
+#
+# The release is ALWAYS created as a draft. Nothing here publishes it: the
+# owner reviews the draft and clicks Publish, which creates the tag and fires
+# release-published.yml (the site-refresh hook).
+#
+# Telegram credentials: releases compile the TELEGRAM_API_ID /
+# TELEGRAM_API_HASH secrets into the binaries (src/credentials.rs). Missing
+# secrets give a credential-free build, which the release notes call out. Dry
+# runs embed nothing unless embed_credentials is set.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Create a draft release (otherwise a dry run that only uploads artifacts)'
+        required: false
+        default: false
+        type: boolean
+      embed_credentials:
+        description: 'Dry runs only: embed the Telegram credential secrets'
+        required: false
+        default: false
+        type: boolean
+
+run-name: ${{ github.ref_type == 'tag' && format('release {0}', github.ref_name) || (inputs.release && format('release ({0})', github.ref_name) || format('release dry run ({0})', github.ref_name)) }}
+
+# Releases queue behind each other; dry runs have their own queue, so a slow
+# dry run never holds up a release.
+concurrency:
+  group: release-${{ (github.ref_type == 'tag' || inputs.release) && 'publish' || format('dry-run-{0}', github.ref) }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      embed: ${{ steps.v.outputs.embed }}
+      credentials: ${{ steps.v.outputs.credentials }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        name: version, tag and credential mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE: ${{ inputs.release }}
+          INPUT_EMBED: ${{ inputs.embed_credentials }}
+          # Only "true"/"false" leave this step; the values never do.
+          HAVE_SECRETS: ${{ secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+            embed=true
+            publish=true
+          else
+            # YEAR.MONTHDAY.COMMITS of the commit being built (UTC).
+            day="$(TZ=UTC git log -1 --format=%cd --date=format-local:'%Y.%-m%d' HEAD)"
+            version="$day.$(git rev-list --count HEAD)"
+            if [ "$INPUT_RELEASE" = true ]; then
+              [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::releases are cut from main, not $GITHUB_REF"; exit 1; }
+              embed=true
+              publish=true
+            else
+              embed="${INPUT_EMBED:-false}"
+              publish=false
+            fi
+          fi
+          python3 - "$version" <<'PY' || exit 1
+          import datetime, re, sys
+          v = sys.argv[1]
+          m = re.fullmatch(r"(\d{4})\.([1-9]\d?)(\d{2})\.(0|[1-9]\d*)", v)
+          if not m:
+              sys.exit(f"::error::version must be YEAR.MONTHDAY.COMMITS (e.g. 2026.1009.1187), got '{v}'")
+          try:
+              datetime.date(int(m[1]), int(m[2]), int(m[3]))
+          except ValueError:
+              sys.exit(f"::error::version {v} does not start with a real date")
+          PY
+          if [ "$publish" = true ] && gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release v$version already exists (this commit was released); delete its draft to rebuild it"
+            exit 1
+          fi
+          credentials=none
+          if [ "$embed" = true ] && [ "$HAVE_SECRETS" = true ]; then credentials=embedded; fi
+          if [ "$embed" = true ] && [ "$HAVE_SECRETS" != true ]; then
+            echo "::warning::TELEGRAM_API_ID / TELEGRAM_API_HASH secrets are not set: this is a credential-free build"
+          fi
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "publish=$publish"
+            echo "embed=$embed"
+            echo "credentials=$credentials"
+          } >> "$GITHUB_OUTPUT"
+          echo "Quill $version, tag v$version, credentials: $credentials, draft release: $publish"
+
+  linux:
+    name: linux
+    needs: prepare
+    uses: ./.github/workflows/package-linux.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
+    secrets:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+
+  windows:
+    name: windows
+    needs: prepare
+    uses: ./.github/workflows/package-windows.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
+    secrets:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+
+  macos:
+    name: macos
+    needs: prepare
+    uses: ./.github/workflows/package-macos.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
+    secrets:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+
+  # Corresponding source for the shipped LGPL libraries (FFmpeg, ntgcalls and
+  # the FFmpeg/GLib inside ntgcalls).
+  sources:
+    name: lgpl-sources
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: archive LGPL sources
+        run: bash scripts/release-lgpl-sources.sh dist/sources
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-lgpl-sources
+          path: dist/sources/*
+          if-no-files-found: error
+
+  release:
+    name: assemble release
+    needs: [prepare, linux, windows, macos, sources]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # generate-notes needs write; the release itself is only created on a tag push.
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      CREDENTIALS: ${{ needs.prepare.outputs.credentials }}
+      PUBLISH: ${{ needs.prepare.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-macos-aarch64
+          path: in/macos
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-linux-x86_64-bundle
+          path: in/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-x86_64
+          path: in/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-lgpl-sources
+          path: in/sources
+      # The release files go in release-out/, never the repo's own assets/
+      # folder (icons, emoji, the .desktop file), which the checkout contains.
+      - name: collect release files
+        run: |
+          mkdir -p release-out
+          # Check each package against the checksum its build job wrote.
+          for f in in/macos/quill-macos-aarch64.zip in/linux/linux/quill-linux-x86_64-bundle.tar.gz in/windows/quill-windows-x86_64.zip; do
+            # The Windows .sha256 file has CRLF line endings.
+            (cd "$(dirname "$f")" && tr -d '\r' < "$(basename "$f").sha256" | sha256sum -c -)
+            cp "$f" release-out/
+          done
+          cp in/linux/update/quill-linux-x86_64 release-out/
+          chmod 755 release-out/quill-linux-x86_64
+          cp in/sources/* release-out/
+          ls -l release-out
+      - name: previous release tag
+        id: prev
+        run: |
+          # The newest vX.Y.Z tag reachable from this commit, other than this release's own.
+          prev="$(git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -vx "$TAG" | head -n 1 || true)"
+          echo "tag=$prev" >> "$GITHUB_OUTPUT"
+          echo "previous tag: ${prev:-none}"
+      - name: generated changelog (merged PRs since the previous tag)
+        env:
+          PREV: ${{ steps.prev.outputs.tag }}
+        run: |
+          args=(-f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -f configuration_file_path=.github/release.yml)
+          [ -n "$PREV" ] && args+=(-f previous_tag_name="$PREV")
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${args[@]}" --jq .body > changes.md
+          wc -l changes.md
+      - name: notes, checksums and latest.json
+        env:
+          PREV: ${{ steps.prev.outputs.tag }}
+        run: |
+          args=(--assets release-out --version "$VERSION" --repo "$GITHUB_REPOSITORY" --changes changes.md
+                --credentials "$CREDENTIALS" --notes-out release-notes.md)
+          [ -f "release-notes/$TAG.md" ] && args+=(--curated "release-notes/$TAG.md")
+          [ -n "$PREV" ] && args+=(--previous-tag "$PREV")
+          python3 -I scripts/release-assemble.py "${args[@]}"
+          {
+            echo "## Quill $VERSION ($([ "$PUBLISH" = true ] && echo 'draft release' || echo 'dry run, no release'))"
+            echo
+            echo '| Asset | Size | SHA-256 |'
+            echo '|---|---|---|'
+            for f in release-out/*; do echo "| $(basename "$f") | $(stat -c %s "$f") | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Exactly the expected files, all regular files: anything missing or
+      # extra stops the release before anything is uploaded.
+      - name: check the release file list
+        run: |
+          expected=(LGPL-SOURCES.txt SHA256SUMS.txt latest.json quill-linux-x86_64
+                    quill-linux-x86_64-bundle.tar.gz quill-macos-aarch64.zip quill-windows-x86_64.zip)
+          for f in "${expected[@]}"; do
+            [ -f "release-out/$f" ] || { echo "::error::missing release file $f"; exit 1; }
+          done
+          sources=0
+          extra=()
+          for entry in release-out/*; do
+            name="$(basename "$entry")"
+            if [ -d "$entry" ] || [ ! -f "$entry" ]; then
+              extra+=("$name/")
+            elif [[ "$name" == quill-source-*.tar.xz ]]; then
+              sources=$((sources + 1))
+            elif ! printf '%s\n' "${expected[@]}" | grep -qxF "$name"; then
+              extra+=("$name")
+            fi
+          done
+          [ "$sources" -ge 1 ] || { echo "::error::no LGPL source archives"; exit 1; }
+          [ "${#extra[@]}" -eq 0 ] || { echo "::error::unexpected entries in release-out: ${extra[*]}"; exit 1; }
+          echo "release files OK: ${#expected[@]} + $sources source archives"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-release-${{ needs.prepare.outputs.tag }}
+          path: |
+            release-out/
+            release-notes.md
+          if-no-files-found: error
+      # Releases only (release=true, or a pushed tag). Always a draft: the
+      # owner publishes it by hand, which creates the tag on this commit.
+      - name: create DRAFT release
+        if: needs.prepare.outputs.publish == 'true'
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::a release for $TAG already exists; delete the old draft before re-running"
+            exit 1
+          fi
+          verify=()
+          [ "$GITHUB_REF_TYPE" = tag ] && verify=(--verify-tag)
+          gh release create "$TAG" --draft "${verify[@]}" --target "$GITHUB_SHA" \
+            --title "Quill $VERSION" --notes-file release-notes.md release-out/*
+          gh release view "$TAG" --json isDraft,url --jq '"draft=\(.isDraft) \(.url)"'
+      # A release step that fails part-way must not leave a half-uploaded draft.
+      - name: remove a partial draft
+        if: failure() && needs.prepare.outputs.publish == 'true'
+        run: |
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+                --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" | head -n 1)"
+          if [ -n "$id" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+            echo "removed the partial draft for $TAG"
+          fi

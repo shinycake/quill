@@ -17,4 +17,14 @@ xcrun clang -fobjc-arc -mmacosx-version-min=14.0 -Wall -Wextra -Werror \
   -Wno-unused-parameter -framework AppKit -framework AVFoundation \
   -framework CoreImage -framework Vision -framework CoreVideo "$ROOT/native/qr-scanner.m" \
   -Wl,-sectcreate,__TEXT,__info_plist,"$(dirname "$OUT")/Info.plist" -o "$OUT"
-"$OUT" --self-test
+# QUILL_QR_SELF_TEST=warn reports a failed self-test without failing the build,
+# for virtual machines (GitHub-hosted macOS) whose Vision framework may not
+# decode barcodes; real Macs keep the hard failure.
+if ! "$OUT" --self-test; then
+  if [[ "${QUILL_QR_SELF_TEST:-}" == warn ]]; then
+    echo "warning: quill-qr-scanner --self-test failed on this machine (QUILL_QR_SELF_TEST=warn); continuing" >&2
+  else
+    echo "error: quill-qr-scanner --self-test failed (set QUILL_QR_SELF_TEST=warn on a VM without Vision support)" >&2
+    exit 1
+  fi
+fi

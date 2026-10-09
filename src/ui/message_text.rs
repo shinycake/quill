@@ -655,6 +655,7 @@ pub(super) fn message_chrome(
         media_led: false,
         actions: None,
         bottom_bar: None,
+        media_width: None,
     }
 }
 

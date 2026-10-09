@@ -76,7 +76,7 @@ pub fn build_set_tdlib_parameters(
         api_hash: credentials.api_hash.clone(),
         device_model: "Desktop".into(),
         system_version: std::env::consts::OS.into(),
-        application_version: env!("CARGO_PKG_VERSION").into(),
+        application_version: crate::version::APP.into(),
         system_language_code: system_language_code.into(),
     }
 }

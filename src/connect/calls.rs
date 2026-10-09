@@ -922,7 +922,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         let mut payload = serde_json::json!({
             "app": env!("CARGO_PKG_NAME"),
-            "app_version": env!("CARGO_PKG_VERSION"),
+            "app_version": crate::version::APP,
             "os": std::env::consts::OS,
             "engine_available": engine_available,
             "call_id": summary.call_id,

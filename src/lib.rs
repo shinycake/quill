@@ -85,6 +85,7 @@ pub mod tray_mac;
 pub mod tray_sni;
 pub mod update_install;
 pub mod updater;
+pub mod version;
 pub mod video;
 pub mod video_decode;
 pub mod voice;

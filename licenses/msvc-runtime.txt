@@ -1,15 +1,15 @@
 Microsoft Visual C++ runtime (Windows package only)
 
-The Windows package contains vcruntime140*.dll and msvcp140*.dll (and any other
-Visual C++ runtime DLL that a bundled library imports), copied unmodified from
-the Visual Studio redistributable directory (%VCToolsRedistDir%) by
-scripts/windows-package.ps1.
+quill.exe, tdjson.dll and rlottie.dll are built with Microsoft Visual C++ and
+link the C/C++ runtime statically (/MT; Rust's +crt-static), so the Windows
+package ships no vcruntime140*.dll or msvcp140*.dll and needs no Visual C++
+Redistributable. ntgcalls.dll (upstream prebuilt) also links it statically.
 
-These files are Microsoft "Distributable Code". They are redistributed under the
-Microsoft Visual Studio license terms, not under Quill's MIT license, and remain
-the property of Microsoft Corporation. See
-https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files and
-https://visualstudio.microsoft.com/license-terms/.
+The runtime library code linked into those files is Microsoft's. It is
+distributed as part of the program under the Microsoft Visual Studio license
+terms (https://visualstudio.microsoft.com/license-terms/), not under Quill's
+MIT license, and remains the property of Microsoft Corporation. See also
+https://learn.microsoft.com/cpp/c-runtime-library/crt-library-features.
 
-You may instead install the Visual C++ Redistributable from Microsoft and delete
-the copies in the Quill folder; Windows then loads the system-wide runtime.
+The Universal CRT (ucrtbase.dll, api-ms-win-crt-*.dll) used by the FFmpeg
+DLLs is part of Windows 10 and later and is not shipped.

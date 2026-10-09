@@ -30,6 +30,14 @@ fn fixture() -> Fixture {
     (dir, driver, recorder, sink, seq)
 }
 
+/// Close the driver (and its database files) before deleting the folder:
+/// Windows refuses to delete files that are still open.
+fn cleanup(f: Fixture) {
+    let (dir, driver, ..) = f;
+    drop(driver);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn ingest(
     driver: &mut ConnectDriver<Arc<RecordingSender>>,
     seq: &AtomicU64,
@@ -78,7 +86,7 @@ fn online_option_is_set_with_a_boolean_value() {
     let parsed = copy_and_parse(&ok, &f.4, &f.3).unwrap();
     f.1.ingest(parsed).unwrap();
     assert!(f.1.session.requests.purpose(extra).is_none());
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -90,6 +98,7 @@ fn online_is_not_sent_before_authorization() {
     let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
     let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
     assert_invalid(driver.set_online(true));
+    drop(driver);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -140,7 +149,7 @@ fn new_login_yes_confirms_the_unconfirmed_session() {
     );
     assert_eq!(f.1.session.notices.unconfirmed_count, 0);
     assert!(f.1.session.notices.unconfirmed_entries.is_empty());
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -164,7 +173,7 @@ fn new_login_no_terminates_and_names_the_attempt() {
             places: vec!["Berlin, Germany (Pixel 9)".into()]
         })
     );
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -185,7 +194,7 @@ fn new_login_review_error_keeps_the_alert() {
     assert!(f.1.session.notices.review_outcome.is_none());
     assert_eq!(f.1.session.notices.unconfirmed_count, 1);
     assert_eq!(f.1.session.notices.review_pending, 0);
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -201,7 +210,7 @@ fn unconfirmed_update_with_none_left_clears_the_alert() {
     assert_eq!(f.1.session.notices.unconfirmed_count, 0);
     assert!(f.1.session.notices.unconfirmed.is_none());
     assert!(f.1.session.notices.unconfirmed_entries.is_empty());
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -231,7 +240,7 @@ fn service_notifications_queue_in_order_and_skip_withdrawal_ones() {
     assert_eq!(queue, ["First", "Second"]);
     f.1.session.dismiss_service_notice();
     assert_eq!(f.1.session.notices.service.front().unwrap().text, "Second");
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -260,7 +269,7 @@ fn terms_of_service_accept_round_trip() {
     );
     assert!(f.1.session.notices.terms.is_none());
     assert!(!f.1.session.notices.terms_in_flight);
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -283,7 +292,7 @@ fn terms_accept_failure_keeps_the_prompt_with_an_error() {
     assert!(f.1.session.notices.terms.is_some());
     assert!(!f.1.session.notices.terms_in_flight);
     assert!(f.1.session.notices.terms_error.is_some());
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -318,7 +327,7 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
     // The usage numbers are refetched on the same ingest.
     assert!(f.1.session.storage_stats_loading);
     assert_eq!(requests_of(&f.2, "getStorageStatistics").len(), 1);
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -328,7 +337,7 @@ fn clear_storage_for_one_chat_names_the_chat() {
     let request = last_request(&f.2);
     assert_eq!(request["chat_ids"], serde_json::json!([4242]));
     assert_eq!(request["file_types"], serde_json::json!([]));
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -345,7 +354,7 @@ fn clear_storage_failure_reports_and_frees_the_gate() {
     assert!(!f.1.session.storage_clearing);
     assert!(f.1.session.data_storage_error.is_some());
     assert!(f.1.session.storage_freed.is_none());
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -395,7 +404,7 @@ fn storage_limits_send_the_four_options_and_read_them_back() {
     let limits = f.1.session.storage_limits;
     assert_eq!(limits.size_limit(), Some(2 * 1024 * 1024 * 1024));
     assert_eq!(limits.keep_for(), Some(31 * 86_400));
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -430,7 +439,7 @@ fn recovery_email_code_confirms_the_pending_address() {
         f.1.session.twofa_flow.notice,
         Some(TwofaNotice::RecoveryEmailConfirmed)
     );
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -462,7 +471,7 @@ fn wrong_recovery_email_code_reports_without_changing_state() {
             .pending_email_pattern
             .is_some()
     );
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -509,7 +518,7 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
         f.1.session.twofa_flow.notice,
         Some(TwofaNotice::PasswordRecovered)
     );
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -526,7 +535,7 @@ fn recovering_with_an_empty_password_reports_removal() {
         f.1.session.twofa_flow.notice,
         Some(TwofaNotice::PasswordRemoved)
     );
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -553,7 +562,7 @@ fn reset_password_pending_refetches_the_state_for_the_date() {
     );
     // The new date lives in the password state: refetched on the same ingest.
     assert_eq!(requests_of(&f.2, "getPasswordState").len(), 2);
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -576,7 +585,7 @@ fn reset_password_declined_reports_the_retry_date() {
             retry_date: 1_760_700_000
         })
     );
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -605,7 +614,7 @@ fn cancel_password_reset_needs_a_pending_reset() {
         Some(TwofaNotice::ResetCancelled)
     );
     assert_eq!(requests_of(&f.2, "getPasswordState").len(), 3);
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]
@@ -659,7 +668,7 @@ fn login_email_change_is_code_confirmed() {
         f.1.session.twofa_flow.notice,
         Some(TwofaNotice::LoginEmailChanged)
     );
-    std::fs::remove_dir_all(&f.0).unwrap();
+    cleanup(f);
 }
 
 #[test]

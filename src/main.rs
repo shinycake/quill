@@ -180,7 +180,7 @@ fn main() {
     attach_parent_console();
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).is_some_and(|a| a == "--version") {
-        println!("Quill {}", env!("CARGO_PKG_VERSION"));
+        println!("Quill {}", quill::version::APP);
         return;
     }
     if args.get(1).is_some_and(|a| a == "--release-asset-name") {
@@ -189,6 +189,12 @@ fn main() {
     }
     if args.get(1).is_some_and(|a| a == "--build-info") {
         println!("{}", if cfg!(feature = "ui") { "ui" } else { "core" });
+        return;
+    }
+    if args.get(1).is_some_and(|a| a == "--embedded-credentials") {
+        // Release pipeline check; prints only whether a pair is embedded.
+        let embedded = quill::credentials::has_embedded();
+        println!("{}", if embedded { "embedded" } else { "none" });
         return;
     }
     if args.get(1).is_some_and(|a| a == "--apply-update") {

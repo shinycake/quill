@@ -1,6 +1,9 @@
 # Build the pinned TDLib (tdjson.dll) with the reviewed Quill export patch on
 # Windows (MSVC + vcpkg for OpenSSL/zlib/gperf, as in TDLib's own instructions).
-# Output: native/prefix/bin/{tdjson.dll, libssl-3-x64.dll, libcrypto-3-x64.dll, z.dll}
+# Output: native/prefix/bin/tdjson.dll, with OpenSSL, zlib and the C runtime
+# linked statically (/MT, vcpkg x64-windows-static), so the package ships no
+# libssl/libcrypto/z.dll and no vcruntime140*/msvcp140* DLLs
+# (docs/decisions/codex-release-pipeline.md).
 # Run from an MSVC developer environment. Does not download prebuilt binaries.
 . "$PSScriptRoot/windows-common.ps1"
 $root = (Resolve-Path "$PSScriptRoot/..").Path
@@ -32,25 +35,31 @@ if ($LASTEXITCODE -eq 0) {
 
 $vcpkg = Join-Path $vcpkgRoot 'vcpkg.exe'
 if (-not (Test-Path $vcpkg)) { throw "vcpkg not found at $vcpkgRoot (set VCPKG_INSTALLATION_ROOT)" }
-Invoke-Native $vcpkg @('install', 'openssl:x64-windows', 'zlib:x64-windows', 'gperf:x64-windows', '--clean-after-build')
-$installed = Join-Path $vcpkgRoot 'installed\x64-windows'
+$triplet = 'x64-windows-static'
+Invoke-Native $vcpkg @('install', "openssl:$triplet", "zlib:$triplet", "gperf:$triplet", '--clean-after-build')
+$installed = Join-Path $vcpkgRoot "installed\$triplet"
 $env:PATH = (Join-Path $installed 'tools\gperf') + ';' + $env:PATH
 
 # No LTO: MSVC /GL + /LTCG on tdjson roughly doubles the (already long) link.
+# Static C runtime: TDLib requires only CMake 3.10, so CMP0091 (which makes
+# CMAKE_MSVC_RUNTIME_LIBRARY effective) has to be switched on explicitly.
 Invoke-Native cmake @('-S', $src, '-B', $build, '-A', 'x64',
     "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake",
-    '-DVCPKG_TARGET_TRIPLET=x64-windows', "-DCMAKE_INSTALL_PREFIX=$prefix")
+    "-DVCPKG_TARGET_TRIPLET=$triplet", "-DCMAKE_INSTALL_PREFIX=$prefix",
+    '-DCMAKE_POLICY_DEFAULT_CMP0091=NEW', '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded')
 Invoke-Native cmake @('--build', $build, '--target', 'tdjson', '--config', 'Release', '--parallel')
 
 New-Item -ItemType Directory -Force (Join-Path $prefix 'bin') | Out-Null
 $dll = Get-ChildItem -Recurse -Path $build -Filter tdjson.dll | Select-Object -First 1
 if (-not $dll) { throw "tdjson.dll was not built under $build" }
-# The vcpkg toolchain's app-local step puts the runtime DLLs (OpenSSL and zlib,
-# which vcpkg names z.dll) next to tdjson.dll; ship exactly that set.
-foreach ($f in Get-ChildItem -File $dll.DirectoryName -Filter *.dll) { Copy-Item $f.FullName (Join-Path $prefix 'bin') }
-foreach ($name in 'tdjson.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll') {
-    if (-not (Test-Path (Join-Path $prefix "bin\$name"))) { throw "$name missing from $prefix\bin" }
-}
+# Everything is static, so tdjson.dll is the only DLL to ship. Fail if it still
+# imports OpenSSL, zlib or the dynamic VC++ runtime.
+Remove-Item (Join-Path $prefix 'bin\*.dll') -ErrorAction SilentlyContinue
+Copy-Item $dll.FullName (Join-Path $prefix 'bin')
+$deps = Get-PeDependents (Join-Path $prefix 'bin\tdjson.dll')
+Write-Host "tdjson.dll imports: $($deps -join ' ')"
+$dynamic = @($deps | Where-Object { $_ -match '^(vcruntime|msvcp|concrt|libssl|libcrypto|zlib|z\.dll)' })
+if ($dynamic.Count) { throw "tdjson.dll still imports $($dynamic -join ', ') (expected a static /MT build)" }
 $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $prefix 'bin\tdjson.dll')).Hash.ToLower()
 "$hash  tdjson.dll" | Tee-Object (Join-Path $prefix 'tdjson.sha256')
 Write-Host "Built $(Join-Path $prefix 'bin\tdjson.dll')"

@@ -40,9 +40,7 @@ pub fn startup_state() -> UpdateState {
             r.release,
             "Update installation failed. Your previous version was restored. Retry the update.",
         ),
-        Some(r) if r.release.version == env!("CARGO_PKG_VERSION") => {
-            UpdateState::Installed(r.release)
-        }
+        Some(r) if r.release.version == crate::version::APP => UpdateState::Installed(r.release),
         _ => UpdateState::Idle,
     }
 }
@@ -118,7 +116,7 @@ fn valid_release(release: &ReleaseInfo) -> bool {
     version == tag_version
         && version.pre.is_empty()
         && version
-            .cmp_precedence(&semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap())
+            .cmp_precedence(&semver::Version::parse(crate::version::APP).unwrap())
             .is_gt()
         && crate::updater::valid_asset(asset, tag)
 }
