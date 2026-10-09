@@ -781,11 +781,7 @@ impl Session {
                         (0, _) => events,
                         (_, Some(ChatEventLogFetch::Loaded(page))) => {
                             let mut merged = page.events.clone();
-                            for event in events {
-                                if !merged.iter().any(|old| old.id == event.id) {
-                                    merged.push(event);
-                                }
-                            }
+                            super::paging::append_new_by_id(&mut merged, events, |event| event.id);
                             merged
                         }
                         _ => events,

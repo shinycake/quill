@@ -65,6 +65,7 @@ mod map_thumbs;
 mod media_library;
 mod member_list;
 mod ownership_types;
+mod paging;
 mod redraw;
 mod request_purpose;
 mod requests;
