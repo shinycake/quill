@@ -534,6 +534,13 @@ impl Session {
             self.folder_chats_to_leave
                 .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
         }
+        // B10: profile panel lists (groups in common, similar channels,
+        // personal channel candidates).
+        if let Some(pending) = pending
+            && matches!(pending.purpose, RequestPurpose::GetProfileChats(_))
+        {
+            self.apply_profile_chats(&chat_ids, pending);
+        }
         // Phase 9.5: `getChatsToPostStories` answer — the
         // composer's "post as" picker options. Runs before the
         // search branch below consumes `chat_ids`.

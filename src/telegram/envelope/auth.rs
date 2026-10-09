@@ -115,6 +115,9 @@ pub enum AuthorizationState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
+    /// No `updateConnectionState` yet: the indicator stays hidden rather
+    /// than flashing "offline" at startup.
+    Initial,
     WaitingForNetwork,
     ConnectingToProxy,
     Connecting,

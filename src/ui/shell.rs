@@ -125,6 +125,8 @@ pub enum DialogKind {
     /// Batch 8: the chat's pending join requests.
     JoinRequests,
     EditProfile,
+    /// B10: profile and contact panel dialogs.
+    ProfilePanel,
     GroupCallStart,
     FolderEditor,
     FolderDelete,
@@ -230,6 +232,7 @@ impl QuillShell {
             DialogKind::BlockBar => app.block_bar_dialog.is_some(),
             DialogKind::JoinRequests => app.join_requests_dialog.is_some(),
             DialogKind::EditProfile => app.edit_profile_dialog.is_some(),
+            DialogKind::ProfilePanel => app.profile_dialog.is_some(),
             DialogKind::GroupCallStart => app.group_call_start_dialog.is_some(),
             DialogKind::FolderEditor => app.folder_editor.is_some(),
             DialogKind::FolderDelete => app.folder_delete_confirm.is_some(),
@@ -291,6 +294,7 @@ impl QuillShell {
             DialogKind::BlockBar => QuillApp::build_block_bar_dialog,
             DialogKind::JoinRequests => QuillApp::build_join_requests_dialog,
             DialogKind::EditProfile => QuillApp::build_edit_profile_dialog,
+            DialogKind::ProfilePanel => QuillApp::build_profile_panel_dialog,
             DialogKind::GroupCallStart => QuillApp::build_group_call_start_dialog,
             DialogKind::FolderEditor => QuillApp::build_folder_editor_dialog,
             DialogKind::FolderDelete => QuillApp::build_folder_delete_dialog,
@@ -378,6 +382,7 @@ impl QuillShell {
         DialogKind::Welcome,
         DialogKind::ImportContacts,
         DialogKind::EditProfile,
+        DialogKind::ProfilePanel,
         DialogKind::AddContact,
         DialogKind::BlockBar,
         DialogKind::JoinRequests,

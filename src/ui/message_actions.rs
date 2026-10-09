@@ -387,8 +387,8 @@ impl QuillApp {
                 _window,
                 cx,
                 {
-                    this.toggle_pin_message(chat_id, message_id, cx);
                     this.message_menu = None;
+                    this.request_toggle_pin(chat_id, message_id, _window, cx);
                     cx.notify();
                 }
             );
@@ -1414,33 +1414,6 @@ impl QuillApp {
         self.sync_command_menu(cx);
         self.sync_inline_mode(cx);
         cx.notify();
-    }
-
-    pub(super) fn toggle_pin_message(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        cx: &mut Context<Self>,
-    ) {
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .toggle_pin_chat_message(chat_id, message_id);
-            self.status_note = match result {
-                Ok(_) => "updating pin…".into(),
-                Err(_) => "could not update pin".into(),
-            };
-            cx.notify();
-            return;
-        }
-        if self.demo_session.is_some() {
-            self.apply_demo_pin_toggle(chat_id, message_id);
-            self.status_note = "pin updated".into();
-            cx.notify();
-        }
     }
 
     pub(super) fn jump_to_pinned_message(&mut self, message_id: MessageId, cx: &mut Context<Self>) {

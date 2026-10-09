@@ -1515,6 +1515,16 @@ impl Session {
             EnvelopePayload::Chats { chat_ids, .. } => {
                 self.apply_chats(chat_ids, pending);
             }
+            EnvelopePayload::ChatPhotos {
+                total_count,
+                photos,
+            } => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetUserProfilePhotos
+                {
+                    self.apply_profile_photos(total_count, photos, pending);
+                }
+            }
             EnvelopePayload::FoundMessages {
                 messages,
                 next_offset,

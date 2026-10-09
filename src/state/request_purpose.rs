@@ -938,6 +938,22 @@ pub enum RequestPurpose {
     /// the bot ids land in `Session::similar_bots` (keyed by the pending
     /// request's `user_id`).
     GetBotSimilarBots,
+    /// B10: a chat-id list for a profile panel — groups in common
+    /// (`getGroupsInCommon`, pending `user_id`), similar channels
+    /// (`getChatSimilarChats`, pending `chat_id`) or the channels that
+    /// can be a personal channel (`getSuitablePersonalChats`). Response
+    /// is `chats`; ids land in `Session::profile_chat_lists`.
+    GetProfileChats(ProfileChatsKind),
+    /// B10: `setBirthdate` (schema 1.8.67, line 14841). Response is
+    /// `ok`; the new value arrives via `updateUserFullInfo`.
+    SetBirthdate,
+    /// B10: `setPersonalChat` (line 14847). Response is `ok`.
+    SetPersonalChat,
+    /// B10: `setUserNote` (line 14553). Response is `ok`.
+    SetUserNote,
+    /// B10: `getUserProfilePhotos` (line 14591) for the profile photo
+    /// gallery; pending `user_id`. Response is `chatPhotos`.
+    GetUserProfilePhotos,
     /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
     /// 13421). Response is `archiveChatListSettings`; stored in
     /// `Session::archive_chat_list_settings`.

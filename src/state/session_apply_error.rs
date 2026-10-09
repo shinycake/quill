@@ -510,6 +510,21 @@ impl Session {
                 self.chat_action_error =
                     Some(format!("could not load similar bots (error {})", err.code));
             }
+            // B10: profile panel fetches keep the reason for a Retry row;
+            // refused edits surface as a toast.
+            Some(RequestPurpose::GetProfileChats(_) | RequestPurpose::GetUserProfilePhotos) => {
+                if let Some(pending) = pending {
+                    self.fail_profile_fetch(pending, error_reason(&err));
+                }
+            }
+            Some(
+                RequestPurpose::SetBirthdate
+                | RequestPurpose::SetPersonalChat
+                | RequestPurpose::SetUserNote,
+            ) => {
+                self.chat_action_error =
+                    Some(format!("could not save the change (error {})", err.code));
+            }
             Some(RequestPurpose::RemoveChatFromList) => {
                 self.chat_action_error =
                     Some(format!("could not delete the chat (error {})", err.code));

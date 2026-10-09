@@ -506,6 +506,14 @@ impl Session {
                 }),
             );
         }
+        // B10: the own profile photos changed — refetch the gallery.
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::SetProfilePhoto | RequestPurpose::DeleteProfilePhoto)
+        ) && let Some(me) = self.my_user_id
+        {
+            self.user_profile_photos.remove(&me);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContact) {
             // Phase 6: the new contact arrives via `updateUser`
             // (`is_contact` flips); invalidate the list so the

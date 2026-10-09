@@ -137,3 +137,7 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalizati
 # the pristine registry copy, so a diff against it isolates the patch.
 [patch.crates-io]
 gpui-base = { path = "third_party/gpui-base" }
+# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.7 with a
+# display link that stops while the window has nothing to draw. The commit
+# that adds third_party/gpui-pre-macos is the pristine registry copy.
+gpui-pre-macos = { path = "third_party/gpui-pre-macos" }

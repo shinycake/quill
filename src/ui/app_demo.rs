@@ -73,6 +73,12 @@ pub(super) fn demo_seed_for(
                 has_recovery_email: true,
             },
         ),
+        ScreenshotDemo::ConnectionClosed => (
+            None,
+            ConnectUiStatus::DemoWaitPhone,
+            "screenshot demo — Closed (injected auth, no live Telegram)".into(),
+            AuthorizationState::Closed,
+        ),
         ScreenshotDemo::WaitPremium => (
             None,
             ConnectUiStatus::DemoWaitPhone,
@@ -551,6 +557,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "Rich messages require Telegram Premium".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyProfilePanels => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — profile and contact panels (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyProfileEdit | ScreenshotDemo::ReadyUsername => (
@@ -1703,6 +1715,7 @@ impl QuillApp {
             context_menu_previous_focus: None,
             connect_status,
             connection_generation: 0,
+            connection_lost: false,
             live,
             status_note,
             status_seen: String::new(),
@@ -1715,6 +1728,7 @@ impl QuillApp {
                         | ScreenshotDemo::WaitPassword
                         | ScreenshotDemo::WaitPremium
                         | ScreenshotDemo::WaitQr
+                        | ScreenshotDemo::ConnectionClosed
                 )
             ),
             demo_session,
@@ -1807,6 +1821,8 @@ impl QuillApp {
             chat_filter: ChatListFilter::All,
             new_secret_picker_open: false,
             pending_forward: None,
+            selection_anchor: None,
+            selection_drag: None,
             forward_picker_open: false,
             forward_result: None,
             reactions_expanded: false,
@@ -1820,7 +1836,7 @@ impl QuillApp {
             row_fx: Default::default(),
             animation_targets: Default::default(),
             animation_sound: Default::default(),
-            polled_notify: (std::time::Instant::now(), false),
+            polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             window_active: std::cell::Cell::new(true),
             presence: Default::default(),
             login_prevented: None,
@@ -1995,6 +2011,8 @@ impl QuillApp {
             block_bar_dialog: None,
             join_requests_dialog: None,
             edit_profile_dialog: None,
+            profile_dialog: None,
+            pending_profile_gallery: None,
             import_contacts_dialog: None,
         };
 
@@ -2052,6 +2070,7 @@ impl QuillApp {
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
         app.demo_setup_proxy(demo, window, cx);
+        app.demo_setup_profile_panels(demo, window, cx);
         if matches!(demo, Some(ScreenshotDemo::ReadyMessageMenu)) {
             app.demo_setup_message_menu(window, cx);
         }
@@ -2249,6 +2268,13 @@ impl QuillApp {
             this.schedule_window_state_save(window, cx);
         })
         .detach();
+        // Performance fixture: a steady stream of synthetic TDLib updates
+        // (`demo_stream`), to measure what an idle signed-in window costs.
+        if demo.is_some()
+            && let Some(rate) = super::demo_stream::update_stream_rate()
+        {
+            app.spawn_demo_update_stream(rate, cx);
+        }
         // Performance fixture: keep rendering at ~60 Hz so a profiler sees
         // steady-state frames (`QUILL_DEMO_STRESS_REDRAW=0`: only what the
         // app itself asks for, to measure idle animation cost).

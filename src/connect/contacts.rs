@@ -110,6 +110,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         first_name: &str,
         last_name: &str,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.edit_contact(user_id, phone_number, first_name, last_name, "", false)
+    }
+
+    /// B10: the edit-contact box (tdesktop `EditContactBox`): `addContact`
+    /// is "add or edit", so it renames an existing contact too. `note`
+    /// must be the contact's current private note (an empty note clears
+    /// it), and `share_phone_number` adds the privacy exception that
+    /// shows the current user's number to the contact.
+    pub fn edit_contact(
+        &mut self,
+        user_id: i64,
+        phone_number: &str,
+        first_name: &str,
+        last_name: &str,
+        note: &str,
+        share_phone_number: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -122,6 +139,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             phone_number,
             first_name,
             last_name,
+            note,
+            share_phone_number,
         )) {
             self.session.requests.take(extra);
             return Err(err);
