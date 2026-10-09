@@ -10,6 +10,7 @@ mod common;
 mod connection_indicator;
 mod downloads;
 mod forum_saved;
+mod group_admin;
 mod groups;
 mod messages;
 mod notifications;

@@ -1,13 +1,14 @@
 //! custom reply keyboards.
 
 use super::app::QuillApp;
+use super::request_share::RequestShareKind;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::ComposerReplyTo;
 use quill::ids::{ChatId, MessageId};
-use quill::state::{ForceReplyTarget, active_custom_keyboard, effective_preview};
+use quill::state::{ForceReplyTarget, effective_preview};
 use quill::telegram::envelope::{KeyboardButton, KeyboardButtonType, ReplyKeyboard};
 impl QuillApp {
     /// B1: the active custom keyboard for the open chat, if any (live or
@@ -15,8 +16,40 @@ impl QuillApp {
     pub(super) fn open_chat_custom_keyboard(&self) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
         let session = self.session()?;
         let chat_id = session.open_chat?;
-        let history = session.histories.get(&chat_id.0)?;
-        active_custom_keyboard(&history.messages, &self.dismissed_keyboards)
+        session.custom_keyboard_for_chat(chat_id, &self.dismissed_keyboards)
+    }
+
+    /// The composer's keyboard button: shows or hides the bot keyboard
+    /// (tdesktop `_botKeyboardShow` / `_botKeyboardHide`). `None` when the
+    /// open chat has no keyboard.
+    pub(super) fn keyboard_toggle_button(&self, cx: &mut Context<Self>) -> Option<Button> {
+        let (chat_id, message_id, _) = self.open_chat_custom_keyboard()?;
+        let hidden = self
+            .collapsed_keyboards
+            .contains(&(chat_id.0, message_id.0));
+        let label = if hidden {
+            "Show bot keyboard"
+        } else {
+            "Hide bot keyboard"
+        };
+        Some(
+            Button::new("composer-keyboard-toggle")
+                .icon(if hidden {
+                    gpui_kit::assets::IconName::Keyboard
+                } else {
+                    gpui_kit::assets::IconName::KeyboardOff
+                })
+                .ghost()
+                .tooltip(label)
+                .accessibility_label(label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let key = (chat_id.0, message_id.0);
+                    if !this.collapsed_keyboards.remove(&key) {
+                        this.collapsed_keyboards.insert(key);
+                    }
+                    cx.notify();
+                })),
+        )
     }
 
     /// B1: the custom keyboard panel rendered above the composer, or
@@ -25,6 +58,12 @@ impl QuillApp {
     /// difference (it only tells TDLib to keep showing the keyboard).
     pub(super) fn custom_keyboard_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (chat_id, message_id, keyboard) = self.open_chat_custom_keyboard()?;
+        if self
+            .collapsed_keyboards
+            .contains(&(chat_id.0, message_id.0))
+        {
+            return None;
+        }
         let mut grid = div()
             .id(("custom-keyboard", message_id.0 as u64))
             .flex()
@@ -172,6 +211,42 @@ impl QuillApp {
                     this.open_message_url(&url, cx);
                 }))
             }
+            KeyboardButtonType::RequestPhoneNumber => {
+                element.on_click(cx.listener(move |this, _, _, cx| {
+                    let bot = this.session().and_then(|s| s.bot_user_id_for_chat(chat_id));
+                    match bot {
+                        Some(bot_user_id) => this.open_request_share(
+                            chat_id,
+                            message_id,
+                            RequestShareKind::Phone { bot_user_id },
+                            cx,
+                        ),
+                        None => this.set_status_note("Only a bot can ask for your number", cx),
+                    }
+                }))
+            }
+            KeyboardButtonType::RequestUsers(spec) => {
+                let spec = spec.clone();
+                element.on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_request_share(
+                        chat_id,
+                        message_id,
+                        RequestShareKind::Users(spec.clone()),
+                        cx,
+                    );
+                }))
+            }
+            KeyboardButtonType::RequestChat(spec) => {
+                let spec = spec.clone();
+                element.on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_request_share(
+                        chat_id,
+                        message_id,
+                        RequestShareKind::Chat(spec.clone()),
+                        cx,
+                    );
+                }))
+            }
             _ => element.disabled(true),
         }
     }
@@ -180,13 +255,11 @@ impl QuillApp {
     pub(super) fn custom_keyboard_button_tooltip(kind: &KeyboardButtonType) -> &'static str {
         match kind {
             KeyboardButtonType::Text | KeyboardButtonType::WebApp { .. } => "",
-            KeyboardButtonType::RequestPhoneNumber => {
-                "Sharing your phone number is not supported yet"
-            }
+            KeyboardButtonType::RequestPhoneNumber => "Share your phone number with the bot",
             KeyboardButtonType::RequestLocation => "Sharing your location is not supported yet",
             KeyboardButtonType::RequestPoll => "Creating a poll is not supported yet",
-            KeyboardButtonType::RequestUsers => "User selection is not supported yet",
-            KeyboardButtonType::RequestChat => "Chat selection is not supported yet",
+            KeyboardButtonType::RequestUsers(_) => "Choose users to share with the bot",
+            KeyboardButtonType::RequestChat(_) => "Choose a chat to share with the bot",
             KeyboardButtonType::RequestManagedBot => "Bot setup is not supported yet",
             KeyboardButtonType::Unknown { .. } => "Unsupported button",
         }

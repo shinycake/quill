@@ -27,6 +27,69 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// B11: "Attached Stickers" in the media viewer menu
+    /// (`getAttachedStickerSets` of the photo or video file). The answer
+    /// opens the first set in the sticker set dialog.
+    pub fn fetch_attached_sticker_sets(
+        &mut self,
+        file_id: FileId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || file_id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.stickers.attached_answer = None;
+        self.session.sticker_set_view = Some(crate::state::StickerSetView {
+            set_id: 0,
+            stage: crate::state::StickerSetViewStage::Loading,
+            files_requested: false,
+        });
+        let extra = self.session.request(
+            RequestPurpose::GetAttachedStickerSets { file_id: file_id.0 },
+            None,
+        );
+        match self
+            .sender
+            .send_json(&crate::telegram::requests::get_attached_sticker_sets(
+                extra, file_id,
+            )) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.sticker_set_view = None;
+                Err(err)
+            }
+        }
+    }
+
+    /// The attached sets arrived: show the first, or say there are none.
+    pub(crate) fn open_attached_sticker_set(&mut self) -> Result<(), ConnectSendError> {
+        match self.session.stickers.attached_answer.take() {
+            Some(Some(set_id)) => {
+                self.view_sticker_set(set_id)?;
+            }
+            Some(None) => {
+                if let Some(view) = self.session.sticker_set_view.as_mut() {
+                    view.stage = crate::state::StickerSetViewStage::Failed;
+                }
+            }
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// B11: the hello stickers an empty private chat offers
+    /// (`getGreetingStickers`), asked once per session.
+    pub fn fetch_greeting_stickers(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.stickers.greeting_loaded {
+            return Ok(None);
+        }
+        // One attempt per session: a failure must not retry on every frame.
+        self.session.stickers.greeting_loaded = true;
+        self.sticker_request(RequestPurpose::GetGreetingStickers, |id| {
+            crate::telegram::requests::get_greeting_stickers(id)
+        })
+    }
+
     /// Open the sticker panel and load installed regular sets
     /// (`getInstalledStickerSets` + `stickerTypeRegular`).
     pub fn open_sticker_panel(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
@@ -398,6 +461,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
+    /// "Remove from recent": `removeRecentSticker`. The sticker leaves
+    /// the cached list at once; `updateRecentStickers` then refetches it.
+    pub fn remove_recent_sticker(
+        &mut self,
+        file_id: FileId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if file_id.0 <= 0 {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let sent = self.sticker_request(RequestPurpose::RemoveRecentSticker, |id| {
+            crate::telegram::requests::remove_recent_sticker(id, file_id, false)
+        })?;
+        if sent.is_some() {
+            self.session
+                .stickers
+                .recent
+                .retain(|sticker| sticker.file_id != file_id);
+        }
+        Ok(sent)
+    }
+
     pub fn set_favorite_sticker(
         &mut self,
         file_id: FileId,
@@ -570,6 +654,63 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             Ok(saved)
         }
+    }
+
+    /// B11: refetch what another device changed (`updateRecentStickers`,
+    /// `updateFavoriteStickers`, `updateTrendingStickerSets`, and the
+    /// reaction picker's options after `updateActiveEmojiReactions` /
+    /// `updateChatAvailableReactions`) so open panels follow without
+    /// reopening. Lists nobody has loaded yet are fetched on first open
+    /// anyway, so a stale flag on an empty, closed list is just dropped.
+    pub(crate) fn refresh_stale_panels(&mut self) -> Result<(), ConnectSendError> {
+        let stickers = &mut self.session.stickers;
+        let recent = std::mem::take(&mut stickers.recent_stale);
+        let favorites = std::mem::take(&mut stickers.favorites_stale);
+        let trending = std::mem::take(&mut stickers.trending_stale);
+        let open = stickers.open;
+        let recent = recent && (open || !stickers.recent.is_empty());
+        let favorites = favorites && (open || !stickers.favorites.is_empty());
+        let trending = trending && open && stickers.tab == StickerTab::Trending;
+        let emoji_trending = std::mem::take(&mut self.session.emoji.trending_stale)
+            && self.session.emoji.open
+            && self.session.emoji.tab == crate::emoji::EmojiSetTab::Trending;
+        let reactions = std::mem::take(&mut self.session.reaction_options_stale);
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        if recent {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetRecentStickers),
+            );
+            self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
+                get_recent_stickers(id, false)
+            })?;
+        }
+        if favorites {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetFavoriteStickers),
+            );
+            self.sticker_request_favorites()?;
+        }
+        if trending {
+            drop(
+                self.session
+                    .requests
+                    .take_purpose(RequestPurpose::GetTrendingStickerSets),
+            );
+            self.fetch_trending_stickers(false)?;
+        }
+        if emoji_trending {
+            self.select_emoji_set_tab(crate::emoji::EmojiSetTab::Trending)?;
+        }
+        if reactions && let Some(options) = self.session.message_reaction_options.take() {
+            self.fetch_message_reactions(options.chat_id, options.message_id)?;
+        }
+        Ok(())
     }
 
     pub fn close_gif_panel(&mut self) {

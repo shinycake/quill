@@ -1440,6 +1440,7 @@ impl QuillApp {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 session.account_ttl_days = Some(180);
+                session.default_auto_delete_secs = Some(604_800);
                 session.account_ttl_loading = false;
                 session.password_state = Some(demo_password_state_manage());
                 session.password_state_loading = false;
@@ -1721,6 +1722,33 @@ impl QuillApp {
                     "screenshot demo — chat self-destruct timer 1h · picker open (injected, no live Telegram)"
                         .into();
         }
+        // Notifications and mute: chat 11 muted, the Mute submenu open on
+        // the Custom duration row (2 days 3 hours).
+        if matches!(demo, Some(ScreenshotDemo::ReadyMuteCustom)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_mute_archive(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.mute_menu_open = true;
+            self.mute_custom_open = true;
+            self.mute_custom = quill::mute_menu::CustomMute { days: 2, hours: 3 };
+            self.status_note = "screenshot demo — mute menu · custom duration".into();
+        }
+        // Auto-delete in a regular chat: 1 week timer, picker with the
+        // Custom stepper on 2 weeks.
+        if matches!(demo, Some(ScreenshotDemo::ReadyAutoDelete)) {
+            if let Some(session) = self.demo_session.as_mut()
+                && let Some(chat) = session
+                    .open_chat
+                    .and_then(|id| session.chats.get_mut(&id.0))
+            {
+                chat.message_auto_delete_time = 604_800;
+            }
+            self.ttl_picker_open = true;
+            self.ttl_custom_open = true;
+            self.ttl_custom_secs = 1_209_600;
+            self.status_note = "screenshot demo — auto-delete timer · custom".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyGroupCall)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -1988,6 +2016,9 @@ impl QuillApp {
                 );
             }
             self.status_note = "screenshot demo — service messages".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyReplyKeyboard)) {
+            self.demo_setup_reply_keyboard(cx);
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyTranslate)) {
             self.demo_setup_translate(window, cx);

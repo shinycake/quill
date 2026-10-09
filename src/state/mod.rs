@@ -23,9 +23,9 @@ use crate::story_page::{
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
     AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
-    CanPostStoryResult, ChannelMemberStatus, ChatAction, ChatActionBar, ChatActiveStoriesView,
-    ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatFolderInfo, ChatFolderSpec,
-    ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
+    CanPostStoryResult, CanTransferOwnershipResult, ChannelMemberStatus, ChatAction, ChatActionBar,
+    ChatActiveStoriesView, ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatFolderInfo,
+    ChatFolderSpec, ChatJoinResult, ChatKind, ChatList, ChatNotificationSettings, ChatPermissions,
     ChatPositionUpdate, ChatStatistics, ConnectionState, EnvelopePayload, EphemeralMessageContent,
     ErrorClass, ForumTopic, GameHighScore, GameInfo, InlineQueryResultSummary,
     InlineQueryResultsButton, InlineQueryResultsPage, InviteGroupCallParticipantResult,
@@ -43,7 +43,7 @@ use crate::telegram::envelope::{
     StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
     ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
 };
-use crate::telegram::envelope::{CallState, ReadyParams};
+use crate::telegram::envelope::{AvailableMessageSender, CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
 use crate::telegram::profile_accent::ProfileAccentColor;
 use crate::telegram::requests::{
@@ -63,6 +63,7 @@ mod history_types;
 mod info_types;
 mod media_library;
 mod member_list;
+mod ownership_types;
 mod redraw;
 mod request_purpose;
 mod requests;
@@ -84,6 +85,7 @@ mod session_date_jump;
 mod session_files;
 mod session_forum;
 mod session_forward;
+mod session_group_admin;
 mod session_history_window;
 mod session_members;
 mod session_message_menu;
@@ -91,10 +93,12 @@ mod session_notifications;
 mod session_profile_panels;
 mod session_proxy;
 mod session_reply;
+mod session_reply_keyboard;
 mod session_requests;
 mod session_saved;
 mod session_search;
 mod session_service;
+mod session_share;
 mod session_sponsored;
 mod session_stickers;
 mod session_stories;
@@ -116,6 +120,7 @@ pub use history_types::*;
 pub use info_types::*;
 pub use media_library::{MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, ReactionChoice};
 pub use member_list::*;
+pub use ownership_types::*;
 pub use redraw::{RedrawNeed, redraw_need};
 pub use request_purpose::*;
 pub use requests::*;
@@ -123,10 +128,11 @@ pub use saved_types::*;
 pub use search_types::*;
 pub use session::*;
 pub(crate) use session_chat_search::history_message;
+pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;
 pub use session_message_menu::{
     Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
-    StickerSetViewStage,
+    StickerSetViewStage, reaction_filter_key,
 };
 pub use session_proxy::LINK_PING_ID;
 pub use session_reply::{
@@ -134,6 +140,8 @@ pub use session_reply::{
     thumb_candidates,
 };
 pub use session_saved::{SAVED_PAGE, SAVED_TOPICS_PAGE};
+pub use session_reply_keyboard::*;
+pub use session_share::ShareSearch;
 pub use session_subsection_tabs::{BotTopics, TopicBadge};
 pub use session_translate::*;
 pub use shared_media_types::*;

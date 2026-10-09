@@ -23,6 +23,14 @@ impl Session {
         {
             self.send_permission_error = Some(notice.into());
         }
+        // Q1: a rate-limited user action says so (tdesktop's
+        // `lng_flood_error`); background lookups were already retried by
+        // the driver and stay quiet.
+        if let Some(notice) = err.flood_notice()
+            && pending.is_some_and(|p| is_user_action(p.purpose))
+        {
+            self.flood_notice = Some(notice);
+        }
         if let Some(p) = pending
             && p.purpose == RequestPurpose::GetChatMember
             && let Some(chat_id) = p.chat_id
@@ -122,6 +130,12 @@ impl Session {
                 | RequestPurpose::GetMessageAddedReactions { .. }),
             ) => self.fail_audience(purpose),
             Some(RequestPurpose::ViewStickerSet { set_id }) => self.fail_sticker_set_view(set_id),
+            Some(RequestPurpose::SetChatMessageSender) => {
+                self.message_action_note = Some(format!(
+                    "could not change the sender: {}",
+                    error_reason(&err)
+                ));
+            }
             Some(RequestPurpose::AddProfileAudio) => {
                 self.message_action_note = Some(format!(
                     "could not save to your profile: {}",
@@ -137,6 +151,27 @@ impl Session {
             Some(RequestPurpose::ReportSupergroupSpam) => {
                 self.message_action_note =
                     Some(format!("could not report the spam: {}", error_reason(&err)));
+            }
+            Some(RequestPurpose::DeleteMessageReactionsFromSender { .. }) => {
+                self.message_action_note = Some(format!(
+                    "could not delete the reaction: {}",
+                    error_reason(&err)
+                ));
+            }
+            Some(RequestPurpose::CanTransferOwnership) => {
+                self.ownership.check_in_flight = false;
+                self.ownership.check_error = Some(format!(
+                    "Could not check whether you can transfer ownership: {}",
+                    error_reason(&err)
+                ));
+            }
+            Some(RequestPurpose::TransferChatOwnership { .. }) => {
+                self.fail_ownership_transfer(&err);
+            }
+            Some(RequestPurpose::GetChatOwnerAfterLeaving) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.fail_owner_lookup(chat_id.0, &err);
+                }
             }
             Some(RequestPurpose::ReportStory) => {
                 if let Some(pending) = pending {
@@ -237,11 +272,14 @@ impl Session {
             // leave the message list without a history entry — the
             // skeleton shimmer would run forever. Create the entry
             // so the UI settles into the empty state.
-            Some(RequestPurpose::GetHistory) => {
+            Some(RequestPurpose::GetHistory | RequestPurpose::GetHistoryAround) => {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
+                    && !self.take_stale_history_request(pending)
                 {
-                    self.histories.entry(chat_id.0).or_default();
+                    // R5: the empty window shows "Couldn't load messages ·
+                    // Retry" instead of a skeleton that never settles.
+                    self.histories.entry(chat_id.0).or_default().load_failed = true;
                 }
             }
             // `parity:platform-chat-export` — a failed export page must not
@@ -337,6 +375,13 @@ impl Session {
                     }
                 }
             }
+            Some(RequestRollback::ChatIsTranslatable { chat_id, previous }) => {
+                self.set_chat_translatable(chat_id, previous);
+            }
+            Some(RequestRollback::AutoTranslate {
+                supergroup_id,
+                previous,
+            }) => self.set_supergroup_auto_translate(supergroup_id, previous),
             // Slice G2: restore the pre-toggle anti-spam flag.
             Some(RequestRollback::AntiSpam {
                 supergroup_id,
@@ -348,6 +393,23 @@ impl Session {
                 }
                 None => {
                     self.supergroup_anti_spam_enabled.remove(&supergroup_id);
+                }
+            },
+            // B7: restore the group admin toggles the server refused.
+            Some(RequestRollback::GroupToggle {
+                supergroup_id,
+                toggle,
+                previous,
+            }) => self.restore_group_toggle(supergroup_id, toggle, previous),
+            Some(RequestRollback::ProtectedContent { chat_id, previous }) => {
+                self.set_chat_protected(chat_id, previous);
+            }
+            Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
+                Some(setting) => {
+                    self.chat_available_reactions.insert(chat_id, setting);
+                }
+                None => {
+                    self.chat_available_reactions.remove(&chat_id);
                 }
             },
             // Slice CL1: restore the pre-toggle pinned /
@@ -525,6 +587,23 @@ impl Session {
                 self.chat_action_error =
                     Some(format!("could not save the change (error {})", err.code));
             }
+            // B7: refused group admin changes were rolled back above; say
+            // so instead of showing the old value as if nothing happened.
+            Some(
+                RequestPurpose::ToggleSupergroupIsForum
+                | RequestPurpose::ToggleSupergroupIsAllHistoryAvailable
+                | RequestPurpose::ToggleSupergroupJoinToSendMessages
+                | RequestPurpose::ToggleSupergroupHasHiddenMembers
+                | RequestPurpose::ToggleChatHasProtectedContent
+                | RequestPurpose::SetChatAvailableReactions
+                | RequestPurpose::SetChatDiscussionGroup
+                | RequestPurpose::UpgradeBasicGroup,
+            ) => {
+                self.chat_action_error = Some(format!(
+                    "could not change the group setting (error {})",
+                    err.code
+                ));
+            }
             Some(RequestPurpose::RemoveChatFromList) => {
                 self.chat_action_error =
                     Some(format!("could not delete the chat (error {})", err.code));
@@ -597,6 +676,12 @@ impl Session {
             Some(RequestPurpose::SharePhoneNumber) => {
                 self.chat_action_error = Some(format!(
                     "could not share your phone number (error {})",
+                    err.code
+                ));
+            }
+            Some(RequestPurpose::ShareWithBot) => {
+                self.chat_action_error = Some(format!(
+                    "the bot could not receive what you shared (error {})",
                     err.code
                 ));
             }
@@ -914,6 +999,40 @@ impl Session {
                     );
                 }
             }
+            // B15: a failed `getPollVoteStatistics` lands in the fetch
+            // state so the dialog shows an honest error.
+            Some(RequestPurpose::GetPollVoteStatistics {
+                chat_id,
+                message_id,
+            }) => {
+                self.poll_stats.insert(
+                    (chat_id.0, message_id.0),
+                    PollStatsFetch::Failed(call_request_error_line(
+                        &err,
+                        "Could not load poll stats",
+                    )),
+                );
+            }
+            // B15: poll option / checklist mutations surface their
+            // failure in the status note (tdesktop shows a toast:
+            // `lng_polls_add_option_error`).
+            Some(RequestPurpose::AddPollOption) => {
+                self.message_action_note = Some(if err.code == 400 {
+                    "Could not add the option. Please try again.".to_string()
+                } else {
+                    call_request_error_line(&err, "Could not add the option")
+                });
+            }
+            Some(RequestPurpose::MarkChecklistTasks) => {
+                self.message_action_note = Some(call_request_error_line(
+                    &err,
+                    "Could not update the checklist",
+                ));
+            }
+            Some(RequestPurpose::AddChecklistTasks) => {
+                self.message_action_note =
+                    Some(call_request_error_line(&err, "Could not add the tasks"));
+            }
             // B4: a failed `getPollVoters` first page lands in the
             // fetch state so the dialog shows an honest error; a
             // failed "load more" keeps the loaded page retryable.
@@ -1103,6 +1222,20 @@ impl Session {
             // never a fake success, never an optimistic change.
             // `sessions_error_line` is reused: it is a pure
             // (action, error-class) formatter, not session-bound.
+            Some(RequestPurpose::GetDefaultAutoDelete) => {
+                self.default_auto_delete_busy = false;
+                self.default_auto_delete_error = Some(sessions_error_line(
+                    "load the default auto-delete timer",
+                    &err,
+                ));
+            }
+            Some(RequestPurpose::SetDefaultAutoDelete { .. }) => {
+                self.default_auto_delete_busy = false;
+                self.default_auto_delete_error = Some(sessions_error_line(
+                    "change the default auto-delete timer",
+                    &err,
+                ));
+            }
             Some(RequestPurpose::GetAccountTtl) => {
                 self.account_ttl_loading = false;
                 self.account_error = Some(sessions_error_line(
@@ -1615,4 +1748,26 @@ pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> S
         }
         _ => format!("Couldn't open the link (error {code})."),
     }
+}
+
+/// Q1: whether a request is something the user did on purpose (send,
+/// edit, join, ...), as opposed to a background lookup, a view/online
+/// ping or a login submit (which has its own error line).
+fn is_user_action(purpose: RequestPurpose) -> bool {
+    if is_auth_submit(purpose) || purpose.is_sweepable() {
+        return false;
+    }
+    let debug = format!("{purpose:?}");
+    ![
+        "Get",
+        "Load",
+        "Search",
+        "Download",
+        "View",
+        "Open",
+        "Close",
+        "SetOnline",
+    ]
+    .iter()
+    .any(|prefix| debug.starts_with(prefix))
 }

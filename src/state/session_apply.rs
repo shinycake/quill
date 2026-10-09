@@ -140,11 +140,15 @@ impl Session {
                 video_chat,
                 has_welcome_messages,
                 has_protected_content,
+                available_reactions,
                 has_scheduled_messages,
+                message_sender,
                 is_translatable,
                 view_as_topics,
+                reply_markup_message_id,
                 unread_mention_count,
                 unread_reaction_count,
+                unread_poll_vote_count,
                 can_be_reported,
                 action_bar,
                 blocked,
@@ -155,8 +159,25 @@ impl Session {
                     self.set_chat_view_as_topics(chat_id.0, view_as_topics);
                 }
                 self.set_chat_protected(chat_id.0, has_protected_content);
+                if let Some(setting) = available_reactions {
+                    self.chat_available_reactions.insert(chat_id.0, setting);
+                }
+                // B7: the answer to `upgradeBasicGroupChatToSupergroupChat`
+                // is the new supergroup chat; remember `old -> new`.
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::UpgradeBasicGroup
+                    && let Some(old) = pending.chat_id
+                {
+                    self.chat_upgrades.push((old.0, chat_id.0));
+                }
                 self.set_chat_has_scheduled(chat_id.0, has_scheduled_messages);
+                self.set_chat_message_sender(chat_id.0, message_sender);
                 self.set_chat_translatable(chat_id.0, is_translatable);
+                if reply_markup_message_id.0 > 0 {
+                    self.reply_keyboards
+                        .markup_message_ids
+                        .insert(chat_id.0, reply_markup_message_id.0);
+                }
                 self.set_chat_action_bar(chat_id.0, action_bar);
                 self.apply_update_new_chat(
                     chat_id,
@@ -184,6 +205,9 @@ impl Session {
                     extra,
                     seq,
                 );
+                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                    chat.unread_poll_vote_count = unread_poll_vote_count;
+                }
                 // `chat.last_message`: the starting preview. Never replaces
                 // a newer one an `updateChatLastMessage` already set.
                 if let Some(message) = last_message {
@@ -296,6 +320,8 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
                     self.contacts = Some(user_ids);
                     self.contacts_error = false;
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
+                    self.reply_keyboards.recent_inline_bots = Some(user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
                     && let Some(pending) = pending
                     && let Some(bot_user_id) = pending.user_id
@@ -322,24 +348,33 @@ impl Session {
                 can_set_sticker_set,
                 sticker_set_id,
                 custom_emoji_sticker_set_id,
-            } => self.apply_supergroup_full_info(
-                description,
-                member_count,
-                linked_chat_id,
-                slow_mode_delay,
-                slow_mode_delay_expires_in,
-                my_boost_count,
-                unrestrict_boost_count,
-                can_get_statistics,
-                has_aggressive_anti_spam_enabled,
-                can_toggle_aggressive_anti_spam,
-                can_set_sticker_set,
-                sticker_set_id,
-                custom_emoji_sticker_set_id,
-                pending,
-                extra,
-                seq,
-            ),
+                admin,
+            } => {
+                let full_info_group = pending
+                    .filter(|p| p.purpose == RequestPurpose::GetSupergroupFullInfo)
+                    .and_then(|p| p.supergroup_id);
+                self.apply_supergroup_full_info(
+                    description,
+                    member_count,
+                    linked_chat_id,
+                    slow_mode_delay,
+                    slow_mode_delay_expires_in,
+                    my_boost_count,
+                    unrestrict_boost_count,
+                    can_get_statistics,
+                    has_aggressive_anti_spam_enabled,
+                    can_toggle_aggressive_anti_spam,
+                    can_set_sticker_set,
+                    sticker_set_id,
+                    custom_emoji_sticker_set_id,
+                    pending,
+                    extra,
+                    seq,
+                );
+                if let Some(supergroup_id) = full_info_group {
+                    self.merge_full_admin(supergroup_id, admin);
+                }
+            }
             // Parity slice: `updateSupergroupFullInfo` — the update carries
             // its own id, so it applies whenever it arrives (no pending
             // correlation).
@@ -358,25 +393,29 @@ impl Session {
                 can_set_sticker_set,
                 sticker_set_id,
                 custom_emoji_sticker_set_id,
-            } => self.apply_update_supergroup_full_info(
-                supergroup_id,
-                description,
-                member_count,
-                linked_chat_id,
-                slow_mode_delay,
-                slow_mode_delay_expires_in,
-                my_boost_count,
-                unrestrict_boost_count,
-                can_get_statistics,
-                has_aggressive_anti_spam_enabled,
-                can_toggle_aggressive_anti_spam,
-                can_set_sticker_set,
-                sticker_set_id,
-                custom_emoji_sticker_set_id,
-                pending,
-                extra,
-                seq,
-            ),
+                admin,
+            } => {
+                self.apply_update_supergroup_full_info(
+                    supergroup_id,
+                    description,
+                    member_count,
+                    linked_chat_id,
+                    slow_mode_delay,
+                    slow_mode_delay_expires_in,
+                    my_boost_count,
+                    unrestrict_boost_count,
+                    can_get_statistics,
+                    has_aggressive_anti_spam_enabled,
+                    can_toggle_aggressive_anti_spam,
+                    can_set_sticker_set,
+                    sticker_set_id,
+                    custom_emoji_sticker_set_id,
+                    pending,
+                    extra,
+                    seq,
+                );
+                self.merge_full_admin(supergroup_id, admin);
+            }
             // Slice (communities backend core): `communityId` (schema 1.8.67,
             // line 2264) is the `createCommunity` response — the driver
             // chains it into `loadCommunityFullInfo`; nothing to reduce.
@@ -418,10 +457,45 @@ impl Session {
                 chat_id,
                 has_protected_content,
             } => self.set_chat_protected(chat_id, has_protected_content),
+            // B7: allowed reactions and the active emoji list.
+            EnvelopePayload::UpdateChatAvailableReactions {
+                chat_id,
+                available_reactions,
+            } => {
+                self.chat_available_reactions
+                    .insert(chat_id, available_reactions);
+                // An open reaction picker for this chat refetches.
+                if self
+                    .message_reaction_options
+                    .as_ref()
+                    .is_some_and(|options| options.chat_id.0 == chat_id)
+                {
+                    self.reaction_options_stale = true;
+                }
+            }
+            EnvelopePayload::UpdateActiveEmojiReactions { emojis } => {
+                self.active_reactions = emojis.clone();
+                self.active_emoji_reactions = emojis;
+                self.reaction_options_stale = true;
+            }
             EnvelopePayload::UpdateChatHasScheduledMessages {
                 chat_id,
                 has_scheduled_messages,
             } => self.set_chat_has_scheduled(chat_id, has_scheduled_messages),
+            EnvelopePayload::UpdateChatReplyMarkup {
+                chat_id,
+                message_id,
+                reply_markup,
+            } => self.set_chat_reply_keyboard(chat_id, message_id, reply_markup),
+            EnvelopePayload::UpdateChatMessageSender {
+                chat_id,
+                message_sender,
+            } => self.set_chat_message_sender(chat_id, message_sender),
+            EnvelopePayload::ChatMessageSenders { senders } => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.send_as_options.insert(chat_id.0, senders);
+                }
+            }
             EnvelopePayload::UpdateChatIsTranslatable {
                 chat_id,
                 is_translatable,
@@ -968,6 +1042,11 @@ impl Session {
                     .or_insert_with(|| placeholder_chat(chat_id));
                 chat.last_read_inbox_message_id = last_read_inbox_message_id;
                 chat.unread_count = unread_count;
+                // Read here or on another device: whatever toast we showed
+                // for the chat is stale (tdesktop `clearFromHistory`).
+                if unread_count == 0 {
+                    self.clear_chat_notifications(chat_id);
+                }
             }
             // Slice CL3: mention / reaction badge counts (schema 1.8.67,
             // lines 10567/10570).
@@ -988,6 +1067,67 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .unread_reaction_count = unread_reaction_count;
+            }
+            // B15: poll-vote badge count (schema 1.8.67, lines 10457/10573).
+            EnvelopePayload::UpdateChatUnreadPollVoteCount {
+                chat_id,
+                unread_poll_vote_count,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .unread_poll_vote_count = unread_poll_vote_count;
+            }
+            // B15: `getPollVoteStatistics` answer — cached per message.
+            EnvelopePayload::PollVoteStatistics { graph } => {
+                if let Some(RequestPurpose::GetPollVoteStatistics {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.poll_stats
+                        .insert((chat_id.0, message_id.0), PollStatsFetch::Loaded(graph));
+                }
+            }
+            EnvelopePayload::UpdateMessageUnreadReactions {
+                chat_id,
+                unread_reaction_count,
+                newest,
+                ..
+            } => {
+                let previous = self
+                    .chats
+                    .get(&chat_id.0)
+                    .map_or(0, |chat| chat.unread_reaction_count);
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .unread_reaction_count = unread_reaction_count;
+                // A grown counter with a visible newest reaction is a new
+                // reaction on one of our messages.
+                if unread_reaction_count > previous
+                    && let Some(reaction) = newest
+                {
+                    self.queue_reaction_notification(chat_id, &reaction);
+                }
+            }
+            // `updateNotificationGroup` / `updateActiveNotifications`: a
+            // group that emptied (read elsewhere, or removed) clears the
+            // OS notifications we showed for the chat.
+            EnvelopePayload::UpdateNotificationGroup {
+                chat_id,
+                total_count,
+                added_count,
+                removed_count,
+            } => {
+                if total_count == 0 && added_count == 0 && removed_count > 0 {
+                    self.clear_chat_notifications(chat_id);
+                }
+            }
+            EnvelopePayload::UpdateActiveNotifications { chat_ids } => {
+                // Notifications of a previous launch: remember the chats so
+                // a later read clears them too.
+                self.shown_notification_chats.extend(chat_ids);
             }
             // Slice CL3: `updateChatBlockList` (schema 1.8.67, line
             // 10594).
@@ -1040,9 +1180,11 @@ impl Session {
                 if let Some(RequestPurpose::GetMessageAddedReactions {
                     chat_id,
                     message_id,
+                    filter,
+                    append,
                 }) = pending.map(|p| p.purpose)
                 {
-                    self.accept_added_reactions(chat_id, message_id, page);
+                    self.accept_added_reactions(chat_id, message_id, filter, append, page);
                 }
             }
             EnvelopePayload::UpdateChatReadOutbox {
@@ -1377,6 +1519,11 @@ impl Session {
             } => {
                 if let Some(notice) = error.send_permission_notice() {
                     self.send_permission_error = Some(notice.into());
+                } else if let Some(notice) = error.flood_notice() {
+                    // Q1: the failed row keeps its retry affordance
+                    // (`can_retry` comes from TDLib, which marks rate
+                    // limits retryable); the text stays in the history.
+                    self.flood_notice = Some(notice);
                 }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id;
@@ -1712,9 +1859,28 @@ impl Session {
             EnvelopePayload::UpdateBasicGroup {
                 basic_group_id,
                 member_count,
+                status,
+                can_restrict_members,
+                can_promote_members,
+                can_manage_tags,
+                can_change_info,
+                is_active,
             } => {
                 self.basic_group_member_counts
                     .insert(basic_group_id, member_count);
+                self.basic_group_status.insert(basic_group_id, status);
+                self.basic_group_own.insert(
+                    basic_group_id,
+                    BasicGroupOwn {
+                        status,
+                        can_restrict_members,
+                        can_promote_members,
+                        can_manage_tags,
+                    },
+                );
+                self.basic_group_change_info_right
+                    .insert(basic_group_id, can_change_info.unwrap_or(false));
+                self.basic_group_active.insert(basic_group_id, is_active);
             }
             EnvelopePayload::UpdateChatOnlineMemberCount {
                 chat_id,
@@ -1728,6 +1894,7 @@ impl Session {
                 member_count,
                 is_forum,
                 has_forum_tabs,
+                has_automatic_translation,
                 username,
                 status,
                 can_restrict_members,
@@ -1741,7 +1908,10 @@ impl Session {
                 is_broadcast_group,
                 sign_messages,
                 show_message_sender,
+                join_to_send_messages,
             } => {
+                self.supergroup_join_to_send
+                    .insert(supergroup_id, join_to_send_messages);
                 if member_count > 0 {
                     self.supergroup_member_counts
                         .insert(supergroup_id, member_count);
@@ -1749,6 +1919,7 @@ impl Session {
                 self.supergroup_verification
                     .insert(supergroup_id, verification);
                 self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
+                self.set_supergroup_auto_translate(supergroup_id, has_automatic_translation);
                 self.apply_update_supergroup(
                     supergroup_id,
                     is_forum,
@@ -1774,6 +1945,7 @@ impl Session {
                 supergroup_id,
                 is_forum,
                 has_forum_tabs,
+                has_automatic_translation,
                 username,
                 status,
                 can_restrict_members,
@@ -1787,8 +1959,12 @@ impl Session {
                 is_broadcast_group,
                 sign_messages,
                 show_message_sender,
+                join_to_send_messages,
             } => {
+                self.supergroup_join_to_send
+                    .insert(supergroup_id, join_to_send_messages);
                 self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
+                self.set_supergroup_auto_translate(supergroup_id, has_automatic_translation);
                 self.apply_supergroup(
                     supergroup_id,
                     is_forum,
@@ -1859,6 +2035,14 @@ impl Session {
                 self.apply_message_thread_info(*info, pending);
             }
             EnvelopePayload::Message(message) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatReplyMarkupMessage) {
+                    self.set_chat_reply_keyboard(
+                        message.chat_id,
+                        Some(message.id),
+                        message.reply_markup.clone(),
+                    );
+                    return;
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMessageByDate) {
                     self.accept_date_message(message.id);
                     return;
@@ -1925,7 +2109,15 @@ impl Session {
                 }
             }
             EnvelopePayload::StickerSets { sets, .. } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets) {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::GetAttachedStickerSets { .. })
+                ) {
+                    // B11: "Attached Stickers" of a photo or video.
+                    self.stickers.attached_answer = Some(sets.first().map(|set| set.id));
+                } else if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::GetInstalledStickerSets)
+                {
                     self.accept_installed_sticker_sets(sets);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchivedStickerSets)
                 {
@@ -1955,6 +2147,25 @@ impl Session {
                 is_regular,
             } => {
                 self.apply_installed_sticker_set_order(&sticker_set_ids, is_regular);
+            }
+            // B11: other devices changed recents, favorites, trending or the
+            // reaction lists; mark the loaded caches stale (the driver
+            // refetches) or store the pushed value.
+            EnvelopePayload::UpdateRecentStickers { is_attached } => {
+                if !is_attached {
+                    self.stickers.recent_stale = true;
+                }
+            }
+            EnvelopePayload::UpdateFavoriteStickers => self.stickers.favorites_stale = true,
+            EnvelopePayload::UpdateTrendingStickerSets { is_regular } => {
+                if is_regular {
+                    self.stickers.trending_stale = true;
+                } else {
+                    self.emoji.trending_stale = true;
+                }
+            }
+            EnvelopePayload::UpdateDefaultReactionType { reaction_type } => {
+                self.default_reaction = ReactionChoice::from_type(&reaction_type);
             }
             // Slice S8: `getTrendingStickerSets` answers with
             // `trendingStickerSets`.
@@ -1987,6 +2198,9 @@ impl Session {
                     self.accept_favorite_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
                     self.accept_recent_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::GetGreetingStickers) {
+                    self.stickers.greeting = stickers;
+                    self.stickers.greeting_loaded = true;
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
                     // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
                     self.accept_custom_emoji_stickers(stickers);
@@ -2003,6 +2217,7 @@ impl Session {
             | EnvelopePayload::EmojiStatusCustomEmojis { .. }
             | EnvelopePayload::AnimatedEmoji { .. }
             | EnvelopePayload::EmojiKeywords { .. }
+            | EnvelopePayload::Emojis { .. }
             | EnvelopePayload::EmojiCategories { .. }) => {
                 self.dispatch_emoji_payload(pending.map(|p| p.purpose), payload);
             }
@@ -2101,9 +2316,19 @@ impl Session {
                     self.accept_sponsored_report(pending, result);
                 }
             }
+            EnvelopePayload::CanTransferOwnershipResult { result } => {
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::CanTransferOwnership) {
+                    self.accept_can_transfer_ownership(result);
+                }
+            }
             EnvelopePayload::Me { user_id } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
+                } else if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::GetChatOwnerAfterLeaving)
+                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                {
+                    self.accept_owner_after_leaving(chat_id.0, user_id);
                 } else if let Some(RequestPurpose::DeepLinkResolve { generation }) =
                     pending.map(|p| p.purpose)
                     && let Some(DeepLinkState::ResolvingChat {
@@ -2693,6 +2918,13 @@ impl Session {
                     self.change_number_timeout = Some(timeout);
                     self.change_number_loading = false;
                     self.change_number_error = None;
+                }
+            }
+            EnvelopePayload::MessageAutoDeleteTime { seconds } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetDefaultAutoDelete) {
+                    self.default_auto_delete_secs = Some(seconds);
+                    self.default_auto_delete_busy = false;
+                    self.default_auto_delete_error = None;
                 }
             }
             EnvelopePayload::AccountTtl { days } => {

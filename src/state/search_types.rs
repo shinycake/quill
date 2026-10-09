@@ -391,19 +391,23 @@ impl ChatSearchJump {
 }
 
 /// Which unread marker a corner jump button walks (tdesktop
-/// `CornerButtonType::Mentions` / `Reactions`).
+/// `CornerButtonType::Mentions` / `Reactions` / `PollVotes`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnreadJumpKind {
     Mention,
     Reaction,
+    /// B15: votes in the user's polls (`searchMessagesFilterUnreadPollVote`,
+    /// `readAllChatPollVotes`).
+    PollVote,
 }
 
 impl UnreadJumpKind {
-    /// `searchMessagesFilter*` constructor (`schema/td_api.tl:6317,6320`).
+    /// `searchMessagesFilter*` constructor (`schema/td_api.tl:6317,6320,6323`).
     pub fn filter_constructor(self) -> &'static str {
         match self {
             Self::Mention => "searchMessagesFilterUnreadMention",
             Self::Reaction => "searchMessagesFilterUnreadReaction",
+            Self::PollVote => "searchMessagesFilterUnreadPollVote",
         }
     }
 }

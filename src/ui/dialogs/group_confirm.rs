@@ -82,6 +82,11 @@ pub enum GroupConfirmAction {
     DeleteSavedSublist {
         topic_id: i64,
     },
+    /// Member list: "Remove from group" (tdesktop `lng_profile_sure_kick`)
+    /// — `banChatMember` in a basic group, ban then lift in a supergroup.
+    RemoveMember {
+        user_id: i64,
+    },
 }
 
 pub struct GroupConfirmDialog {

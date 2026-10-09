@@ -98,10 +98,7 @@ impl Session {
     /// Loaded Main-list destinations for the forward picker. Local title filter
     /// (tdesktop ShareBox search field). Unsupported kinds stay out.
     pub fn forward_destinations(&self, query: &str) -> Vec<&ChatSummary> {
-        self.local_search_chats(query)
-            .into_iter()
-            .filter(|chat| chat.supported())
-            .collect()
+        self.share_destinations(query)
     }
 
     /// Official "Forwarded from" label from `messageForwardInfo.origin`.
@@ -158,10 +155,16 @@ impl Session {
             self.remember_files(&message.files);
             self.upsert_message(message.clone(), message.id.0 < 0);
         }
-        let flight = self
-            .in_flight_forward
-            .take()
-            .filter(|flight| flight.extra == pending.id);
+        let flight = match self.in_flight_forward.take() {
+            Some(flight) if flight.extra == pending.id => Some(flight),
+            other => {
+                self.in_flight_forward = other;
+                self.queued_forward_flights
+                    .iter()
+                    .position(|flight| flight.extra == pending.id)
+                    .map(|index| self.queued_forward_flights.remove(index))
+            }
+        };
         let dest_chat_id = flight
             .as_ref()
             .map(|f| f.dest_chat_id)

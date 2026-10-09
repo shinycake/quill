@@ -621,6 +621,7 @@ impl QuillApp {
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
                 let sendable = !show_attach
+                    || self.forward_bar_here()
                     || !self.pending_attachments.is_empty()
                     || !self.composer.read(cx).value().trim().is_empty();
                 this.child(
@@ -687,6 +688,7 @@ impl QuillApp {
                         .when(
                             self.pending_forward.is_some()
                                 && !self.forward_picker_open
+                                && !self.forward_bar_here()
                                 // Selecting here: the header carries the buttons.
                                 && !self
                                     .session()
@@ -698,6 +700,10 @@ impl QuillApp {
                                 })
                             },
                         )
+                        .when(self.forward_bar_here(), |this| {
+                            this.child(self.forward_bar(cx))
+                        })
+                        .when(self.send_as_open, |this| this.child(self.send_as_panel(cx)))
                         .when_some(self.pending_delete.clone(), |this, _| {
                             this.child(self.delete_confirm_banner(cx))
                         })
@@ -724,6 +730,14 @@ impl QuillApp {
                         })
                         // Phase 4.2: poll creation dialog above the composer.
                         .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))
+                        // B15: checklist composer / "Add Tasks" and the poll
+                        // "Add an Option" row above the composer.
+                        .when_some(self.checklist_dialog_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
+                        .when_some(self.poll_add_option_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         // Phase D3a: invite-link creation dialog above the composer.
                         .when_some(self.invite_link_dialog_panel(cx), |this, panel| {
                             this.child(panel)
@@ -857,6 +871,13 @@ impl QuillApp {
                                 .when_some(self.scheduled_messages_button(cx), |row, button| {
                                     row.child(button)
                                 })
+                                // Show / hide the bot's reply keyboard.
+                                .when_some(self.keyboard_toggle_button(cx), |row, button| {
+                                    row.child(button)
+                                })
+                                // "Send as" identity of the chat
+                                // (`chat.message_sender_id`).
+                                .when_some(self.send_as_button(cx), |row, button| row.child(button))
                                 // Telegram Desktop's round button: the mic
                                 // while there's nothing to send, Send once
                                 // there is, Save when editing, the slow-mode
@@ -1139,10 +1160,40 @@ impl QuillApp {
                     // message rows instead of the empty placeholder.
                     let history_loading =
                         open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
-                    if history_loading {
+                    // R5: the first page failed or timed out — a Retry row
+                    // instead of an endless skeleton or a false "No messages".
+                    let history_failed =
+                        open.is_some_and(|id| session.is_some_and(|s| s.history_load_failed(id)));
+                    if history_failed {
+                        div()
+                            .id("history-load-failed")
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .p_6()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Couldn’t load messages ·"),
+                            )
+                            .child(
+                                Button::new("history-retry")
+                                    .label("Retry")
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.retry_history_load(cx);
+                                    })),
+                            )
+                            .into_any_element()
+                    } else if history_loading {
                         history_skeleton().into_any_element()
                     } else if is_secret {
                         self.secret_empty_explainer(cx).into_any_element()
+                    } else if let Some(intro) = self.greeting_intro(chat.as_ref(), cx) {
+                        intro
                     } else {
                         pane_placeholder(
                             "No messages yet",
@@ -1717,6 +1768,7 @@ impl QuillApp {
         let corner_buttons = self.jump_corner_buttons(
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
             chat.as_ref().map_or(0, |c| c.unread_reaction_count),
+            chat.as_ref().map_or(0, |c| c.unread_poll_vote_count),
             cx,
         );
         // kit Phase 3: only visible rows render. Row 0 becoming visible
@@ -2073,8 +2125,32 @@ impl QuillApp {
                             {
                                 this.begin_reply_from_message(chat_id, message_id, window, cx);
                             }
+                            // B11: double-click reacts with the quick
+                            // reaction (tdesktop `toggleFavoriteReaction`);
+                            // on selected text it selects the word instead.
+                            if event.click_count == 2
+                                && !this.selecting_in(row_chat)
+                                && !gpui_kit::base::TextSelection::has_selection(window, cx)
+                            {
+                                this.quick_react(row_chat, row_msg, cx);
+                            }
                             cx.notify();
                         }),
+                    )
+                    .when_some(
+                        self.reaction_fly_for(row_chat.0, row_msg.0, cx),
+                        |this, (glyph, frame)| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .bottom(px(12. + frame.rise))
+                                    .when(outgoing, |this| this.right(px(56.)))
+                                    .when(!outgoing, |this| this.left(px(64.)))
+                                    .opacity(frame.alpha)
+                                    .text_size(px(26. * frame.scale))
+                                    .child(glyph),
+                            )
+                        },
                     )
                     // Selecting slides an outgoing bubble aside for the check.
                     .child(if outgoing && selection_slide > 0. {
@@ -2146,6 +2222,17 @@ impl QuillApp {
             }
             self.history_scroller
                 .update(cx, |state, cx| state.scroll_to_end(cx));
+        }
+        cx.notify();
+    }
+
+    /// The "Couldn't load messages · Retry" row: ask for the first page
+    /// again.
+    pub(super) fn retry_history_load(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.retry_history().is_err()
+        {
+            self.status_note = "could not load history".into();
         }
         cx.notify();
     }

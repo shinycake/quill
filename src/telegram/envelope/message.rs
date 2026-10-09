@@ -9,6 +9,14 @@ pub enum MessageSender {
     Chat { chat_id: i64 },
 }
 
+/// `chatMessageSender` (TDLib 1.8.67, schema line 2842): one identity the
+/// user may post as; `needs_premium` entries are shown but locked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AvailableMessageSender {
+    pub sender: MessageSender,
+    pub needs_premium: bool,
+}
+
 /// `message.forward_info.origin` (TDLib 1.8.67 `MessageOrigin`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageOrigin {

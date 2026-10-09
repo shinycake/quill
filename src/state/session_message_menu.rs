@@ -3,7 +3,7 @@
 //! `AddWhoReactedAction`).
 use super::*;
 use crate::telegram::envelope::{
-    AddedReactionsPage, MessageReadDate, MessageViewer, ReportChatOutcome,
+    AddedReactionsPage, MessageReadDate, MessageViewer, ReactionType, ReportChatOutcome,
 };
 
 /// Where the report flow stands. TDLib walks it: an empty `reportChat`
@@ -75,6 +75,11 @@ pub struct MessageAudience {
     pub viewers: Audience<Vec<MessageViewer>>,
     pub read_date: Audience<MessageReadDate>,
     pub reactions: Audience<AddedReactionsPage>,
+    /// Per-reaction tabs, by `reaction_filter_key` (the "All" tab is
+    /// `reactions`).
+    pub filtered: HashMap<u64, Audience<AddedReactionsPage>>,
+    /// Tabs whose next page is in flight.
+    pub more_loading: HashSet<u64>,
 }
 
 impl MessageAudience {
@@ -85,6 +90,8 @@ impl MessageAudience {
             viewers: Audience::NotAsked,
             read_date: Audience::NotAsked,
             reactions: Audience::NotAsked,
+            filtered: HashMap::new(),
+            more_loading: HashSet::new(),
         }
     }
 }
@@ -278,10 +285,49 @@ impl Session {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
+        filter: u64,
+        append: bool,
         page: AddedReactionsPage,
     ) {
+        let Some(a) = self.audience_for(chat_id, message_id) else {
+            return;
+        };
+        a.more_loading.remove(&filter);
+        let slot = if filter == 0 {
+            &mut a.reactions
+        } else {
+            a.filtered.entry(filter).or_default()
+        };
+        match slot {
+            Audience::Ready(existing) if append => {
+                existing.reactions.extend(page.reactions);
+                existing.total_count = page.total_count.max(existing.total_count);
+                existing.next_offset = page.next_offset;
+            }
+            _ => *slot = Audience::Ready(page),
+        }
+    }
+
+    /// A tab's first page is on its way.
+    pub fn audience_tab_loading(&mut self, chat_id: ChatId, message_id: MessageId, filter: u64) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.reactions = Audience::Ready(page);
+            if filter == 0 {
+                a.reactions = Audience::Loading;
+            } else {
+                a.filtered.insert(filter, Audience::Loading);
+            }
+        }
+    }
+
+    /// A tab's next page is on its way.
+    pub fn audience_tab_loading_more(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        filter: u64,
+    ) {
+        if let Some(a) = self.audience_for(chat_id, message_id) {
+            a.more_loading.insert(filter);
         }
     }
 
@@ -307,12 +353,39 @@ impl Session {
             RequestPurpose::GetMessageAddedReactions {
                 chat_id,
                 message_id,
+                filter,
+                append,
             } => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
-                    a.reactions = Audience::Failed;
+                    a.more_loading.remove(&filter);
+                    // A failed next page keeps what was already listed.
+                    if !append {
+                        if filter == 0 {
+                            a.reactions = Audience::Failed;
+                        } else {
+                            a.filtered.insert(filter, Audience::Failed);
+                        }
+                    }
                 }
             }
             _ => {}
         }
     }
+}
+
+/// Stable key of a reaction for the "who reacted" tabs (0 is "All").
+pub fn reaction_filter_key(reaction: &ReactionType) -> u64 {
+    let text = match reaction {
+        ReactionType::Emoji { emoji } => format!("e:{emoji}"),
+        ReactionType::CustomEmoji { custom_emoji_id } => format!("c:{custom_emoji_id}"),
+        ReactionType::Paid => return 2,
+        ReactionType::Unknown => return 3,
+    };
+    // FNV-1a: stable across runs, unlike `DefaultHasher`.
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash.max(4)
 }

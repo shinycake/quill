@@ -328,3 +328,71 @@ fn b1_login_url_info_parsed() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn request_users_and_chat_buttons_keep_their_restrictions() {
+    let env = parse_envelope(
+        r#"{"@type":"updateNewMessage","message":{"id":310,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Pick bots","type":{"@type":"keyboardButtonTypeRequestUsers","id":7,"restrict_user_is_bot":true,"user_is_bot":true,"restrict_user_is_premium":false,"user_is_premium":true,"max_quantity":3}},{"@type":"keyboardButton","text":"Pick forum","type":{"@type":"keyboardButtonTypeRequestChat","id":8,"chat_is_channel":false,"restrict_chat_is_forum":true,"chat_is_forum":true,"restrict_chat_has_username":false,"chat_has_username":true,"chat_is_created":true,"bot_is_member":true}}]],"is_persistent":false,"resize_keyboard":false,"one_time":false,"is_personal":false,"force_reply":false,"input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+    )
+    .unwrap();
+    let EnvelopePayload::UpdateNewMessage(message) = env.payload else {
+        panic!("not a message");
+    };
+    let Some(ReplyMarkup::ShowKeyboard(keyboard)) = message.reply_markup else {
+        panic!("no keyboard");
+    };
+    assert_eq!(
+        keyboard.rows[0][0].kind,
+        KeyboardButtonType::RequestUsers(RequestUsersSpec {
+            id: 7,
+            user_is_bot: Some(true),
+            user_is_premium: None,
+            max_quantity: 3,
+        })
+    );
+    assert_eq!(
+        keyboard.rows[0][1].kind,
+        KeyboardButtonType::RequestChat(RequestChatSpec {
+            id: 8,
+            chat_is_channel: false,
+            chat_is_forum: Some(true),
+            chat_has_username: None,
+            chat_is_created: true,
+            bot_is_member: true,
+        })
+    );
+}
+
+#[test]
+fn update_chat_reply_markup_parses_the_message_and_null() {
+    let env = parse_envelope(
+        r#"{"@type":"updateChatReplyMarkup","chat_id":21,"reply_markup_message":{"id":12,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupRemoveKeyboard","is_personal":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateChatReplyMarkup {
+            chat_id,
+            message_id,
+            reply_markup,
+        } => {
+            assert_eq!(chat_id.0, 21);
+            assert_eq!(message_id.map(|m| m.0), Some(12));
+            assert!(matches!(reply_markup, Some(ReplyMarkup::RemoveKeyboard)));
+        }
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(
+        r#"{"@type":"updateChatReplyMarkup","chat_id":21,"reply_markup_message":null}"#,
+    )
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::UpdateChatReplyMarkup {
+            message_id,
+            reply_markup,
+            ..
+        } => {
+            assert!(message_id.is_none() && reply_markup.is_none());
+        }
+        other => panic!("{other:?}"),
+    }
+}

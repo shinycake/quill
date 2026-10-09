@@ -299,9 +299,6 @@ pub enum ServiceAction {
     PaidMedia {
         stars: i64,
     },
-    Checklist {
-        title: String,
-    },
 }
 
 fn i(value: &Value, key: &str) -> i64 {
@@ -380,6 +377,7 @@ fn chat_photo(value: &Value, files: &mut Vec<ParsedFile>) -> Option<PhotoContent
     }
     files.extend(photo_files);
     Some(PhotoContent {
+        has_stickers: false,
         caption: String::new(),
         caption_entities: Vec::new(),
         show_caption_above_media: false,
@@ -789,12 +787,6 @@ impl ServiceAction {
             },
             "messagePaidMedia" => A::PaidMedia {
                 stars: i(value, "star_count"),
-            },
-            "messageChecklist" => A::Checklist {
-                title: value
-                    .get("list")
-                    .map(|l| formatted(l, "title"))
-                    .unwrap_or_default(),
             },
             _ => return None,
         })

@@ -22,7 +22,7 @@ use quill::message_menu::{
 };
 use quill::state::{Audience, MessageReportStage, Session, StickerSetViewStage};
 use quill::telegram::envelope::{
-    ChatKind, MessageActions, MessageContent, MessageSender, ReactionType, ReportOption,
+    ChannelMemberStatus, MessageActions, MessageContent, MessageSender, ReactionType, ReportOption,
 };
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -46,6 +46,8 @@ pub(super) struct MessageMenuUi {
     pub report_open: bool,
     /// The sticker set dialog (`DialogKind::StickerSet`) is open.
     pub sticker_set_open: bool,
+    /// The "who reacted" tab (`None` = All).
+    pub audience_tab: Option<quill::telegram::envelope::ReactionType>,
     /// Details of a report (`reportChatResultTextRequired`).
     pub report_text: Entity<TextareaState>,
 }
@@ -56,6 +58,7 @@ impl MessageMenuUi {
             page: MessageMenuPage::Main,
             report_open: false,
             sticker_set_open: false,
+            audience_tab: None,
             report_text: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder("Add Comment")
@@ -72,9 +75,11 @@ pub(super) struct ModerationOffer {
     pub chat_id: ChatId,
     pub user_id: i64,
     pub user_name: String,
-    pub report_spam: bool,
-    pub delete_all: bool,
-    pub ban: bool,
+    /// Which checkboxes apply (`quill::moderation::moderate_options`).
+    pub options: quill::moderation::ModerateOptions,
+    /// Banning can be softened to a restriction (supergroups only;
+    /// tdesktop's expander under "Ban").
+    pub can_restrict_instead: bool,
 }
 
 /// One row of the menu with its sort key.
@@ -883,6 +888,7 @@ impl QuillApp {
                         ))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.message_menu_ui.page = MessageMenuPage::Audience;
+                            this.message_menu_ui.audience_tab = None;
                             cx.notify();
                         }))
                         .into_any_element(),
@@ -910,6 +916,23 @@ impl QuillApp {
         rows
     }
 
+    /// Switch the "who reacted" tab; a tab loads its first page once.
+    fn select_audience_tab(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        tab: Option<ReactionType>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live
+                .driver
+                .fetch_reactors_tab(chat_id, message_id, tab.as_ref(), false);
+        }
+        self.message_menu_ui.audience_tab = tab;
+        cx.notify();
+    }
+
     /// The page behind the "N Seen" row: reactors with their reaction and
     /// time, then viewers with theirs.
     pub(super) fn menu_audience_page(
@@ -935,10 +958,16 @@ impl QuillApp {
         else {
             return Vec::new();
         };
+        // An admin may drop one member's reaction when TDLib says this
+        // message allows it (`messageProperties.can_delete_reactions`).
+        let can_delete_reactions = session
+            .message_menu_actions
+            .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
         let person = |ix: u64,
                       sender: MessageSender,
                       detail: Option<String>,
                       when: i32,
+                      deletable: bool,
                       cx: &mut Context<Self>|
          -> MenuRow {
             let (name, photo) = super::history::reactor_avatar(&sender, Some(session), &roots);
@@ -988,6 +1017,27 @@ impl QuillApp {
                     .when_some(detail, |this, detail| {
                         this.child(div().ml_auto().pl_3().text_base().child(detail))
                     })
+                    .when(deletable, |this| {
+                        this.child(
+                            div()
+                                .id(("menu-audience-delete-reaction", ix))
+                                .ml_2()
+                                .px_2()
+                                .py_0p5()
+                                .rounded_md()
+                                .text_xs()
+                                .text_color(danger_bright())
+                                .hover(|style| style.bg(row_hover))
+                                .role(gpui_kit::Role::Button)
+                                .aria_label("Delete reaction")
+                                .child("Delete")
+                                // Keep the row's own click (open profile) out of it.
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.delete_member_reaction(chat_id, message_id, sender, cx);
+                                })),
+                        )
+                    })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.message_menu = None;
                         this.open_avatar_profile(sender, window, cx);
@@ -1012,7 +1062,70 @@ impl QuillApp {
         };
         let mut rows = Vec::new();
         let mut ix = 0u64;
-        if let Some(page) = audience.reactions.ready()
+        // Tabs per reaction (tdesktop `Ui::ReactionsList` / the "All" tab
+        // and one tab per reaction when there is more than one).
+        let tab = self.message_menu_ui.audience_tab.clone();
+        let chips: Vec<(ReactionType, i32)> = message
+            .reaction_chips()
+            .into_iter()
+            .map(|chip| (chip.reaction_type.clone(), chip.total_count))
+            .collect();
+        if chips.len() > 1 && audience.reactions.ready().is_some() {
+            let total: i32 = chips.iter().map(|(_, count)| *count).sum();
+            let mut tabs = div()
+                .id("menu-audience-tabs")
+                .flex()
+                .flex_wrap()
+                .gap_1()
+                .px_2()
+                .py_1();
+            let all_selected = tab.is_none();
+            let mut entries: Vec<(Option<ReactionType>, String)> =
+                vec![(None, format!("All {total}"))];
+            for (reaction, count) in &chips {
+                let glyph = match reaction {
+                    ReactionType::Emoji { emoji } => super::reactions::emoji_presentation(emoji),
+                    ReactionType::Paid => "⭐".to_string(),
+                    _ => "✦".to_string(),
+                };
+                entries.push((Some(reaction.clone()), format!("{glyph} {count}")));
+            }
+            for (tab_ix, (reaction, label)) in entries.into_iter().enumerate() {
+                let selected = if tab_ix == 0 {
+                    all_selected
+                } else {
+                    tab == reaction
+                };
+                let accent_bg = cx.theme().accent;
+                tabs = tabs.child(
+                    div()
+                        .id(("menu-audience-tab", tab_ix as u64))
+                        .px_2()
+                        .py_0p5()
+                        .rounded_full()
+                        .text_xs()
+                        .cursor_pointer()
+                        .text_color(text_menu())
+                        .when(selected, |this| this.bg(accent_bg).font_semibold())
+                        .hover(|style| style.bg(accent_bg))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label(label.clone())
+                        .child(label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.select_audience_tab(chat_id, message_id, reaction.clone(), cx);
+                        })),
+                );
+            }
+            rows.push((10, tabs.into_any_element()));
+        }
+        let tab_state = match &tab {
+            None => Some(&audience.reactions),
+            Some(reaction) => audience
+                .filtered
+                .get(&quill::state::reaction_filter_key(reaction)),
+        };
+        let tab_filter = tab.as_ref().map_or(0, quill::state::reaction_filter_key);
+        if let Some(page) = tab_state.and_then(|state| state.ready())
             && !page.reactions.is_empty()
         {
             rows.push(heading(reacted_label(page.total_count.max(0) as usize), 0));
@@ -1023,8 +1136,54 @@ impl QuillApp {
                     ReactionType::Paid => "⭐".to_string(),
                     _ => "✦".to_string(),
                 };
-                rows.push(person(ix, reaction.sender, Some(glyph), reaction.date, cx));
+                rows.push(person(
+                    ix,
+                    reaction.sender,
+                    Some(glyph),
+                    reaction.date,
+                    can_delete_reactions,
+                    cx,
+                ));
             }
+            if !page.next_offset.is_empty() {
+                let loading = audience.more_loading.contains(&tab_filter);
+                let more_tab = tab.clone();
+                let hover = cx.theme().accent;
+                rows.push((
+                    10,
+                    div()
+                        .id("menu-audience-more")
+                        .px_3()
+                        .py_1p5()
+                        .rounded_md()
+                        .text_sm()
+                        .text_color(text_muted())
+                        .when(!loading, |this| {
+                            this.cursor_pointer().hover(|style| style.bg(hover))
+                        })
+                        .role(gpui_kit::Role::Button)
+                        .child(if loading { "Loading..." } else { "Show more" })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.fetch_reactors_tab(
+                                    chat_id,
+                                    message_id,
+                                    more_tab.as_ref(),
+                                    true,
+                                );
+                            }
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                ));
+            }
+        } else if tab_state.is_some_and(|state| state.is_loading()) {
+            rows.push(info_row(
+                10,
+                "menu-audience-tab-loading",
+                None,
+                "Loading...",
+            ));
         }
         if let Some(viewers) = audience.viewers.ready()
             && !viewers.is_empty()
@@ -1039,6 +1198,7 @@ impl QuillApp {
                     },
                     None,
                     viewer.view_date,
+                    false,
                     cx,
                 ));
             }
@@ -1358,6 +1518,29 @@ impl QuillApp {
     // Moderation.
     // ----------------------------------------------------------------
 
+    /// "Delete" on a row of the who-reacted list: the admin removes that
+    /// member's reaction (`deleteMessageReactionsFromSender`), then the
+    /// list is fetched again.
+    pub(super) fn delete_member_reaction(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        sender: MessageSender,
+        cx: &mut Context<Self>,
+    ) {
+        self.status_note = match self.live.as_mut() {
+            Some(live) => match live
+                .driver
+                .delete_message_reactions_from(chat_id, message_id, sender)
+            {
+                Ok(Some(_)) => "deleting reaction…".into(),
+                _ => "could not delete the reaction".into(),
+            },
+            None => "reaction deletion needs a live connection (demo)".into(),
+        };
+        cx.notify();
+    }
+
     /// The admin checkboxes the delete box adds for `message_id`
     /// (`boxes/moderate_messages_box.cpp`): Report Spam, Delete all from
     /// the user, Ban the user. `None` when nothing applies.
@@ -1367,34 +1550,50 @@ impl QuillApp {
         message: &quill::state::HistoryMessage,
         actions: Option<MessageActions>,
     ) -> Option<ModerationOffer> {
+        use quill::moderation::{GroupFlavor, ModerateInput, moderate_options};
         let session = self.session()?;
-        let supergroup = matches!(
-            session.chats.get(&chat_id.0)?.kind,
-            ChatKind::Supergroup {
-                is_channel: false,
-                ..
-            }
-        );
+        let flavor = self.group_flavor(chat_id)?;
         let MessageSender::User { user_id } = message.sender? else {
             return None;
         };
-        if !supergroup || message.is_outgoing || session.my_user_id == Some(user_id) {
-            return None;
-        }
         let actions = actions?;
-        let can_delete = actions.can_be_deleted_for_all_users;
-        let offer = ModerationOffer {
+        // The sender's standing, when the admin list is loaded; a plain
+        // member otherwise (TDLib rejects a ban it does not allow).
+        let (sender_status, sender_can_be_edited) = match session.admin_lists.get(&chat_id.0) {
+            Some(quill::state::AdminListFetch::Loaded(list)) => list
+                .iter()
+                .find(|entry| entry.user_id == user_id)
+                .map_or((ChannelMemberStatus::Member, false), |entry| {
+                    if entry.is_owner {
+                        (ChannelMemberStatus::Creator, false)
+                    } else {
+                        (ChannelMemberStatus::Administrator, entry.can_be_edited)
+                    }
+                }),
+            _ => (ChannelMemberStatus::Member, false),
+        };
+        let options = moderate_options(&ModerateInput {
+            flavor,
+            sender_is_user: true,
+            sender_is_self: message.is_outgoing || session.my_user_id == Some(user_id),
+            can_report_spam: actions.can_report_supergroup_spam,
+            can_delete_for_all: actions.can_be_deleted_for_all_users,
+            // Reactions are removed from the who-reacted list, not here.
+            can_delete_reactions: false,
+            viewer_can_restrict: session.chat_can_restrict_members(chat_id),
+            sender_status,
+            sender_can_be_edited,
+        });
+        options.any().then(|| ModerationOffer {
             chat_id,
             user_id,
             user_name: session
                 .user(user_id)
                 .map(|u| u.display_name())
                 .unwrap_or_else(|| "this user".into()),
-            report_spam: actions.can_report_supergroup_spam,
-            delete_all: can_delete,
-            ban: session.chat_can_restrict_members(chat_id),
-        };
-        (offer.report_spam || offer.delete_all || offer.ban).then_some(offer)
+            options,
+            can_restrict_instead: flavor == GroupFlavor::Supergroup && options.ban_or_restrict,
+        })
     }
 }
 

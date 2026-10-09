@@ -432,6 +432,7 @@ impl Session {
                     can_set_sticker_set,
                     sticker_set_id,
                     custom_emoji_sticker_set_id,
+                    admin: Default::default(),
                 },
             );
             // Slice G2: anti-spam state for the manage-dialog
@@ -478,6 +479,7 @@ impl Session {
                 can_set_sticker_set,
                 sticker_set_id,
                 custom_emoji_sticker_set_id,
+                admin: Default::default(),
             },
         );
         // Slice G2: anti-spam state for the manage-dialog toggle.
@@ -556,6 +558,14 @@ impl Session {
             self.notification_exceptions
                 .insert(scope, chat_ids.iter().map(|id| id.0).collect());
             self.notification_exceptions_loading.remove(&scope);
+        }
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::SearchShareChats | RequestPurpose::SearchShareChatsOnServer
+            )
+        {
+            self.share_search.accept(pending.id, &chat_ids);
         }
         // `getTopChats`: not tied to a query generation, only to the strip.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopChats) {

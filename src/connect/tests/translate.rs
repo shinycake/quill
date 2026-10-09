@@ -198,3 +198,55 @@ fn chat_translated_to_toggles_and_bumps_the_revision() {
     h.driver.session.set_chat_translated_to(ChatId(7), None);
     assert_eq!(h.driver.session.chat_translated_to(ChatId(7)), None);
 }
+
+#[test]
+fn hiding_the_bar_sends_toggle_chat_is_translatable_and_rolls_back() {
+    let mut h = Harness::new();
+    h.ingest(r#"{"@type":"updateChatIsTranslatable","chat_id":7,"is_translatable":true}"#);
+    h.driver
+        .toggle_chat_is_translatable(ChatId(7), false)
+        .expect("request");
+    let v = sent_request(&h.recorder, "toggleChatIsTranslatable");
+    assert_eq!(v["chat_id"], 7);
+    assert_eq!(v["is_translatable"], false);
+    assert!(!h.driver.session.chat_is_translatable(ChatId(7)));
+    let json = format!(
+        r#"{{"@type":"error","code":400,"message":"PEER_ID_INVALID","@extra":"{id}"}}"#,
+        id = v["@extra"].as_str().unwrap(),
+    );
+    h.ingest(&json);
+    assert!(
+        h.driver.session.chat_is_translatable(ChatId(7)),
+        "a refused hide puts the bar back"
+    );
+}
+
+#[test]
+fn channel_auto_translate_is_parsed_gated_and_toggled() {
+    let mut h = Harness::new();
+    h.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":13,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":13,"is_channel":true},"unread_count":0}}"#,
+    );
+    h.ingest(
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"has_automatic_translation":true,"status":{"@type":"chatMemberStatusMember"}}}"#,
+    );
+    assert!(h.driver.session.chat_auto_translate(ChatId(13)));
+    // A plain member cannot change it.
+    assert!(h.driver.toggle_auto_translate(ChatId(13), false).is_err());
+    h.ingest(
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"has_automatic_translation":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_change_info":true}}}}"#,
+    );
+    h.driver
+        .toggle_auto_translate(ChatId(13), false)
+        .expect("request");
+    let v = sent_request(&h.recorder, "toggleSupergroupHasAutomaticTranslation");
+    assert_eq!(v["supergroup_id"], 13);
+    assert_eq!(v["has_automatic_translation"], false);
+    assert!(!h.driver.session.chat_auto_translate(ChatId(13)));
+    let json = format!(
+        r#"{{"@type":"error","code":400,"message":"BOOSTS_REQUIRED","@extra":"{id}"}}"#,
+        id = v["@extra"].as_str().unwrap(),
+    );
+    h.ingest(&json);
+    assert!(h.driver.session.chat_auto_translate(ChatId(13)));
+}
