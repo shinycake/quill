@@ -18,6 +18,11 @@ impl Session {
         self.apply_proxy_ok(pending);
         self.apply_privacy_data_ok(pending);
         match pending.map(|p| p.purpose) {
+            Some(
+                RequestPurpose::SetChatTheme
+                | RequestPurpose::SetChatBackground
+                | RequestPurpose::DeleteChatBackground,
+            ) => self.chat_look_oks = self.chat_look_oks.wrapping_add(1),
             Some(RequestPurpose::EditMessageSchedulingState {
                 message_id,
                 scheduling,

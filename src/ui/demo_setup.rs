@@ -1458,6 +1458,7 @@ impl QuillApp {
                 background: Some(6),
                 remove_wallpaper: false,
                 both: false,
+                awaiting: None,
             });
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyBackgroundLink)) {
@@ -1469,6 +1470,7 @@ impl QuillApp {
                 background: None,
                 remove_wallpaper: false,
                 both: false,
+                awaiting: None,
             });
         }
         // Slice parity:auth-multi-account (UI): the Accounts dialog open
