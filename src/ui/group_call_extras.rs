@@ -15,6 +15,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::*;
 use quill::calls::ptt::{PttAction, PttConfig, PushToTalk};
+use quill::calls::ptt_global::{HookState, KeyEdge, Sink};
 use quill::calls::tile_pin::TileKey;
 use quill::telegram::envelope::MessageSender;
 use std::time::Duration;
@@ -54,7 +55,16 @@ impl QuillApp {
     /// push-to-talk key (so the caller stops other handling of it).
     pub(super) fn group_call_key_down(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
         let config = self.ptt_config();
-        if !PushToTalk::matches(&config, key) || !self.group_call_joined() {
+        if !PushToTalk::matches(&config, key) {
+            return false;
+        }
+        self.ptt_press(cx)
+    }
+
+    /// The push-to-talk key went down (window or system-wide). Returns
+    /// whether it was handled.
+    fn ptt_press(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.group_call_joined() {
             return false;
         }
         // An admin-muted participant cannot open the microphone by key.
@@ -78,7 +88,13 @@ impl QuillApp {
         if !PushToTalk::matches(&config, key) {
             return false;
         }
-        let delay = config.release_delay_ms;
+        self.ptt_release(cx);
+        true
+    }
+
+    /// The push-to-talk key came up (window or system-wide).
+    fn ptt_release(&mut self, cx: &mut Context<Self>) {
+        let delay = self.ptt_config().release_delay_ms;
         let now = self.ptt_now_ms();
         if let Some(action) = self.group_call_ptt.key_up(now, delay) {
             self.apply_ptt_action(action, cx);
@@ -90,7 +106,6 @@ impl QuillApp {
             })
             .detach();
         }
-        true
     }
 
     fn group_call_ptt_tick(&mut self, cx: &mut Context<Self>) {
@@ -103,6 +118,10 @@ impl QuillApp {
     /// The voice chat window lost focus (the key-up would never arrive), or
     /// push-to-talk was switched off: drop held state, close the microphone.
     pub(super) fn group_call_ptt_release_all(&mut self, cx: &mut Context<Self>) {
+        // With the system-wide hook the key-up still arrives in the background.
+        if self.global_ptt.is_active() {
+            return;
+        }
         if let Some(action) = self.group_call_ptt.reset()
             && self.group_call_joined()
         {
@@ -113,6 +132,7 @@ impl QuillApp {
     /// Settings switched push-to-talk on or off while a call may be live:
     /// on, the microphone closes until the key is held; off, the state resets.
     pub(super) fn sync_ptt_with_call(&mut self, cx: &mut Context<Self>) {
+        self.sync_global_ptt(cx);
         let enabled = self.ptt_config().enabled;
         if enabled {
             if self.group_call_joined() && !self.group_call_ptt.is_talking() {
@@ -121,6 +141,107 @@ impl QuillApp {
         } else {
             let _ = self.group_call_ptt.reset();
         }
+    }
+
+    /// Run the system-wide key hook exactly while a real group call is
+    /// joined with push-to-talk on; tear it down otherwise. Cheap when
+    /// nothing changed, so it is safe to call from the render sync.
+    pub(super) fn sync_global_ptt(&mut self, cx: &mut Context<Self>) {
+        let config = self.ptt_config();
+        let want = (self.live.is_some() && config.enabled && self.group_call_joined())
+            .then_some(config.key);
+        let mut events = None;
+        let changed = self.global_ptt.sync(want.as_deref(), |key| {
+            let (tx, rx) = std::sync::mpsc::channel::<KeyEdge>();
+            let sink: Sink = std::sync::Arc::new(move |edge| {
+                let _ = tx.send(edge);
+            });
+            let handle = quill::calls::ptt_global::start_platform(key, sink)?;
+            events = Some(rx);
+            Ok(handle)
+        });
+        if let Some(rx) = events {
+            self.listen_global_ptt(rx, cx);
+        }
+        if want.is_none() && changed {
+            let _ = self.group_call_ptt.reset();
+        }
+        if matches!(self.global_ptt.state(), HookState::NeedsPermission) {
+            self.arm_global_ptt_permission_poll(cx);
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Forward hook-thread events to the app. Blocks one background thread
+    /// per event instead of polling; ends when the hook stops.
+    fn listen_global_ptt(
+        &mut self,
+        rx: std::sync::mpsc::Receiver<KeyEdge>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            let mut rx = rx;
+            loop {
+                let (back, edge) = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let edge = rx.recv().ok();
+                        (rx, edge)
+                    })
+                    .await;
+                rx = back;
+                let Some(edge) = edge else { break };
+                if this
+                    .update(cx, |this, cx| this.global_ptt_edge(edge, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn global_ptt_edge(&mut self, edge: KeyEdge, cx: &mut Context<Self>) {
+        if !self.ptt_config().enabled {
+            return;
+        }
+        match edge {
+            KeyEdge::Down => {
+                self.ptt_press(cx);
+            }
+            KeyEdge::Up => self.ptt_release(cx),
+        }
+    }
+
+    /// Input Monitoring changes need no restart to be noticed by a fresh
+    /// check, so look again every couple of seconds while it is missing.
+    fn arm_global_ptt_permission_poll(&mut self, cx: &mut Context<Self>) {
+        if self.global_ptt_polling {
+            return;
+        }
+        self.global_ptt_polling = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let _ = this.update(cx, |this, cx| {
+                this.global_ptt_polling = false;
+                if quill::calls::ptt_global::permission_granted() {
+                    this.recheck_global_ptt(cx);
+                } else if matches!(this.global_ptt.state(), HookState::NeedsPermission) {
+                    this.arm_global_ptt_permission_poll(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// "Check again" in Settings: allow a failed start to be retried.
+    pub(super) fn recheck_global_ptt(&mut self, cx: &mut Context<Self>) {
+        self.global_ptt.retry();
+        self.sync_global_ptt(cx);
+        cx.notify();
     }
 
     /// Bind the next pressed key as the push-to-talk key (Settings).
@@ -175,6 +296,9 @@ impl QuillApp {
         let config = config.sanitized();
         let selected_delay = delays.iter().position(|d| *d == config.release_delay_ms);
         let capturing = self.ptt_capture;
+        let needs_permission = config.enabled
+            && (matches!(self.global_ptt.state(), HookState::NeedsPermission)
+                || !quill::calls::ptt_global::permission_granted());
         let mut section = div().flex().flex_col().gap_1().child(
             div()
                 .id("call-pref-ptt")
@@ -214,7 +338,12 @@ impl QuillApp {
                         .items_center()
                         .justify_between()
                         .px_2()
-                        .child(div().text_xs().font_weight(FontWeight::MEDIUM).child("Shortcut"))
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child("Shortcut"),
+                        )
                         .child(
                             Button::new("call-pref-ptt-key")
                                 .label(if capturing {
@@ -241,16 +370,49 @@ impl QuillApp {
                     RadioGroup::vertical("call-pref-ptt-delay")
                         .selected_index(selected_delay)
                         .children(delays.iter().map(|ms| {
-                            Radio::new(format!("call-pref-ptt-delay-{ms}")).label(format!("{ms} ms"))
+                            Radio::new(format!("call-pref-ptt-delay-{ms}"))
+                                .label(format!("{ms} ms"))
                         }))
                         .on_click(cx.listener(move |this, &ix, _, cx| {
                             let ms = delays[ix];
-                            this.set_call_pref(|prefs| prefs.push_to_talk.release_delay_ms = ms, cx);
+                            this.set_call_pref(
+                                |prefs| prefs.push_to_talk.release_delay_ms = ms,
+                                cx,
+                            );
                         })),
                 )
                 .child(div().text_xs().text_color(muted).px_2().child(
-                    "Works while the voice chat window is in front. System-wide shortcuts are not available yet.",
+                    quill::calls::ptt_global::status_note(
+                        self.global_ptt.state(),
+                        quill::calls::ptt_global::static_limit().as_deref(),
+                    ),
                 ));
+            // tdesktop shows this box when enabling the shortcut without
+            // access; here it sits under the shortcut instead of a dialog.
+            if needs_permission {
+                section = section.child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .px_2()
+                        .child(
+                            Button::new("call-pref-ptt-open-settings")
+                                .label("Open Settings")
+                                .small()
+                                .on_click(cx.listener(|_, _, _, _| {
+                                    quill::calls::ptt_global::open_permission_settings();
+                                })),
+                        )
+                        .child(
+                            Button::new("call-pref-ptt-recheck")
+                                .label("Check again")
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.recheck_global_ptt(cx);
+                                })),
+                        ),
+                );
+            }
         }
         section.into_any_element()
     }

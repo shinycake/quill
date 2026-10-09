@@ -649,6 +649,9 @@ pub struct QuillApp {
     pub(super) group_call_ptt: quill::calls::ptt::PushToTalk,
     pub(super) ptt_clock: Instant,
     pub(super) ptt_capture: bool,
+    /// System-wide push-to-talk hook, live only while joined with PTT on.
+    pub(super) global_ptt: quill::calls::ptt_global::PlatformController,
+    pub(super) global_ptt_polling: bool,
     /// Locally pinned video tile of the group call (tdesktop viewport pin).
     pub(super) group_call_pin: quill::calls::tile_pin::TilePin,
     pub(super) call_window_opening: bool,
