@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
@@ -53,7 +53,7 @@ jobs:
             libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev libclang-dev nasm
       - name: restore TDLib build
         id: tdlib-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: native/prefix
           key: tdlib-linux-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
@@ -64,13 +64,13 @@ jobs:
         run: bash scripts/build-tdlib.sh
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: native/prefix
           key: tdlib-linux-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
       - name: restore rlottie build
         id: rlottie-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: vendor/rlottie/prefix
           key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
@@ -79,7 +79,7 @@ jobs:
         run: bash scripts/build-rlottie.sh
       - name: save rlottie build
         if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: vendor/rlottie/prefix
           key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
@@ -87,7 +87,7 @@ jobs:
       # FFmpeg (LGPL, shared, decoders only) + the quillvideo shim.
       - name: restore FFmpeg build
         id: ffmpeg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
@@ -96,7 +96,7 @@ jobs:
         run: bash scripts/build-ffmpeg.sh
       - name: save FFmpeg build
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
@@ -153,7 +153,7 @@ jobs:
           mkdir -p dist/update
           cp dist/linux/quill-linux-x86_64/quill dist/update/quill-linux-x86_64
           test "$(dist/update/quill-linux-x86_64 --release-asset-name)" = quill-linux-x86_64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-linux-x86_64-bundle
           path: |

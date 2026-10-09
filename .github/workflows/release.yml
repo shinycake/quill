@@ -59,7 +59,7 @@ jobs:
       credentials: ${{ steps.v.outputs.credentials }}
       publish: ${{ steps.v.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: v
@@ -158,10 +158,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: archive LGPL sources
         run: bash scripts/release-lgpl-sources.sh dist/sources
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-lgpl-sources
           path: dist/sources/*
@@ -182,22 +182,22 @@ jobs:
       CREDENTIALS: ${{ needs.prepare.outputs.credentials }}
       PUBLISH: ${{ needs.prepare.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: quill-macos-aarch64
           path: in/macos
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: quill-linux-x86_64-bundle
           path: in/linux
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: quill-windows-x86_64
           path: in/windows
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: quill-lgpl-sources
           path: in/sources
@@ -271,7 +271,7 @@ jobs:
           [ "$sources" -ge 1 ] || { echo "::error::no LGPL source archives"; exit 1; }
           [ "${#extra[@]}" -eq 0 ] || { echo "::error::unexpected entries in release-out: ${extra[*]}"; exit 1; }
           echo "release files OK: ${#expected[@]} + $sources source archives"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-release-${{ needs.prepare.outputs.tag }}
           path: |
