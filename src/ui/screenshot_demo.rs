@@ -590,6 +590,13 @@ pub enum ScreenshotDemo {
     /// `messageChatSetMessageAutoDeleteTime` service row, and the timer
     /// picker expanded under the header.
     ReadyChatTtl,
+    /// Notifications and mute: the open chat's Mute submenu with the
+    /// Custom duration row expanded, Unmute and Disable sound (injected,
+    /// no live Telegram).
+    ReadyMuteCustom,
+    /// Auto-delete in a regular chat: the header menu's picker with the
+    /// Custom stepper expanded (injected, no live Telegram).
+    ReadyAutoDelete,
     /// Phase C3a: a joined group voice chat (injected, no live
     /// Telegram) — the overlay renders the title, participant grid
     /// (speaking / muted / hand-raised badges), E2E verification

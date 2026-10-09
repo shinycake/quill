@@ -312,3 +312,18 @@ pub(crate) fn parse_reaction_type(value: Option<&Value>) -> Option<ReactionType>
         None => None,
     }
 }
+
+/// `unreadReaction type:ReactionType sender_id:MessageSender is_big:Bool`
+/// (schema 1.8.67, line 2995): one not-yet-seen reaction on an own message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadReaction {
+    pub reaction_type: ReactionType,
+    pub sender: Option<MessageSender>,
+}
+
+pub(crate) fn parse_unread_reaction(value: &Value) -> Option<UnreadReaction> {
+    Some(UnreadReaction {
+        reaction_type: parse_reaction_type(value.get("type"))?,
+        sender: super::message::parse_message_sender(value.get("sender_id")).ok(),
+    })
+}

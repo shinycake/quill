@@ -1103,6 +1103,20 @@ impl Session {
             // never a fake success, never an optimistic change.
             // `sessions_error_line` is reused: it is a pure
             // (action, error-class) formatter, not session-bound.
+            Some(RequestPurpose::GetDefaultAutoDelete) => {
+                self.default_auto_delete_busy = false;
+                self.default_auto_delete_error = Some(sessions_error_line(
+                    "load the default auto-delete timer",
+                    &err,
+                ));
+            }
+            Some(RequestPurpose::SetDefaultAutoDelete { .. }) => {
+                self.default_auto_delete_busy = false;
+                self.default_auto_delete_error = Some(sessions_error_line(
+                    "change the default auto-delete timer",
+                    &err,
+                ));
+            }
             Some(RequestPurpose::GetAccountTtl) => {
                 self.account_ttl_loading = false;
                 self.account_error = Some(sessions_error_line(

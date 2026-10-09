@@ -945,6 +945,11 @@ impl Session {
                     .or_insert_with(|| placeholder_chat(chat_id));
                 chat.last_read_inbox_message_id = last_read_inbox_message_id;
                 chat.unread_count = unread_count;
+                // Read here or on another device: whatever toast we showed
+                // for the chat is stale (tdesktop `clearFromHistory`).
+                if unread_count == 0 {
+                    self.clear_chat_notifications(chat_id);
+                }
             }
             // Slice CL3: mention / reaction badge counts (schema 1.8.67,
             // lines 10567/10570).
@@ -965,6 +970,46 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .unread_reaction_count = unread_reaction_count;
+            }
+            EnvelopePayload::UpdateMessageUnreadReactions {
+                chat_id,
+                unread_reaction_count,
+                newest,
+                ..
+            } => {
+                let previous = self
+                    .chats
+                    .get(&chat_id.0)
+                    .map_or(0, |chat| chat.unread_reaction_count);
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .unread_reaction_count = unread_reaction_count;
+                // A grown counter with a visible newest reaction is a new
+                // reaction on one of our messages.
+                if unread_reaction_count > previous
+                    && let Some(reaction) = newest
+                {
+                    self.queue_reaction_notification(chat_id, &reaction);
+                }
+            }
+            // `updateNotificationGroup` / `updateActiveNotifications`: a
+            // group that emptied (read elsewhere, or removed) clears the
+            // OS notifications we showed for the chat.
+            EnvelopePayload::UpdateNotificationGroup {
+                chat_id,
+                total_count,
+                added_count,
+                removed_count,
+            } => {
+                if total_count == 0 && added_count == 0 && removed_count > 0 {
+                    self.clear_chat_notifications(chat_id);
+                }
+            }
+            EnvelopePayload::UpdateActiveNotifications { chat_ids } => {
+                // Notifications of a previous launch: remember the chats so
+                // a later read clears them too.
+                self.shown_notification_chats.extend(chat_ids);
             }
             // Slice CL3: `updateChatBlockList` (schema 1.8.67, line
             // 10594).
@@ -2667,6 +2712,13 @@ impl Session {
                     self.change_number_timeout = Some(timeout);
                     self.change_number_loading = false;
                     self.change_number_error = None;
+                }
+            }
+            EnvelopePayload::MessageAutoDeleteTime { seconds } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetDefaultAutoDelete) {
+                    self.default_auto_delete_secs = Some(seconds);
+                    self.default_auto_delete_busy = false;
+                    self.default_auto_delete_error = None;
                 }
             }
             EnvelopePayload::AccountTtl { days } => {

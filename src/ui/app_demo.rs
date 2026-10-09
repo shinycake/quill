@@ -1013,6 +1013,20 @@ pub(super) fn demo_seed_for(
             "screenshot demo — reconnecting call audio (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyMuteCustom => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — mute menu with custom duration (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyAutoDelete => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — auto-delete timer in a regular chat (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyChatTtl => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1827,7 +1841,11 @@ impl QuillApp {
             forward_result: None,
             reactions_expanded: false,
             mute_menu_open: false,
+            mute_custom_open: false,
+            mute_custom: quill::mute_menu::CustomMute::default(),
             ttl_picker_open: false,
+            ttl_custom_open: false,
+            ttl_custom_secs: 86_400,
             pinned_cursor: HashMap::new(),
             hidden_pinned: HashMap::new(),
             pinned_list_open: false,
@@ -2226,8 +2244,11 @@ impl QuillApp {
                 {
                     return;
                 }
+                let action = quill::notify::NotificationAction::from_id(
+                    response.action_id.as_ref().map(|id| id.as_ref()),
+                );
                 if let Ok(mut clicks) = this.notify_clicks.lock() {
-                    clicks.push(chat_id);
+                    clicks.push((chat_id, action));
                 }
                 cx.notify();
             });
