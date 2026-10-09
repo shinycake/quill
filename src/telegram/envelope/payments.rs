@@ -460,7 +460,11 @@ pub(crate) fn parse_payment_receipt(value: &Value) -> Option<PaymentReceiptData>
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        date: value
+            .get("date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         currency,
         total_amount,
         credentials_title,
@@ -567,7 +571,8 @@ pub(crate) fn parse_star_subscription(value: &Value) -> Option<StarSubscriptionD
         expiration_date: value
             .get("expiration_date")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         is_canceled: value
             .get("is_canceled")
             .and_then(Value::as_bool)

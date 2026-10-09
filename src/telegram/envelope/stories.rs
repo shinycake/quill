@@ -305,7 +305,8 @@ pub(crate) fn parse_can_post_story_result(value: &Value) -> Option<CanPostStoryR
             story_count: value
                 .get("story_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         Some("canPostStoryResultPremiumNeeded") => Some(CanPostStoryResult::PremiumNeeded),
         Some("canPostStoryResultBoostNeeded") => Some(CanPostStoryResult::BoostNeeded),
@@ -317,7 +318,8 @@ pub(crate) fn parse_can_post_story_result(value: &Value) -> Option<CanPostStoryR
                 retry_after: value
                     .get("retry_after")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
             })
         }
         Some("canPostStoryResultMonthlyLimitExceeded") => {
@@ -325,12 +327,17 @@ pub(crate) fn parse_can_post_story_result(value: &Value) -> Option<CanPostStoryR
                 retry_after: value
                     .get("retry_after")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
             })
         }
         Some("canPostStoryResultLiveStoryIsActive") => {
             Some(CanPostStoryResult::LiveStoryIsActive {
-                story_id: value.get("story_id").and_then(Value::as_i64).unwrap_or(0) as i32,
+                story_id: value
+                    .get("story_id")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .sat_i32(),
             })
         }
         _ => None,
@@ -339,8 +346,12 @@ pub(crate) fn parse_can_post_story_result(value: &Value) -> Option<CanPostStoryR
 
 pub(crate) fn parse_story_info(value: &Value) -> Option<StoryInfoView> {
     Some(StoryInfoView {
-        story_id: value.get("story_id")?.as_i64()? as i32,
-        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        story_id: value.get("story_id")?.as_i64()?.sat_i32(),
+        date: value
+            .get("date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         is_for_close_friends: value
             .get("is_for_close_friends")
             .and_then(Value::as_bool)
@@ -360,7 +371,8 @@ pub(crate) fn parse_chat_active_stories(value: &Value) -> Option<ChatActiveStori
         max_read_story_id: value
             .get("max_read_story_id")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         stories: value
             .get("stories")
             .and_then(Value::as_array)
@@ -374,7 +386,7 @@ pub(crate) fn parse_chat_active_stories(value: &Value) -> Option<ChatActiveStori
 /// than failing the row. Collects the content's `file`s like the message
 /// content parsers do.
 pub(crate) fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>)> {
-    let id = value.get("id")?.as_i64()? as i32;
+    let id = value.get("id")?.as_i64()?.sat_i32();
     let poster_chat_id = int53(value.get("poster_chat_id")).ok()?;
     let (caption, caption_entities) = parse_caption(value.get("caption"));
     let mut files = Vec::new();
@@ -391,7 +403,11 @@ pub(crate) fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>
         ParsedStory {
             id,
             poster_chat_id,
-            date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+            date: value
+                .get("date")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
             content,
             caption,
             caption_entities,
@@ -454,7 +470,11 @@ pub(crate) fn parse_story_repost_info(value: Option<&Value>) -> Option<StoryRepo
     let origin = match origin.get("@type").and_then(Value::as_str) {
         Some("storyOriginPublicStory") => StoryOriginView::PublicStory {
             chat_id: int53(origin.get("chat_id")).ok()?,
-            story_id: origin.get("story_id").and_then(Value::as_i64).unwrap_or(0) as i32,
+            story_id: origin
+                .get("story_id")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
         },
         Some("storyOriginHiddenUser") => StoryOriginView::HiddenUser {
             poster_name: origin
@@ -564,15 +584,21 @@ pub(crate) fn parse_story_interaction_info(
 ) -> Option<StoryInteractionInfoView> {
     let info = value.filter(|value| !value.is_null())?;
     Some(StoryInteractionInfoView {
-        view_count: info.get("view_count").and_then(Value::as_i64).unwrap_or(0) as i32,
+        view_count: info
+            .get("view_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         forward_count: info
             .get("forward_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         reaction_count: info
             .get("reaction_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
     })
 }
 
@@ -651,8 +677,8 @@ pub(crate) fn parse_story_content(
                             id
                         })
                         .filter(|id| id.0 != 0),
-                    int53_or_zero(thumb.get("width")) as i32,
-                    int53_or_zero(thumb.get("height")) as i32,
+                    int53_or_zero(thumb.get("width")).sat_i32(),
+                    int53_or_zero(thumb.get("height")).sat_i32(),
                 ),
                 None => (None, 0, 0),
             };
