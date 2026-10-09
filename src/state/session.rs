@@ -1054,7 +1054,7 @@ impl Session {
             account_generation: AccountGeneration(1),
             auth_view: view_for(&auth),
             auth,
-            connection: ConnectionState::WaitingForNetwork,
+            connection: ConnectionState::Initial,
             chats: HashMap::new(),
             main_order: Vec::new(),
             archive_order: Vec::new(),
@@ -1396,7 +1396,7 @@ impl ConnectionIndicator {
 /// indicator visibility. `None` = `Ready` = connected, nothing renders.
 pub fn connection_indicator(state: ConnectionState) -> Option<ConnectionIndicator> {
     match state {
-        ConnectionState::Ready => None,
+        ConnectionState::Ready | ConnectionState::Initial => None,
         ConnectionState::WaitingForNetwork => Some(ConnectionIndicator::Offline),
         ConnectionState::ConnectingToProxy => {
             Some(ConnectionIndicator::Transitioning("Connecting to proxy…"))

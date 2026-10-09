@@ -11,6 +11,8 @@ pub enum ScreenshotDemo {
     /// Slice A1: injected `authorizationStateWaitOtherDeviceConfirmation`
     /// with a fake link, rendered as a real QR (no live Telegram).
     WaitQr,
+    /// Unexpected `authorizationStateClosed`: the Retry card.
+    ConnectionClosed,
     ReadyChats,
     ReadyTrayBehavior,
     ReadyUpdateInstall,

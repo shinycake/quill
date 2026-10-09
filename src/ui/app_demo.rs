@@ -73,6 +73,12 @@ pub(super) fn demo_seed_for(
                 has_recovery_email: true,
             },
         ),
+        ScreenshotDemo::ConnectionClosed => (
+            None,
+            ConnectUiStatus::DemoWaitPhone,
+            "screenshot demo — Closed (injected auth, no live Telegram)".into(),
+            AuthorizationState::Closed,
+        ),
         ScreenshotDemo::WaitPremium => (
             None,
             ConnectUiStatus::DemoWaitPhone,
@@ -1621,6 +1627,7 @@ impl QuillApp {
             scroll_date: Default::default(),
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),
+            scroll_view_probe: Default::default(),
             group_call_composer,
             command_menu_open: false,
             command_menu_selected: 0,
@@ -1706,6 +1713,7 @@ impl QuillApp {
             context_menu_previous_focus: None,
             connect_status,
             connection_generation: 0,
+            connection_lost: false,
             live,
             status_note,
             status_seen: String::new(),
@@ -1718,6 +1726,7 @@ impl QuillApp {
                         | ScreenshotDemo::WaitPassword
                         | ScreenshotDemo::WaitPremium
                         | ScreenshotDemo::WaitQr
+                        | ScreenshotDemo::ConnectionClosed
                 )
             ),
             demo_session,

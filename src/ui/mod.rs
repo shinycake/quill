@@ -32,6 +32,7 @@ mod privacy;
 mod rtl_demo;
 mod selectable_text;
 mod selection_mode;
+mod shortcut_pack;
 mod story_areas;
 mod synthetic;
 mod updates;

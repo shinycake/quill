@@ -273,7 +273,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Selection bar: Copy Selected as Text <!-- parity:selection-copy-text -->
 - [ ] Selection bar: Download, Save, Unpin, Report, Send Now and Reschedule selected messages <!-- parity:selection-bulk-actions -->
 - [ ] Drag-select across messages and Shift-click range selection <!-- parity:selection-drag-range -->
-- [ ] Delete key removes the selected messages and Esc clears the selection <!-- parity:selection-delete-key -->
+- [x] Delete key removes the selected messages and Esc clears the selection <!-- parity:selection-delete-key -->
 - [ ] Keyboard selection with Ctrl+Space and per-message focus <!-- parity:selection-keyboard -->
 - [ ] Pin confirmation with "Notify all members" and "Also pin for {user}" <!-- parity:pin-confirm-options -->
 - [ ] Unpin-all and hide-pinned confirmations with message counts (partial: basic confirm exists) <!-- parity:pin-unpin-all-confirm -->
@@ -327,7 +327,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Composer state buttons: Unblock, Start, Join, Apply to join, Mute and Unmute (partial: Join and Mute exist; Unblock and Apply to join unverified) <!-- parity:chrome-composer-states -->
 - [ ] "Discuss" and "Direct messages" buttons in the channel bottom bar <!-- parity:chrome-discuss-buttons -->
 - [ ] Middle-click autoscroll in history <!-- parity:chrome-middle-click-scroll -->
-- [ ] PageUp, PageDown, Home and End scroll the history <!-- parity:chrome-page-keys -->
+- [x] PageUp, PageDown, Home and End scroll the history <!-- parity:chrome-page-keys -->
 - [ ] Window title shows the chat name or unread count <!-- parity:chrome-window-title -->
 
 ### Chat list
@@ -392,7 +392,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Story strip context menu: Hide stories, View profile, Mute <!-- parity:chatlist-stories-menu -->
 - [ ] Contacts: sort by last seen, Invite friends, search <!-- parity:chatlist-contacts-extras -->
 - [ ] Clear all call history from the Calls list <!-- parity:chatlist-clear-calls -->
-- [ ] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
+- [x] Chat preview from the keyboard (Ctrl+]) <!-- parity:chatlist-preview-key -->
 - [ ] Main menu: My Profile, Contacts, Calls, Night Mode, account list, Set Emoji Status, My Stories, My Groups and Channels <!-- parity:chatlist-main-menu -->
 - [ ] "This is your Archive" explainer <!-- parity:chatlist-archive-hint -->
 
@@ -1099,13 +1099,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Copy text to clipboard (inline keyboard copy-text button src/ui/mod.rs:3932; invite link src/ui/mod.rs:6357) <!-- parity:platform-copy-clipboard -->
 - [x] Paste image from clipboard into composer (partial: clipboard write exists, no read_from_clipboard usage) <!-- parity:platform-paste-image -->
 - [x] t.me/tg: deep-link handling via getDeepLinkInfo (schema support exists; no usage in Quill) <!-- parity:platform-deep-links -->
-- [ ] Ctrl+Up and Ctrl+Down reply to the previous or next message <!-- parity:platform-shortcut-reply-nav -->
-- [ ] Ctrl+O opens the attach picker <!-- parity:platform-shortcut-attach -->
+- [x] Ctrl+Up and Ctrl+Down reply to the previous or next message <!-- parity:platform-shortcut-reply-nav -->
+- [x] Ctrl+O opens the attach picker <!-- parity:platform-shortcut-attach -->
 - [ ] Ctrl+L locks the app <!-- parity:platform-shortcut-lock -->
-- [ ] Ctrl+PageUp and Ctrl+PageDown switch chats; Ctrl+Alt+Home and End jump to the first or last chat <!-- parity:platform-shortcut-chat-nav -->
-- [ ] Ctrl+1 to 8 open pinned chats, Ctrl+0 Saved Messages, Ctrl+9 Archive, Ctrl+J Contacts <!-- parity:platform-shortcut-pinned -->
-- [ ] Ctrl+Shift+Up and Down switch folders <!-- parity:platform-shortcut-folders -->
-- [ ] Ctrl+R mark chat read, Ctrl+\ chat menu <!-- parity:platform-shortcut-chat-actions -->
+- [x] Ctrl+PageUp and Ctrl+PageDown switch chats; Ctrl+Alt+Home and End jump to the first or last chat <!-- parity:platform-shortcut-chat-nav -->
+- [x] Ctrl+1 to 8 open pinned chats, Ctrl+0 Saved Messages, Ctrl+9 Archive, Ctrl+J Contacts <!-- parity:platform-shortcut-pinned -->
+- [x] Ctrl+Shift+Up and Down switch folders <!-- parity:platform-shortcut-folders -->
+- [x] Ctrl+R mark chat read, Ctrl+\ chat menu <!-- parity:platform-shortcut-chat-actions -->
 - [ ] Shortcuts for scheduled messages, silent send, schedule, link preview toggle, round video, archive chat, admin log and reopen closed window <!-- parity:platform-shortcut-commands -->
 - [ ] Open a chat in a new window <!-- parity:platform-new-window -->
 - [ ] Dock menu on macOS (deferred: low impact) <!-- parity:platform-dock-menu -->
