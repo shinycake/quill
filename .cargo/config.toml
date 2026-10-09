@@ -1,0 +1,5 @@
+# Windows: link the C runtime statically (/MT) so the package ships no
+# vcruntime140*.dll / msvcp140*.dll. The native DLLs (tdjson, rlottie) are
+# built with the static runtime too; see docs/decisions/codex-release-pipeline.md.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

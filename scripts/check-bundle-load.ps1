@@ -1,5 +1,6 @@
-# Load tdjson/ntgcalls/rlottie/quillvideo from the package and assert the OpenSSL/zlib, FFmpeg and
-# VC runtime DLLs mapped into this process came from the package directory.
+# Load tdjson/ntgcalls/rlottie/quillvideo from the package and assert the FFmpeg DLLs mapped
+# into this process came from the package directory, and that no OpenSSL/zlib DLL was
+# loaded at all (tdjson.dll links them statically).
 # Run with the package directory's DLLs not on PATH.   pwsh scripts/check-bundle-load.ps1 <dir>
 param([Parameter(Mandatory)][string]$Dir)
 $ErrorActionPreference = 'Stop'
@@ -28,7 +29,8 @@ foreach ($m in [System.Diagnostics.Process]::GetCurrentProcess().Modules) {
         Write-Host ("{0,-28} {1}" -f $m.ModuleName, $m.FileName)
         # pwsh itself loads vcruntime/msvcp from its own directory, so only the
         # libraries that exist solely for Quill must come from the package.
-        if (-not $inPkg -and $m.ModuleName -match '^(libssl-3|libcrypto-3|z\.dll|av(codec|format|util)-|sw(scale|resample)-)') { $bad += $m.FileName }
+        if (-not $inPkg -and $m.ModuleName -match '^(av(codec|format|util)-|sw(scale|resample)-)') { $bad += $m.FileName }
+        if ($m.ModuleName -match '^(libssl-3|libcrypto-3|z\.dll)') { $bad += "$($m.FileName) (tdjson.dll should link it statically)" }
     }
 }
 if ($bad.Count) { throw "libraries not loaded from the package: $($bad -join ', ')" }

@@ -1,4 +1,5 @@
-//! Load Telegram `api_id` / `api_hash` from process env or gitignored local files.
+//! Load Telegram `api_id` / `api_hash` from process env or gitignored local files,
+//! falling back to credentials compiled into release builds.
 //! Never log or Debug-print the hash value.
 
 use crate::auth::credentials_ready;
@@ -31,9 +32,40 @@ pub fn load_from_env() -> Option<TelegramCredentials> {
     finish(api_id, api_hash)
 }
 
+/// Credentials compiled into this binary, if the build embedded a valid pair.
+/// The release workflow sets `QUILL_BUILD_TELEGRAM_API_ID` /
+/// `QUILL_BUILD_TELEGRAM_API_HASH` from the `TELEGRAM_API_ID` /
+/// `TELEGRAM_API_HASH` repository secrets for the release `cargo build` only
+/// (docs/decisions/codex-release-pipeline.md). Every other build leaves them
+/// unset or empty and embeds nothing.
+pub fn embedded() -> Option<TelegramCredentials> {
+    parse_embedded(
+        option_env!("QUILL_BUILD_TELEGRAM_API_ID"),
+        option_env!("QUILL_BUILD_TELEGRAM_API_HASH"),
+    )
+}
+
+/// Whether this binary carries embedded credentials (`--embedded-credentials`).
+pub fn has_embedded() -> bool {
+    embedded().is_some()
+}
+
+fn parse_embedded(api_id: Option<&str>, api_hash: Option<&str>) -> Option<TelegramCredentials> {
+    let api_id = api_id.and_then(|s| s.trim().parse().ok());
+    let api_hash = api_hash
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    finish(api_id, api_hash)
+}
+
 /// Prefer process env; fill missing values from `.env` / `quill.local.env` under
-/// `CARGO_MANIFEST_DIR` and the process current directory.
+/// `CARGO_MANIFEST_DIR` and the process current directory. When that yields no
+/// complete pair, use the credentials embedded at build time (release builds only).
 pub fn load() -> Option<TelegramCredentials> {
+    load_runtime().or_else(embedded)
+}
+
+fn load_runtime() -> Option<TelegramCredentials> {
     let mut api_id = env_i32("TELEGRAM_API_ID").or_else(|| env_i32("QUILL_API_ID"));
     let mut api_hash = env_string("TELEGRAM_API_HASH").or_else(|| env_string("QUILL_API_HASH"));
 
@@ -292,6 +324,39 @@ mod tests {
         let creds = creds.expect("file credentials");
         assert_eq!(creds.api_id, 777);
         assert_eq!(creds.api_hash, "file-hash-ok");
+    }
+
+    #[test]
+    fn embedded_pair_parses_only_when_complete() {
+        assert!(parse_embedded(None, None).is_none());
+        assert!(parse_embedded(Some(""), Some("")).is_none());
+        assert!(parse_embedded(Some("123"), Some("  ")).is_none());
+        assert!(parse_embedded(Some("abc"), Some("hash")).is_none());
+        assert!(parse_embedded(Some("0"), Some("hash")).is_none());
+        assert!(parse_embedded(Some("1"), Some("YOUR_API_HASH")).is_none());
+        let creds = parse_embedded(Some(" 4242 "), Some(" embedded-hash\n")).expect("pair");
+        assert_eq!(creds.api_id, 4242);
+        assert_eq!(creds.api_hash, "embedded-hash");
+    }
+
+    #[test]
+    fn runtime_credentials_win_over_embedded() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = EnvGuard::capture(ENV_KEYS);
+        for k in ENV_KEYS {
+            guard.remove(k);
+        }
+        guard.set("TELEGRAM_API_ID", "31337");
+        guard.set("TELEGRAM_API_HASH", "runtime-hash");
+        let creds = load().expect("runtime credentials");
+        assert_eq!(creds.api_id, 31337);
+        assert_eq!(creds.api_hash, "runtime-hash");
+    }
+
+    #[test]
+    fn test_builds_embed_nothing() {
+        // CI and local test builds never set the embed variables.
+        assert!(!has_embedded());
     }
 
     #[test]

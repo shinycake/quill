@@ -1,0 +1,35 @@
+name: release-published
+# Hook for the product page (built separately under /site, deployed to GitHub
+# Pages): when the owner publishes a release, emit a repository_dispatch event
+# of type "site-refresh" so the Pages workflow can rebuild from the GitHub API
+# and the release's latest.json. Repository dispatches sent with GITHUB_TOKEN
+# do start workflows (unlike most GITHUB_TOKEN events).
+# docs/decisions/codex-release-pipeline.md
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  site-refresh:
+    name: site-refresh
+    runs-on: ubuntu-latest
+    permissions:
+      # POST /repos/{owner}/{repo}/dispatches needs contents: write.
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name || '' }}
+      URL: ${{ github.event.release.html_url || '' }}
+    steps:
+      - name: emit site-refresh
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=site-refresh \
+            -f "client_payload[tag]=$TAG" \
+            -f "client_payload[release_url]=$URL" \
+            -f "client_payload[manifest]=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
+          echo "site-refresh sent for ${TAG:-manual dispatch}"

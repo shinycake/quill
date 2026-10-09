@@ -3,16 +3,18 @@
 #
 #   quill-windows-<arch>/
 #     quill.exe
-#     tdjson.dll libssl-3-x64.dll libcrypto-3-x64.dll z.dll
+#     tdjson.dll                         TDLib, OpenSSL and zlib linked in statically
 #     ntgcalls.dll rlottie.dll
 #     quillvideo.dll av{codec,format,util}-N.dll sw{scale,resample}-N.dll   in-process video (FFmpeg, LGPL-2.1+)
 #     licenses/ffmpeg/                   FFmpeg license texts + exact source and configure line
-#     vcruntime140*.dll msvcp140*.dll   (app-local VC++ runtime, see decision doc)
 #     README.txt LICENSE THIRD_PARTY.md THIRD_PARTY_LICENSES.md
 #     licenses/                          native-library license texts and notices
 #
 # Env (all optional): QUILL_BIN, QUILL_TDJSON_DIR, QUILL_NTGCALLS_DLL, QUILL_RLOTTIE_DLL, QUILL_FFMPEG_PREFIX, OUT.
-# Needs an MSVC developer environment (dumpbin.exe, VCToolsRedistDir).
+# Needs an MSVC developer environment (dumpbin.exe). No VC++ runtime DLLs are
+# shipped: quill.exe, tdjson.dll and rlottie.dll link the C runtime statically
+# (/MT), ntgcalls.dll already does, and the MinGW-built FFmpeg DLLs use the
+# Universal CRT that is part of Windows 10+ (docs/decisions/codex-release-pipeline.md).
 . "$PSScriptRoot/windows-common.ps1"
 $root = (Resolve-Path "$PSScriptRoot/..").Path
 Set-Location $root
@@ -24,7 +26,6 @@ $rlottie = Pick $env:QUILL_RLOTTIE_DLL 'vendor/rlottie/prefix/bin/rlottie.dll'
 $ffmpeg = Pick $env:QUILL_FFMPEG_PREFIX 'vendor/ffmpeg/prefix'
 $out = Pick $env:OUT 'dist/windows'
 
-$tdFiles = @(Get-ChildItem -File $tdDir -Filter *.dll | ForEach-Object Name)   # tdjson + OpenSSL + zlib
 $videoDlls = @(Get-ChildItem -File (Join-Path $ffmpeg 'bin') -Filter *.dll -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match '^(quillvideo|avcodec-\d+|avformat-\d+|avutil-\d+|swscale-\d+|swresample-\d+)\.dll$' })
 if ($videoDlls.Count -ne 6) { throw "expected quillvideo.dll and 5 FFmpeg DLLs in $ffmpeg/bin, found $($videoDlls.Name -join ', ')" }
@@ -40,7 +41,7 @@ Remove-Item -Recurse -Force $pkg, $zip, "$zip.sha256" -ErrorAction SilentlyConti
 New-Item -ItemType Directory -Force $pkg | Out-Null
 
 Copy-Item $bin (Join-Path $pkg 'quill.exe')
-foreach ($f in $tdFiles) { Copy-Item (Join-Path $tdDir $f) $pkg }
+Copy-Item (Join-Path $tdDir 'tdjson.dll') $pkg
 Copy-Item $ntg (Join-Path $pkg 'ntgcalls.dll')
 Copy-Item $rlottie (Join-Path $pkg 'rlottie.dll')
 # In-process video: the shim plus FFmpeg's DLLs, dynamically linked so they
@@ -49,22 +50,6 @@ foreach ($dll in $videoDlls) { Copy-Item $dll.FullName $pkg }
 $lic = Join-Path $pkg 'licenses/ffmpeg'
 New-Item -ItemType Directory -Force $lic | Out-Null
 Copy-Item (Join-Path $ffmpeg 'share/quillvideo/*') $lic
-
-# Bundle the VC++ runtime closure: any imported vcruntime/msvcp/concrt DLL that
-# is not in the package yet comes from the MSVC redistributable directory.
-$redist = Get-VcRedistDir
-Write-Host "VC++ runtime from $redist"
-$changed = $true
-while ($changed) {
-    $changed = $false
-    foreach ($file in Get-ChildItem -File $pkg | Where-Object { $_.Extension -in '.exe', '.dll' }) {
-        foreach ($dep in Get-PeDependents $file.FullName) {
-            if (Test-Path (Join-Path $pkg $dep)) { continue }
-            $src = Join-Path $redist $dep
-            if (Test-Path $src) { Copy-Item $src $pkg; $changed = $true }
-        }
-    }
-}
 
 Copy-Item 'scripts/windows-package-README.txt' (Join-Path $pkg 'README.txt')
 # License and third-party notices (mirrors scripts/stage-licenses.sh).

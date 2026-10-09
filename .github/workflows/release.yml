@@ -1,0 +1,230 @@
+name: release
+# Builds the three platform packages, the LGPL source archives, the release
+# notes and latest.json, then creates a DRAFT GitHub release.
+# docs/decisions/codex-release-pipeline.md
+#
+#   git tag vX.Y.Z && git push origin vX.Y.Z     -> draft release vX.Y.Z (owner publishes it)
+#   gh workflow run release.yml -f version=X.Y.Z  -> dry run: same build, artifacts only,
+#                                                    never creates a release or a tag
+#
+# The release is ALWAYS created as a draft. Nothing here publishes it: the
+# owner reviews the draft and clicks Publish, which fires release-published.yml
+# (the site-refresh hook). X.Y.Z must equal the version in Cargo.toml, because
+# the in-app updater checks that the downloaded binary reports it.
+#
+# Telegram credentials: tag builds compile the TELEGRAM_API_ID /
+# TELEGRAM_API_HASH secrets into the binaries (src/credentials.rs). Missing
+# secrets give a credential-free build, which the release notes call out. Dry
+# runs embed nothing unless embed_credentials is set.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to dry-run (X.Y.Z, must match Cargo.toml). Uploads artifacts only.'
+        required: true
+        type: string
+      embed_credentials:
+        description: 'Embed the Telegram credential secrets in the dry-run binaries'
+        required: false
+        default: false
+        type: boolean
+
+run-name: ${{ github.event_name == 'push' && format('release {0}', github.ref_name) || format('release dry run {0} ({1})', inputs.version, github.ref_name) }}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      embed: ${{ steps.v.outputs.embed }}
+      credentials: ${{ steps.v.outputs.credentials }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: version, tag and credential mode
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_EMBED: ${{ inputs.embed_credentials }}
+          # Only "true"/"false" leave this step; the values never do.
+          HAVE_SECRETS: ${{ secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            version="${GITHUB_REF_NAME#v}"
+            embed=true
+          else
+            version="$INPUT_VERSION"
+            embed="$INPUT_EMBED"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z, got '$version'"; exit 1; }
+          cargo_version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')"
+          if [ "$cargo_version" != "$version" ]; then
+            echo "::error::release $version does not match Cargo.toml version $cargo_version; bump Cargo.toml (and Cargo.lock) first"
+            exit 1
+          fi
+          credentials=none
+          if [ "$embed" = true ] && [ "$HAVE_SECRETS" = true ]; then credentials=embedded; fi
+          if [ "$embed" = true ] && [ "$HAVE_SECRETS" != true ]; then
+            echo "::warning::TELEGRAM_API_ID / TELEGRAM_API_HASH secrets are not set: this is a credential-free build"
+          fi
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "embed=$embed"
+            echo "credentials=$credentials"
+          } >> "$GITHUB_OUTPUT"
+          echo "Quill $version, tag v$version, credentials: $credentials, dry run: $([ "$EVENT" = push ] && echo no || echo yes)"
+
+  linux:
+    name: linux
+    needs: prepare
+    uses: ./.github/workflows/package-linux.yml
+    with:
+      embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
+    secrets:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+
+  windows:
+    name: windows
+    needs: prepare
+    uses: ./.github/workflows/package-windows.yml
+    with:
+      embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
+    secrets:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+
+  macos:
+    name: macos
+    needs: prepare
+    uses: ./.github/workflows/package-macos.yml
+    with:
+      embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
+    secrets:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+
+  # Corresponding source for the shipped LGPL libraries (FFmpeg, ntgcalls and
+  # the FFmpeg/GLib inside ntgcalls).
+  sources:
+    name: lgpl-sources
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: archive LGPL sources
+        run: bash scripts/release-lgpl-sources.sh dist/sources
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-lgpl-sources
+          path: dist/sources/*
+          if-no-files-found: error
+
+  release:
+    name: assemble release
+    needs: [prepare, linux, windows, macos, sources]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # generate-notes needs write; the release itself is only created on a tag push.
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      CREDENTIALS: ${{ needs.prepare.outputs.credentials }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-macos-aarch64
+          path: in/macos
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-linux-x86_64-bundle
+          path: in/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-windows-x86_64
+          path: in/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: quill-lgpl-sources
+          path: in/sources
+      - name: collect assets
+        run: |
+          mkdir -p assets
+          # Check each package against the checksum its build job wrote.
+          for f in in/macos/quill-macos-aarch64.zip in/linux/linux/quill-linux-x86_64-bundle.tar.gz in/windows/quill-windows-x86_64.zip; do
+            # The Windows .sha256 file has CRLF line endings.
+            (cd "$(dirname "$f")" && tr -d '\r' < "$(basename "$f").sha256" | sha256sum -c -)
+            cp "$f" assets/
+          done
+          cp in/linux/update/quill-linux-x86_64 assets/
+          chmod 755 assets/quill-linux-x86_64
+          cp in/sources/* assets/
+          ls -l assets
+      - name: previous release tag
+        id: prev
+        run: |
+          # The newest vX.Y.Z tag reachable from this commit, other than this release's own.
+          prev="$(git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -vx "$TAG" | head -n 1 || true)"
+          echo "tag=$prev" >> "$GITHUB_OUTPUT"
+          echo "previous tag: ${prev:-none}"
+      - name: generated changelog (merged PRs since the previous tag)
+        env:
+          PREV: ${{ steps.prev.outputs.tag }}
+        run: |
+          args=(-f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -f configuration_file_path=.github/release.yml)
+          [ -n "$PREV" ] && args+=(-f previous_tag_name="$PREV")
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${args[@]}" --jq .body > changes.md
+          wc -l changes.md
+      - name: notes, checksums and latest.json
+        env:
+          PREV: ${{ steps.prev.outputs.tag }}
+        run: |
+          args=(--assets assets --version "$VERSION" --repo "$GITHUB_REPOSITORY" --changes changes.md
+                --credentials "$CREDENTIALS" --notes-out release-notes.md)
+          [ -f "release-notes/$TAG.md" ] && args+=(--curated "release-notes/$TAG.md")
+          [ -n "$PREV" ] && args+=(--previous-tag "$PREV")
+          python3 -I scripts/release-assemble.py "${args[@]}"
+          {
+            echo "## Quill $VERSION ($([ "$GITHUB_EVENT_NAME" = push ] && echo 'draft release' || echo 'dry run, no release'))"
+            echo
+            echo '| Asset | Size | SHA-256 |'
+            echo '|---|---|---|'
+            for f in assets/*; do echo "| $(basename "$f") | $(stat -c %s "$f") | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quill-release-${{ needs.prepare.outputs.tag }}
+          path: |
+            assets/
+            release-notes.md
+          if-no-files-found: error
+      # Tag pushes only. Always a draft: the owner publishes it by hand.
+      - name: create DRAFT release
+        if: github.event_name == 'push'
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::a release for $TAG already exists; delete the old draft before re-running"
+            exit 1
+          fi
+          gh release create "$TAG" --draft --verify-tag \
+            --title "Quill $VERSION" --notes-file release-notes.md assets/*
+          gh release view "$TAG" --json isDraft,url --jq '"draft=\(.isDraft) \(.url)"'
