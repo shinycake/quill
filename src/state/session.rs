@@ -785,6 +785,8 @@ pub struct Session {
     /// (schema 1.8.67, line 10964) — full `profileAccentColor` entries
     /// for swatch rendering.
     pub profile_accent_colors: Vec<ProfileAccentColor>,
+    /// Name-color palette from `updateAccentColors` (sender names).
+    pub name_accent_colors: Vec<crate::telegram::NameAccentColor>,
     /// Slice A12: ids `setProfileAccentColor` accepts, in server order —
     /// the edit-profile accent picker rows.
     pub available_accent_color_ids: Vec<i32>,
@@ -1401,6 +1403,7 @@ impl Session {
             archive_settings_open: false,
             users: HashMap::new(),
             profile_accent_colors: Vec::new(),
+            name_accent_colors: Vec::new(),
             available_accent_color_ids: Vec::new(),
             contacts: None,
             contacts_error: false,

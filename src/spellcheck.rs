@@ -223,6 +223,10 @@ pub trait SpellBackend: Send + Sync {
     }
     /// Tell the backend the word is ignored for this app session.
     fn ignore(&self, _word: &str) {}
+    /// Load any lazily parsed data now. Called once from a background
+    /// thread at startup so the first check or suggestion never parses a
+    /// large dictionary on the thread that asked.
+    fn warm(&self) {}
 }
 
 /// Where "Add to Dictionary" stored the word.

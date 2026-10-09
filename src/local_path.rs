@@ -26,15 +26,32 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
     }
     let verdict = sandboxed_display_path_uncached(candidate, allowed_roots);
     if let Ok(mut cache) = VERDICTS.lock() {
-        if cache.len() > 8192 {
-            cache.retain(|_, (at, _)| now.duration_since(*at) < VERDICT_TTL);
-        }
+        make_room(&mut cache, now);
         cache.insert(key, (now, verdict.clone()));
     }
     verdict
 }
 
 const VERDICT_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+const VERDICT_CAP: usize = 8192;
+
+/// Keep the memo below [`VERDICT_CAP`] after one more insert: drop expired
+/// entries first, then evict oldest-first until a slot is free.
+fn make_room(cache: &mut VerdictCache, now: std::time::Instant) {
+    if cache.len() < VERDICT_CAP {
+        return;
+    }
+    cache.retain(|_, (at, _)| now.duration_since(*at) < VERDICT_TTL);
+    if cache.len() < VERDICT_CAP {
+        return;
+    }
+    let excess = cache.len() + 1 - VERDICT_CAP;
+    let mut ages: Vec<_> = cache.iter().map(|(k, (at, _))| (*at, k.clone())).collect();
+    ages.sort_by_key(|(at, _)| *at);
+    for (_, key) in ages.into_iter().take(excess) {
+        cache.remove(&key);
+    }
+}
 
 type VerdictCache = HashMap<(String, u64), (std::time::Instant, Option<PathBuf>)>;
 static VERDICTS: LazyLock<Mutex<VerdictCache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -268,6 +285,24 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn verdict_cache_hard_cap_evicts_oldest_first() {
+        let base = std::time::Instant::now();
+        let mut cache = VerdictCache::new();
+        for i in 0..VERDICT_CAP {
+            // All fresh (inside the TTL), so only the cap can evict; entry 0 is oldest.
+            let at = base + std::time::Duration::from_micros(i as u64);
+            cache.insert((format!("p{i}"), 1), (at, None));
+        }
+        let now = base + std::time::Duration::from_millis(500);
+        make_room(&mut cache, now);
+        assert_eq!(cache.len(), VERDICT_CAP - 1);
+        assert!(!cache.contains_key(&("p0".to_owned(), 1)));
+        assert!(cache.contains_key(&(format!("p{}", VERDICT_CAP - 1), 1)));
+        cache.insert(("new".to_owned(), 1), (now, None));
+        assert_eq!(cache.len(), VERDICT_CAP);
+    }
 
     fn scratch(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
