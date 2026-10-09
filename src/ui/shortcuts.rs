@@ -46,11 +46,20 @@ impl QuillApp {
                 {
                     continue;
                 }
-                let keys = bindings
+                // `partial_eq`, not the name: the eight pinned-chat chords
+                // share one action type and differ by index. Composer
+                // scoped twins of a chord list it once.
+                let mut keys: Vec<Keystroke> = Vec::new();
+                for binding in bindings
                     .bindings()
-                    .filter(|binding| binding.action().name() == row.binding.action().name())
-                    .flat_map(|binding| binding.keystrokes().iter().map(|key| key.inner().clone()))
-                    .collect();
+                    .filter(|binding| binding.action().partial_eq(row.binding.action()))
+                {
+                    for key in binding.keystrokes() {
+                        if !keys.contains(key.inner()) {
+                            keys.push(key.inner().clone());
+                        }
+                    }
+                }
                 groups.push((row.section, row.label, keys));
             }
             drop(bindings);
