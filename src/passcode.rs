@@ -692,8 +692,10 @@ pub fn autolock_label(secs: u32) -> String {
 /// OS-wide idle time (time since the last keyboard or mouse input anywhere
 /// on the desktop) where the platform exposes it without extra
 /// dependencies: macOS (CoreGraphics) and Windows (`GetLastInputInfo`).
-/// `None` on Linux, where idle time needs a compositor-specific protocol;
-/// callers fall back to in-window input ("inactive" instead of "away").
+/// On Linux it asks GNOME's idle monitor through `gdbus` ([`linux_idle_ms`]);
+/// `None` on other desktops, where idle time needs a compositor-specific
+/// protocol, so callers fall back to in-window input ("inactive" instead of
+/// "away").
 pub fn os_idle_ms() -> Option<u64> {
     #[cfg(target_os = "macos")]
     {
@@ -726,16 +728,72 @@ pub fn os_idle_ms() -> Option<u64> {
         let now = unsafe { GetTickCount() };
         Some(u64::from(now.wrapping_sub(info.dwTime)))
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_idle_ms()
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         None
     }
+}
+
+/// Parse `gdbus call ... GetIdletime` output, e.g. `(uint64 1234,)`.
+#[cfg(any(target_os = "linux", test))]
+fn parse_gdbus_idletime(output: &str) -> Option<u64> {
+    let rest = output.trim().strip_prefix('(')?.trim_start();
+    let rest = rest.strip_prefix("uint64").unwrap_or(rest).trim_start();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// GNOME Mutter's `org.gnome.Mutter.IdleMonitor.GetIdletime`, queried at most
+/// every two seconds (callers tick faster). Once the call fails (no `gdbus`,
+/// not GNOME) it is never retried and callers fall back.
+#[cfg(target_os = "linux")]
+fn linux_idle_ms() -> Option<u64> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, Option<u64>)>> = Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    match *cache {
+        Some((_, None)) => return None,
+        Some((at, Some(ms))) if at.elapsed() < Duration::from_secs(2) => {
+            return Some(ms + at.elapsed().as_millis() as u64);
+        }
+        _ => {}
+    }
+    let ms = std::process::Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.gnome.Mutter.IdleMonitor",
+            "--object-path",
+            "/org/gnome/Mutter/IdleMonitor/Core",
+            "--method",
+            "org.gnome.Mutter.IdleMonitor.GetIdletime",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| parse_gdbus_idletime(&String::from_utf8_lossy(&o.stdout)));
+    *cache = Some((Instant::now(), ms));
+    ms
 }
 
 #[cfg(test)]
 mod tests {
     use crate::passcode::*;
     use crate::platform::MemorySecretStore;
+
+    #[test]
+    fn gdbus_idletime_output_parses() {
+        assert_eq!(parse_gdbus_idletime("(uint64 1234,)\n"), Some(1234));
+        assert_eq!(parse_gdbus_idletime("(0,)"), Some(0));
+        assert_eq!(parse_gdbus_idletime("Error: no such name"), None);
+        assert_eq!(parse_gdbus_idletime("()"), None);
+    }
 
     const FAST: u32 = 8;
 
