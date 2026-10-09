@@ -2474,6 +2474,41 @@ impl QuillApp {
             self.open_story_viewer(ChatId(11), 5, cx);
             self.status_note = "screenshot demo — clickable story areas".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryVideo)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_stories(session, &self.demo_sink, &self.demo_seq);
+            }
+            // B14: the viewer opens on chat 11's video story (story 4) and
+            // plays the generated 12 s clip with the native player.
+            self.open_story_viewer(ChatId(11), 4, cx);
+            self.status_note = "screenshot demo — story video playback".into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyStoryMore)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_contacts(session, &self.demo_sink, &self.demo_seq);
+                session.open_info_panel = None;
+                apply_ready_story_post(session, &self.demo_sink, &self.demo_seq);
+                // `getCloseFriends` answered through the real reducer.
+                let extra = session.request(quill::state::RequestPurpose::GetCloseFriends, None);
+                let json = format!(
+                    r#"{{"@type":"users","@extra":"{}","total_count":2,"user_ids":[31,33]}}"#,
+                    extra.0,
+                );
+                let dyn_sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                    self.demo_sink.clone();
+                if let Some(owned) =
+                    quill::telegram::client::copy_and_parse(&json, &self.demo_seq, &dyn_sink)
+                {
+                    session.apply(owned);
+                }
+            }
+            // B14: own story 5 with the close-friends editor open.
+            self.open_story_viewer(ChatId(11), 5, cx);
+            self.open_close_friends_editor(window, cx);
+            self.status_note = "screenshot demo — story close friends".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyStoryComposer)) {
             // Phase 9.3: the composer opens with a seeded photo path (the
             // demo thumbnail, so the preview renders), a caption draft,

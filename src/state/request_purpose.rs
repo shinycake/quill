@@ -1217,6 +1217,18 @@ pub enum RequestPurpose {
     /// story ids (correlated via `PendingRequest::story_ids`) replace
     /// the chat's `pinned_story_ids`.
     SetChatPinnedStories,
+    /// B14: `getCloseFriends`. Response is `users`; the ids land in
+    /// `Session::close_friends` (user objects arrive via `updateUser`).
+    GetCloseFriends,
+    /// B14: `setCloseFriends`. Response is `ok`; the sent ids (staged in
+    /// `Session::close_friends_pending`) become `Session::close_friends`.
+    SetCloseFriends,
+    /// B14: `setChatActiveStoriesList` (hide / unhide a peer's stories).
+    /// Response is `ok`; the tray moves via `updateChatActiveStories`.
+    SetChatActiveStoriesList,
+    /// B14: `toggleStoryIsPostedToChatPage` (post to / remove from
+    /// profile). Response is `ok`; the flag arrives via `updateStory`.
+    ToggleStoryIsPostedToChatPage,
     /// Parity slice: `createChatFolder`. Response is `chatFolderInfo`;
     /// upserted into `Session::chat_folders` (`updateChatFolders` stays the
     /// source of truth).

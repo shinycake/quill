@@ -82,7 +82,12 @@ pub(super) fn apply_ready_stories(session: &mut Session, sink: &Arc<MemorySink>,
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
     let video_thumb_file = demo_file_json(92, &demo_thumb_png_path(), true);
-    let video_file = demo_file_json(93, &demo_thumb_png_path(), true);
+    // B14: the video story plays the generated 12 s fixture clip.
+    let clip_path = super::demo::demo_media_allowlist()
+        .join("demo-clip-12s.mp4")
+        .to_string_lossy()
+        .into_owned();
+    let video_file = demo_file_json(93, &clip_path, true);
     let tray = |chat_id: i64, order: i64, max_read: i32, story_ids: &[i32]| -> String {
         let stories = story_ids
             .iter()
@@ -114,8 +119,8 @@ pub(super) fn apply_ready_stories(session: &mut Session, sink: &Arc<MemorySink>,
         tray(12, 20, 6, &[6]),
         // Chat 11, story 4: video story with a thumbnail (read).
         format!(
-            r#"{{"@type":"story","id":4,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentVideo","video":{{"@type":"storyVideo","duration":9.0,"video":{video_file},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":120,"file":{video_thumb_file}}}}},"alternative_video":null}},"caption":{}}}"#,
-            caption("Demo story — the video shows its thumbnail (playback is out of slice)."),
+            r#"{{"@type":"story","id":4,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentVideo","video":{{"@type":"storyVideo","duration":12.0,"video":{video_file},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":120,"file":{video_thumb_file}}}}},"alternative_video":null}},"caption":{}}}"#,
+            caption("Demo video story — plays with the native player."),
         ),
         // Chat 11, story 5: photo story (unread).
         photo_story(5, 11, "Demo story — full-size photo render.", &photo_file),
@@ -200,6 +205,10 @@ impl QuillApp {
         // viewer (re)opens — also covers the deferred `pending_story_open`
         // path, which funnels through here.
         self.story_playback.start(Instant::now());
+        self.story_pause.reset();
+        self.story_native_failed = None;
+        self.story_video_wait_since = Some(Instant::now());
+        self.sync_story_video();
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         self.ensure_story_custom_emoji_downloads();
@@ -810,6 +819,15 @@ impl QuillApp {
         // Phase 9.6: the tick task self-exits on the next wake when the
         // viewer is no longer open.
         self.story_playback.stop();
+        // B14: drop the player and the viewer's extra state with it.
+        *self.story_native.borrow_mut() = None;
+        self.story_native_key = None;
+        self.story_native_failed = None;
+        self.story_pause.reset();
+        self.story_share_open = false;
+        self.close_friends_edit = None;
+        self.close_friends_saving = false;
+        self.story_notice = None;
         cx.notify();
     }
 
@@ -830,9 +848,15 @@ impl QuillApp {
         }
         self.story_reaction_picker_open = false;
         self.story_reply_open = false;
+        // B14: a new story starts playing (a Space pause is per story).
+        self.story_pause.reset();
+        self.story_share_open = false;
+        self.story_notice = None;
+        self.story_native_failed = None;
         // Phase 9.6: manual nav restarts the playback clock for the new
         // current story (same as the official clients).
         self.story_playback.start(Instant::now());
+        self.sync_story_video();
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         self.ensure_story_custom_emoji_downloads();
@@ -846,7 +870,11 @@ impl QuillApp {
     /// into this same predicate when they land (they live on their own
     /// parity branch; not touched here).
     pub(super) fn story_playback_paused(&self) -> bool {
-        self.story_reaction_picker_open || self.story_reply_open
+        self.story_reaction_picker_open
+            || self.story_reply_open
+            || self.story_pause.is_paused()
+            || self.story_share_open
+            || self.close_friends_edit.is_some()
     }
 
     /// Phase 9.6: 100ms tick while the story viewer is open (mirrors
@@ -875,11 +903,16 @@ impl QuillApp {
                             return false;
                         }
                         let now = Instant::now();
+                        // B14: the native player drives video stories;
+                        // the duration clock stays frozen meanwhile.
+                        this.sync_story_video();
+                        let user_paused = this.story_playback_paused();
+                        let video_driven = this.story_video_driven();
                         this.story_playback
-                            .set_paused(this.story_playback_paused(), now);
-                        if let Some(item) = this.story_viewer.current().cloned()
-                            && this.story_playback.finished(&item, now)
-                        {
+                            .set_paused(user_paused || video_driven, now);
+                        this.apply_story_native_pause(user_paused);
+                        this.tick_close_friends(cx);
+                        if this.story_segment_finished(now) {
                             this.advance_story_playback(cx);
                         }
                         // Phase 9.2+: keep custom-emoji reaction stickers
@@ -939,6 +972,23 @@ impl QuillApp {
         });
         if !local && item.download_file_id.0 != 0 {
             self.request_media_download(item.download_file_id, None, cx);
+        }
+        // B14: a video story also needs its clip to play.
+        if let Some(video_id) = item.video_file_id
+            && video_id != item.download_file_id
+        {
+            let roots = self.media_display_roots();
+            let clip_local = self.session().is_some_and(|session| {
+                session
+                    .files
+                    .get(&video_id.0)
+                    .and_then(|file| file.usable_path())
+                    .and_then(|path| sandboxed_display_path(path, &roots))
+                    .is_some()
+            });
+            if !clip_local {
+                self.request_media_download(video_id, None, cx);
+            }
         }
     }
 
@@ -1625,6 +1675,7 @@ impl QuillApp {
                 caption_entities: Vec::new(),
                 duration_label: None,
                 duration_secs: None,
+                video_file_id: None,
                 is_live: false,
                 live_call: None,
                 areas: Vec::new(),
@@ -1655,7 +1706,10 @@ impl QuillApp {
         } else {
             format!("{poster} · {kind_label}")
         };
-        let visual: AnyElement = if let Some(path) = path {
+        let video_frame = self.story_video_element(cx);
+        let visual: AnyElement = if let Some(frame) = video_frame {
+            frame
+        } else if let Some(path) = path {
             img(path)
                 .id(("story-viewer-img", item.story_id as u64))
                 .w(px(360.))
@@ -1790,12 +1844,40 @@ impl QuillApp {
                     .into_any_element()
             })
             .collect();
+        // B14: press-and-hold on the media pauses until release.
+        let paused_chip = self.story_pause.is_paused().then(|| {
+            div()
+                .absolute()
+                .left(px(8.))
+                .bottom(px(8.))
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .bg(rgba(0x00000099))
+                .text_xs()
+                .text_color(rgb(0xffffff))
+                .child("Paused")
+        });
         let visual: AnyElement = div()
+            .id(("story-viewer-media", item.story_id as u64))
             .relative()
             .w(px(360.))
             .overflow_hidden()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.story_hold(true, cx)),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.story_hold(false, cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.story_hold(false, cx)),
+            )
             .child(visual)
             .children(area_chips)
+            .children(paused_chip)
             .into_any_element();
         let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
             rich_text_line(
@@ -1890,6 +1972,7 @@ impl QuillApp {
                     .when_some(self.story_viewer_meta_line(), |this, meta| {
                         this.child(div().text_xs().text_color(text_muted()).child(meta))
                     })
+                    .child(self.story_more_row(cx))
                     .child(self.story_action_row(cx))
                     .child(
                         div()
@@ -1932,11 +2015,7 @@ impl QuillApp {
         total: usize,
         now: Instant,
     ) -> impl IntoElement {
-        let current_progress = self
-            .story_viewer
-            .current()
-            .map(|item| self.story_playback.progress(item, now))
-            .unwrap_or(0.0);
+        let current_progress = self.story_segment_progress(now);
         div()
             .id("story-viewer-progress")
             .flex()

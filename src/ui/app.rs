@@ -970,6 +970,25 @@ pub struct QuillApp {
     pub(super) story_privacy_edit: Option<StoryPrivacyEdit>,
     pub(super) story_privacy_user_search: Entity<TextareaState>,
     pub(super) story_privacy_sent: bool,
+    /// B14: native player of the current video story (a `RefCell` because
+    /// the overlay renders from `&self` and pulling a frame needs `&mut`),
+    /// the story it belongs to, and the story whose clip could not play.
+    pub(super) story_native: std::cell::RefCell<Option<super::native_video::NativeVideo>>,
+    pub(super) story_native_key: Option<(i64, i32)>,
+    pub(super) story_native_failed: Option<(i64, i32)>,
+    pub(super) story_native_play_at: Instant,
+    pub(super) story_native_paused_by_us: bool,
+    pub(super) story_video_wait_since: Option<Instant>,
+    /// B14: story sound muted, the press-and-hold / Space pause, and the
+    /// viewer's extra panels (close friends, share) with their shared
+    /// search field and last result line.
+    pub(super) story_muted: bool,
+    pub(super) story_pause: quill::story_extras::StoryUserPause,
+    pub(super) close_friends_edit: Option<quill::story_extras::CloseFriendsEdit>,
+    pub(super) close_friends_saving: bool,
+    pub(super) story_share_open: bool,
+    pub(super) story_more_search: Entity<TextareaState>,
+    pub(super) story_notice: Option<String>,
     /// Phase 6: sidebar tab — `true` shows the contacts list instead of
     /// the chat list.
     pub(super) contacts_tab_open: bool,

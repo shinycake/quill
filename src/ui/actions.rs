@@ -73,6 +73,8 @@ actions!(
         ViewerFlipVertical,
         ViewerCopy,
         ViewerSave,
+        /// B14: Space pauses / resumes the open story (story viewer only).
+        StoryTogglePause,
         /// Shortcut pack (tdesktop `replyToPreviousMessage` /
         /// `replyToNextMessage`): Cmd/Ctrl+Up / Down.
         ReplyToPrevious,

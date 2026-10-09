@@ -223,8 +223,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Paid media shows a blurred locked preview with an unlock button <!-- parity:render-paid-media -->
 - [x] Checklist messages render with tasks and done marks <!-- parity:render-checklist -->
 - [ ] Gift and giveaway messages render as cards (regular, unique, refunded, prize, winners, gift code) <!-- parity:render-gift-cards -->
-- [ ] Contact cards show an avatar with Message, Add contact and View buttons <!-- parity:render-contact-card-actions -->
-- [ ] Location and venue messages show a map thumbnail <!-- parity:render-map-thumbnail -->
+- [x] Contact cards show an avatar with Message, Add contact and View buttons <!-- parity:render-contact-card-actions -->
+- [x] Location and venue messages show a map thumbnail <!-- parity:render-map-thumbnail -->
 - [ ] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
 - [ ] Dice, dart and slot machine messages play their animation and result <!-- parity:render-dice-playback -->
 - [ ] Tapping an animated emoji plays a fullscreen effect <!-- parity:render-emoji-interaction -->
@@ -233,9 +233,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Theme and wallpaper link previews with a preview card (deferred: low impact) <!-- parity:render-theme-wallpaper-docs -->
 - [ ] Similar channels carousel after joining a channel <!-- parity:render-similar-channels -->
 - [ ] Link-preview "View channel / bot / message" buttons <!-- parity:render-preview-view-button -->
-- [ ] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
-- [ ] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
-- [ ] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
+- [x] Bubble tails and grouped-message corner radii <!-- parity:render-bubble-tails -->
+- [x] Sender avatar sticks to the bottom of a group of messages while scrolling <!-- parity:render-sticky-avatar -->
+- [x] Code blocks show a language header with a Copy button <!-- parity:render-code-block-header -->
 - [ ] "Photo has expired" style placeholders for expired media (partial: generic unsupported card for some) <!-- parity:render-expired-media -->
 - [ ] Fact-check block under messages <!-- parity:render-fact-check -->
 - [ ] "About sponsored messages" info box from the Ad menu <!-- parity:render-sponsored-info -->
@@ -286,7 +286,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Forward bar in the composer: change recipient, hide sender or captions, add a comment <!-- parity:composer-forward-bar -->
 - [x] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
 - [ ] Repeating scheduled messages (Premium) <!-- parity:composer-repeat-schedule -->
-- [ ] Send a dice, dart, basketball, football, bowling or slot machine by sending its emoji alone <!-- parity:composer-send-dice -->
+- [x] Send a dice, dart, basketball, football, bowling or slot machine by sending its emoji alone <!-- parity:composer-send-dice -->
 - [x] Share a contact card from a profile <!-- parity:composer-share-contact -->
 - [x] Create checklists <!-- parity:composer-checklist -->
 - [ ] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
@@ -657,13 +657,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 #### More story features
 
-- [ ] Story video playback (partial: video stories show a thumbnail in some cases) <!-- parity:stories-video-playback -->
-- [ ] Share or forward a story to a chat <!-- parity:stories-share-to-chat -->
-- [ ] Save story media and copy a story link <!-- parity:stories-save-copy-link -->
-- [ ] Post to Profile and Archive actions on your own stories <!-- parity:stories-post-to-profile-archive -->
-- [ ] Mute story audio, pause on hold, arrow keys and Space <!-- parity:stories-keyboard-mute -->
-- [ ] Close friends list editor <!-- parity:stories-close-friends-editor -->
-- [ ] Hide and unhide a contact's stories <!-- parity:stories-hide-peer -->
+- [x] Story video playback (partial: video stories show a thumbnail in some cases) <!-- parity:stories-video-playback -->
+- [x] Share or forward a story to a chat <!-- parity:stories-share-to-chat -->
+- [x] Save story media and copy a story link <!-- parity:stories-save-copy-link -->
+- [x] Post to Profile and Archive actions on your own stories <!-- parity:stories-post-to-profile-archive -->
+- [x] Mute story audio, pause on hold, arrow keys and Space <!-- parity:stories-keyboard-mute -->
+- [x] Close friends list editor <!-- parity:stories-close-friends-editor -->
+- [x] Hide and unhide a contact's stories <!-- parity:stories-hide-peer -->
 - [ ] Story replies with stickers, emoji or voice <!-- parity:stories-reply-media -->
 - [ ] Search stories by hashtag, location or venue <!-- parity:stories-search -->
 - [ ] Story statistics and public forwards <!-- parity:stories-statistics -->

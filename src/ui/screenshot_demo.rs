@@ -429,6 +429,12 @@ pub enum ScreenshotDemo {
     /// venue, suggested reaction, message, link, weather, gift) with
     /// the viewer open on it.
     ReadyStoryAreas,
+    /// B14: a video story playing in the viewer (the generated 12 s demo
+    /// clip through the native player; no live Telegram).
+    ReadyStoryVideo,
+    /// B14: the story viewer's close-friends editor, hide and profile
+    /// actions (injected, no live Telegram).
+    ReadyStoryMore,
     /// MED3 downloads-manager demo (injected, no live Telegram): the
     /// `ReadyMedia` seed plus an actively downloading document (file 24,
     /// 42% through `notes.txt`), a failed document (file 26, "Retry"

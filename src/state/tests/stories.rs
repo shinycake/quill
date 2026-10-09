@@ -525,6 +525,9 @@ fn update_story_deleted_removes_cache_and_tray() {
             area_link_url: None,
             area_reaction_emojis: Vec::new(),
             can_be_added_to_album: false,
+            is_posted_to_chat_page: false,
+            can_toggle_is_posted_to_chat_page: false,
+            can_get_statistics: false,
             areas: Vec::new(),
         },
     );
@@ -1158,4 +1161,114 @@ fn per_message_updates_reach_loaded_topic_histories() {
     };
     assert_eq!(poll.poll.total_voter_count, 2);
     assert!(poll.poll.options[0].is_chosen);
+}
+
+#[test]
+fn b14_close_friends_load_and_save_round_trip() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    // A stray `users` answer never becomes the close-friends list.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"users","@extra":"no-such","total_count":1,"user_ids":[9]}"#,
+    );
+    assert!(session.close_friends.is_none());
+
+    let extra = session.request(RequestPurpose::GetCloseFriends, None);
+    session.begin_story_page_check(crate::story_page::story_page_op_label(
+        RequestPurpose::GetCloseFriends,
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"users","@extra":"{}","total_count":2,"user_ids":[31,33]}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.close_friends, Some(vec![31, 33]));
+    assert!(session.story_page_op.is_none());
+
+    // `setCloseFriends` applies the staged ids on `ok`.
+    session.close_friends_pending = Some(vec![33]);
+    let extra = session.request(RequestPurpose::SetCloseFriends, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert_eq!(session.close_friends, Some(vec![33]));
+    assert!(session.close_friends_pending.is_none());
+}
+
+#[test]
+fn b14_close_friends_error_drops_staged_ids() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.close_friends = Some(vec![31]);
+    session.close_friends_pending = Some(vec![31, 32]);
+    session.begin_story_page_op(crate::story_page::story_page_op_label(
+        RequestPurpose::SetCloseFriends,
+    ));
+    let extra = session.request(RequestPurpose::SetCloseFriends, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"USER_NOT_MUTUAL_CONTACT"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.close_friends, Some(vec![31]));
+    assert!(session.close_friends_pending.is_none());
+    assert!(matches!(
+        session.story_page_op.as_ref().map(|op| &op.state),
+        Some(crate::story_page::StoryPageOpState::Failed(_))
+    ));
+}
+
+#[test]
+fn b14_hide_and_profile_ops_finish_on_ok() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for purpose in [
+        RequestPurpose::SetChatActiveStoriesList,
+        RequestPurpose::ToggleStoryIsPostedToChatPage,
+    ] {
+        session.begin_story_page_op(crate::story_page::story_page_op_label(purpose));
+        let extra = session.request(purpose, Some(ChatId(11)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+        assert_eq!(
+            session.story_page_op.as_ref().map(|op| &op.state),
+            Some(&crate::story_page::StoryPageOpState::Succeeded)
+        );
+    }
+}
+
+#[test]
+fn b14_story_parses_profile_and_statistics_flags() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateStory","story":{"@type":"story","id":5,"poster_chat_id":11,"date":1,"is_posted_to_chat_page":true,"can_toggle_is_posted_to_chat_page":true,"can_get_statistics":true,"can_be_forwarded":true,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}}"#,
+    );
+    let story = session.stories.get(&(11, 5)).expect("story cached");
+    assert!(story.is_posted_to_chat_page);
+    assert!(story.can_toggle_is_posted_to_chat_page);
+    assert!(story.can_get_statistics);
+    assert!(crate::story_extras::can_share_story(story));
+    assert!(crate::story_extras::can_save_story(story));
 }

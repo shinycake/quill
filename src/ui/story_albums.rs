@@ -622,6 +622,18 @@ impl QuillApp {
                     cx.notify();
                 })),
         );
+        if edit.privacy == StoryPrivacy::CloseFriends {
+            // B14: the list behind "Close friends" is edited here too.
+            panel = panel.child(
+                Button::new("story-privacy-edit-close-friends")
+                    .label("Edit close friends…")
+                    .ghost()
+                    .text_color(text_bright())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_close_friends_editor(window, cx);
+                    })),
+            );
+        }
         if edit.privacy == StoryPrivacy::SelectedUsers {
             let query = self.story_privacy_user_search.read(cx).value();
             let rows = self.g1_contact_rows(&query, cx);

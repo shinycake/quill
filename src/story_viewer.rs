@@ -166,6 +166,9 @@ pub struct StoryViewerItem {
     /// playback progress / auto-advance for video stories (Phase 9.6).
     /// `None` for photos, live, and unsupported stories.
     pub duration_secs: Option<i32>,
+    /// B14: the playable clip (`storyVideo.video`) of a video story, so the
+    /// viewer can play it with the native player once it is local.
+    pub video_file_id: Option<FileId>,
     /// `storyInfo.is_live` — a live story shows the live placeholder
     /// (or the Join button) even if a `storyVideo` thumbnail were present.
     pub is_live: bool,
@@ -274,6 +277,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 caption_entities: story.caption_entities.clone(),
                 duration_label: None,
                 duration_secs: None,
+                video_file_id: None,
                 is_live: false,
                 live_call: None,
                 areas: story.areas.clone(),
@@ -299,6 +303,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
                 caption_entities: story.caption_entities.clone(),
                 duration_label: Some(format_voice_duration(*duration_secs)),
                 duration_secs: Some(*duration_secs),
+                video_file_id: (file_id.0 != 0).then_some(*file_id),
                 is_live: false,
                 live_call: None,
                 areas: story.areas.clone(),
@@ -317,6 +322,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             caption_entities: story.caption_entities.clone(),
             duration_label: None,
             duration_secs: None,
+            video_file_id: None,
             is_live: true,
             live_call: Some(LiveStoryCall {
                 group_call_id: *group_call_id,
@@ -334,6 +340,7 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
             caption_entities: story.caption_entities.clone(),
             duration_label: None,
             duration_secs: None,
+            video_file_id: None,
             is_live: false,
             live_call: None,
             areas: story.areas.clone(),
@@ -379,6 +386,9 @@ mod tests {
             area_link_url: None,
             area_reaction_emojis: Vec::new(),
             can_be_added_to_album: false,
+            is_posted_to_chat_page: false,
+            can_toggle_is_posted_to_chat_page: false,
+            can_get_statistics: false,
             areas: Vec::new(),
         }
     }
@@ -418,6 +428,9 @@ mod tests {
             area_link_url: None,
             area_reaction_emojis: Vec::new(),
             can_be_added_to_album: false,
+            is_posted_to_chat_page: false,
+            can_toggle_is_posted_to_chat_page: false,
+            can_get_statistics: false,
             areas: Vec::new(),
         }
     }
@@ -466,6 +479,7 @@ mod tests {
             caption_entities: Vec::new(),
             duration_label: None,
             duration_secs,
+            video_file_id: None,
             is_live: false,
             live_call: None,
             areas: Vec::new(),

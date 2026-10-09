@@ -81,6 +81,7 @@ pub mod sticker_suggest;
 pub mod storage_limits;
 pub mod stories_strip;
 pub mod story_composer;
+pub mod story_extras;
 pub mod story_page;
 pub mod story_restriction;
 pub mod story_ring;
