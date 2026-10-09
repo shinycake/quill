@@ -111,6 +111,8 @@ pub enum ConnectBlocker {
     LockedStore,
     StoreError,
     TdjsonLoad,
+    /// The OS refused to start the TDLib receive thread.
+    ReceiveThread,
 }
 
 impl ConnectBlocker {
@@ -127,6 +129,9 @@ impl ConnectBlocker {
             }
             ConnectBlocker::LockedStore => "secret store is locked or unavailable",
             ConnectBlocker::StoreError => "secret store error",
+            ConnectBlocker::ReceiveThread => {
+                "could not start the Telegram receive thread — close other apps and retry"
+            }
             ConnectBlocker::TdjsonLoad => {
                 "tdjson library found but failed to load (missing symbols or wrong arch)"
             }
@@ -142,6 +147,7 @@ impl ConnectBlocker {
             ConnectBlocker::LockedStore => "locked-store",
             ConnectBlocker::StoreError => "store-error",
             ConnectBlocker::TdjsonLoad => "tdjson-load",
+            ConnectBlocker::ReceiveThread => "receive-thread",
         }
     }
 }
