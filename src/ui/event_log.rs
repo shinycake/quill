@@ -418,7 +418,12 @@ impl QuillApp {
                     .flex_col()
                     .flex_1()
                     .gap_1()
-                    .child(div().text_sm().child(actor))
+                    .child(
+                        div()
+                            .text_sm()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(actor)),
+                    )
                     .child(
                         div()
                             .text_xs()

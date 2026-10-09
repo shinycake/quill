@@ -2743,7 +2743,12 @@ impl QuillApp {
                     .flex_col()
                     .min_w_0()
                     .text_color(gpui_kit::white())
-                    .child(div().font_semibold().truncate().child(name))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(name)),
+                    )
                     .child(
                         div()
                             .text_xs()

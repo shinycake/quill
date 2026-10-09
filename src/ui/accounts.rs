@@ -274,7 +274,13 @@ impl QuillApp {
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(div().font_semibold().text_sm().child(name.clone()))
+                .child(
+                    div()
+                        .font_semibold()
+                        .text_sm()
+                        .truncate()
+                        .child(super::bidi_line::one_line_plain(name.clone())),
+                )
                 .child(actions),
         );
         if confirming_remove {

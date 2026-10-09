@@ -395,7 +395,7 @@ impl QuillApp {
                                     .min_w_0()
                                     .font_semibold()
                                     .truncate()
-                                    .child(title),
+                                    .child(super::bidi_line::one_line_plain(title)),
                             )
                             .when(pinned, |this| {
                                 this.child(Icon::new(IconName::Pin).size(px(14.)).text_color(muted))
@@ -410,7 +410,9 @@ impl QuillApp {
                             .text_color(muted)
                             .min_w_0()
                             .truncate()
-                            .child(preview),
+                            .child(super::bidi_line::one_line_plain(
+                                super::search_ui::one_line_preview(&preview),
+                            )),
                     ),
             )
             .context_menu(move |menu, _, _| {

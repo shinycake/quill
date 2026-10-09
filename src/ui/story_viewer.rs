@@ -1513,7 +1513,13 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().text_color(text_menu()).child(name))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(text_menu())
+                                    .truncate()
+                                    .child(super::bidi_line::one_line_plain(name)),
+                            )
                             .child(div().text_xs().text_color(text_muted()).child(detail)),
                     ),
             );
@@ -1941,7 +1947,9 @@ impl QuillApp {
                                 div()
                                     .font_semibold()
                                     .text_color(text_bright())
-                                    .child(header_label),
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(super::bidi_line::one_line_plain(header_label)),
                             )
                             .child(
                                 div()

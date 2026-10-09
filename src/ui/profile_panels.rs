@@ -250,10 +250,9 @@ impl QuillApp {
                         .hover(move |style| style.bg(hover))
                 })
                 .child(
-                    div()
+                    super::bidi_line::aligned_block(row.value.clone())
                         .text_sm()
-                        .when(row.hint, |this| this.text_color(muted))
-                        .child(row.value.clone()),
+                        .when(row.hint, |this| this.text_color(muted)),
                 )
                 .child(div().text_xs().text_color(muted).child(row.label));
             let tapped = base.on_click(cx.listener(move |this, _, window, cx| match &action {
@@ -370,7 +369,12 @@ impl QuillApp {
                 .tab_index(0)
                 .hover(|style| style.bg(cx.theme().secondary))
                 .child(chat_avatar(&title, photo.as_deref(), 32.))
-                .child(div().text_sm().truncate().child(title))
+                .child(
+                    div()
+                        .text_sm()
+                        .truncate()
+                        .child(super::bidi_line::one_line_plain(title)),
+                )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.dismiss_profile_modal();
                     this.select_listed_chat(ChatId(chat_id), window, cx);
