@@ -1,6 +1,0 @@
-parity:menu-moderate-delete
-parity:menu-delete-reaction
-parity:profile-member-menu
-parity:profile-remove-member
-parity:admin-transfer-ownership
-parity:admin-new-owner-on-leave

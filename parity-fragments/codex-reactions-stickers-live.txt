@@ -1,9 +1,0 @@
-# B11 reactions, stickers and emoji live data
-parity:stickers-live-updates
-parity:stickers-remove-recent
-parity:emoji-keyword-search
-parity:reactions-quick-double-click
-parity:reactions-fly-animation
-parity:reactions-live-updates
-parity:menu-attached-stickers
-parity:composer-greeting-sticker
