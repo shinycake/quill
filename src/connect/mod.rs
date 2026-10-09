@@ -2,6 +2,7 @@
 //! Never logs api_hash, phone numbers, or codes.
 mod account_hygiene;
 mod auth;
+mod backgrounds;
 mod bots;
 mod calls;
 mod chat_list;

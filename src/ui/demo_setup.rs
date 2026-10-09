@@ -74,6 +74,7 @@ use super::statistics::apply_ready_channel_stats;
 use super::story_composer::{apply_ready_story_edit, apply_ready_story_post};
 use super::story_viewer::{apply_ready_stories, apply_ready_story_viewers};
 use super::subsection_tabs::apply_ready_bot_topics;
+use super::wallpaper::apply_demo_wallpapers;
 use super::*;
 use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, ForwardDraft};
@@ -1435,6 +1436,16 @@ impl QuillApp {
             } else {
                 "screenshot demo — appearance settings".into()
             };
+        }
+        // Appearance slice: interface scale and Telegram wallpapers.
+        if matches!(demo, Some(ScreenshotDemo::ReadyAppearanceWallpapers)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                apply_demo_wallpapers(session);
+            }
+            self.appearance.interface_scale_pct = 125;
+            self.appearance.telegram_wallpaper = true;
+            self.appearance_open = true;
+            self.status_note = "screenshot demo — appearance: scale and wallpapers".into();
         }
         // Slice parity:auth-multi-account (UI): the Accounts dialog open
         // over the ReadyChats fixture (injected, no live Telegram). The

@@ -89,6 +89,16 @@ pub struct Session {
     pub folder_invite_error: Option<String>,
     /// `addChatFolderByInviteLink` confirmed.
     pub folder_invite_done: bool,
+    /// `getInstalledBackgrounds` answer for the current theme; `None` until
+    /// fetched.
+    pub installed_backgrounds: Option<Vec<Background>>,
+    /// The account's default wallpaper per theme (`false` light, `true`
+    /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
+    pub default_backgrounds: HashMap<bool, Background>,
+    /// Which theme the pending `setDefaultBackground` was for.
+    pub background_set_for_dark: bool,
+    /// One-shot: a wallpaper request failed; shown in Appearance.
+    pub background_error: Option<String>,
     pub histories: HashMap<i64, HistoryState>,
     /// History page requests issued for a window that has since been
     /// replaced (`reset_history_window`): their answers are dropped so an
@@ -1208,6 +1218,10 @@ impl Session {
             folder_invite_info: None,
             folder_invite_error: None,
             folder_invite_done: false,
+            installed_backgrounds: None,
+            default_backgrounds: HashMap::new(),
+            background_set_for_dark: false,
+            background_error: None,
             histories: HashMap::new(),
             stale_history_requests: HashSet::new(),
             revision: 0,

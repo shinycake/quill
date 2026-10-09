@@ -222,6 +222,7 @@ mod translate_demo;
 mod translate_ui;
 mod video_pip;
 mod viewer_demo;
+mod wallpaper;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

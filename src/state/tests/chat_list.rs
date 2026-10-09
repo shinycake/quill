@@ -1231,3 +1231,57 @@ fn folder_link_chats_are_cached_per_folder() {
     );
     assert_eq!(session.folder_link_chats.get(&3), Some(&vec![5, 6]));
 }
+
+#[test]
+fn installed_backgrounds_and_default_updates_are_cached() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetInstalledBackgrounds, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"backgrounds","@extra":"{}","backgrounds":[{{"@type":"background","id":5,"is_default":false,"is_dark":false,"name":"sky","document":{{"@type":"document","document":{{"@type":"file","id":31,"size":9,"local":{{"path":"","is_downloading_completed":false}}}}}},"type":{{"@type":"backgroundTypeWallpaper","is_blurred":false,"is_moving":false}}}},{{"@type":"background","id":6,"is_default":true,"is_dark":false,"name":"mint","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":10092441}}}}}}]}}"#,
+            extra.0
+        ),
+    );
+    let list = session.installed_backgrounds.as_ref().expect("list");
+    assert_eq!(list.len(), 2);
+    assert!(session.files.contains_key(&31), "photo file is tracked");
+
+    // The account default for a theme arrives as an update.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateDefaultBackground","for_dark_theme":true,"background":{"@type":"background","id":6,"is_default":true,"is_dark":true,"name":"night","type":{"@type":"backgroundTypeFill","fill":{"@type":"backgroundFillSolid","color":1}}}}"#,
+    );
+    assert_eq!(session.default_backgrounds[&true].id, 6);
+    assert!(!session.default_backgrounds.contains_key(&false));
+
+    // A set answer files under the theme it was sent for; errors surface.
+    session.background_set_for_dark = false;
+    let extra = session.request(RequestPurpose::SetDefaultBackground, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"background","@extra":"{}","id":5,"is_default":true,"is_dark":false,"name":"sky","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":2}}}}}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.default_backgrounds[&false].id, 5);
+    let extra = session.request(RequestPurpose::RemoveInstalledBackground, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"BACKGROUND_INVALID"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.background_error.is_some());
+}

@@ -565,6 +565,8 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Appearance slice: Appearance with Telegram wallpapers and interface scale.
+    ReadyAppearanceWallpapers,
     /// Ready chat draft with typos underlined (red wavy).
     ReadySpellcheck,
     /// Multi-line draft: typos underlined; link, mention, hashtag, command and code skipped.

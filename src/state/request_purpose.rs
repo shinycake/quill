@@ -1268,6 +1268,17 @@ pub enum RequestPurpose {
     /// cached in `Session::folder_chats_to_leave` (keyed by
     /// `PendingRequest::folder_id`) for the delete-confirm dialog.
     GetChatFolderChatsToLeave,
+    /// `getInstalledBackgrounds`. Response is `backgrounds`
+    /// (`Session::installed_backgrounds`).
+    GetInstalledBackgrounds,
+    /// `setDefaultBackground`. Response is `background`
+    /// (`Session::default_backgrounds`).
+    SetDefaultBackground,
+    /// `deleteDefaultBackground`. Response is `ok`.
+    DeleteDefaultBackground,
+    /// `removeInstalledBackground`. Response is `ok`; the entry leaves the
+    /// list optimistically at send time.
+    RemoveInstalledBackground,
     /// `getRecommendedChatFolders`. Response is `recommendedChatFolders`,
     /// cached in `Session::recommended_folders`.
     GetRecommendedChatFolders,

@@ -58,6 +58,14 @@ impl Session {
                 self.folder_share_error = Some(error_reason(&err));
             }
             Some(
+                RequestPurpose::GetInstalledBackgrounds
+                | RequestPurpose::SetDefaultBackground
+                | RequestPurpose::DeleteDefaultBackground
+                | RequestPurpose::RemoveInstalledBackground,
+            ) => {
+                self.background_error = Some(error_reason(&err));
+            }
+            Some(
                 RequestPurpose::CheckChatFolderInviteLink
                 | RequestPurpose::AddChatFolderByInviteLink,
             ) => {

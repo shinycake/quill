@@ -22,7 +22,7 @@ use crate::story_page::{
 };
 use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{
-    AnimationItem, AuthorizationState, BotCommand, BotInfo, CallbackQueryAnswer,
+    AnimationItem, AuthorizationState, Background, BotCommand, BotInfo, CallbackQueryAnswer,
     CanPostStoryResult, CanTransferOwnershipResult, ChannelMemberStatus, ChatAction, ChatActionBar,
     ChatActiveStoriesView, ChatAdminRights, ChatAdministratorEntry, ChatDraft, ChatFolderInfo,
     ChatFolderInviteLink, ChatFolderInviteLinkInfo, ChatFolderSpec, ChatJoinResult, ChatKind,
