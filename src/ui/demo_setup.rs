@@ -478,8 +478,8 @@ impl QuillApp {
     pub(super) fn demo_setup_chat_list(
         &mut self,
         demo: Option<ScreenshotDemo>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         // Slice CL1: pinned + archived + marked-as-unread rows, with the
         // row context menu open over the pinned chat.
@@ -687,8 +687,11 @@ impl QuillApp {
             }
             match variant.as_str() {
                 "requests-box" => {
-                    self.join_requests_dialog =
-                        Some(quill::ids::ChatId(super::chat_bars::DEMO_GROUP));
+                    self.open_join_requests_dialog(
+                        quill::ids::ChatId(super::chat_bars::DEMO_GROUP),
+                        window,
+                        cx,
+                    );
                 }
                 "block-box" => {
                     self.block_bar_dialog = Some(super::chat_bars::BlockBarDialog {
@@ -2625,6 +2628,11 @@ impl QuillApp {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_invite_links(session, &self.demo_sink, &self.demo_seq);
             }
+            self.invite_link_details = Some((
+                quill::ids::ChatId(13),
+                "https://t.me/+moderatorslink".to_owned(),
+            ));
+            self.revoked_links_open = true;
             self.open_info_panel_target(InfoPanelTarget::Supergroup(13), window, cx);
             self.status_note = "screenshot demo — invite links".into();
         }

@@ -656,8 +656,9 @@ fn invite_link_edit_replaces_in_place() {
 }
 
 #[test]
-fn invite_link_revoke_replaces_list() {
-    // Phase D3a: Revoking an invite link replaces the cached list response.
+fn invite_link_revoke_removes_the_revoked_link() {
+    // Revoking answers with the revoked link only (plus the replacement
+    // for a primary link); it leaves the active list without it.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let fetch_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
@@ -682,7 +683,8 @@ fn invite_link_revoke_replaces_list() {
         &sink,
         &format!(
             r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":1,"invite_links":[{}]}}"#,
-            revoke_extra.0, link2
+            revoke_extra.0,
+            link1.replace(r#""is_revoked":false"#, r#""is_revoked":true"#)
         ),
     );
 

@@ -1426,6 +1426,15 @@ pub enum EnvelopePayload {
         total_count: i32,
         requests: Vec<ParsedChatJoinRequest>,
     },
+    /// B8: `chatInviteLinkCounts` — the `getChatInviteLinkCounts` answer.
+    ChatInviteLinkCounts {
+        counts: Vec<ParsedChatInviteLinkCount>,
+    },
+    /// B8: `chatInviteLinkMembers` — the `getChatInviteLinkMembers` answer.
+    ChatInviteLinkMembers {
+        total_count: i32,
+        members: Vec<ParsedChatInviteLinkMember>,
+    },
     /// Phase D3b: `chatAdministrators` (TDLib 1.8.67, line 2485) — the
     /// response of `getChatAdministrators` (line 13632). Carries no chat
     /// id; correlated to the chat by the request's

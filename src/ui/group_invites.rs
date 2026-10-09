@@ -7,6 +7,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
@@ -29,6 +30,24 @@ pub(super) fn apply_ready_invite_links(
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let links_extra = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
     let requests_extra = session.request(RequestPurpose::GetChatJoinRequests, Some(ChatId(13)));
+    let counts_extra = session.request(RequestPurpose::GetChatInviteLinkCounts, Some(ChatId(13)));
+    let revoked_extra =
+        session.request(RequestPurpose::GetRevokedChatInviteLinks, Some(ChatId(13)));
+    let members_extra = session.request(
+        RequestPurpose::GetChatInviteLinkMembers { append: false },
+        Some(ChatId(13)),
+    );
+    session.invite_link_members.insert(
+        13,
+        quill::state::InviteLinkMembersState {
+            invite_link: "https://t.me/+moderatorslink".into(),
+            total_count: 0,
+            members: Vec::new(),
+            loading: true,
+            error: None,
+            request: Some(members_extra),
+        },
+    );
     let link = |invite_link: &str,
                 name: &str,
                 expiration_date: i64,
@@ -43,11 +62,29 @@ pub(super) fn apply_ready_invite_links(
     };
     let jsons = [
         format!(
-            r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":3,"invite_links":[{},{},{}]}}"#,
+            r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":4,"invite_links":[{},{},{},{}]}}"#,
             links_extra.0,
             link("https://t.me/+primarylink", "", 0, 0, 1204, 0, false, true),
             link("https://t.me/+moderatorslink", "Moderators", 1_792_756_800, 25, 8, 0, false, false),
             link("https://t.me/+joinapprovallink", "Join approval", 0, 0, 0, 2, true, false),
+            link("https://t.me/+viplink", "VIP", 0, 0, 3, 0, false, false)
+                .replace(r#""subscription_pricing":null"#, r#""subscription_pricing":{"@type":"starSubscriptionPricing","period":2592000,"star_count":250}"#),
+        ),
+        format!(
+            r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":2,"invite_links":[{},{}]}}"#,
+            revoked_extra.0,
+            link("https://t.me/+oldcampaign", "Old campaign", 0, 0, 41, 0, false, false)
+                .replace(r#""is_revoked":false"#, r#""is_revoked":true"#),
+            link("https://t.me/+spring", "Spring promo", 0, 0, 12, 0, false, false)
+                .replace(r#""is_revoked":false"#, r#""is_revoked":true"#),
+        ),
+        format!(
+            r#"{{"@type":"chatInviteLinkCounts","@extra":"{}","invite_link_counts":[{{"@type":"chatInviteLinkCount","user_id":777,"invite_link_count":4,"revoked_invite_link_count":2}},{{"@type":"chatInviteLinkCount","user_id":7001,"invite_link_count":2,"revoked_invite_link_count":0}},{{"@type":"chatInviteLinkCount","user_id":7002,"invite_link_count":1,"revoked_invite_link_count":3}}]}}"#,
+            counts_extra.0,
+        ),
+        format!(
+            r#"{{"@type":"chatInviteLinkMembers","@extra":"{}","total_count":2,"members":[{{"@type":"chatInviteLinkMember","user_id":7001,"joined_chat_date":1788600000,"via_chat_folder_invite_link":false,"approver_user_id":0}},{{"@type":"chatInviteLinkMember","user_id":7002,"joined_chat_date":1788650000,"via_chat_folder_invite_link":false,"approver_user_id":0}}]}}"#,
+            members_extra.0,
         ),
         format!(
             r#"{{"@type":"chatJoinRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"chatJoinRequest","user_id":7001,"date":1788500000,"bio":"Hi, I would like to join the channel."}},{{"@type":"chatJoinRequest","user_id":7002,"date":1788550000,"bio":"Long-time reader."}}]}}"#,
@@ -295,7 +332,38 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.invite_link_dialog = Some(InviteLinkDialog::new(window, cx, chat_id));
+        let allow_subscription = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.chat_supports_subscription_links(chat_id))
+            || self
+                .session()
+                .and_then(|s| s.chats.get(&chat_id.0))
+                .is_some_and(|chat| chat.kind.is_channel());
+        self.invite_link_dialog = Some(InviteLinkDialog::new(
+            window,
+            cx,
+            chat_id,
+            allow_subscription,
+        ));
+        cx.notify();
+    }
+
+    /// B8: rename a subscription link (the only editable field).
+    pub(super) fn open_subscription_link_rename(
+        &mut self,
+        chat_id: ChatId,
+        invite_link: &str,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut dialog = InviteLinkDialog::new(window, cx, chat_id, false);
+        dialog.edit_link = Some(invite_link.to_owned());
+        dialog
+            .name_input
+            .update(cx, |input, cx| input.set_value(name.to_owned(), window, cx));
+        self.invite_link_dialog = Some(dialog);
         cx.notify();
     }
 
@@ -311,6 +379,39 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(dialog) = self.invite_link_dialog.as_ref() {
+            let chat_id = dialog.chat_id;
+            let name = dialog.name_input.read(cx).value().to_string();
+            let edit_link = dialog.edit_link.clone();
+            let stars_text = dialog.stars_input.read(cx).value().to_string();
+            let stars: i64 = stars_text.trim().parse().unwrap_or(0);
+            if edit_link.is_some() || (dialog.allow_subscription && stars > 0) {
+                let result = match (self.live.as_mut(), edit_link) {
+                    (Some(live), Some(link)) => Some(
+                        live.driver
+                            .edit_chat_subscription_invite_link(chat_id, &link, &name),
+                    ),
+                    (Some(live), None) => Some(
+                        live.driver
+                            .create_chat_subscription_invite_link(chat_id, &name, stars),
+                    ),
+                    (None, _) => None,
+                };
+                self.invite_link_dialog = None;
+                self.status_note = match result {
+                    Some(Ok(_)) => "saving invite link…".into(),
+                    Some(Err(_)) => "could not save invite link".into(),
+                    None => "invite links need a live connection (demo)".into(),
+                };
+                cx.notify();
+                return;
+            }
+            if !stars_text.trim().is_empty() && stars_text.trim().parse::<i64>().is_err() {
+                self.status_note = "Stars price must be a whole number".into();
+                cx.notify();
+                return;
+            }
+        }
         let (chat_id, name, expiration_date, member_limit, creates_join_request) =
             match self.invite_link_dialog.as_ref() {
                 Some(dialog) => {
@@ -384,6 +485,12 @@ impl QuillApp {
     pub(super) fn invite_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.invite_link_dialog.as_ref()?;
         let creates_join_request = dialog.creates_join_request;
+        let editing = dialog.edit_link.is_some();
+        let title = if editing {
+            "Rename subscription link"
+        } else {
+            "New invite link"
+        };
         let panel = div()
             .id("invite-link-dialog")
             .flex()
@@ -394,42 +501,62 @@ impl QuillApp {
             .border_1()
             .border_color(accent())
             .bg(bg_canvas())
-            .child(div().text_sm().font_semibold().child("New invite link"))
+            .child(div().text_sm().font_semibold().child(title))
             .child(
                 Textarea::new(&dialog.name_input)
                     .aria_label("Invite link name")
                     .h(px(40.)),
             )
-            .child(
-                Textarea::new(&dialog.expiration_days_input)
-                    .aria_label("Invite link duration in days")
-                    .h(px(40.)),
-            )
-            .child(
-                Textarea::new(&dialog.member_limit_input)
-                    .aria_label("Invite link member limit")
-                    .h(px(40.)),
-            )
-            .child(
-                // Phase 6: kit Checkbox (was: ghost button with a ☑/☐
-                // label). Controlled: writes the requested value.
-                Checkbox::new("invite-link-dialog-toggle-join-request")
-                    .label("Approval required to join")
-                    .checked(creates_join_request)
-                    .on_click(cx.listener(|this, &on, _, cx| {
-                        if let Some(dialog) = this.invite_link_dialog.as_mut() {
-                            dialog.creates_join_request = on;
-                        }
-                        cx.notify();
-                    })),
-            )
+            .when(!editing, |panel| {
+                panel
+                    .child(
+                        Textarea::new(&dialog.expiration_days_input)
+                            .aria_label("Invite link duration in days")
+                            .h(px(40.)),
+                    )
+                    .child(
+                        Textarea::new(&dialog.member_limit_input)
+                            .aria_label("Invite link member limit")
+                            .h(px(40.)),
+                    )
+                    .child(
+                        // Phase 6: kit Checkbox (was: ghost button with a
+                        // check label). Controlled: writes the requested
+                        // value.
+                        Checkbox::new("invite-link-dialog-toggle-join-request")
+                            .label("Approval required to join")
+                            .checked(creates_join_request)
+                            .on_click(cx.listener(|this, &on, _, cx| {
+                                if let Some(dialog) = this.invite_link_dialog.as_mut() {
+                                    dialog.creates_join_request = on;
+                                }
+                                cx.notify();
+                            })),
+                    )
+            })
+            .when(dialog.allow_subscription && !editing, |panel| {
+                // tdesktop "Require Monthly Fee": a Stars price makes a
+                // 30-day subscription link; expiry and limit do not apply.
+                panel
+                    .child(
+                        Textarea::new(&dialog.stars_input)
+                            .aria_label("Stars per month")
+                            .h(px(40.)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(text_muted())
+                            .child("A Stars price charges people monthly to join through this link. Expiry, limit and approval do not apply."),
+                    )
+            })
             .child(
                 div()
                     .flex()
                     .gap_2()
                     .child(
                         Button::new("invite-link-dialog-create")
-                            .label("Create link")
+                            .label(if editing { "Save" } else { "Create link" })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.submit_invite_link_dialog(window, cx);
                             })),

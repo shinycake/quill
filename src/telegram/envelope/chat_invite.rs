@@ -106,3 +106,49 @@ pub(crate) fn parse_chat_join_request(value: Option<&Value>) -> Option<ParsedCha
             .to_owned(),
     })
 }
+
+/// B8: `chatInviteLinkCount` (TDLib 1.8.68, `schema/td_api.tl:2946`):
+/// one administrator's active and revoked link counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedChatInviteLinkCount {
+    pub user_id: i64,
+    pub invite_link_count: i32,
+    pub revoked_invite_link_count: i32,
+}
+
+/// B8: `chatInviteLinkMember` (`schema/td_api.tl:2956`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedChatInviteLinkMember {
+    pub user_id: i64,
+    pub joined_chat_date: i32,
+    pub via_chat_folder_invite_link: bool,
+    pub approver_user_id: i64,
+}
+
+pub(crate) fn parse_chat_invite_link_count(
+    value: Option<&Value>,
+) -> Option<ParsedChatInviteLinkCount> {
+    let value = value?;
+    Some(ParsedChatInviteLinkCount {
+        user_id: int53(value.get("user_id")).ok()?,
+        invite_link_count: int53(value.get("invite_link_count")).ok().unwrap_or(0) as i32,
+        revoked_invite_link_count: int53(value.get("revoked_invite_link_count"))
+            .ok()
+            .unwrap_or(0) as i32,
+    })
+}
+
+pub(crate) fn parse_chat_invite_link_member(
+    value: Option<&Value>,
+) -> Option<ParsedChatInviteLinkMember> {
+    let value = value?;
+    Some(ParsedChatInviteLinkMember {
+        user_id: int53(value.get("user_id")).ok()?,
+        joined_chat_date: int53(value.get("joined_chat_date")).ok().unwrap_or(0) as i32,
+        via_chat_folder_invite_link: value
+            .get("via_chat_folder_invite_link")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        approver_user_id: int53(value.get("approver_user_id")).ok().unwrap_or(0),
+    })
+}

@@ -19,6 +19,7 @@ mod group_admin;
 mod group_calls;
 mod groups;
 mod history_window;
+mod invite_admin;
 mod media_library;
 mod member_moderation;
 mod message_menu;
