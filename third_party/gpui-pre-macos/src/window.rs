@@ -2160,7 +2160,9 @@ impl PlatformWindow for MacWindow {
     // next-frame callback. While the display link is stopped for idling,
     // ask for one step now; `step` draws and restarts the link. While it
     // runs (or is stopped because the window is hidden) this does nothing,
-    // so frames stay paced by the display.
+    // so frames stay paced by the display. The waker may outlive the
+    // window: dropping `WindowFrameSource` cancels the dispatch source, so
+    // a late `merge_data` never runs `step` on a freed view.
     fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
         let mut lock = self.0.lock();
         let data = lock.native_view.as_ptr() as *mut c_void;

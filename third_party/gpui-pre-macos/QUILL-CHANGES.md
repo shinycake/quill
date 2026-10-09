@@ -17,7 +17,9 @@ The Quill project changed it in 2026 so an idle window stops costing CPU:
   dirty or queues a next-frame callback) to request one step on the window's
   dispatch source while the link is idle; that step draws and resubscribes.
   `schedule_frame` and `draw` mark activity. Stops for other reasons
-  (occlusion, direct draws) behave as before.
+  (occlusion, direct draws) behave as before. The waker holds the window's
+  dispatch source; window teardown still cancels it, so a waker that
+  outlives the window never runs a step.
 - `src/display_link.rs`: `WindowFrameSource::is_running` and
   `WindowFrameSource::requests`.
 - `Cargo.toml`: allows the `deprecated` lint, which the registry build caps
