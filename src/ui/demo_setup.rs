@@ -2017,6 +2017,9 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — service messages".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyReplyKeyboard)) {
+            self.demo_setup_reply_keyboard(cx);
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyTranslate)) {
             self.demo_setup_translate(window, cx);
         }

@@ -401,6 +401,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_probe_channel_membership()?;
             self.maybe_fetch_bot_info()?;
             self.maybe_fetch_bot_commands()?;
+            self.maybe_fetch_reply_markup()?;
             self.maybe_view_open_messages()?;
             self.maybe_download_open_thumbs()?;
             self.maybe_download_open_chat_media()?;
@@ -426,6 +427,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_probe_channel_membership()?;
         self.maybe_fetch_bot_info()?;
         self.maybe_fetch_bot_commands()?;
+        self.maybe_fetch_reply_markup()?;
         self.maybe_view_open_messages()?;
         self.maybe_download_open_thumbs()?;
         self.fetch_sponsored_messages(chat_id)?;

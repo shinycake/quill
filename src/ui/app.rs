@@ -756,6 +756,10 @@ pub struct QuillApp {
     /// B1: one-time custom keyboards the user already tapped
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<(i64, i64)>,
+    /// Keyboards the user hid with the composer's keyboard button.
+    pub(super) collapsed_keyboards: std::collections::HashSet<(i64, i64)>,
+    /// A bot request button's share dialog (`DialogKind::RequestShare`).
+    pub(super) request_share: Option<super::request_share::RequestShare>,
     /// Slice G1: default chat permissions editor.
     pub(super) permissions_dialog: Option<PermissionsDialog>,
     /// Slice G1: public username editor.

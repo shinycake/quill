@@ -91,6 +91,7 @@ mod session_notifications;
 mod session_profile_panels;
 mod session_proxy;
 mod session_reply;
+mod session_reply_keyboard;
 mod session_requests;
 mod session_search;
 mod session_service;
@@ -133,6 +134,7 @@ pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,
     thumb_candidates,
 };
+pub use session_reply_keyboard::*;
 pub use session_share::ShareSearch;
 pub use session_subsection_tabs::{BotTopics, TopicBadge};
 pub use session_translate::*;

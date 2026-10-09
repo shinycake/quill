@@ -354,6 +354,13 @@ impl Session {
                     }
                 }
             }
+            Some(RequestRollback::ChatIsTranslatable { chat_id, previous }) => {
+                self.set_chat_translatable(chat_id, previous);
+            }
+            Some(RequestRollback::AutoTranslate {
+                supergroup_id,
+                previous,
+            }) => self.set_supergroup_auto_translate(supergroup_id, previous),
             // Slice G2: restore the pre-toggle anti-spam flag.
             Some(RequestRollback::AntiSpam {
                 supergroup_id,
@@ -648,6 +655,12 @@ impl Session {
             Some(RequestPurpose::SharePhoneNumber) => {
                 self.chat_action_error = Some(format!(
                     "could not share your phone number (error {})",
+                    err.code
+                ));
+            }
+            Some(RequestPurpose::ShareWithBot) => {
+                self.chat_action_error = Some(format!(
+                    "the bot could not receive what you shared (error {})",
                     err.code
                 ));
             }

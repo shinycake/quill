@@ -1,4 +1,4 @@
-use crate::ids::{ChatId, RequestId};
+use crate::ids::{ChatId, MessageId, RequestId};
 use serde_json::{Value, json};
 
 /// Phase 3.3: `getCommands` for a bot's global (default) command scope
@@ -189,6 +189,77 @@ pub fn toggle_has_sponsored_messages_enabled(extra: RequestId, enabled: bool) ->
         "@type": "toggleHasSponsoredMessagesEnabled",
         "@extra": extra.as_extra(),
         "has_sponsored_messages_enabled": enabled,
+    })
+    .to_string()
+}
+
+/// `getMessage` (schema 1.8.67): fetch one message, e.g. the chat's
+/// reply-markup message when it is outside the loaded history window.
+pub fn get_message(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
+    json!({
+        "@type": "getMessage",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+    })
+    .to_string()
+}
+
+/// `keyboardButtonSourceMessage chat_id message_id` (schema 1.8.67,
+/// line 3815).
+fn keyboard_button_source(chat_id: ChatId, message_id: MessageId) -> serde_json::Value {
+    json!({
+        "@type": "keyboardButtonSourceMessage",
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+    })
+}
+
+/// `shareUsersWithBot` (schema 1.8.67, line 13001): completes a
+/// `keyboardButtonTypeRequestUsers` press.
+pub fn share_users_with_bot(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    button_id: i32,
+    user_ids: &[i64],
+) -> String {
+    json!({
+        "@type": "shareUsersWithBot",
+        "@extra": extra.as_extra(),
+        "source": keyboard_button_source(chat_id, message_id),
+        "button_id": button_id,
+        "shared_user_ids": user_ids,
+        "only_check": false,
+    })
+    .to_string()
+}
+
+/// `shareChatWithBot` (schema 1.8.67, line 13010): completes a
+/// `keyboardButtonTypeRequestChat` press.
+pub fn share_chat_with_bot(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    button_id: i32,
+    shared_chat_id: ChatId,
+) -> String {
+    json!({
+        "@type": "shareChatWithBot",
+        "@extra": extra.as_extra(),
+        "source": keyboard_button_source(chat_id, message_id),
+        "button_id": button_id,
+        "shared_chat_id": shared_chat_id.0,
+        "only_check": false,
+    })
+    .to_string()
+}
+
+/// `getRecentInlineBots` (schema 1.8.67, line 14776).
+pub fn get_recent_inline_bots(extra: RequestId) -> String {
+    json!({
+        "@type": "getRecentInlineBots",
+        "@extra": extra.as_extra(),
     })
     .to_string()
 }

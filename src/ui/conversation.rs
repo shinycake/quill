@@ -850,6 +850,10 @@ impl QuillApp {
                                 .when_some(self.scheduled_messages_button(cx), |row, button| {
                                     row.child(button)
                                 })
+                                // Show / hide the bot's reply keyboard.
+                                .when_some(self.keyboard_toggle_button(cx), |row, button| {
+                                    row.child(button)
+                                })
                                 // "Send as" identity of the chat
                                 // (`chat.message_sender_id`).
                                 .when_some(self.send_as_button(cx), |row, button| row.child(button))

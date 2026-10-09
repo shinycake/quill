@@ -96,6 +96,10 @@ pub enum RequestRollback {
         previous_sign: Option<bool>,
         previous_show: Option<bool>,
     },
+    /// `toggleChatIsTranslatable`: the previous `chat.is_translatable`.
+    ChatIsTranslatable { chat_id: i64, previous: bool },
+    /// `toggleSupergroupHasAutomaticTranslation`: the previous flag.
+    AutoTranslate { supergroup_id: i64, previous: bool },
     /// Slice G2: `toggleSupergroupHasAggressiveAntiSpamEnabled`: the
     /// previous `has_aggressive_anti_spam_enabled` flag (`None` =
     /// unknown).

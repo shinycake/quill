@@ -607,8 +607,11 @@ pub struct TranslatePrefs {
     /// "Show Translate Button": the Translate entries in the message menu.
     #[serde(default = "default_true")]
     pub show_button: bool,
-    /// "Translate Entire Chats" (Telegram Premium): the chat bar.
-    #[serde(default)]
+    /// "Translate Entire Chats" (Telegram Premium): the chat bar. On by
+    /// default like tdesktop (`_translateChatEnabled = true`); the switch is
+    /// locked for accounts without Premium, but channels with automatic
+    /// translation still use it.
+    #[serde(default = "default_true")]
     pub translate_chats: bool,
     /// The "Translate to" language; empty means the app language.
     #[serde(default)]
@@ -629,7 +632,7 @@ impl Default for TranslatePrefs {
     fn default() -> Self {
         Self {
             show_button: true,
-            translate_chats: false,
+            translate_chats: true,
             translate_to: String::new(),
             skip_languages: Vec::new(),
             hidden_chats: Vec::new(),
@@ -814,6 +817,22 @@ pub fn replace_content_text(
     true
 }
 
+/// `TranslateTracker::setup`: the bar and the translated chat are tracked
+/// when "Translate Entire Chats" is on and the account has Premium or the
+/// channel translates automatically.
+pub fn tracking_enabled(translate_chats: bool, premium: bool, automatic: bool) -> bool {
+    translate_chats && (premium || automatic)
+}
+
+/// The bar's label with the channel auto-translate wording
+/// (`lng_translate_return_original`: "View Original (Spanish)").
+pub fn bar_label_for(translated: bool, to: &str, automatic: bool, from: Option<&str>) -> String {
+    match (translated, automatic, from) {
+        (true, true, Some(from)) => format!("View Original ({})", language_name(from)),
+        _ => bar_label(translated, to),
+    }
+}
+
 /// The translate bar's label.
 pub fn bar_label(translated: bool, to: &str) -> String {
     if translated {
@@ -826,8 +845,9 @@ pub fn bar_label(translated: bool, to: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        TranslatePrefs, bar_label, choose_translate_to, detect_language, language_name,
-        normalize_code, offer_language, search_languages, skip_translate,
+        TranslatePrefs, bar_label, bar_label_for, choose_translate_to, detect_language,
+        language_name, normalize_code, offer_language, search_languages, skip_translate,
+        tracking_enabled,
     };
 
     #[test]
@@ -896,7 +916,7 @@ mod tests {
     fn prefs_default_to_the_app_language() {
         let prefs = TranslatePrefs::default();
         assert!(prefs.show_button);
-        assert!(!prefs.translate_chats);
+        assert!(prefs.translate_chats, "tdesktop default");
         assert_eq!(prefs.to_language("de"), "de");
         assert_eq!(prefs.skip("de"), vec!["de"]);
         assert_eq!(prefs.to_language("xx"), "en");
@@ -1023,6 +1043,26 @@ mod tests {
         let mut sticker_like = MessageContent::ChatTtlChanged { secs: 0 };
         assert!(!super::replace_content_text(&mut sticker_like, "x", &[]));
         let _ = &mut empty;
+    }
+
+    #[test]
+    fn auto_translate_tracks_without_premium() {
+        assert!(!tracking_enabled(true, false, false));
+        assert!(tracking_enabled(true, true, false));
+        assert!(tracking_enabled(true, false, true));
+        assert!(!tracking_enabled(false, true, true));
+        assert_eq!(
+            bar_label_for(true, "en", true, Some("es")),
+            "View Original (Spanish)"
+        );
+        assert_eq!(
+            bar_label_for(true, "en", false, Some("es")),
+            "Show Original"
+        );
+        assert_eq!(
+            bar_label_for(false, "en", true, Some("es")),
+            "Translate to English"
+        );
     }
 
     #[test]

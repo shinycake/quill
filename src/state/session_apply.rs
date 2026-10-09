@@ -144,6 +144,7 @@ impl Session {
                 has_scheduled_messages,
                 message_sender,
                 is_translatable,
+                reply_markup_message_id,
                 unread_mention_count,
                 unread_reaction_count,
                 can_be_reported,
@@ -167,6 +168,11 @@ impl Session {
                 self.set_chat_has_scheduled(chat_id.0, has_scheduled_messages);
                 self.set_chat_message_sender(chat_id.0, message_sender);
                 self.set_chat_translatable(chat_id.0, is_translatable);
+                if reply_markup_message_id.0 > 0 {
+                    self.reply_keyboards
+                        .markup_message_ids
+                        .insert(chat_id.0, reply_markup_message_id.0);
+                }
                 self.set_chat_action_bar(chat_id.0, action_bar);
                 self.apply_update_new_chat(
                     chat_id,
@@ -306,6 +312,8 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
                     self.contacts = Some(user_ids);
                     self.contacts_error = false;
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecentInlineBots) {
+                    self.reply_keyboards.recent_inline_bots = Some(user_ids);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBotSimilarBots)
                     && let Some(pending) = pending
                     && let Some(bot_user_id) = pending.user_id
@@ -456,6 +464,11 @@ impl Session {
                 chat_id,
                 has_scheduled_messages,
             } => self.set_chat_has_scheduled(chat_id, has_scheduled_messages),
+            EnvelopePayload::UpdateChatReplyMarkup {
+                chat_id,
+                message_id,
+                reply_markup,
+            } => self.set_chat_reply_keyboard(chat_id, message_id, reply_markup),
             EnvelopePayload::UpdateChatMessageSender {
                 chat_id,
                 message_sender,
@@ -1808,6 +1821,7 @@ impl Session {
                 member_count,
                 is_forum,
                 has_forum_tabs,
+                has_automatic_translation,
                 username,
                 status,
                 can_restrict_members,
@@ -1832,6 +1846,7 @@ impl Session {
                 self.supergroup_verification
                     .insert(supergroup_id, verification);
                 self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
+                self.set_supergroup_auto_translate(supergroup_id, has_automatic_translation);
                 self.apply_update_supergroup(
                     supergroup_id,
                     is_forum,
@@ -1857,6 +1872,7 @@ impl Session {
                 supergroup_id,
                 is_forum,
                 has_forum_tabs,
+                has_automatic_translation,
                 username,
                 status,
                 can_restrict_members,
@@ -1875,6 +1891,7 @@ impl Session {
                 self.supergroup_join_to_send
                     .insert(supergroup_id, join_to_send_messages);
                 self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
+                self.set_supergroup_auto_translate(supergroup_id, has_automatic_translation);
                 self.apply_supergroup(
                     supergroup_id,
                     is_forum,
@@ -1945,6 +1962,14 @@ impl Session {
                 self.apply_message_thread_info(*info, pending);
             }
             EnvelopePayload::Message(message) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatReplyMarkupMessage) {
+                    self.set_chat_reply_keyboard(
+                        message.chat_id,
+                        Some(message.id),
+                        message.reply_markup.clone(),
+                    );
+                    return;
+                }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMessageByDate) {
                     self.accept_date_message(message.id);
                     return;

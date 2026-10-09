@@ -1322,6 +1322,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .get("has_forum_tabs")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                has_automatic_translation: supergroup
+                    .get("has_automatic_translation")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 username: parse_first_active_username(supergroup.get("usernames")),
                 // Phase A1: own `chatMemberStatus*` (schema 1.8.67 line
                 // 2746); unknown/missing → `Unknown` (gated, no bypass).
@@ -1379,6 +1383,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .unwrap_or(false),
             has_forum_tabs: value
                 .get("has_forum_tabs")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_automatic_translation: value
+                .get("has_automatic_translation")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             username: parse_first_active_username(value.get("usernames")),
@@ -2148,6 +2156,17 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        "updateChatReplyMarkup" => {
+            let message = match value.get("reply_markup_message") {
+                Some(m) if !m.is_null() => Some(parse_message(m)?),
+                _ => None,
+            };
+            Ok(EnvelopePayload::UpdateChatReplyMarkup {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                message_id: message.as_ref().map(|m| m.id),
+                reply_markup: message.and_then(|m| m.reply_markup),
+            })
+        }
         "updateChatMessageSender" => Ok(EnvelopePayload::UpdateChatMessageSender {
             chat_id: int53(value.get("chat_id"))?,
             message_sender: parse_message_sender(value.get("message_sender_id")).ok(),

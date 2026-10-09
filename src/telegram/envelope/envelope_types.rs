@@ -284,6 +284,9 @@ pub enum EnvelopePayload {
         /// translation of the chat's messages must be suggested.
         /// Refreshed by `updateChatIsTranslatable` (line 10585).
         is_translatable: bool,
+        /// `chat.reply_markup_message_id` (schema 1.8.67, line 3624): the
+        /// message whose keyboard the chat shows; 0 for none.
+        reply_markup_message_id: MessageId,
         /// Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67, lines
         /// 3600 / 3627). Refreshed by `updateChatIsMarkedAsUnread`
         /// (schema line 10588).
@@ -688,6 +691,9 @@ pub enum EnvelopePayload {
         /// line 2746) — a forum whose topics show as tabs, the way
         /// Telegram Desktop shows them (`ChannelData::useSubsectionTabs`).
         has_forum_tabs: bool,
+        /// `supergroup.has_automatic_translation` (schema 1.8.67, line
+        /// 2746): the channel shows its messages translated for everyone.
+        has_automatic_translation: bool,
         username: String,
         /// `supergroup.member_count` — may be 0 until full info is known.
         member_count: i32,
@@ -759,6 +765,9 @@ pub enum EnvelopePayload {
         /// Subsection tabs: `supergroup.has_forum_tabs` (schema 1.8.67,
         /// line 2746).
         has_forum_tabs: bool,
+        /// `supergroup.has_automatic_translation` (schema 1.8.67, line
+        /// 2746): the channel shows its messages translated for everyone.
+        has_automatic_translation: bool,
         username: String,
         status: ChannelMemberStatus,
         /// Phase A1: `rights.can_restrict_members` from own
@@ -1235,6 +1244,14 @@ pub enum EnvelopePayload {
     UpdateChatHasScheduledMessages {
         chat_id: i64,
         has_scheduled_messages: bool,
+    },
+    /// `updateChatReplyMarkup` (schema 1.8.67, line 10558): the message
+    /// whose reply markup the chat shows changed. `message_id` is `None`
+    /// when the markup was removed; `reply_markup` is that message's markup.
+    UpdateChatReplyMarkup {
+        chat_id: ChatId,
+        message_id: Option<MessageId>,
+        reply_markup: Option<ReplyMarkup>,
     },
     /// `updateChatMessageSender` (schema 1.8.67, line 10546) — the "send as"
     /// identity of the chat changed.
