@@ -477,6 +477,9 @@ impl Session {
             self.folder_specs.remove(&folder_id);
             self.folder_chats_exhausted.remove(&folder_id);
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatFolderByInviteLink) {
+            self.folder_invite_done = true;
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ToggleHasSponsoredMessagesEnabled)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {

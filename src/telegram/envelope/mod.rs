@@ -1,5 +1,6 @@
 mod account_notices;
 mod auth;
+mod backgrounds;
 mod bots;
 mod calls;
 mod chat;
@@ -92,6 +93,7 @@ mod tests_threads;
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 pub use account_notices::*;
 pub use auth::*;
+pub use backgrounds::*;
 pub use bots::*;
 pub use calls::*;
 pub use chat::*;

@@ -165,9 +165,16 @@ impl QuillApp {
             } else if this.device_qr_scanner.is_some() {
                 body = body.child(Button::new("cancel-device-scan").label("Cancel camera scan").ghost()
                     .on_click(cx.listener(|this, _, _, cx| { this.clear_device_qr(); cx.notify(); })));
-            } else if cfg!(target_os = "macos") {
-                body = body.child(Button::new("scan-device-login").label("Link device with camera").disabled(mutating)
-                    .on_click(cx.listener(|this, _, _, cx| this.scan_device_qr(cx))));
+            } else {
+                // Cross-platform: paste the `tg://login?token=...` link that
+                // a QR reader shows for the other device's code.
+                let mut row = div().flex().flex_wrap().gap_2();
+                if cfg!(target_os = "macos") {
+                    row = row.child(Button::new("scan-device-login").label("Link device with camera").disabled(mutating)
+                        .on_click(cx.listener(|this, _, _, cx| this.scan_device_qr(cx))));
+                }
+                body = body.child(row.child(Button::new("paste-device-login").label("Link device from pasted link").ghost().disabled(mutating)
+                    .on_click(cx.listener(|this, _, _, cx| this.paste_device_login_link(cx)))));
             }
 
             if let Some(line) = error {

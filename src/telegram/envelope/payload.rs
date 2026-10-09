@@ -1030,6 +1030,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 },
             ))
         }
+        // `countries` — the `getCountries` answer for the sign-in picker.
+        "countries" => Ok(EnvelopePayload::Countries {
+            countries: crate::phone::countries_from_json(&value),
+        }),
         // Phase C3a: `text` (schema 1.8.67, line 10071) — the
         // `joinVideoChat` / `joinGroupCall` answer ("join response
         // payload for tgcalls"). Quill stores it, never consumes it
@@ -1171,6 +1175,37 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // `schema/td_api.tl:13355`) — the full editable folder spec.
         "chatFolder" => parse_chat_folder(&value)
             .map(|spec| EnvelopePayload::ChatFolder { spec })
+            .ok_or(ParseError::MissingField),
+        "backgrounds" => parse_backgrounds(&value)
+            .map(EnvelopePayload::Backgrounds)
+            .ok_or(ParseError::MissingField),
+        "background" => parse_background(&value)
+            .map(EnvelopePayload::Background)
+            .ok_or(ParseError::MissingField),
+        "updateDefaultBackground" => {
+            let background = value
+                .get("background")
+                .and_then(parse_background)
+                .ok_or(ParseError::MissingField)?;
+            Ok(EnvelopePayload::UpdateDefaultBackground {
+                for_dark_theme: value
+                    .get("for_dark_theme")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                background,
+            })
+        }
+        "chatFolderInviteLink" => parse_chat_folder_invite_link(&value)
+            .map(EnvelopePayload::ChatFolderInviteLink)
+            .ok_or(ParseError::MissingField),
+        "chatFolderInviteLinks" => parse_chat_folder_invite_links(&value)
+            .map(EnvelopePayload::ChatFolderInviteLinks)
+            .ok_or(ParseError::MissingField),
+        "recommendedChatFolders" => parse_recommended_chat_folders(&value)
+            .map(EnvelopePayload::RecommendedChatFolders)
+            .ok_or(ParseError::MissingField),
+        "chatFolderInviteLinkInfo" => parse_chat_folder_invite_link_info(&value)
+            .map(EnvelopePayload::ChatFolderInviteLinkInfo)
             .ok_or(ParseError::MissingField),
         // Parity slice: `getChatListsToAddChat` response (TDLib 1.8.67,
         // `schema/td_api.tl:13347`) — the chat lists a chat may be added

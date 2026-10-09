@@ -63,6 +63,28 @@ pub(super) fn demo_seed_for(
             "screenshot demo — WaitCode (injected auth, no live Telegram)".into(),
             AuthorizationState::WaitCode {
                 code_length: Some(5),
+                delivery: Default::default(),
+            },
+        ),
+        ScreenshotDemo::WaitPhoneCountry
+        | ScreenshotDemo::WaitPhoneFormatted
+        | ScreenshotDemo::WaitPhoneBanned => (
+            None,
+            ConnectUiStatus::DemoWaitPhone,
+            "screenshot demo — sign-in phone step (injected auth, no live Telegram)".into(),
+            AuthorizationState::WaitPhoneNumber,
+        ),
+        ScreenshotDemo::WaitCodeResend => (
+            None,
+            ConnectUiStatus::DemoWaitCode,
+            "screenshot demo — WaitCode with resend countdown (injected auth)".into(),
+            AuthorizationState::WaitCode {
+                code_length: Some(5),
+                delivery: quill::telegram::envelope::CodeDelivery {
+                    kind: quill::telegram::envelope::CodeKind::TelegramMessage,
+                    next: Some(quill::telegram::envelope::CodeKind::Sms),
+                    timeout_secs: 60,
+                },
             },
         ),
         ScreenshotDemo::WaitPassword => (
@@ -95,7 +117,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadyAppearanceWallpapers | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -891,6 +913,30 @@ pub(super) fn demo_seed_for(
             "screenshot demo — folder management (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyFoldersShare => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — Share Folder dialog: invite links over the folder fixture (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersSidebar => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — folders in the left column (Tabs on the left) with icons (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersAddLink => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — Add folder for an addlist link (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersIcons => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — folder editor with the icon picker (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyChatAvatars => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1304,6 +1350,73 @@ impl QuillApp {
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
+        let mut signin = super::signin_ui::SignInUi::new(window, cx);
+        // Group the digits as the user types or pastes.
+        cx.subscribe_in(
+            &phone_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.signin_phone_changed(window, cx);
+                }
+            },
+        )
+        .detach();
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::WaitPhone
+                    | ScreenshotDemo::WaitPhoneCountry
+                    | ScreenshotDemo::WaitPhoneFormatted
+                    | ScreenshotDemo::WaitPhoneBanned
+            )
+        ) {
+            signin.demo_countries = super::signin_ui::demo_country_fixtures();
+            signin.demo_guess = Some("US".into());
+        }
+        match demo {
+            Some(ScreenshotDemo::WaitPhoneCountry) => {
+                signin.picker_open = true;
+                signin
+                    .search
+                    .update(cx, |input, cx| input.set_value("uni", window, cx));
+            }
+            Some(ScreenshotDemo::WaitPhoneFormatted) => {
+                signin.touched = true;
+                signin.phone_text = "+1 555 010 0199".into();
+                phone_input.update(cx, |input, cx| {
+                    input.set_value("+1 555 010 0199", window, cx)
+                });
+            }
+            Some(ScreenshotDemo::WaitPhoneBanned) => {
+                signin.touched = true;
+                signin.phone_text = "+1 555 010 0199".into();
+                signin.submitted_phone = "+1 555 010 0199".into();
+                phone_input.update(cx, |input, cx| {
+                    input.set_value("+1 555 010 0199", window, cx)
+                });
+                signin.demo_error = Some(quill::state::AuthRequestError {
+                    purpose: quill::state::RequestPurpose::SetPhoneNumber,
+                    class: quill::telegram::envelope::ErrorClass::PhoneBanned,
+                    flood_wait_secs: None,
+                });
+            }
+            Some(ScreenshotDemo::WaitCodeResend) => {
+                signin.submitted_phone = "+1 555 010 0199".into();
+                // 18 seconds into the 60-second wait.
+                signin.code_clock = Some((
+                    quill::telegram::envelope::CodeDelivery {
+                        kind: quill::telegram::envelope::CodeKind::TelegramMessage,
+                        next: Some(quill::telegram::envelope::CodeKind::Sms),
+                        timeout_secs: 60,
+                    },
+                    std::time::Instant::now()
+                        .checked_sub(Duration::from_secs(18))
+                        .unwrap_or_else(std::time::Instant::now),
+                ));
+            }
+            _ => {}
+        }
         let code_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Verification code")
@@ -1754,6 +1867,7 @@ impl QuillApp {
             registration_notify_contacts: false,
             email_input,
             phone_input,
+            signin,
             code_input,
             password_input,
             recovery_code_input,
@@ -1829,6 +1943,10 @@ impl QuillApp {
                 demo,
                 Some(
                     ScreenshotDemo::WaitPhone
+                        | ScreenshotDemo::WaitPhoneCountry
+                        | ScreenshotDemo::WaitPhoneFormatted
+                        | ScreenshotDemo::WaitPhoneBanned
+                        | ScreenshotDemo::WaitCodeResend
                         | ScreenshotDemo::WaitCode
                         | ScreenshotDemo::WaitPassword
                         | ScreenshotDemo::WaitPremium
@@ -2129,6 +2247,8 @@ impl QuillApp {
             folder_manage_open: false,
             folder_editor: None,
             folder_delete_confirm: None,
+            folder_share: None,
+            folder_invite: None,
             folder_menu_open: false,
             add_contact_dialog: None,
             block_bar_dialog: None,

@@ -44,6 +44,35 @@ impl Session {
         {
             self.reject_replied_message(chat_id, message_id);
         }
+        // Share Folder / recommended folders / "Add folder" by link: the
+        // dialog shows the reason instead of spinning.
+        match pending.map(|p| p.purpose) {
+            Some(
+                RequestPurpose::GetChatFolderInviteLinks
+                | RequestPurpose::GetChatsForFolderInviteLink
+                | RequestPurpose::CreateChatFolderInviteLink
+                | RequestPurpose::EditChatFolderInviteLink
+                | RequestPurpose::DeleteChatFolderInviteLink
+                | RequestPurpose::GetRecommendedChatFolders,
+            ) => {
+                self.folder_share_error = Some(error_reason(&err));
+            }
+            Some(
+                RequestPurpose::GetInstalledBackgrounds
+                | RequestPurpose::SetDefaultBackground
+                | RequestPurpose::DeleteDefaultBackground
+                | RequestPurpose::RemoveInstalledBackground,
+            ) => {
+                self.background_error = Some(error_reason(&err));
+            }
+            Some(
+                RequestPurpose::CheckChatFolderInviteLink
+                | RequestPurpose::AddChatFolderByInviteLink,
+            ) => {
+                self.folder_invite_error = Some(error_reason(&err));
+            }
+            _ => {}
+        }
         // Phase 9.3: a `postStory` / `canPostStory` error — the
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {

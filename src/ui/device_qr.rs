@@ -132,6 +132,38 @@ impl QuillApp {
         cx.activate(true);
         cx.notify();
     }
+    /// Link a device from a `tg://login?token=...` link on the clipboard
+    /// (no camera needed, so it works on every platform). The link goes
+    /// through the same validation and explicit consent step as a scan; it
+    /// is never logged.
+    pub(super) fn paste_device_login_link(&mut self, cx: &mut Context<Self>) {
+        if self.device_login_qr.is_some()
+            || !self.live.as_ref().is_some_and(|live| {
+                matches!(
+                    live.driver.session.auth,
+                    quill::telegram::envelope::AuthorizationState::Ready
+                )
+            })
+        {
+            return;
+        }
+        let link = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .map(|text| Zeroizing::new(text.trim().to_string()));
+        match link {
+            Some(link) if quill::auth::is_device_login_qr(&link) => {
+                self.device_link_notice = None;
+                self.device_login_qr = Some(link);
+            }
+            _ => {
+                self.device_link_notice = Some(
+                    "Copy the tg://login link from the other device's QR code first, then try again.",
+                );
+            }
+        }
+        cx.notify();
+    }
     pub(super) fn confirm_scanned_device(&mut self, cx: &mut Context<Self>) {
         let Some(link) = self.device_login_qr.take() else {
             return;

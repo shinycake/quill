@@ -22,6 +22,12 @@ impl QuillApp {
         show_qr: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let state = self.current_auth();
+        let auth = &self.signin_view(auth, &state);
+        // "Wrong number?" swaps the code form for the phone form.
+        let editing_phone = self.signin_phone_visible(&state) && !show_phone;
+        let show_phone = show_phone || editing_phone;
+        let show_code = show_code && !editing_phone;
         let busy = self.session().is_some_and(|s| s.requests.has_auth_submit());
         let can_qr = quill::auth::can_request_qr_login(&self.current_auth())
             && (self.live.is_some() || self.demo_auth_inputs);
@@ -92,36 +98,21 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, window, cx| this.submit_email(window, cx))),
                 );
         }
+        let (error_elements, locked) = self.signin_error_elements(cx);
         if show_phone {
-            form = form
-                .child(
-                    Textarea::new(&self.phone_input)
-                        .aria_label("Phone number")
-                        .h(px(40.)),
-                )
-                .child(
-                    primary_action("submit-phone", "Continue", busy)
-                        .on_click(cx.listener(|this, _, window, cx| this.submit_phone(window, cx))),
-                );
+            for element in self.signin_phone_section(busy, locked, cx) {
+                form = form.child(element);
+            }
         }
         if show_code {
-            form = form
-                .child(
-                    Textarea::new(&self.code_input)
-                        .aria_label("Sign-in code")
-                        .h(px(40.)),
-                )
-                .child(
-                    primary_action("submit-code", "Continue", busy)
-                        .on_click(cx.listener(|this, _, window, cx| this.submit_code(window, cx))),
-                )
-                .child(
-                    Button::new("resend-code")
-                        .label("Send the code again")
-                        .ghost()
-                        .w_full()
-                        .on_click(cx.listener(|this, _, _, cx| this.resend_code(cx))),
-                );
+            for element in self.signin_code_section(busy, locked, cx) {
+                form = form.child(element);
+            }
+        }
+        if show_phone || show_code {
+            for element in error_elements {
+                form = form.child(element);
+            }
         }
         if show_password {
             // Slice A10: password / recovery-code entry (`auth_recovery.rs`).

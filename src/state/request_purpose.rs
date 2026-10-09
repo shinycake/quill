@@ -27,6 +27,12 @@ pub enum RequestPurpose {
     RecoverAuthenticationPassword,
     /// Slice A1: `requestQrCodeAuthentication` from the phone screen.
     RequestQrCodeAuthentication,
+    /// `resetAuthenticationEmailAddress` on the email-code step.
+    ResetAuthenticationEmail,
+    /// `getCountries` for the sign-in country picker.
+    GetCountries,
+    /// `getCountryCode`: the default country guess for the phone screen.
+    GetCountryCode,
     LoadChats,
     /// Phase 7.1: single-shot `loadChats(chatListFolder(id))` when a folder
     /// tab is selected. Separate from `LoadChats` so the ok-response does
@@ -1262,6 +1268,42 @@ pub enum RequestPurpose {
     /// cached in `Session::folder_chats_to_leave` (keyed by
     /// `PendingRequest::folder_id`) for the delete-confirm dialog.
     GetChatFolderChatsToLeave,
+    /// `getInstalledBackgrounds`. Response is `backgrounds`
+    /// (`Session::installed_backgrounds`).
+    GetInstalledBackgrounds,
+    /// `setDefaultBackground`. Response is `background`
+    /// (`Session::default_backgrounds`).
+    SetDefaultBackground,
+    /// `deleteDefaultBackground`. Response is `ok`.
+    DeleteDefaultBackground,
+    /// `removeInstalledBackground`. Response is `ok`; the entry leaves the
+    /// list optimistically at send time.
+    RemoveInstalledBackground,
+    /// `getRecommendedChatFolders`. Response is `recommendedChatFolders`,
+    /// cached in `Session::recommended_folders`.
+    GetRecommendedChatFolders,
+    /// `getChatsForChatFolderInviteLink`. Response is `chats` — the folder
+    /// chats a link can grant (`Session::folder_link_chats`, keyed by
+    /// `PendingRequest::folder_id`).
+    GetChatsForFolderInviteLink,
+    /// `getChatFolderInviteLinks`. Response is `chatFolderInviteLinks`
+    /// (`Session::folder_invite_links`, keyed by folder id).
+    GetChatFolderInviteLinks,
+    /// `createChatFolderInviteLink`. Response is `chatFolderInviteLink`.
+    CreateChatFolderInviteLink,
+    /// `editChatFolderInviteLink`. Response is `chatFolderInviteLink`.
+    EditChatFolderInviteLink,
+    /// `deleteChatFolderInviteLink`. Response is `ok`; the link leaves the
+    /// cache optimistically at send time.
+    DeleteChatFolderInviteLink,
+    /// `checkChatFolderInviteLink` (an `addlist` link). Response is
+    /// `chatFolderInviteLinkInfo` (`Session::folder_invite_info`).
+    CheckChatFolderInviteLink,
+    /// `addChatFolderByInviteLink`. Response is `ok`.
+    AddChatFolderByInviteLink,
+    /// `getChat` for a chat an `addlist` link offers that is not loaded
+    /// yet (its title shows in the "Add folder" dialog).
+    GetFolderInviteChat,
     /// Phase B1: `createNewSecretChat`. Response is `chat` (the new
     /// secret chat); the canonical state arrives as `updateNewChat` /
     /// `updateSecretChat`.

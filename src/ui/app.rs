@@ -165,6 +165,7 @@ pub struct QuillApp {
     pub(super) registration_notify_contacts: bool,
     pub(super) email_input: Entity<TextareaState>,
     pub(super) phone_input: Entity<TextareaState>,
+    pub(super) signin: super::signin_ui::SignInUi,
     pub(super) code_input: Entity<TextareaState>,
     pub(super) password_input: Entity<InputState>,
     /// Slice A10: recovery-code entry for 2FA password recovery. The code
@@ -469,7 +470,7 @@ pub struct QuillApp {
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
-    pub(super) appearance_applied: Option<(ThemeMode, u32, bool)>,
+    pub(super) appearance_applied: Option<(ThemeMode, u32, bool, u16)>,
     /// Slice S3: Privacy settings overlay (TGX Settings → Privacy).
     pub(super) privacy_open: bool,
     /// B13: transient state of the privacy / security extras.
@@ -1041,6 +1042,10 @@ pub struct QuillApp {
     pub(super) folder_manage_open: bool,
     pub(super) folder_editor: Option<FolderEditorDialog>,
     pub(super) folder_delete_confirm: Option<FolderDeleteConfirm>,
+    /// Share Folder (invite links) dialog.
+    pub(super) folder_share: Option<FolderShareDialog>,
+    /// "Add folder" for an `addlist` link.
+    pub(super) folder_invite: Option<FolderInviteDialog>,
     pub(super) folder_menu_open: bool,
 }
 
