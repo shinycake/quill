@@ -152,6 +152,9 @@ impl Session {
                     self.upsert_message(message, false);
                 }
                 self.refresh_history_has_newer(chat_id);
+                // R6: scrolling far back — drop the newest end of the
+                // window instead of growing it without bound.
+                self.trim_history_window(chat_id, WindowEnd::Newest);
             }
         }
     }
