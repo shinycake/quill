@@ -140,7 +140,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         message_id: MessageId,
         silent: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        self.send_pin_chat_message(chat_id, message_id, false, silent)
+        self.send_pin_chat_message(chat_id, message_id, false, silent, false)
+    }
+
+    /// Pin from the pin box: `silent` is "Notify all members" off,
+    /// `only_for_self` is "Also pin for {user}" off.
+    pub fn pin_chat_message_with(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        silent: bool,
+        only_for_self: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.send_pin_chat_message(chat_id, message_id, false, silent, only_for_self)
     }
 
     /// Unpin one pinned message (tdesktop PinnedBar cancel / Unpin).
@@ -149,7 +161,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<RequestId, ConnectSendError> {
-        self.send_pin_chat_message(chat_id, message_id, true, false)
+        self.send_pin_chat_message(chat_id, message_id, true, false, false)
     }
 
     /// Toggle pin for an already-sent message.
@@ -164,7 +176,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
             .is_some_and(|message| message.is_pinned);
-        self.send_pin_chat_message(chat_id, message_id, pinned, false)
+        self.send_pin_chat_message(chat_id, message_id, pinned, false, false)
     }
 
     fn send_pin_chat_message(
@@ -173,6 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         message_id: MessageId,
         unpin: bool,
         silent: bool,
+        only_for_self: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -205,7 +218,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = if unpin {
             unpin_chat_message(extra, chat_id, message_id)
         } else {
-            pin_chat_message(extra, chat_id, message_id, silent, false)
+            pin_chat_message(extra, chat_id, message_id, silent, only_for_self)
         };
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),

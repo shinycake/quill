@@ -536,6 +536,10 @@ pub struct QuillApp {
     pub(super) new_secret_picker_open: bool,
     /// tdesktop `Data::ForwardDraft` / history multi-select.
     pub(super) pending_forward: Option<ForwardDraft>,
+    /// Last row clicked in selection mode: the Shift+click range anchor.
+    pub(super) selection_anchor: Option<MessageId>,
+    /// A drag over rows is selecting (`true`) or deselecting (`false`).
+    pub(super) selection_drag: Option<bool>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
     pub(super) forward_picker_open: bool,
     /// Last successful (or failed) `forwardMessages` result.

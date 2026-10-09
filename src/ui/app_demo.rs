@@ -1819,6 +1819,8 @@ impl QuillApp {
             chat_filter: ChatListFilter::All,
             new_secret_picker_open: false,
             pending_forward: None,
+            selection_anchor: None,
+            selection_drag: None,
             forward_picker_open: false,
             forward_result: None,
             reactions_expanded: false,
