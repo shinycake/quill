@@ -1024,21 +1024,21 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 
 ### Settings: privacy & security
 
-- [ ] More privacy settings: bio, date of birth, voice messages, gifts, who can message me, saved music, find me by phone <!-- parity:settings-privacy-extra-keys -->
-- [ ] Privacy rule types: Premium users, bots and chat members in exceptions <!-- parity:settings-privacy-rule-types -->
+- [x] More privacy settings: bio, date of birth, voice messages, gifts, who can message me, saved music, find me by phone <!-- parity:settings-privacy-extra-keys -->
+- [x] Privacy rule types: Premium users, bots and chat members in exceptions <!-- parity:settings-privacy-rule-types -->
 - [ ] Editable call privacy exceptions <!-- parity:settings-privacy-call-exceptions -->
 - [x] Local passcode with auto-lock, lock screen and biometric unlock <!-- parity:settings-passcode -->
 - [x] Enter the recovery email confirmation code <!-- parity:settings-recovery-email-code -->
 - [x] Forgot password in Settings and password reset with a waiting period <!-- parity:settings-password-reset -->
 - [x] Set or change the login email <!-- parity:settings-login-email -->
-- [ ] "Do you still remember your password?" check <!-- parity:settings-password-remember -->
-- [ ] Terminate old sessions if inactive for a chosen time <!-- parity:settings-inactive-sessions -->
+- [x] "Do you still remember your password?" check <!-- parity:settings-password-remember -->
+- [x] Terminate old sessions if inactive for a chosen time <!-- parity:settings-inactive-sessions -->
 - [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
 - [ ] Session details box and rename this device <!-- parity:settings-session-details -->
 - [x] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
 - [ ] Bots and websites: mini-app permissions and delete cloud drafts <!-- parity:settings-bots-websites -->
-- [ ] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
-- [ ] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
+- [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
+- [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
 - [ ] Passkeys (blocked: Telegram only allows passkeys in its signed apps) <!-- parity:settings-passkeys -->
 - [ ] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
 
@@ -1073,8 +1073,8 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Clear cache removes TDLib cached files <!-- parity:data-clear-cache-real -->
 - [ ] Storage limits: total size, media cache, clear older than <!-- parity:data-storage-limits -->
 - [ ] Clear storage per file type and per chat from the breakdown <!-- parity:data-clear-per-type -->
-- [ ] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
-- [ ] Network usage statistics with reset <!-- parity:data-network-usage -->
+- [x] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
+- [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
 - [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip <!-- parity:data-proxy-extras -->
 - [ ] Try IPv6 option <!-- parity:data-ipv6 -->
