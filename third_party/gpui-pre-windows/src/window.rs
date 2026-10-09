@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// windows stop receiving vsync frames while idle. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -90,6 +92,11 @@ pub struct WindowsWindowState {
     initial_placement: Cell<Option<WindowOpenStatus>>,
     hwnd: HWND,
     pub(crate) a11y: RefCell<Option<A11yState>>,
+    /// Quill: something drew, presented or asked for another frame since the
+    /// last `draw_window` (see `WindowsWindowInner::frames_after_draw`).
+    frame_activity: Cell<bool>,
+    /// Quill: whether this window's vsync invalidations are parked.
+    frame_idle: Cell<FrameIdle>,
 }
 
 pub(crate) struct WindowsWindowInner {
@@ -191,6 +198,8 @@ impl WindowsWindowState {
             draw_coordinator,
             direct_manipulation,
             a11y: RefCell::new(None),
+            frame_activity: Cell::new(false),
+            frame_idle: Cell::new(FrameIdle::new(Instant::now())),
         })
     }
 
@@ -254,6 +263,41 @@ impl WindowsWindowState {
 }
 
 impl WindowsWindowInner {
+    /// Quill: the frame waker. GPUI has a frame to draw (the window became
+    /// dirty or queued a next-frame callback). While this window is parked,
+    /// unpark it (which wakes the vsync thread) and invalidate it now, so the
+    /// frame is drawn without waiting for the next vblank; otherwise only
+    /// restart the idle grace period. `RDW_INVALIDATE` alone sends nothing
+    /// synchronously, so this is safe to call from inside GPUI updates.
+    pub(crate) fn demand_frames(&self) {
+        let mut idle = self.state.frame_idle.get();
+        let resume = idle.demand(Instant::now());
+        self.state.frame_idle.set(idle);
+        if resume {
+            FRAME_GATE.unpark(self.hwnd);
+            unsafe {
+                let _ = RedrawWindow(Some(self.hwnd), None, None, RDW_INVALIDATE);
+            }
+        }
+    }
+
+    /// Quill: after GPUI handled a frame request in `draw_window`. Frames
+    /// that neither drew, presented nor asked for another frame for
+    /// `FRAME_IDLE_AFTER` park the window's vsync invalidations; a frame that
+    /// does (a heartbeat that found work) unparks them. `keep_running`: the
+    /// platform has its own reason to keep frames coming.
+    pub(crate) fn frames_after_draw(&self, keep_running: bool) {
+        // The kill switch (`QUILL_IDLE_FRAMES=0`) makes every frame active.
+        let active = self.state.frame_activity.take() || keep_running || !idle_frames_enabled();
+        let mut idle = self.state.frame_idle.get();
+        match idle.frame(active, Instant::now()) {
+            Transition::Park => FRAME_GATE.park(self.hwnd),
+            Transition::Resume => FRAME_GATE.unpark(self.hwnd),
+            Transition::Keep => {}
+        }
+        self.state.frame_idle.set(idle);
+    }
+
     /// Whether the window is being presented: shown and not minimized. Windows
     /// has no notification for a window fully covered by other windows, so
     /// that case reports `Visible`.
@@ -971,6 +1015,23 @@ impl PlatformWindow for WindowsWindow {
         self.state.callbacks.request_frame.set(Some(callback));
     }
 
+    // Quill: GPUI asks for another frame (the window is still dirty, or
+    // next-frame callbacks are queued): keep the vsync frames coming.
+    fn schedule_frame(&self) {
+        self.state.frame_activity.set(true);
+    }
+
+    // Quill: see `WindowsWindowInner::demand_frames`. Holds the window
+    // weakly: a waker that outlives the window does nothing.
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let inner = Rc::downgrade(&self.0);
+        Some(Rc::new(move || {
+            if let Some(inner) = inner.upgrade() {
+                inner.demand_frames();
+            }
+        }))
+    }
+
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>) {
         self.state.callbacks.input.set(Some(callback));
     }
@@ -1029,6 +1090,8 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn draw(&self, scene: &Scene) {
+        // Quill: a drawn (or presented) frame keeps the vsync frames coming.
+        self.state.frame_activity.set(true);
         self.state
             .renderer
             .borrow_mut()

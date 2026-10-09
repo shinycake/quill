@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// adds `FrameGate`, which lets the vsync thread sleep while every window is idle.
+// See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     sync::LazyLock,
     time::{Duration, Instant},
@@ -6,6 +9,9 @@ use std::{
 use anyhow::{Context, Result};
 use gpui::FrameRequestSource;
 use gpui_util::ResultExt;
+use parking_lot::{Condvar, Mutex, RwLock};
+use smallvec::SmallVec;
+
 use windows::Win32::{
     Foundation::HWND,
     Graphics::Dwm::{DWM_TIMING_INFO, DwmFlush, DwmGetCompositionTimingInfo},
@@ -75,6 +81,100 @@ fn get_dwm_interval() -> Result<Duration> {
         ))
     } else {
         Ok(interval)
+    }
+}
+
+/// Quill: which windows' vsync invalidations are parked (see `frame_idle`).
+///
+/// Upstream's vsync thread invalidates every window on every vblank, so each
+/// visible window gets a `WM_PAINT` and a GPUI frame request 60–144 times a
+/// second even when nothing changes. A window that stays idle parks here; the
+/// vsync thread skips parked windows (except for a heartbeat invalidation
+/// every `PARKED_HEARTBEAT`) and sleeps on the condition variable while
+/// every window is parked. The window's frame waker unparks it.
+///
+/// Lock order: the vsync thread takes `parked`, then the window list's read
+/// lock. The UI thread never takes `parked` while holding the window list.
+pub(crate) struct FrameGate {
+    parked: Mutex<Vec<isize>>,
+    unparked: Condvar,
+}
+
+pub(crate) static FRAME_GATE: FrameGate = FrameGate {
+    parked: parking_lot::const_mutex(Vec::new()),
+    unparked: Condvar::new(),
+};
+
+fn hwnd_key(hwnd: HWND) -> isize {
+    hwnd.0 as isize
+}
+
+impl FrameGate {
+    /// The window's frames are idle: stop invalidating it every vblank.
+    pub(crate) fn park(&self, hwnd: HWND) {
+        let key = hwnd_key(hwnd);
+        let mut parked = self.parked.lock();
+        if !parked.contains(&key) {
+            parked.push(key);
+        }
+    }
+
+    /// The window wants frames again (or is new, in case a closed window
+    /// with the same handle was parked): invalidate it every vblank, and
+    /// wake the vsync thread if it sleeps.
+    pub(crate) fn unpark(&self, hwnd: HWND) {
+        let key = hwnd_key(hwnd);
+        self.parked.lock().retain(|parked| *parked != key);
+        self.unparked.notify_all();
+    }
+
+    /// The window is gone.
+    pub(crate) fn forget(&self, hwnd: HWND) {
+        let key = hwnd_key(hwnd);
+        self.parked.lock().retain(|parked| *parked != key);
+    }
+
+    /// Blocks the vsync thread while every window is parked, until a window
+    /// unparks or `heartbeat_at`. Returns `false` once the window list is
+    /// gone (the platform was dropped). `raw` gives each list entry's handle.
+    pub(crate) fn wait_for_frames<W>(
+        &self,
+        all_windows: &std::sync::Weak<RwLock<SmallVec<[W; 4]>>>,
+        raw: impl Fn(&W) -> HWND,
+        heartbeat_at: Instant,
+    ) -> bool {
+        let mut parked = self.parked.lock();
+        loop {
+            let Some(windows) = all_windows.upgrade() else {
+                return false;
+            };
+            let any_awake = windows
+                .read()
+                .iter()
+                .any(|window| !parked.contains(&hwnd_key(raw(window))));
+            drop(windows);
+            let now = Instant::now();
+            if any_awake || now >= heartbeat_at {
+                return true;
+            }
+            self.unparked.wait_for(&mut parked, heartbeat_at - now);
+        }
+    }
+
+    /// The windows the vsync thread skips on this vblank. Taken before the
+    /// window list's read lock, so the vsync thread never holds both.
+    pub(crate) fn parked_windows(&self) -> ParkedWindows {
+        ParkedWindows(self.parked.lock().iter().copied().collect())
+    }
+}
+
+/// Quill: a snapshot of [`FrameGate`]'s parked windows.
+#[derive(Default)]
+pub(crate) struct ParkedWindows(SmallVec<[isize; 4]>);
+
+impl ParkedWindows {
+    pub(crate) fn contains(&self, hwnd: HWND) -> bool {
+        self.0.contains(&hwnd_key(hwnd))
     }
 }
 

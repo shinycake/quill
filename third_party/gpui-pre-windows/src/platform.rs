@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// the vsync thread skips idle windows and sleeps while all are idle.
+// See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
     ffi::{OsStr, OsString},
@@ -8,6 +11,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 
 use anyhow::{Context as _, Result, anyhow};
@@ -446,11 +450,26 @@ impl WindowsPlatform {
         let text_system = Arc::downgrade(direct_write_text_system);
         let invalidate_devices = self.invalidate_devices.clone();
 
+        // Quill: read the idle-frames kill switch at startup.
+        if !idle_frames_enabled() {
+            log::info!("{IDLE_FRAMES_ENV} is off: windows will get vsync frames even when idle");
+        }
         std::thread::Builder::new()
             .name("VSyncProvider".to_owned())
             .spawn(move || {
                 let vsync_provider = VSyncProvider::new();
+                // Quill: parked windows still get one invalidation this often.
+                let mut next_heartbeat = Instant::now() + PARKED_HEARTBEAT;
                 loop {
+                    // Quill: sleep while every window's frames are parked
+                    // (see `FrameGate`), until one unparks or the heartbeat.
+                    if !FRAME_GATE.wait_for_frames(
+                        &all_windows,
+                        TrackedWindow::as_raw,
+                        next_heartbeat,
+                    ) {
+                        break;
+                    }
                     let signal_source = vsync_provider.wait_for_vsync();
                     let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
                     if stop.load(Ordering::Acquire) {
@@ -472,7 +491,19 @@ impl WindowsPlatform {
                     let Some(all_windows) = all_windows.upgrade() else {
                         break;
                     };
+                    // Quill: skip parked windows, except on the heartbeat. The
+                    // parked set is read before the window list (lock order).
+                    let heartbeat = Instant::now() >= next_heartbeat;
+                    let parked = if heartbeat {
+                        next_heartbeat = Instant::now() + PARKED_HEARTBEAT;
+                        ParkedWindows::default()
+                    } else {
+                        FRAME_GATE.parked_windows()
+                    };
                     for hwnd in all_windows.read().iter() {
+                        if parked.contains(hwnd.as_raw()) {
+                            continue;
+                        }
                         unsafe {
                             if let Some(signal_at) = signal_at {
                                 if IsWindowVisible(hwnd.as_raw()).as_bool()
@@ -763,6 +794,9 @@ impl Platform for WindowsPlatform {
             handle: handle.into(),
             frame_signal: window.state.frame_signal.clone(),
         });
+        // Quill: a new window starts with frames running; wake the vsync
+        // thread if every other window is parked.
+        FRAME_GATE.unpark(handle);
 
         Ok(Box::new(window))
     }
@@ -1240,7 +1274,11 @@ impl WindowsPlatformInner {
             .unwrap();
         lock.remove(index);
 
-        lock.is_empty()
+        let is_empty = lock.is_empty();
+        // Quill: never take the frame gate while holding the window list.
+        drop(lock);
+        FRAME_GATE.forget(target_window);
+        is_empty
     }
 
     #[inline]
