@@ -1665,21 +1665,6 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_str)
                 == Some("stickerTypeRegular"),
         }),
-        "updateActiveEmojiReactions" => Ok(EnvelopePayload::UpdateActiveEmojiReactions {
-            emojis: value
-                .get("emojis")
-                .and_then(Value::as_array)
-                .map(|list| {
-                    list.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default(),
-        }),
-        "updateChatAvailableReactions" => Ok(EnvelopePayload::UpdateChatAvailableReactions {
-            chat_id: ChatId(int53(value.get("chat_id"))?),
-        }),
         "updateDefaultReactionType" => Ok(EnvelopePayload::UpdateDefaultReactionType {
             reaction_type: super::message_reactions::parse_reaction_type(
                 value.get("reaction_type"),

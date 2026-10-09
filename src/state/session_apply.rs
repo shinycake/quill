@@ -460,9 +460,19 @@ impl Session {
             } => {
                 self.chat_available_reactions
                     .insert(chat_id, available_reactions);
+                // An open reaction picker for this chat refetches.
+                if self
+                    .message_reaction_options
+                    .as_ref()
+                    .is_some_and(|options| options.chat_id.0 == chat_id)
+                {
+                    self.reaction_options_stale = true;
+                }
             }
             EnvelopePayload::UpdateActiveEmojiReactions { emojis } => {
+                self.active_reactions = emojis.clone();
                 self.active_emoji_reactions = emojis;
+                self.reaction_options_stale = true;
             }
             EnvelopePayload::UpdateChatHasScheduledMessages {
                 chat_id,
@@ -2128,19 +2138,6 @@ impl Session {
                     self.stickers.trending_stale = true;
                 } else {
                     self.emoji.trending_stale = true;
-                }
-            }
-            EnvelopePayload::UpdateActiveEmojiReactions { emojis } => {
-                self.active_reactions = emojis;
-                self.reaction_options_stale = true;
-            }
-            EnvelopePayload::UpdateChatAvailableReactions { chat_id } => {
-                if self
-                    .message_reaction_options
-                    .as_ref()
-                    .is_some_and(|options| options.chat_id == chat_id)
-                {
-                    self.reaction_options_stale = true;
                 }
             }
             EnvelopePayload::UpdateDefaultReactionType { reaction_type } => {

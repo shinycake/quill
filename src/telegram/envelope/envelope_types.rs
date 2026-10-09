@@ -979,16 +979,6 @@ pub enum EnvelopePayload {
     UpdateTrendingStickerSets {
         is_regular: bool,
     },
-    /// `updateActiveEmojiReactions` (line 10999): the emoji reactions
-    /// Telegram currently offers, in server order.
-    UpdateActiveEmojiReactions {
-        emojis: Vec<String>,
-    },
-    /// `updateChatAvailableReactions` (line 10532): what a chat allows
-    /// changed (the payload is not needed: the picker refetches).
-    UpdateChatAvailableReactions {
-        chat_id: crate::ids::ChatId,
-    },
     /// `updateDefaultReactionType` (line 11007): the quick reaction.
     UpdateDefaultReactionType {
         reaction_type: ReactionType,
