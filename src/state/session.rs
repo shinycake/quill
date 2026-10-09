@@ -67,6 +67,38 @@ pub struct Session {
     /// Parity slice: `getChatFolderChatsToLeave` results per folder id —
     /// chats the delete-confirm dialog offers to leave with the folder.
     pub folder_chats_to_leave: HashMap<i32, Vec<i64>>,
+    /// `getChatFolderInviteLinks` results (and creates/edits applied on top)
+    /// per folder id — the Share Folder dialog's link list.
+    pub folder_invite_links: HashMap<i32, Vec<ChatFolderInviteLink>>,
+    /// `getChatsForChatFolderInviteLink` results per folder id — the chats a
+    /// link may include.
+    pub folder_link_chats: HashMap<i32, Vec<i64>>,
+    /// `getRecommendedChatFolders` result; `None` until fetched.
+    pub recommended_folders: Option<Vec<RecommendedChatFolder>>,
+    /// One-shot: a folder link create/edit was applied (the dialog returns
+    /// to its list). Drained by the UI.
+    pub folder_link_saved: bool,
+    /// One-shot: a Share Folder / recommended-folder request failed; the
+    /// text is shown in the dialog. Drained by the UI.
+    pub folder_share_error: Option<String>,
+    /// The `addlist` link being checked by the "Add folder" dialog.
+    pub folder_invite_link: Option<String>,
+    /// `checkChatFolderInviteLink` answer for `folder_invite_link`.
+    pub folder_invite_info: Option<ChatFolderInviteLinkInfo>,
+    /// The "Add folder" dialog's failure text (check or add).
+    pub folder_invite_error: Option<String>,
+    /// `addChatFolderByInviteLink` confirmed.
+    pub folder_invite_done: bool,
+    /// `getInstalledBackgrounds` answer for the current theme; `None` until
+    /// fetched.
+    pub installed_backgrounds: Option<Vec<Background>>,
+    /// The account's default wallpaper per theme (`false` light, `true`
+    /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
+    pub default_backgrounds: HashMap<bool, Background>,
+    /// Which theme the pending `setDefaultBackground` was for.
+    pub background_set_for_dark: bool,
+    /// One-shot: a wallpaper request failed; shown in Appearance.
+    pub background_error: Option<String>,
     pub histories: HashMap<i64, HistoryState>,
     /// History page requests issued for a window that has since been
     /// replaced (`reset_history_window`): their answers are dropped so an
@@ -1177,6 +1209,19 @@ impl Session {
             folder_chats_exhausted: HashSet::new(),
             folder_remove_queue: Vec::new(),
             folder_chats_to_leave: HashMap::new(),
+            folder_invite_links: HashMap::new(),
+            folder_link_chats: HashMap::new(),
+            recommended_folders: None,
+            folder_link_saved: false,
+            folder_share_error: None,
+            folder_invite_link: None,
+            folder_invite_info: None,
+            folder_invite_error: None,
+            folder_invite_done: false,
+            installed_backgrounds: None,
+            default_backgrounds: HashMap::new(),
+            background_set_for_dark: false,
+            background_error: None,
             histories: HashMap::new(),
             stale_history_requests: HashSet::new(),
             revision: 0,

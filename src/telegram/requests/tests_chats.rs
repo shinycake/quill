@@ -267,6 +267,8 @@ fn folder_request_shapes_match_1_8_67() {
     use crate::telegram::envelope::ChatFolderSpec;
     let spec = ChatFolderSpec {
         name: "Work".into(),
+        icon_name: None,
+        color_id: -1,
         pinned_chat_ids: vec![11],
         included_chat_ids: vec![12],
         excluded_chat_ids: vec![],
@@ -292,6 +294,17 @@ fn folder_request_shapes_match_1_8_67() {
     assert!(v["folder"]["exclude_muted"].as_bool().unwrap());
     assert!(v["folder"]["include_contacts"].as_bool().unwrap());
     assert!(v["folder"]["include_groups"].as_bool().unwrap());
+    // A chosen icon and a tag color are carried in the `chatFolder`.
+    let with_icon = ChatFolderSpec {
+        icon_name: Some("Work".into()),
+        color_id: 3,
+        ..spec.clone()
+    };
+    let v: serde_json::Value =
+        serde_json::from_str(&create_chat_folder(RequestId(30), &with_icon)).unwrap();
+    assert_eq!(v["folder"]["icon"]["@type"], "chatFolderIcon");
+    assert_eq!(v["folder"]["icon"]["name"], "Work");
+    assert_eq!(v["folder"]["color_id"], 3);
     // `editChatFolder chat_folder_id:int32 folder:chatFolder =
     // ChatFolderInfo` (line 13361).
     let v: serde_json::Value =
@@ -869,4 +882,65 @@ fn search_upgrade_request_shapes_match_1_8_67() {
         serde_json::from_str(&remove_recently_found_chat(RequestId(75), ChatId(11))).unwrap();
     assert_eq!(v["@type"], "removeRecentlyFoundChat");
     assert_eq!(v["chat_id"], 11);
+}
+
+#[test]
+fn folder_share_request_shapes_match_schema() {
+    let parse = |json: String| serde_json::from_str::<serde_json::Value>(&json).unwrap();
+    // `getRecommendedChatFolders = RecommendedChatFolders` (line 13773).
+    let v = parse(get_recommended_chat_folders(RequestId(1)));
+    assert_eq!(v["@type"], "getRecommendedChatFolders");
+    // `getChatsForChatFolderInviteLink chat_folder_id:int32 = Chats`.
+    let v = parse(get_chats_for_chat_folder_invite_link(RequestId(2), 7));
+    assert_eq!(v["@type"], "getChatsForChatFolderInviteLink");
+    assert_eq!(v["chat_folder_id"], 7);
+    // `getChatFolderInviteLinks chat_folder_id:int32`.
+    let v = parse(get_chat_folder_invite_links(RequestId(3), 7));
+    assert_eq!(v["@type"], "getChatFolderInviteLinks");
+    assert_eq!(v["chat_folder_id"], 7);
+    // `createChatFolderInviteLink chat_folder_id:int32 name:string
+    // chat_ids:vector<int53>`.
+    let v = parse(create_chat_folder_invite_link(
+        RequestId(4),
+        7,
+        "Team",
+        &[11, 12],
+    ));
+    assert_eq!(v["@type"], "createChatFolderInviteLink");
+    assert_eq!(v["name"], "Team");
+    assert_eq!(v["chat_ids"], json!([11, 12]));
+    // `editChatFolderInviteLink chat_folder_id:int32 invite_link:string
+    // name:string chat_ids:vector<int53>`.
+    let v = parse(edit_chat_folder_invite_link(
+        RequestId(5),
+        7,
+        "https://t.me/addlist/x",
+        "Renamed",
+        &[12],
+    ));
+    assert_eq!(v["@type"], "editChatFolderInviteLink");
+    assert_eq!(v["invite_link"], "https://t.me/addlist/x");
+    assert_eq!(v["chat_ids"], json!([12]));
+    // `deleteChatFolderInviteLink chat_folder_id:int32 invite_link:string`.
+    let v = parse(delete_chat_folder_invite_link(
+        RequestId(6),
+        7,
+        "https://t.me/addlist/x",
+    ));
+    assert_eq!(v["@type"], "deleteChatFolderInviteLink");
+    assert_eq!(v["chat_folder_id"], 7);
+    // `checkChatFolderInviteLink invite_link:string`.
+    let v = parse(check_chat_folder_invite_link(
+        RequestId(7),
+        "https://t.me/addlist/x",
+    ));
+    assert_eq!(v["@type"], "checkChatFolderInviteLink");
+    // `addChatFolderByInviteLink invite_link:string chat_ids:vector<int53>`.
+    let v = parse(add_chat_folder_by_invite_link(
+        RequestId(8),
+        "https://t.me/addlist/x",
+        &[11],
+    ));
+    assert_eq!(v["@type"], "addChatFolderByInviteLink");
+    assert_eq!(v["chat_ids"], json!([11]));
 }

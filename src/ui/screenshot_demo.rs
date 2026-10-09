@@ -497,6 +497,14 @@ pub enum ScreenshotDemo {
     /// Parity slice: folder manage dialog over the ReadyFolders fixture
     /// (injected, no live Telegram).
     ReadyFoldersManage,
+    /// Shareable folders slice: Share Folder dialog: invite links over the folder fixture.
+    ReadyFoldersShare,
+    /// Shareable folders slice: folders in the left column ("Tabs on the left") with icons.
+    ReadyFoldersSidebar,
+    /// Shareable folders slice: "Add folder" for an addlist link.
+    ReadyFoldersAddLink,
+    /// Shareable folders slice: folder editor with the icon picker.
+    ReadyFoldersIcons,
     /// Parity slice: chat-list avatars (injected, no live Telegram) — the
     /// chat list mixes photo avatars (private chat A, the demo channel)
     /// and colored-initial fallbacks (private chat B, a basic group, the
@@ -557,6 +565,8 @@ pub enum ScreenshotDemo {
     /// Settings → Appearance: the Appearance dialog open over the
     /// ReadyChats fixture (injected, no live Telegram).
     ReadyAppearance,
+    /// Appearance slice: Appearance with Telegram wallpapers and interface scale.
+    ReadyAppearanceWallpapers,
     /// Ready chat draft with typos underlined (red wavy).
     ReadySpellcheck,
     /// Multi-line draft: typos underlined; link, mention, hashtag, command and code skipped.

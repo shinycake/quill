@@ -17,9 +17,13 @@ use std::collections::HashSet;
 /// exclude-muted/read/archived flags. Pinned chats are not managed here
 /// (Quill has no per-folder pin UI yet) — edits preserve the existing
 /// `pinned_chat_ids`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FolderEditor {
     pub name: String,
+    /// Chosen `chatFolderIcon` name; `None` = the default icon.
+    pub icon_name: Option<String>,
+    /// Tag color carried over from the loaded spec (not edited here).
+    pub color_id: i32,
     pub include_contacts: bool,
     pub include_non_contacts: bool,
     pub include_bots: bool,
@@ -35,15 +39,47 @@ pub struct FolderEditor {
     pub pinned: Vec<i64>,
 }
 
+impl Default for FolderEditor {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            icon_name: None,
+            color_id: -1,
+            include_contacts: false,
+            include_non_contacts: false,
+            include_bots: false,
+            include_groups: false,
+            include_channels: false,
+            exclude_muted: false,
+            exclude_read: false,
+            exclude_archived: false,
+            included: HashSet::new(),
+            excluded: HashSet::new(),
+            pinned: Vec::new(),
+        }
+    }
+}
+
 impl FolderEditor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The icon the folder will show: the chosen one, or the default its
+    /// rules produce (tdesktop `ComputeDefaultFilterIcon`).
+    pub fn icon_or_default(&self) -> String {
+        match &self.icon_name {
+            Some(name) => name.clone(),
+            None => crate::folder_icons::default_icon_name(&self.to_spec()).to_string(),
+        }
     }
 
     /// Prefill from a `getChatFolder` spec (edit path).
     pub fn from_spec(spec: &ChatFolderSpec) -> Self {
         Self {
             name: spec.name.clone(),
+            icon_name: spec.icon_name.clone(),
+            color_id: spec.color_id,
             include_contacts: spec.include_contacts,
             include_non_contacts: spec.include_non_contacts,
             include_bots: spec.include_bots,
@@ -68,6 +104,8 @@ impl FolderEditor {
         excluded.sort_unstable();
         ChatFolderSpec {
             name: self.name.trim().to_string(),
+            icon_name: self.icon_name.clone(),
+            color_id: self.color_id,
             pinned_chat_ids: self.pinned.clone(),
             included_chat_ids: included,
             excluded_chat_ids: excluded,

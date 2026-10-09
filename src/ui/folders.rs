@@ -217,7 +217,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let session = this.session();
             let tags_enabled = session.as_ref().is_some_and(|s| s.are_folder_tags_enabled);
-            let folders: Vec<(i32, String, usize)> = session
+            let folders: Vec<(i32, String, usize, String)> = session
                 .as_ref()
                 .map(|s| {
                     s.chat_folders
@@ -228,7 +228,31 @@ impl QuillApp {
                                 .values()
                                 .filter(|c| c.folder_positions.contains_key(&f.id))
                                 .count();
-                            (f.id, f.name.clone(), count)
+                            (f.id, f.name.clone(), count, f.icon_name.clone())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            // Telegram's suggestions, minus the folders already made
+            // (tdesktop hides a recommendation once it is added).
+            let recommended: Vec<(usize, String, String, String)> = session
+                .as_ref()
+                .and_then(|s| s.recommended_folders.as_ref())
+                .map(|list| {
+                    list.iter()
+                        .enumerate()
+                        .filter(|(_, r)| {
+                            !folders.iter().any(|(_, name, _, _)| *name == r.spec.name)
+                        })
+                        .map(|(ix, r)| {
+                            (
+                                ix,
+                                r.spec.name.clone(),
+                                r.description.clone(),
+                                r.spec.icon_name.clone().unwrap_or_else(|| {
+                                    quill::folder_icons::default_icon_name(&r.spec).to_string()
+                                }),
+                            )
                         })
                         .collect()
                 })
@@ -248,11 +272,12 @@ impl QuillApp {
                         .child("No folders yet. Create one to organize your chats."),
                 );
             }
-            for (index, (folder_id, name, count)) in folders.iter().enumerate() {
+            for (index, (folder_id, name, count, icon)) in folders.iter().enumerate() {
                 let folder_id = *folder_id;
                 let is_first = index == 0;
                 let is_last = index + 1 == folders.len();
                 let name_label = format!("{name} ({count})");
+                let glyph = super::folder_glyphs::folder_glyph(icon);
                 list = list.child(
                     div()
                         .flex()
@@ -262,10 +287,23 @@ impl QuillApp {
                         .px_2()
                         .py_1()
                         .rounded_md()
-                        .child(div().text_sm().font_medium().child(name_label))
                         .child(
                             div()
                                 .flex()
+                                .items_center()
+                                .gap_2()
+                                .min_w_0()
+                                .child(
+                                    Icon::new(glyph)
+                                        .size(px(16.))
+                                        .text_color(cx.theme().muted_foreground),
+                                )
+                                .child(div().text_sm().font_medium().truncate().child(name_label)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_none()
                                 .gap_1()
                                 .child(
                                     Button::new(format!("folder-up-{folder_id}"))
@@ -309,6 +347,21 @@ impl QuillApp {
                                         })),
                                 )
                                 .child(
+                                    Button::new(format!("folder-share-{folder_id}"))
+                                        .icon(gpui_kit::assets::IconName::Link)
+                                        .ghost()
+                                        .tooltip("Share folder")
+                                        .accessibility_label("Share folder")
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.open_folder_share(folder_id, window, cx);
+                                            this.close_kit_dialog_if_done(
+                                                DialogKind::FolderManage,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                )
+                                .child(
                                     Button::new(format!("folder-delete-{folder_id}"))
                                         .label("Delete")
                                         .ghost()
@@ -324,11 +377,74 @@ impl QuillApp {
                         ),
                 );
             }
+            let tabs_settings = this.folder_tabs_settings(cx);
+            let mut recommended_section = div().flex().flex_col().gap_1();
+            if !recommended.is_empty() {
+                recommended_section = recommended_section.child(
+                    div()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Recommended folders"),
+                );
+            }
+            for (ix, name, description, icon) in recommended {
+                recommended_section = recommended_section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .min_w_0()
+                                .child(
+                                    Icon::new(super::folder_glyphs::folder_glyph(&icon))
+                                        .size(px(16.))
+                                        .text_color(cx.theme().muted_foreground),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .min_w_0()
+                                        .child(div().text_sm().font_medium().truncate().child(name))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .truncate()
+                                                .child(description),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            Button::new(("folder-recommended-add", ix))
+                                .label("Add")
+                                .small()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.add_recommended_folder(ix, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::FolderManage,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        ),
+                );
+            }
             let body = div()
                 .flex()
                 .flex_col()
                 .gap_2()
                 .child(list)
+                .child(recommended_section)
                 .child(
                     div().flex().items_center().gap_2().child(
                         // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
@@ -351,6 +467,7 @@ impl QuillApp {
                             this.close_kit_dialog_if_done(DialogKind::FolderManage, window, cx);
                         })),
                 )
+                .child(tabs_settings)
                 .into_any_element();
             dialog
                 .overlay(true)
@@ -398,6 +515,57 @@ impl QuillApp {
                 )
                 .into_any_element();
         }
+        // Icon picker (tdesktop `FilterIconPanel`): six per row. Until one
+        // is chosen the folder shows the icon its rules produce.
+        let chosen = dialog.editor.icon_name.clone();
+        let default_icon = quill::folder_icons::default_icon_name(&dialog.editor.to_spec());
+        let mut icon_header = div().flex().items_center().gap_2().child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child("Choose an icon"),
+        );
+        if chosen.is_none() {
+            icon_header = icon_header.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("Default: {default_icon}")),
+            );
+        }
+        let mut icon_grid = div().id("folder-editor-icons").flex().flex_col().gap_1();
+        for (row_ix, names) in quill::folder_icons::ICON_NAMES
+            .chunks(quill::folder_icons::ICONS_PER_ROW)
+            .enumerate()
+        {
+            let mut row = div().flex().flex_row().gap_1();
+            for (col_ix, name) in names.iter().copied().enumerate() {
+                let ix = row_ix * quill::folder_icons::ICONS_PER_ROW + col_ix;
+                let selected = chosen.as_deref() == Some(name);
+                row = row.child(
+                    Button::new(("folder-icon", ix))
+                        .icon(super::folder_glyphs::folder_glyph(name))
+                        .ghost()
+                        .selected(selected)
+                        .tooltip(name)
+                        .accessibility_label(format!("{name} icon"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(dialog) = this.folder_editor.as_mut() {
+                                // A second click returns to the default icon.
+                                dialog.editor.icon_name = if selected {
+                                    None
+                                } else {
+                                    Some(name.to_string())
+                                };
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            icon_grid = icon_grid.child(row);
+        }
+        panel = panel.child(icon_header).child(icon_grid);
         // Include-type filters.
         let include_filters = [
             (
@@ -576,7 +744,37 @@ impl QuillApp {
         panel.into_any_element()
     }
 
+    /// Add recommended folder `ix` of `Session::recommended_folders`
+    /// (`createChatFolder` with Telegram's own spec, as tdesktop's "Add").
+    pub(super) fn add_recommended_folder(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(spec) = self
+            .session()
+            .and_then(|s| s.recommended_folders.as_ref())
+            .and_then(|list| list.get(ix))
+            .map(|r| r.spec.clone())
+        else {
+            return;
+        };
+        let result = match self.live.as_mut() {
+            Some(live) => live.driver.create_chat_folder(&spec).map(|_| ()),
+            None => {
+                self.apply_demo_folder_save(None, spec.clone());
+                Ok(())
+            }
+        };
+        self.status_note = match result {
+            Ok(()) => format!("folder {} added", spec.name),
+            Err(err) => format!("could not add folder: {err:?}"),
+        };
+        cx.notify();
+    }
+
     pub(super) fn open_folder_manage(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_recommended_chat_folders()
+        {
+            self.status_note = format!("could not load recommended folders: {err:?}");
+        }
         self.folder_manage_open = true;
         self.folder_editor = None;
         self.folder_delete_confirm = None;

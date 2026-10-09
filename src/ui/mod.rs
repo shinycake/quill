@@ -117,6 +117,10 @@ mod emoji_sets;
 mod entity_links;
 mod event_log;
 mod find_demo;
+mod folder_demo;
+mod folder_glyphs;
+mod folder_share;
+mod folder_tabs;
 mod folders;
 mod forum_extras;
 mod forums_saved_demo;
@@ -218,6 +222,7 @@ mod translate_demo;
 mod translate_ui;
 mod video_pip;
 mod viewer_demo;
+mod wallpaper;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

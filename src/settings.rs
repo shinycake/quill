@@ -443,6 +443,21 @@ pub fn clamp_font_size(px: u8) -> u8 {
     px.clamp(FONT_SIZE_MIN, FONT_SIZE_MAX)
 }
 
+/// tdesktop's interface scale range (`style::kScaleMin` / `kScaleMax`), in
+/// percent. 100 is the unscaled interface.
+pub const INTERFACE_SCALE_MIN: u16 = 100;
+pub const INTERFACE_SCALE_MAX: u16 = 300;
+pub const INTERFACE_SCALE_DEFAULT: u16 = 100;
+/// The scales the Appearance dialog offers.
+pub const INTERFACE_SCALE_CHOICES: [u16; 7] = [100, 125, 150, 175, 200, 250, 300];
+
+/// Clamp a stored scale into tdesktop's range and snap it to steps of 5
+/// (prefs files are user-editable).
+pub fn clamp_interface_scale(pct: u16) -> u16 {
+    let clamped = pct.clamp(INTERFACE_SCALE_MIN, INTERFACE_SCALE_MAX);
+    ((clamped + 2) / 5 * 5).clamp(INTERFACE_SCALE_MIN, INTERFACE_SCALE_MAX)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppearancePrefs {
     /// Manual theme choice; auto-night overrides it while active.
@@ -462,6 +477,15 @@ pub struct AppearancePrefs {
     /// Chat wallpaper as 0xRRGGBB; None = the theme background.
     #[serde(default)]
     pub wallpaper_rgb: Option<u32>,
+    /// Show the account's Telegram wallpaper (`updateDefaultBackground`)
+    /// behind the messages instead of the preset color.
+    #[serde(default)]
+    pub telegram_wallpaper: bool,
+    /// Interface scale in percent (tdesktop 100-300%). Scales the kit's
+    /// rem size, so text and rem-based spacing grow together; widths drawn
+    /// in fixed pixels do not.
+    #[serde(default = "default_interface_scale")]
+    pub interface_scale_pct: u16,
     /// Message text size in px.
     #[serde(default = "default_font_size")]
     pub font_size_px: u8,
@@ -493,6 +517,12 @@ pub struct AppearancePrefs {
     /// as in tdesktop.
     #[serde(default)]
     pub swipe_action: crate::chat_swipe::SwipeAction,
+    /// tdesktop `chatFiltersHorizontal` (inverted): "Tabs on the left".
+    #[serde(default)]
+    pub folder_tabs_view: crate::folder_icons::FolderTabsView,
+    /// tdesktop `chatFiltersTabsMode`: text, icons, or both on the tabs.
+    #[serde(default)]
+    pub folder_tabs_mode: crate::folder_icons::FolderTabsMode,
     #[serde(default)]
     pub start_in_tray: bool,
     #[serde(default)]
@@ -507,6 +537,10 @@ fn default_night_start() -> u16 {
 
 fn default_night_end() -> u16 {
     7 * 60
+}
+
+fn default_interface_scale() -> u16 {
+    INTERFACE_SCALE_DEFAULT
 }
 
 fn default_font_size() -> u8 {
@@ -526,6 +560,8 @@ impl Default for AppearancePrefs {
             night_end_minutes: default_night_end(),
             accent_rgb: 0,
             wallpaper_rgb: None,
+            telegram_wallpaper: false,
+            interface_scale_pct: INTERFACE_SCALE_DEFAULT,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
             preview_lines: crate::chatlist_style::PREVIEW_LINES_DEFAULT,
@@ -534,6 +570,8 @@ impl Default for AppearancePrefs {
             archive_collapsed: false,
             archive_in_main_menu: false,
             swipe_action: crate::chat_swipe::SwipeAction::Disabled,
+            folder_tabs_view: crate::folder_icons::FolderTabsView::Top,
+            folder_tabs_mode: crate::folder_icons::FolderTabsMode::Default,
             start_in_tray: false,
             minimize_to_tray: false,
             check_updates_on_launch: true,
@@ -549,6 +587,7 @@ impl Default for AppearancePrefs {
 pub fn load_appearance_prefs(paths: &AccountPaths) -> AppearancePrefs {
     let mut prefs: AppearancePrefs = load_json_prefs(paths, "appearance_prefs.json");
     prefs.font_size_px = clamp_font_size(prefs.font_size_px);
+    prefs.interface_scale_pct = clamp_interface_scale(prefs.interface_scale_pct);
     prefs.preview_lines = crate::chatlist_style::clamp_preview_lines(prefs.preview_lines);
     prefs.night_start_minutes %= 24 * 60;
     prefs.night_end_minutes %= 24 * 60;
@@ -1075,6 +1114,20 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn interface_scale_clamps_and_snaps() {
+        assert_eq!(clamp_interface_scale(0), 100);
+        assert_eq!(clamp_interface_scale(100), 100);
+        assert_eq!(clamp_interface_scale(133), 135);
+        assert_eq!(clamp_interface_scale(150), 150);
+        assert_eq!(clamp_interface_scale(999), 300);
+        assert!(
+            INTERFACE_SCALE_CHOICES
+                .iter()
+                .all(|c| clamp_interface_scale(*c) == *c)
+        );
+    }
+
+    #[test]
     fn atomic_json_write_replaces_and_leaves_no_temp_file() {
         let dir = std::env::temp_dir().join(format!("quill-atomic-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -1295,6 +1348,8 @@ mod tests {
             night_end_minutes: 6 * 60,
             accent_rgb: 0x2f81f7,
             wallpaper_rgb: Some(0x0e1621),
+            telegram_wallpaper: true,
+            interface_scale_pct: 150,
             font_size_px: 17,
             bubbles: false,
             preview_lines: 3,
@@ -1303,6 +1358,8 @@ mod tests {
             archive_collapsed: true,
             archive_in_main_menu: true,
             swipe_action: crate::chat_swipe::SwipeAction::Archive,
+            folder_tabs_view: crate::folder_icons::FolderTabsView::Left,
+            folder_tabs_mode: crate::folder_icons::FolderTabsMode::IconsOnly,
             start_in_tray: true,
             minimize_to_tray: true,
             check_updates_on_launch: false,

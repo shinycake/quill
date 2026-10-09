@@ -1607,6 +1607,28 @@ pub enum EnvelopePayload {
     ChatFolder {
         spec: ChatFolderSpec,
     },
+    /// `backgrounds` — the answer of `getInstalledBackgrounds`.
+    Backgrounds(Vec<Background>),
+    /// `background` — the answer of `setDefaultBackground`.
+    Background(Background),
+    /// `updateDefaultBackground` (`schema/td_api.tl:11317`): the account's
+    /// default wallpaper for the light or dark theme changed.
+    UpdateDefaultBackground {
+        for_dark_theme: bool,
+        background: Background,
+    },
+    /// `chatFolderInviteLink` — the answer of `createChatFolderInviteLink`
+    /// / `editChatFolderInviteLink` (`schema/td_api.tl:13785` / `:13795`).
+    ChatFolderInviteLink(ChatFolderInviteLink),
+    /// `chatFolderInviteLinks` — the answer of `getChatFolderInviteLinks`
+    /// (`schema/td_api.tl:13788`).
+    ChatFolderInviteLinks(Vec<ChatFolderInviteLink>),
+    /// `recommendedChatFolders` — the answer of `getRecommendedChatFolders`
+    /// (`schema/td_api.tl:13773`).
+    RecommendedChatFolders(Vec<RecommendedChatFolder>),
+    /// `chatFolderInviteLinkInfo` — the answer of `checkChatFolderInviteLink`
+    /// (`schema/td_api.tl:13803`).
+    ChatFolderInviteLinkInfo(ChatFolderInviteLinkInfo),
     /// Parity slice: `chatLists` as the response of `getChatListsToAddChat`
     /// (TDLib 1.8.67, `schema/td_api.tl:13347`) — the chat lists a chat may
     /// be added to via `addChatToList`. Correlated to the chat by the

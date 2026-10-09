@@ -2,6 +2,7 @@
 //! Never logs api_hash, phone numbers, or codes.
 mod account_hygiene;
 mod auth;
+mod backgrounds;
 mod bots;
 mod calls;
 mod chat_list;
@@ -12,6 +13,7 @@ mod core;
 mod deep_links;
 mod emoji_sets;
 mod flood_retry;
+mod folder_links;
 mod forum_saved;
 mod gifs;
 mod group_admin;

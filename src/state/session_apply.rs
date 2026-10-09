@@ -1348,6 +1348,64 @@ impl Session {
                     self.folder_specs.insert(folder_id, spec);
                 }
             }
+            EnvelopePayload::Backgrounds(list) => {
+                for background in &list {
+                    if let Some(file) = &background.file {
+                        self.upsert_file(file.clone(), false);
+                    }
+                }
+                self.installed_backgrounds = Some(list);
+            }
+            EnvelopePayload::Background(background) => {
+                if let Some(file) = &background.file {
+                    self.upsert_file(file.clone(), false);
+                }
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::SetDefaultBackground) {
+                    self.default_backgrounds
+                        .insert(self.background_set_for_dark, background);
+                }
+            }
+            EnvelopePayload::UpdateDefaultBackground {
+                for_dark_theme,
+                background,
+            } => {
+                if let Some(file) = &background.file {
+                    self.upsert_file(file.clone(), false);
+                }
+                self.default_backgrounds.insert(for_dark_theme, background);
+            }
+            EnvelopePayload::ChatFolderInviteLink(link) => {
+                // `createChatFolderInviteLink` / `editChatFolderInviteLink`:
+                // upsert into the folder's cached link list.
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    let links = self.folder_invite_links.entry(folder_id).or_default();
+                    match links
+                        .iter_mut()
+                        .find(|existing| existing.invite_link == link.invite_link)
+                    {
+                        Some(existing) => *existing = link,
+                        None => links.push(link),
+                    }
+                    if let Some(info) = self.chat_folders.iter_mut().find(|f| f.id == folder_id) {
+                        info.is_shareable = true;
+                        info.has_my_invite_links = true;
+                    }
+                    self.folder_link_saved = true;
+                }
+            }
+            EnvelopePayload::ChatFolderInviteLinks(links) => {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.folder_invite_links.insert(folder_id, links);
+                }
+            }
+            EnvelopePayload::RecommendedChatFolders(folders) => {
+                self.recommended_folders = Some(folders);
+            }
+            EnvelopePayload::ChatFolderInviteLinkInfo(info) => {
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::CheckChatFolderInviteLink) {
+                    self.folder_invite_info = Some(info);
+                }
+            }
             EnvelopePayload::ChatLists { lists } => {
                 // Parity slice: `getChatListsToAddChat` response — cache per
                 // chat for the folder picker (correlated via

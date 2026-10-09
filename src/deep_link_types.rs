@@ -60,7 +60,9 @@ pub enum InternalLink {
         live_stream: bool,
     },
     GroupCall,
-    ChatFolderInvite,
+    ChatFolderInvite {
+        invite_link: String,
+    },
     Background,
     Theme,
     UserPhoneNumber {
@@ -112,6 +114,10 @@ pub enum DeepLinkUi {
         link: String,
     },
     Settings(SettingsTarget),
+    /// `addlist`: the "Add folder" box for a shared folder (invite link).
+    FolderInvite {
+        link: String,
+    },
 }
 
 /// The decision for one resolved link.
@@ -225,7 +231,9 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
             live_stream: flag(value, "is_live_stream"),
         },
         "GroupCall" => InternalLink::GroupCall,
-        "ChatFolderInvite" => InternalLink::ChatFolderInvite,
+        "ChatFolderInvite" => InternalLink::ChatFolderInvite {
+            invite_link: text(value, "invite_link"),
+        },
         "Background" => InternalLink::Background,
         "Theme" => InternalLink::Theme,
         "UserPhoneNumber" => InternalLink::UserPhoneNumber {
@@ -344,8 +352,14 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
         InternalLink::GroupCall => {
             LinkRoute::Message(format!("Joining a call from a link {NOT_SUPPORTED}"))
         }
-        InternalLink::ChatFolderInvite => {
-            LinkRoute::Message(format!("Folder invite links {NOT_SUPPORTED}"))
+        InternalLink::ChatFolderInvite { invite_link } => {
+            if invite_link.is_empty() {
+                LinkRoute::Message("This folder link is broken or has expired.".into())
+            } else {
+                LinkRoute::Ui(DeepLinkUi::FolderInvite {
+                    link: invite_link.clone(),
+                })
+            }
         }
         InternalLink::Background => {
             LinkRoute::Message(format!("Chat background links {NOT_SUPPORTED}"))
@@ -629,6 +643,23 @@ mod tests {
     }
 
     #[test]
+    fn folder_invite_links_open_the_add_folder_box() {
+        assert_eq!(
+            route_of(json!({
+                "@type":"internalLinkTypeChatFolderInvite",
+                "invite_link":"https://t.me/addlist/abc"
+            })),
+            LinkRoute::Ui(DeepLinkUi::FolderInvite {
+                link: "https://t.me/addlist/abc".into()
+            })
+        );
+        assert!(matches!(
+            route_of(json!({"@type":"internalLinkTypeChatFolderInvite","invite_link":""})),
+            LinkRoute::Message(_)
+        ));
+    }
+
+    #[test]
     fn unsupported_targets_say_so_and_never_open_a_browser() {
         for ty in [
             "internalLinkTypeInvoice",
@@ -636,7 +667,6 @@ mod tests {
             "internalLinkTypePremiumGiftCode",
             "internalLinkTypeVideoChat",
             "internalLinkTypeGroupCall",
-            "internalLinkTypeChatFolderInvite",
             "internalLinkTypeBackground",
             "internalLinkTypeTheme",
             "internalLinkTypeBotStartInGroup",
