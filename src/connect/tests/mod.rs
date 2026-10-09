@@ -26,6 +26,7 @@ mod proxy;
 mod registration;
 mod search;
 mod settings;
+mod share;
 mod sponsored;
 mod sticker_tabs;
 mod stories;

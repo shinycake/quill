@@ -43,7 +43,7 @@ use crate::telegram::envelope::{
     StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
     ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
 };
-use crate::telegram::envelope::{CallState, ReadyParams};
+use crate::telegram::envelope::{AvailableMessageSender, CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
 use crate::telegram::profile_accent::ProfileAccentColor;
 use crate::telegram::requests::{
@@ -93,6 +93,7 @@ mod session_reply;
 mod session_requests;
 mod session_search;
 mod session_service;
+mod session_share;
 mod session_sponsored;
 mod session_stickers;
 mod session_stories;
@@ -130,6 +131,7 @@ pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,
     thumb_candidates,
 };
+pub use session_share::ShareSearch;
 pub use session_subsection_tabs::{BotTopics, TopicBadge};
 pub use session_translate::*;
 pub use shared_media_types::*;

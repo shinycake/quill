@@ -132,6 +132,7 @@ impl Session {
                 has_welcome_messages,
                 has_protected_content,
                 has_scheduled_messages,
+                message_sender,
                 is_translatable,
                 unread_mention_count,
                 unread_reaction_count,
@@ -143,6 +144,7 @@ impl Session {
             } => {
                 self.set_chat_protected(chat_id.0, has_protected_content);
                 self.set_chat_has_scheduled(chat_id.0, has_scheduled_messages);
+                self.set_chat_message_sender(chat_id.0, message_sender);
                 self.set_chat_translatable(chat_id.0, is_translatable);
                 self.set_chat_action_bar(chat_id.0, action_bar);
                 self.apply_update_new_chat(
@@ -409,6 +411,15 @@ impl Session {
                 chat_id,
                 has_scheduled_messages,
             } => self.set_chat_has_scheduled(chat_id, has_scheduled_messages),
+            EnvelopePayload::UpdateChatMessageSender {
+                chat_id,
+                message_sender,
+            } => self.set_chat_message_sender(chat_id, message_sender),
+            EnvelopePayload::ChatMessageSenders { senders } => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.send_as_options.insert(chat_id.0, senders);
+                }
+            }
             EnvelopePayload::UpdateChatIsTranslatable {
                 chat_id,
                 is_translatable,

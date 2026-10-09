@@ -244,6 +244,10 @@ pub enum EnvelopePayload {
         /// chat has scheduled messages; refreshed by
         /// `updateChatHasScheduledMessages`.
         has_scheduled_messages: bool,
+        /// `chat.message_sender_id` (schema 1.8.67, line 3627) — the "send
+        /// as" identity selected for the chat; `None` when the user can't
+        /// change it. Refreshed by `updateChatMessageSender`.
+        message_sender: Option<MessageSender>,
         /// `chat.is_translatable` (schema 1.8.67, lines 3599 / 3627) —
         /// translation of the chat's messages must be suggested.
         /// Refreshed by `updateChatIsTranslatable` (line 10585).
@@ -1167,6 +1171,16 @@ pub enum EnvelopePayload {
     UpdateChatHasScheduledMessages {
         chat_id: i64,
         has_scheduled_messages: bool,
+    },
+    /// `updateChatMessageSender` (schema 1.8.67, line 10546) — the "send as"
+    /// identity of the chat changed.
+    UpdateChatMessageSender {
+        chat_id: i64,
+        message_sender: Option<MessageSender>,
+    },
+    /// `chatMessageSenders` — answer of `getChatAvailableMessageSenders`.
+    ChatMessageSenders {
+        senders: Vec<AvailableMessageSender>,
     },
     /// `updateChatIsTranslatable` (schema 1.8.67, line 10585) — translation
     /// of the chat's messages was enabled or disabled.

@@ -557,6 +557,14 @@ impl Session {
                 .insert(scope, chat_ids.iter().map(|id| id.0).collect());
             self.notification_exceptions_loading.remove(&scope);
         }
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::SearchShareChats | RequestPurpose::SearchShareChatsOnServer
+            )
+        {
+            self.share_search.accept(pending.id, &chat_ids);
+        }
         if self.search.matches_generation(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {

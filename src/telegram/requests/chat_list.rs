@@ -36,6 +36,20 @@ pub fn search_chats(extra: RequestId, query: &str, limit: i32) -> String {
     .to_string()
 }
 
+/// `searchChatsOnServer` (TDLib 1.8.67, schema line 11621): like
+/// `searchChats` but asks the server, so chats missing from the local
+/// cache (the share box's "server search") are found too.
+pub fn search_chats_on_server(extra: RequestId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchChatsOnServer",
+        "@extra": extra.as_extra(),
+        "query": query,
+        "type_filter": Value::Null,
+        "limit": limit,
+    })
+    .to_string()
+}
+
 /// `searchPublicChats` (TDLib 1.8.67, schema line 11609). Public username /
 /// title lookup across all public chats (private chats, supergroups,
 /// channels) — unlike `searchChats`, not limited to known chats.

@@ -135,6 +135,7 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("has_scheduled_messages")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        message_sender: parse_message_sender(chat.get("message_sender_id")).ok(),
         // `chat.is_translatable` (schema 1.8.67, line 3599).
         is_translatable: chat
             .get("is_translatable")
