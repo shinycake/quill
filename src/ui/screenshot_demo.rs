@@ -505,6 +505,20 @@ pub enum ScreenshotDemo {
     ReadyFoldersAddLink,
     /// Shareable folders slice: folder editor with the icon picker.
     ReadyFoldersIcons,
+    /// Folder follow-ups: folder tag chips on chat rows.
+    ReadyFoldersTags,
+    /// Folder follow-ups: folder editor with the tag colour picker.
+    ReadyFoldersTagColor,
+    /// Folder follow-ups: right-click menu of a folder tab.
+    ReadyFoldersMenu,
+    /// Folder follow-ups: shared folder with the new chats bar.
+    ReadyFoldersNewChats,
+    /// Folder follow-ups: join dialog of a shared folder's new chats.
+    ReadyFoldersNewChatsJoin,
+    /// Folder follow-ups: folder limit box with the Premium upsell.
+    ReadyFoldersLimit,
+    /// Folder follow-ups: remove a shared folder and choose chats to leave.
+    ReadyFoldersDelete,
     /// Parity slice: chat-list avatars (injected, no live Telegram) — the
     /// chat list mixes photo avatars (private chat A, the demo channel)
     /// and colored-initial fallbacks (private chat B, a basic group, the
@@ -671,6 +685,12 @@ pub enum ScreenshotDemo {
     /// indicator live, RTMP URL + key fetched, and two in-call chat
     /// messages with the composer.
     ReadyGroupCallManage,
+    /// Calls polish: a pinned video tile plus paused camera and screen
+    /// streams in a joined voice chat (injected, no live Telegram).
+    ReadyGroupCallPolish,
+    /// Calls polish: the "Join as" picker on an unjoined voice chat
+    /// (injected, no live Telegram).
+    ReadyGroupCallJoinAs,
     /// "Notify me when a scheduled video chat starts" (injected, no
     /// live Telegram) — a scheduled (not yet started) video chat, so
     /// the overlay renders the "Scheduled voice chat" card with the

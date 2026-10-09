@@ -838,6 +838,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Phase C3a: freshly created voice chats get their full
         // `groupCall` via `getGroupCall`.
         let _ = self.maybe_fetch_group_calls();
+        let _ = self.maybe_fetch_join_as();
         // stories-live-play: the story viewer's pending "Join live"
         // fires `join_video_chat` once the `getGroupCall` answer has
         // created the unjoined tracker.

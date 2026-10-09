@@ -955,6 +955,48 @@ pub(super) fn demo_seed_for(
             "screenshot demo — folder editor with the icon picker (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyFoldersTags => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — folder tag chips on chat rows (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersTagColor => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — folder editor with the tag colour picker (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersMenu => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — right-click menu of a folder tab (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersNewChats => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — shared folder with the new chats bar (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersNewChatsJoin => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — join dialog of a shared folder's new chats (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersLimit => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — folder limit box with the Premium upsell (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersDelete => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — remove a shared folder and choose chats to leave (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyChatAvatars => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1172,6 +1214,20 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — voice chat management (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyGroupCallPolish => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — pinned tile and paused streams (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyGroupCallJoinAs => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — join a voice chat as a channel (injected, no live Telegram)"
+                .into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyGroupCallScheduled => (
@@ -2129,6 +2185,10 @@ impl QuillApp {
             group_call_window_opening: false,
             group_call_window_closed_by_user: None,
             group_call_chat_shown: false,
+            group_call_ptt: quill::calls::ptt::PushToTalk::new(),
+            ptt_clock: std::time::Instant::now(),
+            ptt_capture: false,
+            group_call_pin: quill::calls::tile_pin::TilePin::default(),
             call_window_opening: false,
             call_window_raised: false,
             call_window_closed_by_user: None,
@@ -2269,6 +2329,9 @@ impl QuillApp {
             folder_invite: None,
             chat_look_dialog: None,
             folder_menu_open: false,
+            folder_tab_menu: None,
+            folder_new_chats_dialog: None,
+            folder_limit_box: None,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,
@@ -2355,6 +2418,7 @@ impl QuillApp {
                         if this.message_menu.is_none()
                             && this.chat_menu.is_none()
                             && this.archive_menu.is_none()
+                            && this.folder_tab_menu.is_none()
                         {
                             return false;
                         }
@@ -2362,6 +2426,7 @@ impl QuillApp {
                             this.message_menu = None;
                             this.chat_menu = None;
                             this.archive_menu = None;
+                            this.folder_tab_menu = None;
                             cx.notify();
                             return true;
                         }
@@ -2459,6 +2524,22 @@ impl QuillApp {
                 .update(cx, |this, cx| {
                     this.handle_keybinding_capture(&keystroke, cx);
                 })
+                .ok();
+        })
+        .detach();
+        // Settings > Calls > Push-to-talk: the next key becomes the shortcut.
+        let ptt_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, _window, cx| {
+            let armed = ptt_app
+                .update(cx, |this, _| this.ptt_capture)
+                .unwrap_or(false);
+            if !armed || super::keybindings::is_modifier_key(&event.keystroke.key) {
+                return;
+            }
+            cx.stop_propagation();
+            let key = event.keystroke.key.clone();
+            ptt_app
+                .update(cx, |this, cx| this.capture_ptt_key(&key, cx))
                 .ok();
         })
         .detach();

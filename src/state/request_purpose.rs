@@ -1317,6 +1317,14 @@ pub enum RequestPurpose {
     /// `getChat` for a chat an `addlist` link offers that is not loaded
     /// yet (its title shows in the "Add folder" dialog).
     GetFolderInviteChat,
+    /// `getChatFolderNewChats`. Response is `chats`
+    /// (`Session::folder_new_chats`, keyed by `PendingRequest::folder_id`).
+    GetChatFolderNewChats,
+    /// `processChatFolderNewChats`. Response is `ok`; fire-and-forget.
+    ProcessChatFolderNewChats,
+    /// `getPremiumLimit` for a folder limit box. Response is
+    /// `premiumLimit`, which names its own type.
+    GetPremiumLimit,
     /// Phase B1: `createNewSecretChat`. Response is `chat` (the new
     /// secret chat); the canonical state arrives as `updateNewChat` /
     /// `updateSecretChat`.
@@ -1458,6 +1466,15 @@ pub enum RequestPurpose {
     /// Phase C3a: `loadGroupCallParticipants`. Response is `ok`;
     /// participants arrive as updates.
     LoadGroupCallParticipants {
+        group_call_id: i32,
+    },
+    /// `getVideoChatAvailableParticipants`. Response is `messageSenders`;
+    /// the "join as" choices of the tracked call.
+    GetVideoChatAvailableParticipants {
+        group_call_id: i32,
+    },
+    /// `setVideoChatDefaultParticipant`. Response is `ok`.
+    SetVideoChatDefaultParticipant {
         group_call_id: i32,
     },
     /// Phase C3a: `getVideoChatInviteLink`. Response is `httpUrl`.

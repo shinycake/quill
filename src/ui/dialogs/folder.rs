@@ -129,10 +129,16 @@ impl FolderInviteDialog {
     }
 }
 
-/// Parity slice: delete-folder confirmation. Optionally leaves suggested
-/// chats with the folder (`getChatFolderChatsToLeave`).
+/// Delete-folder confirmation (tdesktop `RemoveComplexChatFilter`). A
+/// shared folder also offers the chats Telegram suggests leaving
+/// (`getChatFolderChatsToLeave`), all ticked at first.
 pub struct FolderDeleteConfirm {
     pub(crate) folder_id: i32,
     pub(crate) name: String,
-    pub(crate) leave_with_folder: bool,
+    /// The user made invite links for the folder; deleting kills them.
+    pub(crate) has_links: bool,
+    /// A shared folder: chats can be left along with it.
+    pub(crate) shared: bool,
+    /// Suggested chats the user unticked (so they stay).
+    pub(crate) keep: HashSet<i64>,
 }

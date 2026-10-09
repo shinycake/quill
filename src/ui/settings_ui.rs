@@ -343,6 +343,7 @@ impl QuillApp {
         let privacy_failed = self
             .session()
             .is_some_and(|session| session.call_privacy_error);
+        let ptt_section = self.push_to_talk_settings(&prefs.push_to_talk, cx);
         // Phase 6: one kit RadioGroup per privacy setting. Controlled:
         // the chosen index writes the value and the owner re-renders.
         let privacy_group =
@@ -501,6 +502,7 @@ impl QuillApp {
                             ),
                     )
             })
+            .child(ptt_section)
             .child(
                 div()
                     .text_xs()

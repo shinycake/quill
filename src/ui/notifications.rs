@@ -627,7 +627,9 @@ impl QuillApp {
             self.status_note = notice;
             progressed = true;
         }
-        if self.drain_folder_share(cx) | self.drive_folder_invite(cx) {
+        self.poll_folder_new_chats();
+        if self.drain_folder_share(cx) | self.drive_folder_invite(cx) | self.drain_folder_limit(cx)
+        {
             progressed = true;
         }
         self.finish_successful_sends(cx);

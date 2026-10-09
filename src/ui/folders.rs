@@ -124,43 +124,115 @@ impl QuillApp {
                     .title(crate::ui::shell::dialog_title("Delete folder"))
                     .on_close(on_close.clone());
             };
-            let leave_count = this
-                .session()
-                .and_then(|s| s.folder_chats_to_leave.get(&confirm.folder_id))
-                .map(|ids| ids.len())
-                .unwrap_or(0);
-            let leave_label = if leave_count > 0 {
-                format!(
-                    "Also leave {leave_count} suggested chat{}",
-                    if leave_count == 1 { "" } else { "s" },
-                )
+            let muted = cx.theme().muted_foreground;
+            let folder_id = confirm.folder_id;
+            let suggested: Vec<i64> = if confirm.shared {
+                this.session()
+                    .and_then(|s| s.folder_chats_to_leave.get(&folder_id).cloned())
+                    .unwrap_or_default()
             } else {
-                "Also leave suggested chats".to_string()
+                Vec::new()
             };
-            let body = div()
+            let leaving = suggested
+                .iter()
+                .filter(|id| !confirm.keep.contains(id))
+                .count();
+            // tdesktop `lng_filters_delete_sure` / `lng_filters_remove_sure`.
+            let intro = if confirm.has_links {
+                "Are you sure you want to delete this folder? This will also deactivate all the invite links created to share this folder."
+            } else {
+                "This will remove the folder, your chats will not be deleted."
+            };
+            let mut body = div()
                 .flex()
                 .flex_col()
-                .gap_2()
-                .child(
+                .gap_3()
+                .child(div().id("folder-delete-text").text_sm().child(intro));
+            if !suggested.is_empty() {
+                let all_ticked = leaving == suggested.len();
+                let select_ids = suggested.clone();
+                body = body
+                    .child(div().text_sm().child(format!(
+                        "Do you also want to quit the chats included in the folder {}?",
+                        confirm.name
+                    )))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(muted)
+                                    .child(match leaving {
+                                        1 => "1 chat to quit".to_string(),
+                                        n => format!("{n} chats to quit"),
+                                    }),
+                            )
+                            .child(
+                                Button::new("folder-delete-select-all")
+                                    .label(if all_ticked { "Deselect all" } else { "Select all" })
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if let Some(confirm) = this.folder_delete_confirm.as_mut() {
+                                            if all_ticked {
+                                                confirm.keep = select_ids.iter().copied().collect();
+                                            } else {
+                                                confirm.keep.clear();
+                                            }
+                                        }
+                                        cx.notify();
+                                    })),
+                            ),
+                    );
+                let mut list = div()
+                    .id("folder-delete-chats")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .max_h(px(220.))
+                    .overflow_y_scroll();
+                for chat_id in suggested.iter().copied() {
+                    let ticked = !confirm.keep.contains(&chat_id);
+                    list = list.child(
+                        Checkbox::new(("folder-delete-chat", chat_id as u64))
+                            .checked(ticked)
+                            .label(super::folder_share::chat_title(this.session(), chat_id))
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                if let Some(confirm) = this.folder_delete_confirm.as_mut() {
+                                    if on {
+                                        confirm.keep.remove(&chat_id);
+                                    } else {
+                                        confirm.keep.insert(chat_id);
+                                    }
+                                }
+                                cx.notify();
+                            })),
+                    );
+                }
+                body = body.child(list).child(
                     div()
                         .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Chats stay in your main list unless you leave them."),
-                )
-                .child(
-                    // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
-                    Checkbox::new("folder-delete-leave-toggle")
-                        .checked(confirm.leave_with_folder)
-                        .label(leave_label)
-                        .on_click(cx.listener(|this, &on, window, cx| {
-                            if let Some(confirm) = this.folder_delete_confirm.as_mut() {
-                                confirm.leave_with_folder = on;
-                            }
-                            cx.notify();
-                            this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);
-                        })),
-                )
-                .into_any_element();
+                        .text_color(muted)
+                        .child("You can deselect the chats you don’t want to quit."),
+                );
+            }
+            let body = body.into_any_element();
+            // tdesktop: "Remove Folder and Keep Chats" until a chat is ticked.
+            let confirm_label = if !suggested.is_empty() {
+                match leaving {
+                    0 => "Remove folder and keep chats".to_string(),
+                    1 => "Remove folder and chat".to_string(),
+                    _ => "Remove folder and chats".to_string(),
+                }
+            } else if confirm.has_links {
+                "Delete".to_string()
+            } else {
+                "Remove".to_string()
+            };
             let footer = div()
                 .flex()
                 .justify_end()
@@ -177,13 +249,18 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("folder-delete-confirm")
-                        .label("Delete")
+                        .label(confirm_label)
+                        .danger()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_folder_delete(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);
                         })),
                 );
-            let title = format!("Delete “{}”?", confirm.name);
+            let title = if confirm.shared && !suggested.is_empty() {
+                "Remove Folder".to_string()
+            } else {
+                format!("Delete “{}”?", confirm.name)
+            };
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
@@ -566,6 +643,10 @@ impl QuillApp {
             icon_grid = icon_grid.child(row);
         }
         panel = panel.child(icon_header).child(icon_grid);
+        // Folder tag colour (Premium, with folder tags on).
+        if let Some(picker) = self.folder_tag_picker(cx) {
+            panel = panel.child(picker);
+        }
         // Include-type filters.
         let include_filters = [
             (
@@ -744,9 +825,21 @@ impl QuillApp {
         panel.into_any_element()
     }
 
+    /// Making one more folder would pass the account's limit.
+    fn folders_full(&self) -> bool {
+        self.session().is_some_and(|s| {
+            s.folder_limits
+                .folders_full(s.chat_folders.len(), s.my_is_premium())
+        })
+    }
+
     /// Add recommended folder `ix` of `Session::recommended_folders`
     /// (`createChatFolder` with Telegram's own spec, as tdesktop's "Add").
     pub(super) fn add_recommended_folder(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.folders_full() {
+            self.show_folder_limit(quill::folder_limits::FolderLimitKind::Folders, cx);
+            return;
+        }
         let Some(spec) = self
             .session()
             .and_then(|s| s.recommended_folders.as_ref())
@@ -789,6 +882,10 @@ impl QuillApp {
     }
 
     pub(super) fn open_folder_create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.folders_full() {
+            self.show_folder_limit(quill::folder_limits::FolderLimitKind::Folders, cx);
+            return;
+        }
         self.folder_editor = Some(FolderEditorDialog::new(window, cx, None));
         cx.notify();
     }
@@ -860,6 +957,18 @@ impl QuillApp {
             .as_ref()
             .map(|dialog| dialog.editor.to_spec());
         let Some(spec) = spec else { return };
+        // tdesktop checks the chosen-chat limits before saving.
+        let over = self.session().and_then(|s| {
+            s.folder_limits.chats_over(
+                spec.pinned_chat_ids.len() + spec.included_chat_ids.len(),
+                spec.excluded_chat_ids.len(),
+                s.my_is_premium(),
+            )
+        });
+        if let Some(kind) = over {
+            self.show_folder_limit(kind, cx);
+            return;
+        }
         let result = match self.live.as_mut() {
             Some(live) => match folder_id {
                 Some(id) => live.driver.edit_chat_folder(id, &spec).map(|_| ()),
@@ -891,17 +1000,22 @@ impl QuillApp {
     }
 
     pub(super) fn open_folder_delete(&mut self, folder_id: i32, cx: &mut Context<Self>) {
-        let name = self
+        let info = self
             .session()
             .and_then(|s| s.chat_folders.iter().find(|f| f.id == folder_id))
-            .map(|f| f.name.clone())
-            .unwrap_or_else(|| format!("Folder {folder_id}"));
+            .map(|f| (f.name.clone(), f.is_shareable, f.has_my_invite_links));
+        let (name, shared, has_links) =
+            info.unwrap_or_else(|| (format!("Folder {folder_id}"), false, false));
         self.folder_delete_confirm = Some(FolderDeleteConfirm {
             folder_id,
             name,
-            leave_with_folder: false,
+            has_links,
+            shared,
+            keep: std::collections::HashSet::new(),
         });
-        if let Some(live) = self.live.as_mut()
+        // Only a shared folder has chats worth leaving with it.
+        if shared
+            && let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id)
         {
             self.status_note = format!("could not load folder chats: {err:?}");
@@ -913,10 +1027,13 @@ impl QuillApp {
         let Some(confirm) = self.folder_delete_confirm.take() else {
             return;
         };
-        let leave: Vec<i64> = if confirm.leave_with_folder {
+        let leave: Vec<i64> = if confirm.shared {
             self.session()
                 .and_then(|s| s.folder_chats_to_leave.get(&confirm.folder_id).cloned())
                 .unwrap_or_default()
+                .into_iter()
+                .filter(|id| !confirm.keep.contains(id))
+                .collect()
         } else {
             Vec::new()
         };

@@ -56,6 +56,7 @@ impl Session {
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
                 self.storage_limits.apply_option(&name, &value);
+                self.folder_limits.apply_option(&name, &value);
                 self.apply_privacy_option(&name, &value);
                 if name == "disable_top_chats"
                     && let OptionValue::Boolean(off) = &value
@@ -1431,6 +1432,14 @@ impl Session {
                     self.folder_invite_links.insert(folder_id, links);
                 }
             }
+            EnvelopePayload::PremiumLimit {
+                type_name,
+                default_value,
+                premium_value,
+            } => {
+                self.folder_limits
+                    .apply_premium_limit(&type_name, default_value, premium_value);
+            }
             EnvelopePayload::RecommendedChatFolders(folders) => {
                 self.recommended_folders = Some(folders);
             }
@@ -1997,8 +2006,13 @@ impl Session {
             EnvelopePayload::BlockedMessageSenders {
                 total_count,
                 sender_ids,
+                senders,
             } => {
-                if let Some(RequestPurpose::GetBlockedSenders { offset }) =
+                if let Some(RequestPurpose::GetVideoChatAvailableParticipants { group_call_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.set_group_call_join_as_options(group_call_id, senders);
+                } else if let Some(RequestPurpose::GetBlockedSenders { offset }) =
                     pending.map(|p| p.purpose)
                 {
                     self.blocked_total = total_count;

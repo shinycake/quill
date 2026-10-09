@@ -39,6 +39,8 @@ mod tests_chat_list;
 #[cfg(test)]
 mod tests_chats;
 #[cfg(test)]
+mod tests_folder_followups;
+#[cfg(test)]
 mod tests_group_admin;
 #[cfg(test)]
 mod tests_groups;

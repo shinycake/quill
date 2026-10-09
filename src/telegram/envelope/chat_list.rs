@@ -141,6 +141,26 @@ pub(crate) fn parse_chat_folder_invite_links(value: &Value) -> Option<Vec<ChatFo
     )
 }
 
+/// `premiumLimit` — the answer of `getPremiumLimit` (`schema/td_api.tl:8559`):
+/// the constructor name of the limit type plus the free and Premium values.
+pub(crate) fn parse_premium_limit(value: &Value) -> Option<(String, i32, i32)> {
+    if value.get("@type").and_then(Value::as_str) != Some("premiumLimit") {
+        return None;
+    }
+    let type_name = value.get("type")?.get("@type")?.as_str()?.to_string();
+    let number = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_i64)
+            .map(|n| i32::try_from(n).unwrap_or(i32::MAX))
+    };
+    Some((
+        type_name,
+        number("default_value")?,
+        number("premium_value")?,
+    ))
+}
+
 pub(crate) fn parse_recommended_chat_folders(value: &Value) -> Option<Vec<RecommendedChatFolder>> {
     if value.get("@type").and_then(Value::as_str) != Some("recommendedChatFolders") {
         return None;

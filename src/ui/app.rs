@@ -644,6 +644,13 @@ pub struct QuillApp {
     pub(super) group_call_window_opening: bool,
     pub(super) group_call_window_closed_by_user: Option<i32>,
     pub(super) group_call_chat_shown: bool,
+    /// Push-to-talk state for the group call window, its clock origin,
+    /// and whether Settings is waiting for the next key to bind.
+    pub(super) group_call_ptt: quill::calls::ptt::PushToTalk,
+    pub(super) ptt_clock: Instant,
+    pub(super) ptt_capture: bool,
+    /// Locally pinned video tile of the group call (tdesktop viewport pin).
+    pub(super) group_call_pin: quill::calls::tile_pin::TilePin,
     pub(super) call_window_opening: bool,
     pub(super) call_window_raised: bool,
     pub(super) call_window_closed_by_user: Option<i32>,
@@ -1049,6 +1056,12 @@ pub struct QuillApp {
     pub(super) folder_menu_open: bool,
     /// Theme and wallpaper picker for a chat, or a `bg/` link preview.
     pub(super) chat_look_dialog: Option<super::chat_look_ui::ChatLookDialog>,
+    /// Right-click menu of a folder tab (`None` folder = the All tab).
+    pub(super) folder_tab_menu: Option<super::folder_extras::FolderTabMenu>,
+    /// The shared folder's "N new chats" join dialog.
+    pub(super) folder_new_chats_dialog: Option<super::folder_extras::FolderNewChatsDialog>,
+    /// A folder limit box (or the tag Premium notice).
+    pub(super) folder_limit_box: Option<quill::folder_limits::FolderLimitKind>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

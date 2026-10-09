@@ -65,6 +65,7 @@ fn rtmp_url_answer_caches_on_tracked_call() {
     chat.video_chat = Some(VideoChatInfo {
         group_call_id: 555,
         has_participants: false,
+        default_participant_id: None,
     });
     session.chats.insert(51, chat);
     session.active_group_call = Some(ActiveGroupCall::fresh(555));
@@ -84,6 +85,38 @@ fn rtmp_url_answer_caches_on_tracked_call() {
         Some("rtmp://dc1-rtmp.telegram.org:443/live")
     );
     assert_eq!(call.rtmp_stream_key.as_deref(), Some("secret-key"));
+}
+
+#[test]
+fn join_as_answer_fills_options_and_preselects_the_saved_default() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let mut chat = placeholder_chat(ChatId(51));
+    chat.video_chat = Some(VideoChatInfo {
+        group_call_id: 555,
+        has_participants: true,
+        default_participant_id: Some(MessageSender::Chat { chat_id: -300 }),
+    });
+    session.chats.insert(51, chat);
+    session.active_group_call = Some(ActiveGroupCall::fresh(555));
+    let extra = session.request(
+        RequestPurpose::GetVideoChatAvailableParticipants { group_call_id: 555 },
+        None,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messageSenders","@extra":"{}","total_count":2,"senders":[{{"@type":"messageSenderUser","user_id":7}},{{"@type":"messageSenderChat","chat_id":-300}}]}}"#,
+            extra.0
+        ),
+    );
+    let call = session.active_group_call.as_ref().unwrap();
+    assert_eq!(call.join_as_options.len(), 2);
+    assert_eq!(call.join_as, Some(MessageSender::Chat { chat_id: -300 }));
+    // The blocked-users list is untouched by a join-as answer.
+    assert!(session.blocked_senders.is_none());
 }
 
 #[test]

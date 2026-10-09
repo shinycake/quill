@@ -1212,6 +1212,15 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "chatFolderInviteLinks" => parse_chat_folder_invite_links(&value)
             .map(EnvelopePayload::ChatFolderInviteLinks)
             .ok_or(ParseError::MissingField),
+        "premiumLimit" => parse_premium_limit(&value)
+            .map(
+                |(type_name, default_value, premium_value)| EnvelopePayload::PremiumLimit {
+                    type_name,
+                    default_value,
+                    premium_value,
+                },
+            )
+            .ok_or(ParseError::MissingField),
         "recommendedChatFolders" => parse_recommended_chat_folders(&value)
             .map(EnvelopePayload::RecommendedChatFolders)
             .ok_or(ParseError::MissingField),
@@ -1377,6 +1386,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .filter(|s| s.get("@type").and_then(Value::as_str) == Some("messageSenderUser"))
                     .filter_map(|s| s.get("user_id"))
                     .filter_map(Value::as_i64)
+                    .collect(),
+                senders: senders
+                    .iter()
+                    .filter_map(|s| parse_message_sender(Some(s)).ok())
                     .collect(),
             })
         }

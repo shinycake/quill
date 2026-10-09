@@ -151,15 +151,36 @@ impl QuillApp {
         let weak = cx.weak_entity();
         let mut bar = TabBar::new("folder-tabs");
         for slot in &slots {
-            let mut tab = Tab::new();
-            if show_icon {
-                tab = tab.icon(slot.glyph.clone());
-            }
-            tab = if show_text {
-                tab.label(slot.name.clone())
-            } else {
-                tab.aria_label(slot.name.clone())
+            // The kit draws an icon tab as the icon alone and names it by
+            // its label in the overflow menu, so icons-only tabs keep the
+            // folder name as their label. Icon plus text puts the icon in
+            // the tab's prefix instead.
+            let mut tab = Tab::new().label(slot.name.clone());
+            tab = match (show_icon, show_text) {
+                (true, false) => tab.icon(slot.glyph.clone()).aria_label(slot.name.clone()),
+                (true, true) => tab.prefix(
+                    Icon::new(slot.glyph.clone())
+                        .size(px(14.))
+                        .text_color(cx.theme().muted_foreground),
+                ),
+                _ => tab,
             };
+            // Right-click: Edit / Mark as read / Remove (the All tab:
+            // Mark all as read / Edit folders).
+            let menu_folder = match slot.kind {
+                FolderSlotKind::All => Some(None),
+                FolderSlotKind::Folder(id) => Some(Some(id)),
+                FolderSlotKind::Unread | FolderSlotKind::Archived => None,
+            };
+            if let Some(folder) = menu_folder {
+                let menu_weak = weak.clone();
+                tab = tab.on_mouse_down(MouseButton::Right, move |event, _, cx| {
+                    let position = event.position;
+                    let _ = menu_weak.update(cx, |this, cx| {
+                        this.open_folder_tab_menu(folder, position, cx)
+                    });
+                });
+            }
             bar = bar.child(tab);
         }
         let selected = selected_slot(&slots, self.chat_filter, self.folder_tab);
@@ -218,6 +239,11 @@ impl QuillApp {
             };
             let kind = slot.kind;
             let name = slot.name.clone();
+            let menu_folder = match kind {
+                FolderSlotKind::All => Some(None),
+                FolderSlotKind::Folder(id) => Some(Some(id)),
+                FolderSlotKind::Unread | FolderSlotKind::Archived => None,
+            };
             list = list.child(
                 div()
                     .id(("folder-rail-item", ix))
@@ -237,6 +263,14 @@ impl QuillApp {
                     .aria_label(name.clone())
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| this.select_folder_slot(kind, cx)))
+                    .when_some(menu_folder, |this, folder| {
+                        this.on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                this.open_folder_tab_menu(folder, event.position, cx);
+                            }),
+                        )
+                    })
                     .when(show_icon, |this| {
                         this.child(
                             Icon::new(slot.glyph.clone())
