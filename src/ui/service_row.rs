@@ -243,6 +243,10 @@ pub(super) fn service_message_row(
                 )
             })
     });
+    let card = super::premium_ui::gift_card_of(&message.content).map(|(inner, card)| {
+        let roots = media_roots;
+        super::premium_ui::gift_card_element(row_id, inner, card, session, files, roots, cx)
+    });
     div()
         .id(("service-row", row_id))
         .flex()
@@ -252,6 +256,7 @@ pub(super) fn service_message_row(
         .py_1()
         .child(pill(("service-pill", row_id), &text, cx))
         .when_some(photo, |this, photo| this.child(photo))
+        .when_some(card, |this, card| this.child(card))
         .when_some(buttons, |this, buttons| this.child(buttons))
         .into_any_element()
 }

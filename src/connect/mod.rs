@@ -32,6 +32,7 @@ mod messages;
 mod moderation;
 mod payments;
 mod polls;
+mod premium_hub;
 mod privacy_data;
 mod profile;
 mod profile_panels;
