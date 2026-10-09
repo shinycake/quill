@@ -1781,6 +1781,8 @@ impl QuillApp {
             inline_bot_alert_shown: false,
             forum_manage_dialog: None,
             poll_voters_dialog: None,
+            poll_add_option: None,
+            checklist_dialog: None,
             welcome_dialog: None,
             event_log_search: None,
             event_log_admin_filter: None,

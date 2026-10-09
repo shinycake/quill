@@ -175,6 +175,10 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("unread_reaction_count")
             .and_then(Value::as_i64)
             .unwrap_or(0) as i32,
+        unread_poll_vote_count: chat
+            .get("unread_poll_vote_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
         // Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines
         // 3606/3627) gates the row-menu Report item.
         can_be_reported: chat

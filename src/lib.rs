@@ -12,6 +12,7 @@ pub mod chat_export;
 pub mod chat_swipe;
 pub mod chatlist_archive;
 pub mod chatlist_style;
+pub mod checklist;
 pub mod community_mode;
 pub mod composer;
 pub mod connect;

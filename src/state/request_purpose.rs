@@ -217,6 +217,20 @@ pub enum RequestPurpose {
     /// 12226). Response is the sent `message`; failures surface through
     /// the normal message-send failure path.
     SendInlineQueryResult,
+    /// B15: `addPollOption` (schema 1.8.67 line 12920). Response is `ok`;
+    /// the option arrives through `updatePoll`.
+    AddPollOption,
+    /// B15: `getPollVoteStatistics` (schema 1.8.67 line 12947). Response
+    /// is `pollVoteStatistics`, cached in `Session::poll_stats`.
+    GetPollVoteStatistics {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
+    /// B15: `markChecklistTasksAsDone` (schema 1.8.67 line 12967).
+    /// Response is `ok`; the list refreshes via `updateMessageContent`.
+    MarkChecklistTasks,
+    /// B15: `addChecklistTasks` (schema 1.8.67 line 12960).
+    AddChecklistTasks,
     /// B4: `stopPoll` (schema 1.8.67 line 12953). Response is `ok`; the
     /// poll closes via `updatePoll`.
     StopPoll,

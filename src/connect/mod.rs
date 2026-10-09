@@ -19,6 +19,7 @@ mod marketplace;
 mod media;
 mod media_library;
 pub use media_library::REACTION_STRIP_SIZE;
+mod checklists;
 mod message_actions;
 mod message_menu;
 mod messages;

@@ -21,6 +21,7 @@ mod message_menu;
 mod message_ops;
 mod messaging;
 mod payments;
+mod polls_checklists;
 mod profile_panels;
 mod proxy;
 mod registration;

@@ -134,6 +134,16 @@ pub enum ChatStatisticsFetch {
     Failed(String),
 }
 
+/// B15: fetch state for one poll's `getPollVoteStatistics` result
+/// (schema 1.8.67, line 12947), keyed by (chat id, message id). `Loading`
+/// is the in-flight guard.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PollStatsFetch {
+    Loading,
+    Loaded(crate::telegram::envelope::StatisticalGraph),
+    Failed(String),
+}
+
 /// Phase D3a: fetch state for one chat's `getChatInviteLinks` result
 /// (schema 1.8.67, line 14138). Keyed by chat id. `Loading` is the
 /// in-flight guard — the driver never sends a second request while one

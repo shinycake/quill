@@ -119,6 +119,16 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, _, cx| app.close_media_viewer(cx)
     ),
     layer!(
+        "checklist-dialog",
+        |app| app.checklist_dialog.is_some(),
+        |app, _, cx| app.close_checklist_dialog(cx)
+    ),
+    layer!(
+        "poll-add-option",
+        |app| app.poll_add_option.is_some(),
+        |app, _, cx| app.close_poll_add_option(cx)
+    ),
+    layer!(
         "poll-dialog",
         |app| app.poll_dialog.is_some(),
         |app, _, cx| app.request_close_poll_dialog(cx)

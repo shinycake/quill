@@ -711,6 +711,14 @@ impl QuillApp {
                         })
                         // Phase 4.2: poll creation dialog above the composer.
                         .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))
+                        // B15: checklist composer / "Add Tasks" and the poll
+                        // "Add an Option" row above the composer.
+                        .when_some(self.checklist_dialog_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
+                        .when_some(self.poll_add_option_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
                         // Phase D3a: invite-link creation dialog above the composer.
                         .when_some(self.invite_link_dialog_panel(cx), |this, panel| {
                             this.child(panel)
@@ -1680,6 +1688,7 @@ impl QuillApp {
         let corner_buttons = self.jump_corner_buttons(
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
             chat.as_ref().map_or(0, |c| c.unread_reaction_count),
+            chat.as_ref().map_or(0, |c| c.unread_poll_vote_count),
             cx,
         );
         // kit Phase 3: only visible rows render. Row 0 becoming visible

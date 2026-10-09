@@ -751,6 +751,10 @@ pub struct QuillApp {
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
+    /// B15: the inline "Add an Option" panel (`addPollOption`).
+    pub(super) poll_add_option: Option<PollAddOption>,
+    /// B15: the checklist composer / "Add Tasks" box.
+    pub(super) checklist_dialog: Option<ChecklistDialog>,
     /// Slice G2: chat welcome-message editor.
     pub(super) welcome_dialog: Option<WelcomeDialog>,
     /// Slice G2: event-log search input for the info panel's

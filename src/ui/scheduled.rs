@@ -73,14 +73,39 @@ fn local_stamp(unix: i64) -> String {
     )
 }
 
-fn picker_value(unix: i64) -> Option<DateTime> {
+pub(super) fn picker_value(unix: i64) -> Option<DateTime> {
     Some(DateTime::Single(Some(local_stamp(unix).parse().ok()?)))
 }
 
 /// Local calendar day of `unix` as `YYYY-MM-DD`; compares lexically.
-fn local_day(unix: i64) -> String {
+pub(super) fn local_day(unix: i64) -> String {
     let c = civil_local(unix);
     format!("{:04}-{:02}-{:02}", c.year, c.month, c.day)
+}
+
+/// B15: the poll dialog's absolute-deadline picker (`close_date`): days
+/// from today to a year ahead, opening one day out, like tdesktop's
+/// `ChooseDateTimeBox` with `min = now + 60s`, `max = now + 365d`.
+pub(super) fn poll_deadline_picker(
+    window: &mut Window,
+    cx: &mut Context<QuillApp>,
+) -> Entity<DatePickerState> {
+    let now = now_unix();
+    let first_day = local_day(now);
+    let last_day = local_day(now + quill::poll::POLL_DEADLINE_MAX_SECS);
+    let date = cx.new(|cx| {
+        DatePickerState::new(window, cx)
+            .time_precision(TimePrecision::Minute)
+            .hour_cycle(HourCycle::H23)
+            .disabled_matcher(Matcher::custom(move |day| {
+                let day = day.format("%Y-%m-%d").to_string();
+                day < first_day || day > last_day
+            }))
+    });
+    if let Some(value) = picker_value(now + 24 * 3600) {
+        date.update(cx, |state, cx| state.set_date_time(value, window, cx));
+    }
+    date
 }
 
 impl QuillApp {

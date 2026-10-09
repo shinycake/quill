@@ -508,6 +508,24 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .unwrap_or(0) as i32,
             })
         }
+        // B15: poll-vote badge counts (schema 1.8.67, lines 10457/10573).
+        // `updateMessageContainsUnreadPollVotes` reports the chat's new
+        // counter too, so both fold into the chat counter like mentions.
+        "updateChatUnreadPollVoteCount" | "updateMessageContainsUnreadPollVotes" => {
+            Ok(EnvelopePayload::UpdateChatUnreadPollVoteCount {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                unread_poll_vote_count: value
+                    .get("unread_poll_vote_count")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+            })
+        }
+        // B15: `pollVoteStatistics` (schema 1.8.67, line 10263).
+        "pollVoteStatistics" => Ok(EnvelopePayload::PollVoteStatistics {
+            graph: StatisticalGraph::parse(
+                value.get("vote_graph").ok_or(ParseError::MissingField)?,
+            )?,
+        }),
         "updateChatUnreadReactionCount" | "updateMessageUnreadReactions" => {
             Ok(EnvelopePayload::UpdateChatUnreadReactionCount {
                 chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -796,6 +814,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 can_report_supergroup_spam: flag("can_report_supergroup_spam"),
                 can_delete_reactions: flag("can_delete_reactions"),
                 can_edit_scheduling_state: flag("can_edit_scheduling_state"),
+                can_get_poll_vote_statistics: flag("can_get_poll_vote_statistics"),
             }))
         }
         // B4: `pollVoters` — the `getPollVoters` answer. Unparseable

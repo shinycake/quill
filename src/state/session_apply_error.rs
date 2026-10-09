@@ -902,6 +902,40 @@ impl Session {
                     );
                 }
             }
+            // B15: a failed `getPollVoteStatistics` lands in the fetch
+            // state so the dialog shows an honest error.
+            Some(RequestPurpose::GetPollVoteStatistics {
+                chat_id,
+                message_id,
+            }) => {
+                self.poll_stats.insert(
+                    (chat_id.0, message_id.0),
+                    PollStatsFetch::Failed(call_request_error_line(
+                        &err,
+                        "Could not load poll stats",
+                    )),
+                );
+            }
+            // B15: poll option / checklist mutations surface their
+            // failure in the status note (tdesktop shows a toast:
+            // `lng_polls_add_option_error`).
+            Some(RequestPurpose::AddPollOption) => {
+                self.message_action_note = Some(if err.code == 400 {
+                    "Could not add the option. Please try again.".to_string()
+                } else {
+                    call_request_error_line(&err, "Could not add the option")
+                });
+            }
+            Some(RequestPurpose::MarkChecklistTasks) => {
+                self.message_action_note = Some(call_request_error_line(
+                    &err,
+                    "Could not update the checklist",
+                ));
+            }
+            Some(RequestPurpose::AddChecklistTasks) => {
+                self.message_action_note =
+                    Some(call_request_error_line(&err, "Could not add the tasks"));
+            }
             // B4: a failed `getPollVoters` first page lands in the
             // fetch state so the dialog shows an honest error; a
             // failed "load more" keeps the loaded page retryable.

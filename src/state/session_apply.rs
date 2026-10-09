@@ -135,6 +135,7 @@ impl Session {
                 is_translatable,
                 unread_mention_count,
                 unread_reaction_count,
+                unread_poll_vote_count,
                 can_be_reported,
                 action_bar,
                 blocked,
@@ -171,6 +172,9 @@ impl Session {
                     extra,
                     seq,
                 );
+                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
+                    chat.unread_poll_vote_count = unread_poll_vote_count;
+                }
                 // `chat.last_message`: the starting preview. Never replaces
                 // a newer one an `updateChatLastMessage` already set.
                 if let Some(message) = last_message {
@@ -956,6 +960,27 @@ impl Session {
                     .entry(chat_id.0)
                     .or_insert_with(|| placeholder_chat(chat_id))
                     .unread_reaction_count = unread_reaction_count;
+            }
+            // B15: poll-vote badge count (schema 1.8.67, lines 10457/10573).
+            EnvelopePayload::UpdateChatUnreadPollVoteCount {
+                chat_id,
+                unread_poll_vote_count,
+            } => {
+                self.chats
+                    .entry(chat_id.0)
+                    .or_insert_with(|| placeholder_chat(chat_id))
+                    .unread_poll_vote_count = unread_poll_vote_count;
+            }
+            // B15: `getPollVoteStatistics` answer — cached per message.
+            EnvelopePayload::PollVoteStatistics { graph } => {
+                if let Some(RequestPurpose::GetPollVoteStatistics {
+                    chat_id,
+                    message_id,
+                }) = pending.map(|p| p.purpose)
+                {
+                    self.poll_stats
+                        .insert((chat_id.0, message_id.0), PollStatsFetch::Loaded(graph));
+                }
             }
             // Slice CL3: `updateChatBlockList` (schema 1.8.67, line
             // 10594).

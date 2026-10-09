@@ -3,6 +3,7 @@
 use super::app::{PaneMode, QuillApp};
 use super::bubble_header::{forward_header_line, reply_header_strip, via_bot_line};
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
+use super::message_checklist::checklist_body;
 use super::message_games::game_card;
 use super::message_media::{
     MediaCorners, file_is_downloading, media_content_width, media_frame, photo_display_path,
@@ -1053,6 +1054,14 @@ pub(super) fn session_history_row(
             cx,
         )),
         MessageContent::Poll(poll) => Some(poll_body(message.chat_id, message.id, poll, cx)),
+        // B15: checklist card (tasks, done marks, completer names).
+        MessageContent::Checklist(checklist) => Some(checklist_body(
+            message.chat_id,
+            message.id,
+            &checklist.list,
+            session,
+            cx,
+        )),
         // Slice P1: invoice card + payment receipt rows.
         MessageContent::Invoice(invoice) => {
             Some(invoice_body(message.chat_id, message.id, invoice, cx))
