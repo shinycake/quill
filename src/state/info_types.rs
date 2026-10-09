@@ -20,6 +20,49 @@ pub struct UserFullInfoData {
     pub extras: crate::telegram::envelope::UserProfileExtras,
 }
 
+/// B10: which chat-id list a profile panel fetched. The key of
+/// `Session::profile_chat_lists` is `(kind, id)`: the user id for groups
+/// in common, the channel chat id for similar channels, 0 for the
+/// current user's suitable personal channels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProfileChatsKind {
+    GroupsInCommon,
+    SimilarChats,
+    SuitablePersonalChats,
+}
+
+/// B10: fetch state of one `ProfileChatsKind` list. `Loading` is the
+/// in-flight guard; `Failed` keeps the reason for a Retry row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileChatsFetch {
+    Loading,
+    Loaded(Vec<i64>),
+    Failed(String),
+}
+
+/// B10: one profile photo in the gallery (`chatPhoto`). Both files are
+/// cached in `Session::files`; the thumb is the grid size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfilePhoto {
+    pub id: i64,
+    pub added_date: i32,
+    pub thumb_file_id: i32,
+    pub full_file_id: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// B10: fetch state of a user's profile photos (`getUserProfilePhotos`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfilePhotosFetch {
+    Loading,
+    Loaded {
+        total_count: i32,
+        photos: Vec<ProfilePhoto>,
+    },
+    Failed(String),
+}
+
 /// Phase 6: cached `supergroupFullInfo` subset (schema 1.8.67, line 2792).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SupergroupFullInfoData {

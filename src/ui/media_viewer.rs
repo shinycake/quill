@@ -55,6 +55,8 @@ pub(super) struct ViewerExtra {
     pub restore_fullscreen: bool,
     /// A looping clip paused because the window lost focus.
     pub inactive_paused: bool,
+    /// B10: whose profile photos the viewer shows (`ViewerSource::Profile`).
+    pub profile_user: Option<i64>,
 }
 
 /// Screenshot-capture runs render a single frame: skip fades there so the
@@ -203,7 +205,7 @@ impl QuillApp {
     /// Per-item viewer state: zoom, orientation, playback error, video
     /// and the download / delete-permission lookups for the new current
     /// item. Shared by open, step, and "the current item was deleted".
-    fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
         self.viewer_zoom.reset();
         self.viewer_drag = None;
         // MED1: orientation and playback error are per-item state.
@@ -215,7 +217,10 @@ impl QuillApp {
         self.ensure_viewer_download(cx);
         self.maybe_autoplay_viewer_video(cx);
         // What TDLib allows for this message (Delete in the toolbar).
-        if let (Some(item), Some(live)) = (self.media_viewer.current(), self.live.as_mut()) {
+        // Profile photos are not messages.
+        if self.media_viewer.source() != ViewerSource::Profile
+            && let (Some(item), Some(live)) = (self.media_viewer.current(), self.live.as_mut())
+        {
             let _ = live
                 .driver
                 .fetch_message_menu_actions(item.chat_id, item.message_id);
@@ -1133,7 +1138,10 @@ impl QuillApp {
     fn prune_deleted_viewer_items(&mut self, cx: &mut Context<Self>) {
         // Shared Media items reach past the loaded history; absence there
         // does not mean deleted.
-        if self.media_viewer.source() == ViewerSource::SharedMedia {
+        if matches!(
+            self.media_viewer.source(),
+            ViewerSource::SharedMedia | ViewerSource::Profile
+        ) {
             return;
         }
         let mut viewer = std::mem::take(&mut self.media_viewer);
@@ -1965,12 +1973,26 @@ impl QuillApp {
             .iter()
             .chain(std::iter::once(&item.download_file_id))
             .any(|id| file_is_downloading(*id, &files, &downloading));
-        let kind_label = item.kind.label();
+        let profile_view = self.media_viewer.source() == ViewerSource::Profile;
+        let kind_label = if profile_view {
+            "Profile photo"
+        } else {
+            item.kind.label()
+        };
         let header_label = if total > 1 {
             format!("{kind_label} {position} of {total}")
         } else {
             kind_label.to_string()
         };
+        // B10: "Set as main photo" for one of your own earlier photos (the
+        // first one already is the main photo).
+        let can_set_main = profile_view
+            && position > 1
+            && self
+                .viewer_extra
+                .profile_user
+                .zip(self.session().and_then(|s| s.my_user_id))
+                .is_some_and(|(shown, me)| shown == me);
         // MED1: album pin action for the header — only when the item is in
         // an album and the user may pin in this chat (rights-gated, TGX
         // `MessagePinAlbum` semantics: unpins when any member is pinned).
@@ -2139,6 +2161,8 @@ impl QuillApp {
             let is_photo = item.kind == MediaViewerKind::Photo;
             let menu_protected = protected;
             let menu_can_delete = can_delete;
+            let menu_profile = profile_view;
+            let menu_set_main = can_set_main;
             div()
                 .id(("media-viewer-visual", row_id))
                 .relative()
@@ -2217,7 +2241,12 @@ impl QuillApp {
                         })
                     };
                     let mut menu = menu;
-                    if !menu_protected {
+                    if menu_set_main {
+                        menu = menu.item(item("Set as Main Photo", |this, _, cx| {
+                            this.set_viewer_photo_as_main(cx)
+                        }));
+                    }
+                    if !menu_protected && !menu_profile {
                         menu = menu.item(item("Forward", |this, window, cx| {
                             this.share_viewer_media(window, cx)
                         }));
@@ -2236,9 +2265,11 @@ impl QuillApp {
                                 menu.item(item("Copy", |this, _, cx| this.copy_viewer_photo(cx)));
                         }
                     }
-                    menu = menu.item(item("Show in Chat", |this, _, cx| {
-                        this.show_viewer_in_chat(cx)
-                    }));
+                    if !menu_profile {
+                        menu = menu.item(item("Show in Chat", |this, _, cx| {
+                            this.show_viewer_in_chat(cx)
+                        }));
+                    }
                     if is_photo {
                         menu = menu
                             .item(PopupMenuItem::separator())
@@ -2583,7 +2614,19 @@ impl QuillApp {
                     })
                     // Protected content can't be shared or saved
                     // (Telegram Desktop hides both).
-                    .when(!protected, |this| {
+                    .when(can_set_main, |this| {
+                        this.child(
+                            icon_action(
+                                ("media-viewer-set-main", row_id),
+                                gpui_kit::assets::IconName::Images,
+                                "Set as main photo",
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_viewer_photo_as_main(cx);
+                            })),
+                        )
+                    })
+                    .when(!protected && !profile_view, |this| {
                         this.child(
                             icon_action(
                                 ("media-viewer-share", row_id),
@@ -2596,7 +2639,9 @@ impl QuillApp {
                                 },
                             )),
                         )
-                        .child(
+                    })
+                    .when(!protected, |this| {
+                        this.child(
                             icon_action(
                                 ("media-viewer-save", row_id),
                                 gpui_kit::assets::IconName::Download,
@@ -2607,16 +2652,18 @@ impl QuillApp {
                             })),
                         )
                     })
-                    .child(
-                        icon_action(
-                            ("media-viewer-show-in-chat", row_id),
-                            gpui_kit::assets::IconName::MessageSquare,
-                            "Show in chat",
+                    .when(!profile_view, |this| {
+                        this.child(
+                            icon_action(
+                                ("media-viewer-show-in-chat", row_id),
+                                gpui_kit::assets::IconName::MessageSquare,
+                                "Show in chat",
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_viewer_in_chat(cx);
+                            })),
                         )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.show_viewer_in_chat(cx);
-                        })),
-                    )
+                    })
                     .when_some(album_pin_label, |this, label| {
                         this.child(
                             Button::new(("media-viewer-pin-album", row_id))

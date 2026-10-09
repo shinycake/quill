@@ -183,6 +183,8 @@ pub struct QuillApp {
     pub(super) context_menu_previous_focus: Option<FocusHandle>,
     pub(super) connect_status: ConnectUiStatus,
     pub(super) connection_generation: u64,
+    /// The TDLib receive bridge stopped; shows the Closed / Retry card.
+    pub(super) connection_lost: bool,
     pub(super) live: Option<LiveConnect>,
     pub(super) status_note: String,
     /// The `status_note` text the toast last showed, and when it appeared:
@@ -955,6 +957,12 @@ pub struct QuillApp {
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,
+    /// B10: edit-contact / birthday / personal-channel / share-contact
+    /// dialog behind the profile panels.
+    pub(super) profile_dialog: Option<ProfileDialog>,
+    /// B10: a profile photo gallery whose list was requested; the viewer
+    /// opens when it lands (checked by the poll loop).
+    pub(super) pending_profile_gallery: Option<i64>,
     /// Slice A6: vCard import dialog opened from the Contacts tab
     /// settings section.
     pub(super) import_contacts_dialog: Option<ImportContactsDialog>,
@@ -1026,7 +1034,10 @@ impl QuillApp {
     }
 
     pub(super) fn current_auth(&self) -> AuthorizationState {
-        if let Some(live) = self.live.as_ref() {
+        if self.connection_lost {
+            // The receive bridge died: treat it like an unexpected Closed.
+            AuthorizationState::Closed
+        } else if let Some(live) = self.live.as_ref() {
             live.driver.session.auth.clone()
         } else if let Some(session) = self.demo_session.as_ref() {
             session.auth.clone()

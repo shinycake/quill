@@ -50,6 +50,7 @@ pub mod playlist;
 pub mod poll;
 pub mod presence;
 pub mod privacy;
+pub mod profile_forms;
 pub mod proxy;
 pub mod rich;
 pub mod row_fx;

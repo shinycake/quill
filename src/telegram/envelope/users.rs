@@ -378,3 +378,31 @@ pub(crate) fn parse_user_full_info_photo(value: &Value) -> Option<ParsedFile> {
         .or_else(|| sizes.iter().min_by_key(|size| (size.width, size.height)))?;
     files.into_iter().find(|file| file.id == pick.file_id)
 }
+
+/// B10: one `chatPhoto` of `getUserProfilePhotos`. The grid thumbnail is
+/// the same pick as the panel photo (`"m"`, else the largest up to 320px
+/// wide, else the smallest); the full size is the largest. `None` when
+/// the photo has no usable size.
+pub(crate) fn parse_profile_photo(photo: &Value) -> Option<ParsedProfilePhoto> {
+    let (sizes, files) = parse_photo_sizes(photo);
+    let full = sizes.iter().max_by_key(|size| (size.width, size.height))?;
+    let thumb = sizes
+        .iter()
+        .find(|size| size.type_name == "m")
+        .or_else(|| {
+            sizes
+                .iter()
+                .filter(|size| size.width > 0 && size.width <= 320)
+                .max_by_key(|size| size.width)
+        })
+        .or_else(|| sizes.iter().min_by_key(|size| (size.width, size.height)))?;
+    Some(ParsedProfilePhoto {
+        id: int53(photo.get("id")).ok()?,
+        added_date: int53_or_zero(photo.get("added_date")) as i32,
+        thumb_file_id: thumb.file_id,
+        full_file_id: full.file_id,
+        width: full.width,
+        height: full.height,
+        files,
+    })
+}

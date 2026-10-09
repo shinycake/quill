@@ -1046,6 +1046,19 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .map(ChatId)
                 .collect(),
         }),
+        "chatPhotos" => Ok(EnvelopePayload::ChatPhotos {
+            total_count: value
+                .get("total_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            photos: value
+                .get("photos")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(super::users::parse_profile_photo)
+                .collect(),
+        }),
         "foundMessages" => {
             let messages = value
                 .get("messages")

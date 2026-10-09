@@ -26,6 +26,7 @@ mod moderation;
 mod payments;
 mod polls;
 mod profile;
+mod profile_panels;
 mod proxy;
 mod search;
 mod secret_chats;

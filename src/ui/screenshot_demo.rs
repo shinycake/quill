@@ -11,6 +11,8 @@ pub enum ScreenshotDemo {
     /// Slice A1: injected `authorizationStateWaitOtherDeviceConfirmation`
     /// with a fake link, rendered as a real QR (no live Telegram).
     WaitQr,
+    /// Unexpected `authorizationStateClosed`: the Retry card.
+    ConnectionClosed,
     ReadyChats,
     ReadyTrayBehavior,
     ReadyUpdateInstall,
@@ -673,6 +675,10 @@ pub enum ScreenshotDemo {
     /// "Edit profile" dialog open on the current user (id 777) with a
     /// seeded name, bio, usernames and profile-photo id.
     ReadyProfileEdit,
+    /// B10: profile and contact panels (`QUILL_DEMO_PROFILE=contact|self|
+    /// edit-contact|birthday|channel|share|gallery|similar`; injected data,
+    /// no live Telegram).
+    ReadyProfilePanels,
     /// Slice A5: like `ReadyProfileEdit`, but the username field holds a
     /// freshly-checked value with a seeded `checkChatUsernameResultOk`
     /// verdict — intended for a taller capture

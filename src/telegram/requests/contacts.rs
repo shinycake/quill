@@ -52,14 +52,17 @@ pub fn get_contacts(extra: RequestId) -> String {
 /// share_phone_number:Bool = Ok;`
 /// with `importedContact phone_number:string first_name:string
 /// last_name:string note:formattedText = ImportedContact` (line 7382).
-/// The note is sent as an empty `formattedText` — Quill has no contact
-/// notes UI.
+/// `note` is the contact's private note as plain text (an empty string
+/// clears it, so the edit-contact box always sends the current note) and
+/// `share_phone_number` shares the current user's number with the contact.
 pub fn add_contact(
     extra: RequestId,
     user_id: i64,
     phone_number: &str,
     first_name: &str,
     last_name: &str,
+    note: &str,
+    share_phone_number: bool,
 ) -> String {
     json!({
         "@type": "addContact",
@@ -70,9 +73,9 @@ pub fn add_contact(
             "phone_number": phone_number,
             "first_name": first_name,
             "last_name": last_name,
-            "note": { "@type": "formattedText", "text": "", "entities": [] },
+            "note": { "@type": "formattedText", "text": note, "entities": [] },
         },
-        "share_phone_number": false,
+        "share_phone_number": share_phone_number,
     })
     .to_string()
 }

@@ -75,3 +75,23 @@ fn update_connection_state_drives_indicator() {
         Some(ConnectionIndicator::Transitioning("Updating…"))
     );
 }
+
+/// A fresh session has not heard from TDLib yet: no offline banner flash
+/// at startup. The first `updateConnectionState` takes over.
+#[test]
+fn fresh_session_shows_no_indicator_until_first_update() {
+    let (mut session, sink) = session();
+    assert_eq!(session.connection, ConnectionState::Initial);
+    assert_eq!(connection_indicator(session.connection), None);
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateWaitingForNetwork"}}"#,
+    );
+    assert_eq!(
+        connection_indicator(session.connection),
+        Some(ConnectionIndicator::Offline)
+    );
+}
