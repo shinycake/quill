@@ -32,6 +32,12 @@ impl ContactContent {
 pub struct DiceContent {
     pub emoji: String,
     pub value: i32,
+    /// `final_state` of a regular dice (`diceStickersRegular`): the
+    /// animated sticker that throws the die and lands on `value`. `None`
+    /// for slot machines (`diceStickersSlotMachine`, five stickers
+    /// composed on a reel) and when TDLib has not sent the stickers yet;
+    /// the row then shows the face glyph.
+    pub final_sticker: Option<StickerContent>,
 }
 
 impl DiceContent {
@@ -120,14 +126,43 @@ pub(crate) fn parse_message_dice(value: &Value) -> (MessageContent, Vec<ParsedFi
         },
         Vec::new(),
     );
+    let state = value.get("final_state");
     let Some(number) = value.get("value").and_then(Value::as_i64) else {
         return unsupported;
     };
     let Ok(value) = i32::try_from(number) else {
         return unsupported;
     };
+    let (final_sticker, files) = parse_dice_final_state(state);
     (
-        MessageContent::Dice(DiceContent { emoji, value }),
-        Vec::new(),
+        MessageContent::Dice(DiceContent {
+            emoji,
+            value,
+            final_sticker,
+        }),
+        files,
     )
+}
+
+/// The `diceStickersRegular` sticker of a dice `final_state`, plus its
+/// files (they join the message's file list so the downloader sees them).
+fn parse_dice_final_state(state: Option<&Value>) -> (Option<StickerContent>, Vec<ParsedFile>) {
+    let regular = state
+        .filter(|state| state.get("@type").and_then(Value::as_str) == Some("diceStickersRegular"));
+    let (item, mut files) = parse_sticker_value(regular.and_then(|state| state.get("sticker")));
+    files.retain(|file| file.id.0 != 0);
+    let sticker = item.map(|item| StickerContent {
+        emoji: item.emoji,
+        width: item.width,
+        height: item.height,
+        format: item.format,
+        file_id: item.file_id,
+        thumb_file_id: item.thumb_file_id,
+        thumb_width: item.thumb_width,
+        thumb_height: item.thumb_height,
+        is_premium: false,
+        requires_premium: false,
+        set_id: item.set_id,
+    });
+    (sticker, files)
 }

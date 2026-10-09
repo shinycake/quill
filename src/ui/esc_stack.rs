@@ -124,6 +124,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, _, cx| app.close_checklist_dialog(cx)
     ),
     layer!(
+        "share-content-dialog",
+        |app| app.share_content_dialog.is_some(),
+        |app, _, cx| app.close_share_content_dialog(cx)
+    ),
+    layer!(
         "poll-add-option",
         |app| app.poll_add_option.is_some(),
         |app, _, cx| app.close_poll_add_option(cx)

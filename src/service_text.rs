@@ -1212,7 +1212,7 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
         } else {
             "Story"
         }),
-        A::PaidMedia { stars } => text(&format!("Paid media \u{B7} {}", stars_cost(*stars))),
+        A::PaidMedia { stars, .. } => text(&format!("Paid media \u{B7} {}", stars_cost(*stars))),
     }
 }
 

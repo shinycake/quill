@@ -393,7 +393,7 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
-        self.animated_image(id, format, PlaybackSize::Sticker, cx)
+        self.animated_image(id, format, PlaybackSize::Sticker, false, cx)
     }
 
     /// A history row's animated sticker: for the conversation's animation
@@ -405,7 +405,18 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<AnimatedVisual> {
-        self.history_animated(id, format, PlaybackSize::Sticker, cx)
+        self.history_animated(id, format, PlaybackSize::Sticker, false, cx)
+    }
+
+    /// A dice's landing animation: plays once whatever the loop setting
+    /// says and rests on its last frame (the rolled value).
+    pub(super) fn history_dice_sticker(
+        &self,
+        id: FileId,
+        format: StickerFormat,
+        cx: &mut Context<QuillApp>,
+    ) -> Option<AnimatedVisual> {
+        self.history_animated(id, format, PlaybackSize::Sticker, true, cx)
     }
 
     fn history_animated(
@@ -413,16 +424,18 @@ impl QuillApp {
         id: FileId,
         format: StickerFormat,
         size: PlaybackSize,
+        once: bool,
         cx: &mut Context<QuillApp>,
     ) -> Option<AnimatedVisual> {
         if self.slices.in_conversation() && super::anim_layer::current().is_some() {
-            let looping = self
-                .session()
-                .is_none_or(|s| s.media_prefs.loop_animated_stickers);
+            let looping = !once
+                && self
+                    .session()
+                    .is_none_or(|s| s.media_prefs.loop_animated_stickers);
             self.layered_clip(id, format, size, looping, cx)
                 .map(AnimatedVisual::Layered)
         } else {
-            self.animated_image(id, format, size, cx)
+            self.animated_image(id, format, size, once, cx)
                 .map(AnimatedVisual::Image)
         }
     }
@@ -464,7 +477,9 @@ impl QuillApp {
             if out.contains_key(&id) {
                 continue;
             }
-            if let Some(visual) = self.history_animated(file_id, format, PlaybackSize::Emoji, cx) {
+            if let Some(visual) =
+                self.history_animated(file_id, format, PlaybackSize::Emoji, false, cx)
+            {
                 out.insert(id, visual);
             }
         }
@@ -609,7 +624,7 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
-        self.animated_image(id, format, PlaybackSize::Emoji, cx)
+        self.animated_image(id, format, PlaybackSize::Emoji, false, cx)
     }
 
     fn animated_image(
@@ -617,6 +632,7 @@ impl QuillApp {
         id: FileId,
         format: StickerFormat,
         size: PlaybackSize,
+        once: bool,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
         if !matches!(format, StickerFormat::Tgs | StickerFormat::Webm) || id.0 == 0 {
@@ -627,9 +643,10 @@ impl QuillApp {
         let mut animating = false;
         let image = app.playback_cache(size).clips.get(&id.0).and_then(|clip| {
             let elapsed = clip.started.elapsed();
-            let looping = app
-                .session()
-                .is_none_or(|s| s.media_prefs.loop_animated_stickers);
+            let looping = !once
+                && app
+                    .session()
+                    .is_none_or(|s| s.media_prefs.loop_animated_stickers);
             let count = clip.frames.len();
             let index = if !looping && elapsed >= clip.duration {
                 count.saturating_sub(1)

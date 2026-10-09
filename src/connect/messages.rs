@@ -593,7 +593,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                     send_options.link_preview_disabled = true;
                     send_options.is_secret = true;
                 }
-                send_text(extra, chat_id, topic_id, caption, reply_to, &send_options)
+                // A lone dice emoji rolls a die (tdesktop does the same).
+                match crate::telegram::requests::dice_emoji(caption) {
+                    Some(emoji) => crate::telegram::requests::send_dice(
+                        extra,
+                        chat_id,
+                        topic_id,
+                        emoji,
+                        reply_to.as_ref(),
+                        &send_options,
+                    ),
+                    None => send_text(extra, chat_id, topic_id, caption, reply_to, &send_options),
+                }
             }
             _ => {
                 self.session.requests.take(extra);

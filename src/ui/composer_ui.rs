@@ -1031,6 +1031,8 @@ impl QuillApp {
                 let poll_owner = owner.clone();
                 let checklist_owner = owner.clone();
                 let gif_owner = owner.clone();
+                let contact_owner = owner.clone();
+                let location_owner = owner.clone();
                 let mut menu = menu.separator();
                 if checklists_allowed {
                     menu = menu.item(
@@ -1054,6 +1056,18 @@ impl QuillApp {
                         let _ = poll_owner.update(cx, |this, cx| this.open_poll_dialog(window, cx));
                     }),
                 )
+                .item(PopupMenuItem::new("Contact").icon(IconName::User).on_click(
+                    move |_, window, cx| {
+                        let _ = contact_owner
+                            .update(cx, |this, cx| this.open_share_contact_panel(window, cx));
+                    },
+                ))
+                .item(PopupMenuItem::new("Location").icon(IconName::Map).on_click(
+                    move |_, window, cx| {
+                        let _ = location_owner
+                            .update(cx, |this, cx| this.open_share_location_panel(window, cx));
+                    },
+                ))
                 .item(
                     PopupMenuItem::new("GIFs")
                         .icon(IconName::SquarePlay)

@@ -6,6 +6,7 @@ use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
 use super::history::{album_history_row, history_skeleton, session_history_row};
 use super::pressable::PressableDiv;
+use super::synthetic::BubbleLook;
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -736,6 +737,10 @@ impl QuillApp {
                             this.child(panel)
                         })
                         .when_some(self.poll_add_option_panel(cx), |this, panel| {
+                            this.child(panel)
+                        })
+                        // The attach menu's Contact / Location panel.
+                        .when_some(self.share_content_panel(cx), |this, panel| {
                             this.child(panel)
                         })
                         // Phase D3a: invite-link creation dialog above the composer.
@@ -1524,14 +1529,19 @@ impl QuillApp {
                         } else {
                             None
                         };
+                        let row_day_label = day_label(message.date);
+                        let row_unread_divider = first_unread(&message);
                         rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
                             sender,
                             receipt,
                             sender_avatar,
                             highlighted: highlight_id == Some(message.id),
                             run_start: run_start && index > 0,
-                            day_label: day_label(message.date),
-                            unread_divider: first_unread(&message),
+                            joined_above: !run_start
+                                && row_day_label.is_none()
+                                && !row_unread_divider,
+                            day_label: row_day_label,
+                            unread_divider: row_unread_divider,
                             reply_header: session.and_then(|s| s.reply_header(&message)),
                             forward_header: session.and_then(|s| s.forward_header(&message)),
                             via_bot: session.and_then(|s| s.via_bot_label(&message)),
@@ -1557,6 +1567,7 @@ impl QuillApp {
                     sender_avatar,
                     highlighted: false,
                     run_start,
+                    joined_above: !run_start,
                     day_label: None,
                     unread_divider: false,
                     reply_header: None,
@@ -2047,6 +2058,10 @@ impl QuillApp {
                         MessageContent::Sticker(sticker) => {
                             self.history_sticker(sticker.file_id, sticker.format, cx)
                         }
+                        MessageContent::Dice(dice) => dice
+                            .final_sticker
+                            .as_ref()
+                            .and_then(|s| self.history_dice_sticker(s.file_id, s.format, cx)),
                         _ => None,
                     },
                     self.message_custom_emoji_frames(message, cx),
@@ -2056,8 +2071,12 @@ impl QuillApp {
                     &self.spoiler_revealed,
                     inputs.is_secret,
                     self.session(),
-                    // Settings → Appearance: font size + bubble/plain style.
-                    look,
+                    // Settings → Appearance: font size + bubble/plain style;
+                    // grouping from the neighbouring rows.
+                    BubbleLook {
+                        joined_above: inputs.joined_above,
+                        ..look
+                    },
                     cx,
                 );
                 // M1: `cx.listener` closures must be `'static`, so the

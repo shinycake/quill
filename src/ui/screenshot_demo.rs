@@ -326,6 +326,14 @@ pub enum ScreenshotDemo {
     /// channel and an imported message; "via @bot"; and the footer's
     /// "edited" / pin / views / "imported" marks.
     ReadyBubbleHeaders,
+    /// Message rendering leftovers (injected, no live Telegram): grouped
+    /// bubbles with joined corners, contact cards with Message / Add
+    /// contact / View contact, a dice, a location with its map tile,
+    /// locked paid media, a suggested profile photo with its buttons, the
+    /// media viewer header and the attach menu's Contact / Location panels.
+    /// `QUILL_DEMO_RENDERING_VIEW=bubbles|cards|service|viewer|contact|location`
+    /// (default `bubbles`).
+    ReadyRenderingLeftovers,
     /// Translation demo (injected, no live Telegram): the translate bar,
     /// translated bubbles, the translate box, the language chooser and the
     /// settings. `QUILL_DEMO_TRANSLATE_VIEW=bar|translated|box|rtl|selection|chooser|settings|skip`

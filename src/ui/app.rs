@@ -781,6 +781,8 @@ pub struct QuillApp {
     pub(super) poll_add_option: Option<PollAddOption>,
     /// B15: the checklist composer / "Add Tasks" box.
     pub(super) checklist_dialog: Option<ChecklistDialog>,
+    /// The attach menu's Contact / Location panel.
+    pub(super) share_content_dialog: Option<ShareContentDialog>,
     /// Slice G2: chat welcome-message editor.
     pub(super) welcome_dialog: Option<WelcomeDialog>,
     /// Slice G2: event-log search input for the info panel's

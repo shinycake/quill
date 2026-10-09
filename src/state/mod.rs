@@ -61,6 +61,7 @@ mod chat_types;
 mod history_calendar;
 mod history_types;
 mod info_types;
+mod map_thumbs;
 mod media_library;
 mod member_list;
 mod ownership_types;
@@ -118,6 +119,9 @@ pub use chat_types::*;
 pub use history_calendar::*;
 pub use history_types::*;
 pub use info_types::*;
+pub use map_thumbs::{
+    MAP_THUMB_HEIGHT, MAP_THUMB_SCALE, MAP_THUMB_WIDTH, MAP_THUMB_ZOOM, MapKey, MapThumbs,
+};
 pub use media_library::{MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, ReactionChoice};
 pub use member_list::*;
 pub use ownership_types::*;

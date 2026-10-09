@@ -7,6 +7,39 @@ use serde_json::{Value, json};
 
 /// `downloadFile` (TDLib 1.8.67). `synchronous: false` returns the current
 /// `file` immediately; progress continues on `updateFile`.
+/// `getMapThumbnailFile` (TDLib 1.8.67, `schema/td_api.tl:15998`): the
+/// static map tile of a location message. `width` / `height` are 16..=1024
+/// and `scale` 1..=3; `chat_id` is the chat the message is in (TDLib uses
+/// it for rate limiting). Response is `file`.
+#[allow(clippy::too_many_arguments)]
+pub fn get_map_thumbnail_file(
+    extra: RequestId,
+    latitude: f64,
+    longitude: f64,
+    zoom: i32,
+    width: i32,
+    height: i32,
+    scale: i32,
+    chat_id: ChatId,
+) -> String {
+    json!({
+        "@type": "getMapThumbnailFile",
+        "@extra": extra.as_extra(),
+        "location": {
+            "@type": "location",
+            "latitude": latitude,
+            "longitude": longitude,
+            "horizontal_accuracy": 0.0,
+        },
+        "zoom": zoom.clamp(13, 20),
+        "width": width.clamp(16, 1024),
+        "height": height.clamp(16, 1024),
+        "scale": scale.clamp(1, 3),
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
 pub fn download_file(extra: RequestId, file_id: FileId, priority: i32) -> String {
     json!({
         "@type": "downloadFile",

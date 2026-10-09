@@ -6,6 +6,7 @@ use super::app::QuillApp;
 use super::chat_theme::accent;
 use super::message_media::photo_display_path;
 use super::*;
+use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -25,9 +26,25 @@ const PILL_MAX_WIDTH: f32 = 440.0;
 fn action_photo(content: &MessageContent) -> Option<&PhotoContent> {
     match content {
         MessageContent::Action(action) => match action.as_ref() {
-            ServiceAction::ChatPhoto { photo } | ServiceAction::SuggestProfilePhoto { photo } => {
-                photo.as_ref()
-            }
+            ServiceAction::ChatPhoto { photo }
+            | ServiceAction::SuggestProfilePhoto { photo, .. } => photo.as_ref(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Locked paid media draws as a bubble card, not a service row.
+pub(super) fn locked_paid_media(
+    content: &MessageContent,
+) -> Option<(i64, &[quill::telegram::envelope::PaidMediaPreview], &str)> {
+    match content {
+        MessageContent::Action(action) => match action.as_ref() {
+            ServiceAction::PaidMedia {
+                stars,
+                locked,
+                caption,
+            } if !locked.is_empty() => Some((*stars, locked.as_slice(), caption.as_str())),
             _ => None,
         },
         _ => None,
@@ -36,12 +53,13 @@ fn action_photo(content: &MessageContent) -> Option<&PhotoContent> {
 
 /// Whether the content is drawn as a service row.
 pub(super) fn is_service_row(content: &MessageContent) -> bool {
-    matches!(
-        content,
-        MessageContent::Action(_)
-            | MessageContent::ChatTtlChanged { .. }
-            | MessageContent::ScreenshotTaken
-    )
+    locked_paid_media(content).is_none()
+        && matches!(
+            content,
+            MessageContent::Action(_)
+                | MessageContent::ChatTtlChanged { .. }
+                | MessageContent::ScreenshotTaken
+        )
 }
 
 /// The pill: wrapped, centered text whose linked parts (names, the pinned
@@ -187,6 +205,44 @@ pub(super) fn service_message_row(
             cx,
         )
     });
+    // An incoming suggestion offers View / Set as My Photo (tdesktop's
+    // suggested-photo service box buttons).
+    let suggestion = match &message.content {
+        MessageContent::Action(action) => match action.as_ref() {
+            ServiceAction::SuggestProfilePhoto {
+                photo: Some(_),
+                photo_id,
+            } => Some(*photo_id),
+            _ => None,
+        },
+        _ => None,
+    };
+    let buttons = suggestion.map(|photo_id| {
+        let (chat_id, message_id) = (message.chat_id, message.id);
+        div()
+            .flex()
+            .gap_2()
+            .child(
+                Button::new(format!("suggested-view-{row_id}"))
+                    .label("View Photo")
+                    .small()
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_media_viewer(chat_id, message_id, cx);
+                    })),
+            )
+            .when(!message.is_outgoing && photo_id != 0, |this| {
+                this.child(
+                    Button::new(format!("suggested-set-{row_id}"))
+                        .label("Set as My Photo")
+                        .small()
+                        .primary()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.accept_suggested_photo(photo_id, cx);
+                        })),
+                )
+            })
+    });
     div()
         .id(("service-row", row_id))
         .flex()
@@ -196,5 +252,6 @@ pub(super) fn service_message_row(
         .py_1()
         .child(pill(("service-pill", row_id), &text, cx))
         .when_some(photo, |this, photo| this.child(photo))
+        .when_some(buttons, |this, buttons| this.child(buttons))
         .into_any_element()
 }

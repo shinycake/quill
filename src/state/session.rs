@@ -761,6 +761,8 @@ pub struct Session {
     /// Own user id: TDLib's `my_id` option (pushed after authorization),
     /// or a `getMe` answer. `None` until either arrives.
     pub my_user_id: Option<i64>,
+    /// Static map tiles of location / venue messages.
+    pub map_thumbs: MapThumbs,
     /// TDLib's `is_premium` option: the account's current Premium state.
     /// `None` until the option arrives.
     pub premium_option: Option<bool>,
@@ -1363,6 +1365,7 @@ impl Session {
             sponsored_report_target: None,
             last_sponsored_report: None,
             my_user_id: None,
+            map_thumbs: MapThumbs::default(),
             premium_option: None,
             archive_chat_list_settings: None,
             archive_settings_loading: false,

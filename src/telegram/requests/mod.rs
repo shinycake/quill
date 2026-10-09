@@ -25,6 +25,7 @@ mod profile_panels;
 mod proxy;
 mod secret_chats;
 mod send_as;
+mod share_content;
 mod stickers;
 mod stories;
 #[cfg(test)]
@@ -89,6 +90,7 @@ pub use profile_panels::*;
 pub use proxy::*;
 pub use secret_chats::*;
 pub use send_as::*;
+pub use share_content::*;
 pub use stickers::*;
 pub use stories::*;
 pub use translate::*;
