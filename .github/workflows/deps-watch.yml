@@ -1,0 +1,53 @@
+name: deps-watch
+
+# Weekly dependency watch (docs/dependency-updates.md). scripts/deps-watch.py
+# checks TDLib, gpui-kit and the vendored gpui crates, other Cargo crates,
+# FFmpeg / rlottie / ntgcalls / the Rust toolchain, and the GitHub Actions used
+# in these workflows. Each finding is one issue (label deps-watch) that later
+# runs update in place and close when the update lands. It only reads upstream
+# and opens/edits/closes issues; it never opens PRs or touches the tree.
+# Run it by hand with "Run workflow" (mode=dry-run prints without filing).
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "apply files issues; dry-run only prints"
+        type: choice
+        options: [apply, dry-run]
+        default: apply
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: deps-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: deps-watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: unit tests
+        run: python3 -m unittest discover -s scripts -p 'test_deps_watch.py' -v
+      - name: check upstreams and file issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # cargo update --dry-run / cargo metadata only read the lockfile;
+          # skip installing the pinned toolchain for them.
+          RUSTUP_TOOLCHAIN: stable
+          MODE: ${{ inputs.mode || 'apply' }}
+        run: |
+          if [ "$MODE" = "dry-run" ]; then
+            python3 scripts/deps-watch.py --dry-run
+          else
+            python3 scripts/deps-watch.py --apply
+          fi

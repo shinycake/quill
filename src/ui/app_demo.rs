@@ -2212,6 +2212,8 @@ impl QuillApp {
             group_call_ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
             ptt_capture: false,
+            global_ptt: Default::default(),
+            global_ptt_polling: false,
             group_call_pin: quill::calls::tile_pin::TilePin::default(),
             call_window_opening: false,
             call_window_raised: false,
