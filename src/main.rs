@@ -180,7 +180,7 @@ fn main() {
     attach_parent_console();
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).is_some_and(|a| a == "--version") {
-        println!("Quill {}", env!("CARGO_PKG_VERSION"));
+        println!("Quill {}", quill::version::APP);
         return;
     }
     if args.get(1).is_some_and(|a| a == "--release-asset-name") {

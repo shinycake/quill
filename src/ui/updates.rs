@@ -180,7 +180,7 @@ impl QuillApp {
     /// "About Quill": version, the unofficial-client and no-warranty notice,
     /// and the bundled open-source license notices.
     pub(super) fn about_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let version = format!("Quill {}", env!("CARGO_PKG_VERSION"));
+        let version = format!("Quill {}", quill::version::APP);
         div()
             .flex()
             .flex_col()
