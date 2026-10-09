@@ -1447,6 +1447,15 @@ pub enum RequestPurpose {
     LoadGroupCallParticipants {
         group_call_id: i32,
     },
+    /// `getVideoChatAvailableParticipants`. Response is `messageSenders`;
+    /// the "join as" choices of the tracked call.
+    GetVideoChatAvailableParticipants {
+        group_call_id: i32,
+    },
+    /// `setVideoChatDefaultParticipant`. Response is `ok`.
+    SetVideoChatDefaultParticipant {
+        group_call_id: i32,
+    },
     /// Phase C3a: `getVideoChatInviteLink`. Response is `httpUrl`.
     GetVideoChatInviteLink {
         group_call_id: i32,

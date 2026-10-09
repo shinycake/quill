@@ -286,6 +286,46 @@ pub(super) fn apply_ready_group_call(
     session.open_chat(ChatId(chat_id));
 }
 
+/// Calls-polish fixture: the Ready group voice chat with Mia's screen
+/// share paused (`screen_sharing_video_info.is_paused`), Raj's camera
+/// still paused, and Zed's camera pinned by the caller.
+pub(super) fn apply_ready_group_call_polish(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    apply_ready_group_call(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let json = r#"{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{"@type":"groupCallParticipant","participant_id":{"@type":"messageSenderUser","user_id":42},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":null,"screen_sharing_video_info":{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[222]}],"endpoint_id":"ep-42-screen","is_paused":true},"bio":"","is_current_user":false,"is_speaking":false,"is_hand_raised":true,"can_be_muted_for_all_users":true,"can_be_unmuted_for_all_users":true,"can_be_muted_for_current_user":true,"can_be_unmuted_for_current_user":true,"is_muted_for_all_users":false,"is_muted_for_current_user":false,"can_unmute_self":false,"volume_level":10000,"order":"a2"}}"#;
+    if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}
+
+/// Calls-polish fixture: an unjoined voice chat in a group where the user
+/// can also join as the "Design Team" channel (join-as picker).
+pub(super) fn apply_ready_group_call_join_as(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    apply_ready_group_call(session, sink, seq);
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let json = r#"{"@type":"updateNewChat","chat":{"id":-1001001,"title":"Design Team","type":{"@type":"chatTypeSupergroup","supergroup_id":1001001,"is_channel":true},"unread_count":0}}"#;
+    if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+    if let Some(call) = session.active_group_call.as_mut() {
+        call.is_joined = false;
+        call.join_as_requested = true;
+        call.join_as_options = vec![
+            quill::telegram::envelope::MessageSender::User { user_id: 777 },
+            quill::telegram::envelope::MessageSender::Chat { chat_id: -1001001 },
+        ];
+        call.join_as = Some(quill::telegram::envelope::MessageSender::Chat { chat_id: -1001001 });
+    }
+}
+
 /// Phase C2f: invite-picker fixture — the Ready group voice chat plus
 /// two extra contacts (Lena, Omar) not in the call; `session.contacts`
 /// is seeded so the invite picker lists them (Zed is already in the
@@ -523,6 +563,7 @@ impl QuillApp {
             demo.call_prefs = prefs;
             self.status_note = "demo: call settings are not saved".into();
         }
+        self.sync_ptt_with_call(cx);
         cx.notify();
     }
 

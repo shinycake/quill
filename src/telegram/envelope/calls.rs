@@ -701,11 +701,12 @@ pub(crate) fn parse_group_call_participant(
 /// `videoChat group_call_id:int32 has_participants:Bool
 /// default_participant_id:MessageSender = VideoChat;`
 /// `group_call_id` is 0 when the chat has no active video chat.
-/// `default_participant_id` is dropped (not needed this slice).
+/// `default_participant_id` is the "join as" the user last chose here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedVideoChat {
     pub group_call_id: i32,
     pub has_participants: bool,
+    pub default_participant_id: Option<MessageSender>,
 }
 
 pub(crate) fn parse_video_chat(value: Option<&Value>) -> Option<ParsedVideoChat> {
@@ -720,5 +721,8 @@ pub(crate) fn parse_video_chat(value: Option<&Value>) -> Option<ParsedVideoChat>
             .get("has_participants")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        default_participant_id: value
+            .get("default_participant_id")
+            .and_then(|v| parse_message_sender(Some(v)).ok()),
     })
 }

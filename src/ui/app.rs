@@ -644,6 +644,13 @@ pub struct QuillApp {
     pub(super) group_call_window_opening: bool,
     pub(super) group_call_window_closed_by_user: Option<i32>,
     pub(super) group_call_chat_shown: bool,
+    /// Push-to-talk state for the group call window, its clock origin,
+    /// and whether Settings is waiting for the next key to bind.
+    pub(super) group_call_ptt: quill::calls::ptt::PushToTalk,
+    pub(super) ptt_clock: Instant,
+    pub(super) ptt_capture: bool,
+    /// Locally pinned video tile of the group call (tdesktop viewport pin).
+    pub(super) group_call_pin: quill::calls::tile_pin::TilePin,
     pub(super) call_window_opening: bool,
     pub(super) call_window_raised: bool,
     pub(super) call_window_closed_by_user: Option<i32>,

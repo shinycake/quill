@@ -1367,6 +1367,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .filter_map(|s| s.get("user_id"))
                     .filter_map(Value::as_i64)
                     .collect(),
+                senders: senders
+                    .iter()
+                    .filter_map(|s| parse_message_sender(Some(s)).ok())
+                    .collect(),
             })
         }
         "messageCalendar" => {

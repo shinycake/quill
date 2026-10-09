@@ -84,6 +84,9 @@ pub fn save_preferences(paths: &AccountPaths, prefs: &Preferences) -> std::io::R
 pub struct CallPrefs {
     pub confirm_before_calling: bool,
     pub use_proxy_for_calls: bool,
+    /// Group-call push-to-talk (key + release delay). Client-side only.
+    #[serde(default)]
+    pub push_to_talk: crate::calls::ptt::PttConfig,
 }
 
 /// Shared load: a missing or corrupt prefs file falls back to defaults —
@@ -1190,6 +1193,11 @@ mod tests {
         let prefs = CallPrefs {
             confirm_before_calling: true,
             use_proxy_for_calls: true,
+            push_to_talk: crate::calls::ptt::PttConfig {
+                enabled: true,
+                key: "f13".into(),
+                release_delay_ms: 500,
+            },
         };
         save_call_prefs(&paths, &prefs).expect("save works");
         assert_eq!(load_call_prefs(&paths), prefs);
