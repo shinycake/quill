@@ -2,11 +2,11 @@ use crate::ids::RequestId;
 use crate::pins::{TDLIB_CMAKE_VERSION, TDLIB_GIT_COMMIT};
 use serde_json::json;
 
-/// Phase S2: `getStorageStatistics` (TDLib 1.8.67,
-/// `schema/td_api.tl:15781`):
+/// Phase S2: `getStorageStatistics` (TDLib 1.8.68,
+/// `schema/td_api.tl:16373`):
 /// `getStorageStatistics chat_limit:int32 = StorageStatistics;`
 /// Drives the storage-usage overlay, including the "Secret media and
-/// files" category (`fileTypeSecret`, td_api.tl:9728 — "The file was
+/// files" category (`fileTypeSecret`, td_api.tl:10088 — "The file was
 /// sent to a secret chat (the file type is not known to the server)").
 /// `chat_limit` 0 is honest here: the overlay aggregates by file type
 /// across chats, so per-chat splits are not needed.
@@ -19,8 +19,8 @@ pub fn get_storage_statistics(extra: RequestId, chat_limit: i32) -> String {
     .to_string()
 }
 
-/// Batch 4: `setOption name:string value:OptionValue = Ok;` (TDLib 1.8.67,
-/// `schema/td_api.tl:15662`) with `optionValueBoolean`.
+/// Batch 4: `setOption name:string value:OptionValue = Ok;` (TDLib 1.8.68,
+/// `schema/td_api.tl:16069`) with `optionValueBoolean`.
 pub fn set_option_boolean(extra: RequestId, name: &str, value: bool) -> String {
     json!({
         "@type": "setOption",
@@ -48,8 +48,8 @@ pub fn set_option_integer(extra: RequestId, name: &str, value: Option<i64>) -> S
     .to_string()
 }
 
-/// Batch 6: the `optimizeStorage` arguments (TDLib 1.8.67,
-/// `schema/td_api.tl:15799`). `-1` means "TDLib's default limit" for
+/// Batch 6: the `optimizeStorage` arguments (TDLib 1.8.68,
+/// `schema/td_api.tl:16391`). `-1` means "TDLib's default limit" for
 /// `size` / `ttl` / `count` / `immunity_delay`; `file_types` are
 /// `FileType` constructor names (empty = every type except thumbnails,
 /// profile photos, stickers and wallpapers); `chat_ids` empty = every

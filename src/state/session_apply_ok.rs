@@ -329,6 +329,16 @@ impl Session {
                     self.community_full_infos.remove(&community_id);
                 }
             }
+            // TDLib 1.8.68: a deleted community is gone for everyone —
+            // drop it and its pack. (TDLib pushes the resulting
+            // `updateCommunity` before this `ok`; a later one with
+            // `have_access = false` is filtered out of the hub.)
+            Some(RequestPurpose::DeleteCommunity) => {
+                if let Some(community_id) = pending.and_then(|p| p.community_id) {
+                    self.communities.remove(&community_id);
+                    self.community_full_infos.remove(&community_id);
+                }
+            }
             // Phase 9.5: a posted-story management call landed —
             // clear the spinner; the edited story itself arrives
             // via `updateStory`.

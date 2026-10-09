@@ -784,6 +784,27 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// TDLib 1.8.68 `setCommunityPermissions`: the community info
+    /// panel's "Members can edit the chat list" switch. Not optimistic —
+    /// the switch follows `updateCommunity`; refusals surface through
+    /// `Session::community_error`.
+    pub(super) fn set_community_members_can_edit_chat_list(
+        &mut self,
+        community_id: i64,
+        allowed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.status_note = match self.live.as_mut() {
+            Some(live) => match live.driver.set_community_permissions(community_id, allowed) {
+                Ok(Some(_)) => "updating community permissions…".into(),
+                Ok(None) => "you can't change this community's permissions".into(),
+                Err(_) => "could not update community permissions".into(),
+            },
+            None => "community permissions need a live connection (demo)".into(),
+        };
+        cx.notify();
+    }
+
     pub(super) fn open_username_dialog(
         &mut self,
         chat_id: ChatId,
@@ -1322,6 +1343,13 @@ impl QuillApp {
                         .driver
                         .clear_saved_payment_info()
                         .map(|_| "clearing saved payment info…".to_string()),
+                    // `deleteCommunity` (TDLib 1.8.68). The state drops the
+                    // community on `ok`; a refusal surfaces through
+                    // `Session::community_error`.
+                    GroupConfirmAction::DeleteCommunity { community_id } => live
+                        .driver
+                        .delete_community(community_id)
+                        .map(|sent| sent_note(sent, "deleting community…")),
                     GroupConfirmAction::RemoveMember { user_id } => live
                         .driver
                         .remove_chat_member(dialog.chat_id, user_id)
@@ -1768,6 +1796,20 @@ impl QuillApp {
                         "Delete the shipping info and payment credentials Telegram saved from past checkouts? This cannot be undone.".to_string(),
                         "Clear".to_string(),
                     ),
+                    GroupConfirmAction::DeleteCommunity { community_id } => {
+                        let name = this
+                            .session()
+                            .and_then(|s| s.communities.get(&community_id))
+                            .map(|c| c.name.clone())
+                            .unwrap_or_else(|| "this community".to_string());
+                        (
+                            "Delete community".to_string(),
+                            format!(
+                                "Delete {name} for all members? Its chats stay, but they leave the community. This cannot be undone."
+                            ),
+                            "Delete".to_string(),
+                        )
+                    }
                 };
             let destructive = matches!(
                 dialog_state.action,
@@ -1782,6 +1824,7 @@ impl QuillApp {
                     | GroupConfirmAction::RemoveInstalledStickerSets
                     | GroupConfirmAction::RemoveStickerSet { .. }
                     | GroupConfirmAction::RemoveEmojiSet { .. }
+                    | GroupConfirmAction::DeleteCommunity { .. }
                     | GroupConfirmAction::RemoveMember { .. }
             );
             let body = div()

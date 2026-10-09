@@ -77,6 +77,11 @@ pub enum GroupConfirmAction {
     DeleteForumTopic {
         forum_topic_id: i32,
     },
+    /// Community info panel "Delete community" — `deleteCommunity`
+    /// (TDLib 1.8.68; owner only). The dialog's `chat_id` is a dummy.
+    DeleteCommunity {
+        community_id: i64,
+    },
     /// Saved Messages: "Delete chat" on a sublist —
     /// `deleteSavedMessagesTopicHistory` (schema 1.8.67, line 11781).
     DeleteSavedSublist {

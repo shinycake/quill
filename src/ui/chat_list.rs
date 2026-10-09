@@ -526,7 +526,7 @@ impl QuillApp {
     /// Parity slice `parity:communities-chatlist-mode`: enter community
     /// chat-list mode from the hub's "View chats" button. Replaces any
     /// folder tab / category filter (like `Archived` does); fires
-    /// `loadCommunityFullInfo` so membership resolves for communities
+    /// `getCommunityFullInfo` so membership resolves for communities
     /// never opened in the info panel (deduped by the driver).
     pub(super) fn enter_community_chat_list_mode(
         &mut self,
@@ -537,7 +537,7 @@ impl QuillApp {
         self.contacts_tab_open = false;
         self.chat_filter = ChatListFilter::Community(community_id);
         if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.load_community_full_info(community_id)
+            && let Err(err) = live.driver.get_community_full_info(community_id)
         {
             self.status_note = format!("community info request failed: {err:?}");
         }
@@ -1557,7 +1557,7 @@ impl QuillApp {
                                         // `parity:communities-chatlist-mode`: a
                                         // missing pack means the fetch hasn't
                                         // landed yet (entering the mode fires
-                                        // `loadCommunityFullInfo` when live) —
+                                        // `getCommunityFullInfo` when live) —
                                         // "Loading…", like the community info
                                         // panel. An empty pack / no matching
                                         // loaded chats is the genuine empty

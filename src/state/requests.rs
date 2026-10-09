@@ -559,7 +559,7 @@ pub struct PendingRequest {
     /// id-less `supergroupFullInfo` response lands on the right group.
     pub supergroup_id: Option<i64>,
     /// Slice (communities backend core): `community_id` for
-    /// `LoadCommunityFullInfo` / `SetCommunityName` correlation and
+    /// `GetCommunityFullInfo` / `SetCommunityName` correlation and
     /// per-community in-flight dedupe.
     pub community_id: Option<i64>,
     /// Phase 9.1: `story_id` for `GetStory` requests so in-flight
@@ -966,7 +966,7 @@ impl RequestRegistry {
     }
 
     /// Slice (communities backend core): an in-flight request for a
-    /// purpose/community pair (`LoadCommunityFullInfo` /
+    /// purpose/community pair (`GetCommunityFullInfo` /
     /// `SetCommunityName`).
     pub fn has_purpose_for_community(&self, purpose: RequestPurpose, community_id: i64) -> bool {
         self.pending

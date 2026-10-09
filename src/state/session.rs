@@ -807,9 +807,14 @@ pub struct Session {
     /// create-on-first-sight.
     pub communities: HashMap<i64, ParsedCommunity>,
     /// Slice (communities backend core): `communityFullInfo` cache, keyed
-    /// by community id, fed by `updateCommunityFullInfo` (schema 1.8.67,
-    /// line 10753). Presence records "fetched".
+    /// by community id, fed by the `getCommunityFullInfo` answer and
+    /// `updateCommunityFullInfo` (TDLib 1.8.68). Presence records
+    /// "fetched".
     pub community_full_infos: HashMap<i64, ParsedCommunityFullInfo>,
+    /// TDLib 1.8.68 community management: one-shot; set when
+    /// `setCommunityName` / `setCommunityPhoto` / `setCommunityPermissions`
+    /// / `deleteCommunity` errors. The UI drains it into the status note.
+    pub community_error: Option<String>,
     /// Phase D2: `getChatStatistics` fetch state, keyed by chat id.
     pub chat_statistics: HashMap<i64, ChatStatisticsFetch>,
     /// Phase D3a: `getChatInviteLinks` fetch state, keyed by chat id.
@@ -1377,6 +1382,7 @@ impl Session {
             supergroup_full_infos: HashMap::new(),
             communities: HashMap::new(),
             community_full_infos: HashMap::new(),
+            community_error: None,
             chat_statistics: HashMap::new(),
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),

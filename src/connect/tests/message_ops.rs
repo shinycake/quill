@@ -899,12 +899,12 @@ fn driver_group_sticker_set_gates_and_shape() {
 
 #[test]
 fn driver_community_create_rename_refetch_chain() {
-    // Slice (communities backend core): `createCommunity` (schema
-    // 1.8.67, line 11806) / `loadCommunityFullInfo` (line 11799) /
-    // `setCommunityName` (line 11811). Empty names are refused
-    // client-side; unknown chats are refused without sending;
-    // in-flight dedupe is per (purpose, chat) / (purpose, community).
-    // The `communityId` answer chains into `loadCommunityFullInfo`,
+    // Slice (communities backend core): `createCommunity` /
+    // `getCommunityFullInfo` (TDLib 1.8.68) / `setCommunityName`. Empty
+    // names are refused client-side; unknown chats are refused without
+    // sending; in-flight dedupe is per (purpose, chat) / (purpose,
+    // community). The `communityId` answer chains into
+    // `getCommunityFullInfo`,
     // and a confirmed `setCommunityName` refetches the dropped
     // full-info pack (the welcome-message-mutation pattern).
     let store = MemorySecretStore::new();
@@ -959,7 +959,7 @@ fn driver_community_create_rename_refetch_chain() {
     );
     // `updateCommunity` (guaranteed before the `communityId` answer)
     // creates the community; the `communityId` then chains into
-    // `loadCommunityFullInfo`.
+    // `getCommunityFullInfo`.
     driver
             .ingest(
                 copy_and_parse(
@@ -986,34 +986,37 @@ fn driver_community_create_rename_refetch_chain() {
         .unwrap();
     let sent = recorder.snapshot().last().cloned().expect("request");
     let v: Value = serde_json::from_str(&sent).unwrap();
-    assert_eq!(v["@type"], "loadCommunityFullInfo");
+    assert_eq!(v["@type"], "getCommunityFullInfo");
     assert_eq!(v["community_id"], 42);
-    // The `ok` for the chained load consumes its pending request;
-    // the pack itself arrives as `updateCommunityFullInfo`.
+    // In flight → a second fetch is a no-op.
+    let sent_before = recorder.snapshot().len();
+    assert!(driver.get_community_full_info(42).unwrap().is_none());
+    assert_eq!(recorder.snapshot().len(), sent_before);
+    // TDLib 1.8.68 answers the pack itself (no community id); the
+    // pending request routes it to community 42.
     let load_extra = v["@extra"].as_str().expect("@extra").to_string();
     driver
         .ingest(
             copy_and_parse(
-                &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, load_extra),
+                &format!(
+                    r#"{{"@type":"communityFullInfo","@extra":"{load_extra}","photo":null,"chats":[],"administrator_count":1,"banned_count":0,"add_chat_request_count":0}}"#
+                ),
                 &seq,
                 &dyn_sink,
             )
             .unwrap(),
         )
         .unwrap();
-    driver
-            .ingest(
-                copy_and_parse(
-                    r#"{"@type":"updateCommunityFullInfo","community_id":42,"community_full_info":{"@type":"communityFullInfo","chats":[],"administrator_count":1,"banned_count":0,"add_chat_request_count":0}}"#,
-                    &seq,
-                    &dyn_sink,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-    assert!(driver.session.community_full_infos.contains_key(&42));
+    assert_eq!(
+        driver
+            .session
+            .community_full_infos
+            .get(&42)
+            .map(|info| info.administrator_count),
+        Some(1)
+    );
     let sent_before = recorder.snapshot().len();
-    assert!(driver.load_community_full_info(42).unwrap().is_none());
+    assert!(driver.get_community_full_info(42).unwrap().is_none());
     assert_eq!(recorder.snapshot().len(), sent_before);
     // `setCommunityName`: empty refused, shape right, deduped in
     // flight.
@@ -1043,8 +1046,120 @@ fn driver_community_create_rename_refetch_chain() {
     assert!(!driver.session.community_full_infos.contains_key(&42));
     let sent = recorder.snapshot().last().cloned().expect("request");
     let v: Value = serde_json::from_str(&sent).unwrap();
-    assert_eq!(v["@type"], "loadCommunityFullInfo");
+    assert_eq!(v["@type"], "getCommunityFullInfo");
     assert_eq!(v["community_id"], 42);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn driver_community_management_rights_and_delete() {
+    // TDLib 1.8.68: `setCommunityPermissions` (can_ban_members),
+    // `setCommunityPhoto` (can_change_info) and `deleteCommunity`
+    // (owner). Missing rights are refused without sending; a confirmed
+    // delete drops the community and its pack; errors surface in
+    // `community_error`.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    // 42: owned. 43: plain member. 44: admin with can_ban_members only.
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateCommunity","community":{"@type":"community","id":42,"have_access":true,"name":"Mine","date":1,"status":{"@type":"communityMemberStatusCreator"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false}}}"#,
+    );
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateCommunity","community":{"@type":"community","id":43,"have_access":true,"name":"Theirs","date":1,"status":{"@type":"communityMemberStatusMember"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false}}}"#,
+    );
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateCommunity","community":{"@type":"community","id":44,"have_access":true,"name":"Moderated","date":1,"status":{"@type":"communityMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"communityAdministratorRights","can_manage_community":true,"can_change_info":false,"can_edit_chat_list":false,"can_promote_members":false,"can_ban_members":true}},"permissions":{"@type":"communityPermissions","can_edit_chat_list":false}}}"#,
+    );
+    let sent_before = recorder.snapshot().len();
+    assert!(
+        driver
+            .set_community_permissions(43, true)
+            .unwrap()
+            .is_none()
+    );
+    assert!(driver.set_community_photo(43, None).unwrap().is_none());
+    assert!(driver.set_community_photo(44, None).unwrap().is_none());
+    assert!(driver.delete_community(43).unwrap().is_none());
+    assert!(driver.delete_community(44).unwrap().is_none());
+    assert!(driver.delete_community(404).unwrap().is_none());
+    assert_eq!(recorder.snapshot().len(), sent_before);
+
+    // Admin with can_ban_members may change member permissions.
+    let extra = driver
+        .set_community_permissions(44, true)
+        .unwrap()
+        .expect("sent");
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "setCommunityPermissions");
+    assert_eq!(v["@extra"], extra.0.to_string());
+    assert_eq!(v["permissions"]["can_edit_chat_list"], true);
+    assert!(
+        driver
+            .set_community_permissions(44, false)
+            .unwrap()
+            .is_none()
+    );
+    // A refusal surfaces in the status line.
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"Have not enough rights"}}"#,
+            extra.0
+        ),
+    );
+    let err = driver
+        .session
+        .community_error
+        .take()
+        .expect("error surfaced");
+    assert!(
+        err.starts_with("Could not change the community permissions"),
+        "{err}"
+    );
+
+    // Owner: photo (set + delete) and delete.
+    driver
+        .set_community_photo(42, Some("/tmp/photo.jpg"))
+        .unwrap()
+        .expect("sent");
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "setCommunityPhoto");
+    assert_eq!(v["photo"]["photo"]["path"], "/tmp/photo.jpg");
+    let extra = driver.delete_community(42).unwrap().expect("sent");
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "deleteCommunity");
+    assert_eq!(v["community_id"], 42);
+    driver.session.community_full_infos.insert(
+        42,
+        crate::telegram::envelope::ParsedCommunityFullInfo {
+            chats: Vec::new(),
+            administrator_count: 1,
+            banned_count: 0,
+            add_chat_request_count: 0,
+        },
+    );
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(!driver.session.communities.contains_key(&42));
+    assert!(!driver.session.community_full_infos.contains_key(&42));
+    assert!(driver.session.communities.contains_key(&43));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

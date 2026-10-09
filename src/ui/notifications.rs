@@ -505,6 +505,16 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // TDLib 1.8.68 community management (rename / photo /
+        // permissions / delete) refused.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.community_error.take())
+        {
+            self.status_note = err;
+            progressed = true;
+        }
         // Slice G1 fix-up: an invite-link mutation (create/edit/revoke/
         // replace-primary) failed — the loaded list is kept, so the
         // error surfaces here instead of wiping the panel.

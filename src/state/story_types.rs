@@ -119,7 +119,7 @@ pub enum InfoPanelTarget {
     /// `supergroupFullInfo.can_get_statistics` before opening.
     Statistics(i64),
     /// Slice G10: community info panel, keyed by community id. The
-    /// `loadCommunityFullInfo` fetch fires on open; name edits go
+    /// `getCommunityFullInfo` fetch fires on open; name edits go
     /// through `TextPromptKind::CommunityName`.
     Community(i64),
 }
