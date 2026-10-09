@@ -60,7 +60,7 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
         // Unread totals feed the tray and the dock badge, which sync on
         // their own timer; no pane draws them.
         P::UpdateUnreadMessageCount { .. } | P::UpdateUnreadChatCount { .. } => RedrawNeed::Nothing,
-        // Limits and flags read when the user acts, not drawn.
+        // Limits and flags, mostly read when the user acts.
         P::UpdateOption { .. } => RedrawNeed::Later,
         P::UpdateUserStatus { user_id, status } => {
             let Some(user) = session.user(user_id.0) else {
@@ -108,13 +108,22 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
             }
         }
         P::UpdateUser { user_id, .. } => {
-            if shows_user(session, *user_id) {
+            // Our own record answers the user's profile edits (name,
+            // photo, username), which arrive as `updateUser`.
+            if shows_user(session, *user_id) || session.my_user_id == Some(user_id.0) {
                 RedrawNeed::Now
             } else {
                 RedrawNeed::Later
             }
         }
-        P::UpdateSupergroup { .. } | P::UpdateBasicGroup { .. } => RedrawNeed::Later,
+        // The open group's header (member count) and composer (our
+        // rights) read its record.
+        P::UpdateSupergroup { supergroup_id, .. } => {
+            group_need(session, |kind| matches!(kind, ChatKind::Supergroup { supergroup_id: id, .. } if id == supergroup_id))
+        }
+        P::UpdateBasicGroup { basic_group_id, .. } => {
+            group_need(session, |kind| matches!(kind, ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id))
+        }
         _ => RedrawNeed::Now,
     }
 }
@@ -143,6 +152,19 @@ fn shows_user(session: &Session, user_id: UserId) -> bool {
         })
 }
 
+/// `Now` when the open chat is the group `is_group` matches, else `Later`.
+fn group_need(session: &Session, is_group: impl Fn(&ChatKind) -> bool) -> RedrawNeed {
+    let open = session
+        .open_chat
+        .and_then(|chat_id| session.chats.get(&chat_id.0))
+        .is_some_and(|chat| is_group(&chat.kind));
+    if open {
+        RedrawNeed::Now
+    } else {
+        RedrawNeed::Later
+    }
+}
+
 fn list_unless_shown(session: &Session, chat_id: ChatId) -> RedrawNeed {
     if shows_chat(session, chat_id) {
         RedrawNeed::Now
@@ -151,13 +173,23 @@ fn list_unless_shown(session: &Session, chat_id: ChatId) -> RedrawNeed {
     }
 }
 
-/// Downloads the user started show live progress; automatic ones
-/// (avatars, thumbnails, stickers) only need to appear once they are
-/// done, so their progress redraws in batches. A file Quill is not
+/// Downloads the user started, and the open chat's automatic media
+/// downloads, show live progress. Other automatic downloads (avatars,
+/// thumbnails, stickers) draw nothing while in flight, so their progress
+/// redraws in batches; the update that completes one redraws at once, as
+/// the picture appears wherever it is shown. A file Quill is not
 /// downloading at all (an upload, a generated file) redraws at once.
 fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
     let id = file.id.0;
-    if session.user_downloads.contains(&id) {
+    let completes = file.local.is_downloading_completed
+        && !session
+            .files
+            .get(&id)
+            .is_some_and(|known| known.local.is_downloading_completed);
+    if completes
+        || session.user_downloads.contains(&id)
+        || session.open_chat_media_downloads.contains(&id)
+    {
         RedrawNeed::Now
     } else if session.downloading.contains(&id) || file.local.is_downloading_completed {
         RedrawNeed::Later

@@ -111,7 +111,7 @@ impl QuillApp {
             client_id: None,
             envelope,
         });
-        self.redraw_polled(need, cx);
+        self.redraw_polled(need, false, cx);
     }
 }
 

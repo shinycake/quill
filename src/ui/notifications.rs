@@ -58,17 +58,23 @@ const LATER_REDRAW: (Duration, Duration) =
 /// Urgent updates ([`RedrawNeed::Now`]) redraw the whole window at once
 /// (at most every `INACTIVE_REDRAW` behind another app). The rest are
 /// batched: chat-list-only changes redraw just the chat list
-/// (`notify_chat_list`), others a full redraw, each at most once per its
-/// interval since the last poll redraw. A held-back redraw is never
-/// dropped: the poll loop calls back at least every 120 ms.
+/// (`notify_chat_list`) at most once per `CHAT_LIST_REDRAW`, others a full
+/// redraw at most once per `LATER_REDRAW`. The two batches are tracked
+/// apart, so a pending full redraw never holds a chat-list change back
+/// past its own interval. A held-back redraw is never dropped: the poll
+/// loop calls back at least every 120 ms, with [`RedrawNeed::Nothing`]
+/// when nothing arrived.
 #[derive(Debug)]
 pub(super) struct PolledRedraw {
     /// The last full redraw the poll asked for.
     last_full: std::time::Instant,
     /// The last chat-list redraw (or full redraw, which includes it).
     last_list: std::time::Instant,
-    /// The most urgent need not drawn yet.
-    pending: RedrawNeed,
+    /// The most urgent full redraw not drawn yet (`Nothing`, `Later` or
+    /// `Now`).
+    full: RedrawNeed,
+    /// A chat-list redraw is owed.
+    list: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,44 +89,52 @@ impl PolledRedraw {
         Self {
             last_full: now,
             last_list: now,
-            pending: RedrawNeed::Nothing,
+            full: RedrawNeed::Nothing,
+            list: false,
         }
     }
 
+    /// Record `need` and say what to redraw now.
     pub(super) fn decide(
         &mut self,
         need: RedrawNeed,
         active: bool,
         now: std::time::Instant,
     ) -> PolledAction {
-        self.pending = self.pending.max(need);
+        match need {
+            RedrawNeed::Nothing => {}
+            RedrawNeed::ChatList => self.list = true,
+            RedrawNeed::Later | RedrawNeed::Now => self.full = self.full.max(need),
+        }
         let pick = |(active_gap, inactive_gap): (Duration, Duration)| {
             if active { active_gap } else { inactive_gap }
         };
-        let (due, action) = match self.pending {
-            RedrawNeed::Nothing => return PolledAction::Wait,
-            RedrawNeed::ChatList => (
-                now.duration_since(self.last_list) >= pick(CHAT_LIST_REDRAW),
-                PolledAction::ChatList,
-            ),
-            RedrawNeed::Later => (
-                now.duration_since(self.last_full) >= pick(LATER_REDRAW),
-                PolledAction::Full,
-            ),
-            RedrawNeed::Now => (
-                active || now.duration_since(self.last_full) >= INACTIVE_REDRAW,
-                PolledAction::Full,
-            ),
+        let full_due = match self.full {
+            RedrawNeed::Now => active || now.duration_since(self.last_full) >= INACTIVE_REDRAW,
+            RedrawNeed::Later => now.duration_since(self.last_full) >= pick(LATER_REDRAW),
+            RedrawNeed::Nothing | RedrawNeed::ChatList => false,
         };
-        if !due {
-            return PolledAction::Wait;
+        if full_due {
+            return self.drawn(now);
         }
-        self.pending = RedrawNeed::Nothing;
+        if self.list && now.duration_since(self.last_list) >= pick(CHAT_LIST_REDRAW) {
+            self.list = false;
+            self.last_list = now;
+            return PolledAction::ChatList;
+        }
+        PolledAction::Wait
+    }
+
+    /// A full redraw now, whatever is pending and however recently the
+    /// window drew: for what only a render hands out (desktop
+    /// notifications, their sounds, forced replies), which must not wait
+    /// for the inactive window's interval.
+    pub(super) fn drawn(&mut self, now: std::time::Instant) -> PolledAction {
+        self.full = RedrawNeed::Nothing;
+        self.list = false;
+        self.last_full = now;
         self.last_list = now;
-        if action == PolledAction::Full {
-            self.last_full = now;
-        }
-        action
+        PolledAction::Full
     }
 }
 
@@ -181,12 +195,17 @@ impl QuillApp {
     /// (`quill::state::redraw_need`; batching rules on [`PolledRedraw`]).
     /// Called after every poll, with [`RedrawNeed::Nothing`] when nothing
     /// arrived, so held-back redraws still land.
-    pub(super) fn redraw_polled(&mut self, need: RedrawNeed, cx: &mut Context<Self>) {
+    /// `deliver`: something only a render hands out is queued (see
+    /// [`PolledRedraw::drawn`]); redraw at once even behind another app.
+    pub(super) fn redraw_polled(&mut self, need: RedrawNeed, deliver: bool, cx: &mut Context<Self>) {
         let active = self.window_active.get();
-        match self
-            .polled_redraw
-            .decide(need, active, std::time::Instant::now())
-        {
+        let now = std::time::Instant::now();
+        let action = if deliver {
+            self.polled_redraw.drawn(now)
+        } else {
+            self.polled_redraw.decide(need, active, now)
+        };
+        match action {
             PolledAction::Wait => {}
             PolledAction::ChatList => self.notify_chat_list(cx),
             PolledAction::Full => cx.notify(),
@@ -255,13 +274,13 @@ impl QuillApp {
             progressed = true;
             need = RedrawNeed::Now;
         }
-        // A desktop notification or a forced reply is handed out by the
-        // next render: draw it now, whatever the updates were.
-        if !live.driver.session.pending_notifications.is_empty()
+        // A desktop notification, its sound or a forced reply is handed
+        // out by the next render (`flush_notifications`): draw it now,
+        // whatever the updates were and whether or not the window is in
+        // front.
+        let deliver = !live.driver.session.pending_notifications.is_empty()
             || live.driver.session.pending_force_reply.is_some()
-        {
-            need = RedrawNeed::Now;
-        }
+            || !live.driver.session.pending_sound_plays.is_empty();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.folder_tab
@@ -545,7 +564,7 @@ impl QuillApp {
         if progressed {
             self.progress_inline_mode(cx);
         }
-        self.redraw_polled(need, cx);
+        self.redraw_polled(need, deliver, cx);
         self.discard_stopped_media_playback(cx);
         self.resume_pending_gif(cx);
         self.resume_pending_video(cx);
