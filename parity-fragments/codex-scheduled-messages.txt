@@ -1,6 +1,0 @@
-parity:scheduled-send-now
-parity:scheduled-reschedule
-parity:scheduled-date-picker
-parity:scheduled-reminder-wording
-parity:scheduled-send-when-online
-parity:scheduled-composer-icon
