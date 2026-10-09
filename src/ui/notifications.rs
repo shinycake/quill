@@ -627,6 +627,9 @@ impl QuillApp {
             self.status_note = notice;
             progressed = true;
         }
+        if self.drain_folder_share(cx) | self.drive_folder_invite(cx) {
+            progressed = true;
+        }
         self.finish_successful_sends(cx);
         if progressed || send_failed || self.polled_chrome() != shown_before {
             need = RedrawNeed::Now;

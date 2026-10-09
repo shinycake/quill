@@ -1078,3 +1078,156 @@ fn new_chat_carries_its_last_message_preview() {
     );
     assert_eq!(session.chats[&7].last_preview, "Newer");
 }
+
+#[test]
+fn folder_icon_and_share_flags_parse_from_the_update() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":true,"has_my_invite_links":true}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+    );
+    let folder = &session.chat_folders[0];
+    assert_eq!(folder.icon_name, "Work");
+    assert!(folder.is_shareable && folder.has_my_invite_links);
+}
+
+#[test]
+fn folder_invite_links_list_create_edit_and_errors() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":3,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#,
+    );
+    // getChatFolderInviteLinks fills the folder's list.
+    let extra = session.request_for_folder(RequestPurpose::GetChatFolderInviteLinks, 3);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatFolderInviteLinks","@extra":"{}","invite_links":[{{"@type":"chatFolderInviteLink","invite_link":"https://t.me/addlist/a","name":"Team","chat_ids":[5,6]}}]}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.folder_invite_links[&3].len(), 1);
+    assert_eq!(session.folder_invite_links[&3][0].chat_ids, vec![5, 6]);
+    // A create adds a link and flips the one-shot + the folder flags.
+    let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatFolderInviteLink","@extra":"{}","invite_link":"https://t.me/addlist/b","name":"","chat_ids":[5]}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.folder_invite_links[&3].len(), 2);
+    assert!(session.folder_link_saved);
+    assert!(session.chat_folders[0].is_shareable);
+    // An edit replaces by link, never duplicates.
+    let extra = session.request_for_folder(RequestPurpose::EditChatFolderInviteLink, 3);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatFolderInviteLink","@extra":"{}","invite_link":"https://t.me/addlist/b","name":"Renamed","chat_ids":[6]}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.folder_invite_links[&3].len(), 2);
+    assert_eq!(session.folder_invite_links[&3][1].name, "Renamed");
+    // A refusal surfaces for the dialog.
+    let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"INVITES_TOO_MUCH"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.folder_share_error.is_some());
+}
+
+#[test]
+fn recommended_folders_and_addlist_check_are_cached() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetRecommendedChatFolders, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"recommendedChatFolders","@extra":"{}","chat_folders":[{{"@type":"recommendedChatFolder","folder":{{"@type":"chatFolder","name":{{"@type":"chatFolderName","text":{{"@type":"formattedText","text":"Unread","entities":[]}}}},"icon":{{"@type":"chatFolderIcon","name":"Unread"}},"color_id":-1,"is_shareable":false,"pinned_chat_ids":[],"included_chat_ids":[],"excluded_chat_ids":[],"exclude_muted":false,"exclude_read":true,"exclude_archived":false,"include_contacts":true,"include_non_contacts":true,"include_bots":true,"include_groups":true,"include_channels":true}},"description":"All unread chats"}}]}}"#,
+            extra.0
+        ),
+    );
+    let recommended = session.recommended_folders.as_ref().expect("cached");
+    assert_eq!(recommended[0].spec.name, "Unread");
+    assert_eq!(recommended[0].spec.icon_name.as_deref(), Some("Unread"));
+    assert!(recommended[0].spec.exclude_read);
+    assert_eq!(recommended[0].description, "All unread chats");
+
+    let extra = session.request(RequestPurpose::CheckChatFolderInviteLink, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatFolderInviteLinkInfo","@extra":"{}","chat_folder_info":{{"@type":"chatFolderInfo","id":0,"name":{{"@type":"chatFolderName","text":{{"@type":"formattedText","text":"Shared","entities":[]}}}},"icon":null,"color_id":-1,"is_shareable":true,"has_my_invite_links":false}},"missing_chat_ids":[8,9],"added_chat_ids":[4]}}"#,
+            extra.0
+        ),
+    );
+    let info = session.folder_invite_info.as_ref().expect("info");
+    assert_eq!(info.folder.id, 0);
+    assert_eq!(info.missing_chat_ids, vec![8, 9]);
+    assert_eq!(info.added_chat_ids, vec![4]);
+
+    // Adding confirms through `ok`; a failure shows its reason.
+    let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(session.folder_invite_done);
+    let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHATLISTS_TOO_MUCH"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.folder_invite_error.is_some());
+}
+
+#[test]
+fn folder_link_chats_are_cached_per_folder() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_folder(RequestPurpose::GetChatsForFolderInviteLink, 3);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chats","@extra":"{}","total_count":2,"chat_ids":[5,6]}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.folder_link_chats.get(&3), Some(&vec![5, 6]));
+}

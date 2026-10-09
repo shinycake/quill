@@ -325,6 +325,18 @@ fn typed_links_route_through_get_internal_link_type() {
             &mut driver,
             &seq,
             &sink,
+            "tg://addlist?slug=x",
+            json!({"@type":"internalLinkTypeChatFolderInvite","invite_link":"https://t.me/addlist/x"}),
+        ),
+        Some(DeepLinkState::Ui(DeepLinkUi::FolderInvite {
+            link: "https://t.me/addlist/x".into()
+        }))
+    );
+    assert_eq!(
+        open_with(
+            &mut driver,
+            &seq,
+            &sink,
             "tg://settings/devices",
             json!({"@type":"internalLinkTypeSettings","section":{"@type":"settingsSectionDevices"}}),
         ),
@@ -338,10 +350,6 @@ fn typed_links_route_through_get_internal_link_type() {
         (
             "tg://invoice?slug=x",
             json!({"@type":"internalLinkTypeInvoice","invoice_name":"x"}),
-        ),
-        (
-            "tg://addlist?slug=x",
-            json!({"@type":"internalLinkTypeChatFolderInvite","invite_link":"x"}),
         ),
         (
             "tg://bg?slug=x",

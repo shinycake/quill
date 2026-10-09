@@ -15,8 +15,11 @@ pub fn chat_folder_json(spec: &crate::telegram::envelope::ChatFolderSpec) -> Val
             "text": { "@type": "formattedText", "text": spec.name, "entities": [] },
             "animate_custom_emoji": false,
         },
-        "icon": null,
-        "color_id": -1,
+        "icon": spec.icon_name.as_ref().map(|name| json!({
+            "@type": "chatFolderIcon",
+            "name": name,
+        })),
+        "color_id": spec.color_id,
         "is_shareable": false,
         "pinned_chat_ids": spec.pinned_chat_ids,
         "included_chat_ids": spec.included_chat_ids,
@@ -106,6 +109,118 @@ pub fn get_chat_folder(extra: RequestId, folder_id: i32) -> String {
         "@type": "getChatFolder",
         "@extra": extra.as_extra(),
         "chat_folder_id": folder_id,
+    })
+    .to_string()
+}
+
+/// `getRecommendedChatFolders` (`schema/td_api.tl:13773`). Response is
+/// `recommendedChatFolders`.
+pub fn get_recommended_chat_folders(extra: RequestId) -> String {
+    json!({
+        "@type": "getRecommendedChatFolders",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// `getChatsForChatFolderInviteLink` (`schema/td_api.tl:13779`). Response is
+/// `chats`: the folder chats a link can grant access to.
+pub fn get_chats_for_chat_folder_invite_link(extra: RequestId, folder_id: i32) -> String {
+    json!({
+        "@type": "getChatsForChatFolderInviteLink",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+    })
+    .to_string()
+}
+
+/// `getChatFolderInviteLinks` (`schema/td_api.tl:13788`). Response is
+/// `chatFolderInviteLinks`.
+pub fn get_chat_folder_invite_links(extra: RequestId, folder_id: i32) -> String {
+    json!({
+        "@type": "getChatFolderInviteLinks",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+    })
+    .to_string()
+}
+
+/// `createChatFolderInviteLink` (`schema/td_api.tl:13785`). `name` is 0–32
+/// characters. Response is `chatFolderInviteLink`.
+pub fn create_chat_folder_invite_link(
+    extra: RequestId,
+    folder_id: i32,
+    name: &str,
+    chat_ids: &[i64],
+) -> String {
+    json!({
+        "@type": "createChatFolderInviteLink",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+        "name": name,
+        "chat_ids": chat_ids,
+    })
+    .to_string()
+}
+
+/// `editChatFolderInviteLink` (`schema/td_api.tl:13795`). Response is
+/// `chatFolderInviteLink`.
+pub fn edit_chat_folder_invite_link(
+    extra: RequestId,
+    folder_id: i32,
+    invite_link: &str,
+    name: &str,
+    chat_ids: &[i64],
+) -> String {
+    json!({
+        "@type": "editChatFolderInviteLink",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+        "invite_link": invite_link,
+        "name": name,
+        "chat_ids": chat_ids,
+    })
+    .to_string()
+}
+
+/// `deleteChatFolderInviteLink` (`schema/td_api.tl:13800`). Response is `ok`.
+pub fn delete_chat_folder_invite_link(
+    extra: RequestId,
+    folder_id: i32,
+    invite_link: &str,
+) -> String {
+    json!({
+        "@type": "deleteChatFolderInviteLink",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+        "invite_link": invite_link,
+    })
+    .to_string()
+}
+
+/// `checkChatFolderInviteLink` (`schema/td_api.tl:13803`). Response is
+/// `chatFolderInviteLinkInfo`.
+pub fn check_chat_folder_invite_link(extra: RequestId, invite_link: &str) -> String {
+    json!({
+        "@type": "checkChatFolderInviteLink",
+        "@extra": extra.as_extra(),
+        "invite_link": invite_link,
+    })
+    .to_string()
+}
+
+/// `addChatFolderByInviteLink` (`schema/td_api.tl:13806`). Chats not yet
+/// joined are joined automatically. Response is `ok`.
+pub fn add_chat_folder_by_invite_link(
+    extra: RequestId,
+    invite_link: &str,
+    chat_ids: &[i64],
+) -> String {
+    json!({
+        "@type": "addChatFolderByInviteLink",
+        "@extra": extra.as_extra(),
+        "invite_link": invite_link,
+        "chat_ids": chat_ids,
     })
     .to_string()
 }

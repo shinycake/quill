@@ -734,7 +734,9 @@ impl Render for QuillApp {
                                  cx| {
                                     let left = event.bounds.origin.x;
                                     this.set_sidebar_width(
-                                        event.event.position.x - left,
+                                        event.event.position.x
+                                            - left
+                                            - px(this.folder_rail_width()),
                                         window,
                                         cx,
                                     );

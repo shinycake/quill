@@ -60,6 +60,7 @@ impl QuillApp {
                     self.deep_link_dialog = Some("This proxy link is not valid.".into());
                 }
             }
+            DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
             DeepLinkUi::Settings(target) => {
                 match settings_action(target) {
                     Some(action) => self.navigate(action, window, cx),

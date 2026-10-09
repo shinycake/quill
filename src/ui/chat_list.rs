@@ -602,17 +602,20 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let tabs = self.folder_tabs(cx);
+        // "Tabs on the left": the folders live in the column beside the
+        // list, so only the community banner stays here.
+        let tabs = (!self.folder_rail_active()).then(|| self.folder_tabs(cx));
         if let ChatListFilter::Community(community_id) = self.chat_filter {
             div()
                 .flex()
                 .flex_col()
                 .gap_2()
-                .child(tabs)
+                .children(tabs)
                 .child(self.community_mode_banner(community_id, cx))
                 .into_any_element()
         } else {
-            tabs.into_any_element()
+            tabs.map(IntoElement::into_any_element)
+                .unwrap_or_else(|| div().into_any_element())
         }
     }
 
@@ -860,91 +863,6 @@ impl QuillApp {
             let _ = live.driver.fetch_auto_download_presets();
         }
         cx.notify();
-    }
-
-    /// kit Phase 3: folder tabs as a kit `TabBar` — `Main` plus the
-    /// `updateChatFolders` folders, with the ⋯ manage entry as the bar's
-    /// suffix and the Unread/Archived category filters as trailing tabs.
-    /// Selecting a folder filters the chat list to `chatListFolder` chats
-    /// and fires a single-shot `loadChats(chatListFolder)` when live
-    /// (`open_folder_tab`). Slice CL2: the filters filter the loaded model,
-    /// never the server query; `Archived` is global, so it leaves any
-    /// folder tab. Only rendered when the account actually has folders —
-    /// the manage entry stays always present so folders can be created
-    /// even when the account has none yet.
-    pub(super) fn folder_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let folders: Vec<(i32, String)> = self
-            .session()
-            .map(|s| {
-                s.chat_folders
-                    .iter()
-                    .map(|f| (f.id, f.name.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let weak = cx.weak_entity();
-        // Tab slots: Main, the folders, then the two category filters.
-        let mut bar = TabBar::new("folder-tabs").child(Tab::new().label("All"));
-        for (_, name) in &folders {
-            bar = bar.child(Tab::new().label(name.clone()));
-        }
-        let unread_ix = folders.len() + 1;
-        let archived_ix = folders.len() + 2;
-        bar = bar
-            .child(Tab::new().label("Unread"))
-            .child(Tab::new().label("Archived"));
-        let selected = if self.chat_filter == ChatListFilter::Unread {
-            unread_ix
-        } else if self.chat_filter == ChatListFilter::Archived {
-            archived_ix
-        } else {
-            match self.folder_tab {
-                None => 0,
-                Some(id) => folders
-                    .iter()
-                    .position(|(folder_id, _)| *folder_id == id)
-                    .map(|pos| pos + 1)
-                    .unwrap_or(0),
-            }
-        };
-        // Parity slice: the manage entry is always present so folders can
-        // be created even when the account has none yet.
-        let manage_weak = weak.clone();
-        let folder_ids: Vec<Option<i32>> = std::iter::once(None)
-            .chain(folders.iter().map(|(id, _)| Some(*id)))
-            .collect();
-        bar.selected_index(selected)
-            // Many folders: the strip scrolls, tabs truncate long names, and
-            // an overflow menu lists every tab by its full name.
-            .underline()
-            .menu(true)
-            .max_width(px(140.))
-            .suffix(
-                Button::new("folder-manage")
-                    .icon(gpui_kit::assets::IconName::Settings)
-                    .small()
-                    .tooltip("Chat folders")
-                    .accessibility_label("Manage chat folders")
-                    .ghost()
-                    .on_click(move |_, _, cx| {
-                        let _ = manage_weak.update(cx, |this, cx| this.open_folder_manage(cx));
-                    }),
-            )
-            .on_click(move |ix, _window, cx| {
-                let _ = weak.update(cx, |this, cx| {
-                    if *ix == unread_ix {
-                        this.chat_filter = ChatListFilter::Unread;
-                        cx.notify();
-                    } else if *ix == archived_ix {
-                        this.chat_filter = ChatListFilter::Archived;
-                        this.folder_tab = None;
-                        cx.notify();
-                    } else if let Some(folder) = folder_ids.get(*ix).copied() {
-                        this.open_folder_tab(folder, cx);
-                    }
-                });
-            })
-            .into_any_element()
     }
 
     pub(super) fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
@@ -1786,6 +1704,17 @@ impl QuillApp {
             }
         }
         if mode == PaneMode::Ready {
+            if self.folder_rail_active() {
+                return div()
+                    .id("sidebar-with-folder-rail")
+                    .flex()
+                    .w(self.sidebar_width + px(self.folder_rail_width()))
+                    .flex_none()
+                    .h_full()
+                    .child(self.folder_rail(cx))
+                    .child(list)
+                    .into_any_element();
+            }
             return list.into_any_element();
         }
         list = list

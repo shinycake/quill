@@ -1042,6 +1042,10 @@ pub struct QuillApp {
     pub(super) folder_manage_open: bool,
     pub(super) folder_editor: Option<FolderEditorDialog>,
     pub(super) folder_delete_confirm: Option<FolderDeleteConfirm>,
+    /// Share Folder (invite links) dialog.
+    pub(super) folder_share: Option<FolderShareDialog>,
+    /// "Add folder" for an `addlist` link.
+    pub(super) folder_invite: Option<FolderInviteDialog>,
     pub(super) folder_menu_open: bool,
 }
 

@@ -493,6 +493,12 @@ pub struct AppearancePrefs {
     /// as in tdesktop.
     #[serde(default)]
     pub swipe_action: crate::chat_swipe::SwipeAction,
+    /// tdesktop `chatFiltersHorizontal` (inverted): "Tabs on the left".
+    #[serde(default)]
+    pub folder_tabs_view: crate::folder_icons::FolderTabsView,
+    /// tdesktop `chatFiltersTabsMode`: text, icons, or both on the tabs.
+    #[serde(default)]
+    pub folder_tabs_mode: crate::folder_icons::FolderTabsMode,
     #[serde(default)]
     pub start_in_tray: bool,
     #[serde(default)]
@@ -534,6 +540,8 @@ impl Default for AppearancePrefs {
             archive_collapsed: false,
             archive_in_main_menu: false,
             swipe_action: crate::chat_swipe::SwipeAction::Disabled,
+            folder_tabs_view: crate::folder_icons::FolderTabsView::Top,
+            folder_tabs_mode: crate::folder_icons::FolderTabsMode::Default,
             start_in_tray: false,
             minimize_to_tray: false,
             check_updates_on_launch: true,
@@ -1303,6 +1311,8 @@ mod tests {
             archive_collapsed: true,
             archive_in_main_menu: true,
             swipe_action: crate::chat_swipe::SwipeAction::Archive,
+            folder_tabs_view: crate::folder_icons::FolderTabsView::Left,
+            folder_tabs_mode: crate::folder_icons::FolderTabsMode::IconsOnly,
             start_in_tray: true,
             minimize_to_tray: true,
             check_updates_on_launch: false,
