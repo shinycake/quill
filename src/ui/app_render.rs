@@ -69,8 +69,10 @@ impl Render for QuillApp {
         }
         let status_toast = self.status_toast_visible(cx);
         let viewer_open = self.media_viewer.is_open();
-        let menu_open =
-            self.message_menu.is_some() || self.chat_menu.is_some() || self.archive_menu.is_some();
+        let menu_open = self.message_menu.is_some()
+            || self.chat_menu.is_some()
+            || self.archive_menu.is_some()
+            || self.folder_tab_menu.is_some();
         if menu_open && !self.context_menu_was_open {
             self.context_menu_previous_focus = window.focused(cx);
             window.focus(&self.context_menu_focus, cx);
@@ -943,6 +945,9 @@ impl Render for QuillApp {
             })
             .when_some(self.archive_menu, |this, position| {
                 this.child(self.archive_menu_overlay(position, cx))
+            })
+            .when_some(self.folder_tab_menu, |this, menu| {
+                this.child(self.folder_tab_menu_overlay(menu, cx))
             })
             // Slice CL: floating peek preview — read-only recent
             // messages beside the pressed chat-list row. Rendered above

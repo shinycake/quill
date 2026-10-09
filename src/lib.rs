@@ -27,6 +27,7 @@ pub mod emoji;
 pub mod emoji_catalog;
 pub mod file_prefs;
 pub mod folder_icons;
+pub mod folder_limits;
 pub mod folders;
 pub mod force_reply;
 pub mod icon_badge;

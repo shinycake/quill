@@ -1,5 +1,6 @@
 //! Error routing: maps TDLib errors onto per-purpose handlers.
 use super::*;
+use crate::folder_limits::{FolderOp, limit_kind_for_error};
 
 impl Session {
     #[allow(clippy::too_many_arguments)]
@@ -44,9 +45,26 @@ impl Session {
         {
             self.reject_replied_message(chat_id, message_id);
         }
+        // A folder request that hit a limit opens the limit box (tdesktop
+        // `ShowImportError` / the `*LimitBox`es) instead of an error line.
+        let folder_op = match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::CreateChatFolder) => Some(FolderOp::Create),
+            Some(RequestPurpose::EditChatFolder) => Some(FolderOp::Edit),
+            Some(RequestPurpose::CreateChatFolderInviteLink) => Some(FolderOp::CreateLink),
+            Some(RequestPurpose::AddChatFolderByInviteLink) => Some(FolderOp::AddByLink),
+            _ => None,
+        };
+        let limit_kind = folder_op
+            .zip(err.limit_hint)
+            .map(|(op, hint)| limit_kind_for_error(op, hint));
+        if let Some(kind) = limit_kind {
+            self.folder_limit_hit = Some(kind);
+        }
         // Share Folder / recommended folders / "Add folder" by link: the
         // dialog shows the reason instead of spinning.
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::CreateChatFolderInviteLink) if limit_kind.is_some() => {}
+            Some(RequestPurpose::AddChatFolderByInviteLink) if limit_kind.is_some() => {}
             Some(
                 RequestPurpose::GetChatFolderInviteLinks
                 | RequestPurpose::GetChatsForFolderInviteLink

@@ -1625,6 +1625,14 @@ pub enum EnvelopePayload {
     /// `chatFolderInviteLinks` — the answer of `getChatFolderInviteLinks`
     /// (`schema/td_api.tl:13788`).
     ChatFolderInviteLinks(Vec<ChatFolderInviteLink>),
+    /// `premiumLimit` — the answer of `getPremiumLimit`
+    /// (`schema/td_api.tl:8559`); `type_name` is the `premiumLimitType*`
+    /// constructor.
+    PremiumLimit {
+        type_name: String,
+        default_value: i32,
+        premium_value: i32,
+    },
     /// `recommendedChatFolders` — the answer of `getRecommendedChatFolders`
     /// (`schema/td_api.tl:13773`).
     RecommendedChatFolders(Vec<RecommendedChatFolder>),

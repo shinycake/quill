@@ -937,6 +937,48 @@ pub(super) fn demo_seed_for(
             "screenshot demo — folder editor with the icon picker (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyFoldersTags => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — folder tag chips on chat rows (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersTagColor => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — folder editor with the tag colour picker (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersMenu => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — right-click menu of a folder tab (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersNewChats => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — shared folder with the new chats bar (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersNewChatsJoin => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — join dialog of a shared folder's new chats (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersLimit => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — folder limit box with the Premium upsell (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyFoldersDelete => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — remove a shared folder and choose chats to leave (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyChatAvatars => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2268,6 +2310,9 @@ impl QuillApp {
             folder_share: None,
             folder_invite: None,
             folder_menu_open: false,
+            folder_tab_menu: None,
+            folder_new_chats_dialog: None,
+            folder_limit_box: None,
             add_contact_dialog: None,
             block_bar_dialog: None,
             join_requests_dialog: None,
@@ -2354,6 +2399,7 @@ impl QuillApp {
                         if this.message_menu.is_none()
                             && this.chat_menu.is_none()
                             && this.archive_menu.is_none()
+                            && this.folder_tab_menu.is_none()
                         {
                             return false;
                         }
@@ -2361,6 +2407,7 @@ impl QuillApp {
                             this.message_menu = None;
                             this.chat_menu = None;
                             this.archive_menu = None;
+                            this.folder_tab_menu = None;
                             cx.notify();
                             return true;
                         }

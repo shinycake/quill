@@ -118,6 +118,8 @@ mod entity_links;
 mod event_log;
 mod find_demo;
 mod folder_demo;
+mod folder_demo_followups;
+mod folder_extras;
 mod folder_glyphs;
 mod folder_share;
 mod folder_tabs;

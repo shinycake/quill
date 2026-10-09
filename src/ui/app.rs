@@ -1054,6 +1054,12 @@ pub struct QuillApp {
     /// "Add folder" for an `addlist` link.
     pub(super) folder_invite: Option<FolderInviteDialog>,
     pub(super) folder_menu_open: bool,
+    /// Right-click menu of a folder tab (`None` folder = the All tab).
+    pub(super) folder_tab_menu: Option<super::folder_extras::FolderTabMenu>,
+    /// The shared folder's "N new chats" join dialog.
+    pub(super) folder_new_chats_dialog: Option<super::folder_extras::FolderNewChatsDialog>,
+    /// A folder limit box (or the tag Premium notice).
+    pub(super) folder_limit_box: Option<quill::folder_limits::FolderLimitKind>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

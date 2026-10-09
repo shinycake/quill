@@ -52,7 +52,7 @@ fn chats_count_label(count: usize) -> String {
 
 /// Dialog chrome shared by both folder-link dialogs: title, scrollable
 /// body, optional footer.
-fn finish_dialog(
+pub(super) fn finish_dialog(
     dialog: Dialog,
     title: String,
     body: AnyElement,
@@ -79,7 +79,7 @@ fn finish_dialog(
     dialog.on_close(on_close)
 }
 
-fn chat_title(session: Option<&Session>, chat_id: i64) -> String {
+pub(super) fn chat_title(session: Option<&Session>, chat_id: i64) -> String {
     session
         .and_then(|s| s.chats.get(&chat_id))
         .map(|c| c.title.clone())
@@ -140,6 +140,17 @@ impl QuillApp {
         let Some(folder_id) = self.folder_share.as_ref().map(|d| d.folder_id) else {
             return;
         };
+        // tdesktop `FilterLinksLimitBox`: a folder has a few links at most.
+        if link.is_none() {
+            let full = self.session().is_some_and(|s| {
+                let count = s.folder_invite_links.get(&folder_id).map_or(0, Vec::len);
+                s.folder_limits.links_full(count, s.my_is_premium())
+            });
+            if full {
+                self.show_folder_limit(quill::folder_limits::FolderLimitKind::InviteLinks, cx);
+                return;
+            }
+        }
         let choices = self.folder_link_choices(folder_id);
         let name = link.as_ref().map(|l| l.name.clone()).unwrap_or_default();
         let selected: std::collections::HashSet<i64> = match &link {

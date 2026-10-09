@@ -1201,6 +1201,15 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "chatFolderInviteLinks" => parse_chat_folder_invite_links(&value)
             .map(EnvelopePayload::ChatFolderInviteLinks)
             .ok_or(ParseError::MissingField),
+        "premiumLimit" => parse_premium_limit(&value)
+            .map(
+                |(type_name, default_value, premium_value)| EnvelopePayload::PremiumLimit {
+                    type_name,
+                    default_value,
+                    premium_value,
+                },
+            )
+            .ok_or(ParseError::MissingField),
         "recommendedChatFolders" => parse_recommended_chat_folders(&value)
             .map(EnvelopePayload::RecommendedChatFolders)
             .ok_or(ParseError::MissingField),
