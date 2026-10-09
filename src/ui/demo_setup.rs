@@ -97,6 +97,9 @@ impl QuillApp {
         if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInfo)) {
             self.deep_link_dialog = Some("This link requires a newer version of Telegram. Please update your app to open it.".into());
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkShare)) {
+            self.share_link_text = Some("https://example.com/article\nWorth a look".into());
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyDeepLinkInvite)) {
             self.deep_link_invite = Some(quill::state::DeepLinkState::InvitePreview {
                 hash: "demo_invite".into(),

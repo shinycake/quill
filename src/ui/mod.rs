@@ -99,6 +99,7 @@ mod connect_ui;
 mod contacts;
 mod conversation;
 mod custom_keyboard;
+mod deep_link_routes;
 mod deep_links;
 mod demo;
 mod demo_setup;

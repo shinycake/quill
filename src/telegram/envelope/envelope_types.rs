@@ -1201,6 +1201,18 @@ pub enum EnvelopePayload {
         need_update: bool,
         entities: Vec<TextEntity>,
     },
+    /// `internalLinkType*` — the `getInternalLinkType` answer
+    /// (`parity:deeplink-internal-link-type`).
+    InternalLinkType(crate::deep_link_types::InternalLink),
+    /// `messageLinkInfo` (schema line 9677) — the `getMessageLinkInfo`
+    /// answer. `chat_id` is 0 when the link points nowhere the account can
+    /// see.
+    MessageLinkInfo {
+        chat_id: i64,
+        message_id: i64,
+        media_timestamp: Option<i32>,
+        thread_id: Option<i64>,
+    },
     /// Phase D3a: `chatInviteLinks` (TDLib 1.8.67, line 2630) — the
     /// response of `getChatInviteLinks` / `revokeChatInviteLink`.
     /// Correlated to the chat by the request's `PendingRequest::chat_id`.

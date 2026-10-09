@@ -962,6 +962,7 @@ impl Session {
             // guard.
             Some(
                 RequestPurpose::DeepLinkInfo { generation }
+                | RequestPurpose::DeepLinkInternalType { generation }
                 | RequestPurpose::DeepLinkResolve { generation }
                 | RequestPurpose::DeepLinkJoin { generation }
                 | RequestPurpose::DeepLinkCheckInvite { generation },
@@ -1514,6 +1515,22 @@ pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> S
             action: DeepLinkAction::OpenUsername { domain, .. },
             ..
         }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::OpenPublicChatDraft { domain, .. },
+            ..
+        }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::UserPhone { phone, .. },
+            ..
+        }) if not_found => format!("The phone number +{phone} is not on Telegram yet."),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::StickerSet { .. },
+            ..
+        }) if not_found => "This sticker set doesn't exist.".to_string(),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::MessageLink { .. },
+            ..
+        }) if not_found => "This message link is broken or the chat is not available.".to_string(),
         Some(DeepLinkState::ResolvingChat {
             action: DeepLinkAction::JoinInvite { .. },
             ..

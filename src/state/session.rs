@@ -887,6 +887,9 @@ pub struct Session {
     pub deep_link: Option<DeepLinkState>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
+    /// The link text being resolved by `getInternalLinkType` (the proxy
+    /// hand-off needs it back).
+    pub deep_link_original: String,
     /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
@@ -1310,6 +1313,7 @@ impl Session {
             inline_bot_resolve_seq: 0,
             deep_link: None,
             deep_link_seq: 0,
+            deep_link_original: String::new(),
             proxy: Default::default(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),

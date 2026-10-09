@@ -18,6 +18,8 @@ pub enum ScreenshotDemo {
     ReadyUpdateFailure,
     ReadyDeepLinkInfo,
     ReadyDeepLinkInvite,
+    /// The share-link chat chooser (typed deep links).
+    ReadyDeepLinkShare,
     /// Slice parity:platform-offline-indicator — the ReadyChats fixture
     /// with `connection` forced to `WaitingForNetwork`, so the offline
     /// banner renders below the title bar (injected, no live Telegram).

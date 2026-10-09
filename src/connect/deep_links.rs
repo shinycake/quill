@@ -12,7 +12,8 @@ use crate::ids::{ChatId, RequestId};
 use crate::state::{DeepLinkAction, DeepLinkState, RequestPurpose};
 use crate::telegram::requests::{
     check_chat_invite_link, create_private_chat, get_chat, get_deep_link_info,
-    join_chat_by_invite_link, search_public_chat,
+    get_internal_link_type, get_message_link_info, join_chat_by_invite_link, search_public_chat,
+    search_sticker_set_by_name, search_user_by_phone_number,
 };
 use crate::text::{TextEntity, TextEntityKind};
 
@@ -165,7 +166,12 @@ pub fn parse_web_url(url: &str) -> Option<DeepLinkAction> {
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     let first = *segments.first()?;
     if let Some(hash) = first.strip_prefix('+') {
-        return (!hash.is_empty()).then(|| DeepLinkAction::JoinInvite { hash: hash.into() });
+        // `t.me/+15550001`: all digits is a phone number, not an invite
+        // (TDLib resolves it as `internalLinkTypeUserPhoneNumber`).
+        if hash.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        return Some(DeepLinkAction::JoinInvite { hash: hash.into() });
     }
     match first {
         "joinchat" => {
@@ -242,16 +248,55 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Like tdesktop's `openLocalUrl`, route the link by its shape
         // locally. `getDeepLinkInfo` only knows server-side deep links
         // (it answers 404 for `resolve?domain=` and `t.me/<user>`).
-        if let Some(action) = parse_deep_link_url(link) {
+        // Forms with parameters the local parsers drop (`?comment=`,
+        // `?thread=`, `?t=`, `?startgroup`, ...) and everything else go to
+        // TDLib's `getInternalLinkType`.
+        if !crate::deep_link_types::needs_internal_resolution(link)
+            && let Some(action) = parse_deep_link_url(link)
+        {
             return self.resolve_deep_link(action);
         }
+        self.send_deep_link_lookup(link, true)
+    }
+
+    /// `getDeepLinkInfo` for a link TDLib called unknown (tdesktop
+    /// `HandleUnknown`): the answer is the explanation shown to the user.
+    pub fn request_deep_link_text(
+        &mut self,
+        link: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.send_deep_link_lookup(link, false)
+    }
+
+    /// One lookup in the `ResolvingInfo` slot: `getInternalLinkType`
+    /// (`internal`) or `getDeepLinkInfo`.
+    fn send_deep_link_lookup(
+        &mut self,
+        link: &str,
+        internal: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.deep_link_seq = self.session.deep_link_seq.wrapping_add(1);
         let generation = self.session.deep_link_seq;
         self.session.deep_link = Some(DeepLinkState::ResolvingInfo { generation });
-        let extra = self
-            .session
-            .request(RequestPurpose::DeepLinkInfo { generation }, None);
-        let json = get_deep_link_info(extra, link);
+        let (purpose, build): (_, fn(RequestId, &str) -> String) = if internal {
+            (
+                RequestPurpose::DeepLinkInternalType { generation },
+                get_internal_link_type,
+            )
+        } else {
+            (
+                RequestPurpose::DeepLinkInfo { generation },
+                get_deep_link_info,
+            )
+        };
+        if internal {
+            self.session.deep_link_original = link.to_string();
+        }
+        let extra = self.session.request(purpose, None);
+        let json = build(extra, link);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -311,7 +356,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         action: DeepLinkAction,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
+        // A share draft waits for the user to pick a chat: nothing to resolve.
+        if !self.chats_path_active() || matches!(action, DeepLinkAction::ShareDraft { .. }) {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.deep_link_seq = self.session.deep_link_seq.wrapping_add(1);
@@ -322,11 +368,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let extra = self.session.request(purpose, None);
         let json = match &action {
-            DeepLinkAction::OpenUsername { domain, .. } => search_public_chat(extra, domain),
+            DeepLinkAction::OpenUsername { domain, .. }
+            | DeepLinkAction::OpenPublicChatDraft { domain, .. } => {
+                search_public_chat(extra, domain)
+            }
+            DeepLinkAction::MessageLink { url } => get_message_link_info(extra, url),
+            DeepLinkAction::StickerSet { name } => search_sticker_set_by_name(extra, name),
+            DeepLinkAction::UserPhone { phone, .. } => search_user_by_phone_number(extra, phone),
+            DeepLinkAction::OpenChatById { chat_id, .. } => get_chat(extra, ChatId(*chat_id)),
+            // Refused above; kept total so a new action cannot panic here.
+            DeepLinkAction::ShareDraft { .. } => search_public_chat(extra, ""),
             DeepLinkAction::JoinInvite { hash } => {
                 check_chat_invite_link(extra, &format!("https://t.me/+{hash}"))
             }
-            DeepLinkAction::OpenMessage { user_id, .. } | DeepLinkAction::OpenUser { user_id } => {
+            DeepLinkAction::OpenMessage { user_id, .. }
+            | DeepLinkAction::OpenUser { user_id }
+            | DeepLinkAction::OpenUserDraft { user_id, .. } => {
                 create_private_chat(extra, *user_id, false)
             }
             DeepLinkAction::OpenChannelPost { channel_id, .. } => {
@@ -470,6 +527,8 @@ mod tests {
             })
         );
         assert_eq!(parse_deep_link_url("https://t.me/addstickers/Pack"), None);
+        // Phone links are TDLib's to resolve, not invite hashes.
+        assert_eq!(parse_deep_link_url("https://t.me/+15550001"), None);
         assert_eq!(parse_deep_link_url("https://t.me/"), None);
         assert_eq!(parse_deep_link_url("https://evil.com/durov"), None);
     }
