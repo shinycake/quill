@@ -128,7 +128,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.status_note = format!("demo — {what} runs with live TDLib").into();
+            self.status_note = format!("demo — {what} runs with live TDLib");
             cx.notify();
             return;
         };
@@ -147,7 +147,7 @@ impl QuillApp {
             Some(page) => {
                 let name = page.new_album_name.read(cx).value().trim().to_string();
                 let story_ids =
-                    parse_story_id_list(&page.new_album_story_ids.read(cx).value().to_string());
+                    parse_story_id_list(page.new_album_story_ids.read(cx).value().as_ref());
                 (page.chat_id, name, story_ids)
             }
             None => return,
@@ -285,7 +285,7 @@ impl QuillApp {
                 Some(album_id) => (
                     page.chat_id,
                     album_id,
-                    parse_story_id_list(&page.add_story_ids.read(cx).value().to_string()),
+                    parse_story_id_list(page.add_story_ids.read(cx).value().as_ref()),
                 ),
                 None => return,
             },
@@ -563,7 +563,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.stories.get(&(item.chat_id.0, item.story_id)))
             .and_then(|story| story.privacy_settings.as_ref())
-            .and_then(|settings| StoryPrivacy::from_settings_json(settings))
+            .and_then(StoryPrivacy::from_settings_json)
             .unwrap_or((StoryPrivacy::Everyone, Vec::new()));
         self.story_privacy_edit = Some(StoryPrivacyEdit {
             chat_id: item.chat_id.0,

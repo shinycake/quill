@@ -1,3 +1,11 @@
+// UI builders take many GPUI inputs by design and guard `self.live` with
+// `is_some()` before `expect`; these structural lints are allowed UI-wide.
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::unnecessary_unwrap
+)]
+
 mod account_lifecycle;
 mod accounts;
 mod anim_layer;

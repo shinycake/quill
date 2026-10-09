@@ -215,10 +215,11 @@ impl QuillApp {
             .and_then(|f| f.usable_path())
             .and_then(|p| sandboxed_display_path(p, &self.media_display_roots()));
         let Some(path) = path else {
-            if !session.media_prefs.data_saver && session.should_download(id) {
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.download_file(id, 1);
-                }
+            if !session.media_prefs.data_saver
+                && session.should_download(id)
+                && let Some(live) = self.live.as_mut()
+            {
+                let _ = live.driver.download_file(id, 1);
             }
             return;
         };
@@ -264,8 +265,9 @@ impl QuillApp {
                                                     "Invalid sticker frame".to_string()
                                                 })?;
                                         // rlottie is premultiplied; GPUI expects straight BGRA.
-                                        for pixel in rgba.chunks_exact_mut(4) {
+                                        for pixel in rgba.as_chunks_mut::<4>().0 {
                                             let alpha = u16::from(pixel[3]);
+                                            #[allow(clippy::manual_checked_ops)]
                                             if alpha > 0 {
                                                 for channel in &mut pixel[..3] {
                                                     *channel = (u16::from(*channel) * 255 / alpha)
@@ -302,7 +304,7 @@ impl QuillApp {
                                         i64::from((edge - rgba.width().min(edge)) / 2),
                                         i64::from((edge - rgba.height().min(edge)) / 2),
                                     );
-                                    for pixel in square.chunks_exact_mut(4) {
+                                    for pixel in square.as_chunks_mut::<4>().0 {
                                         pixel.swap(0, 2);
                                     }
                                     frames.push(square);

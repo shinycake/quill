@@ -92,10 +92,10 @@ impl QuillApp {
                         .contains(&(chat_id.0, message_id.0))
                 })
         };
-        if pending.chat_id == chat_id {
-            if let Some(placeholder) = force_reply_placeholder(pending.message_id) {
-                return Some((chat_id, pending.message_id, placeholder));
-            }
+        if pending.chat_id == chat_id
+            && let Some(placeholder) = force_reply_placeholder(pending.message_id)
+        {
+            return Some((chat_id, pending.message_id, placeholder));
         }
         let (kb_chat, kb_message, placeholder) =
             active_force_reply(&history.messages, &self.dismissed_keyboards)?;

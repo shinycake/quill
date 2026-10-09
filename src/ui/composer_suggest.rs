@@ -237,7 +237,7 @@ impl QuillApp {
             .bg(cx.theme().popover)
             .shadow_md();
         let typed = active.query.query.chars().count();
-        Some(match active.query.kind {
+        Some(IntoElement::into_any_element(match active.query.kind {
             SuggestKind::Hashtag => {
                 let mut list = panel
                     .aria_label("Hashtag suggestions")
@@ -323,8 +323,7 @@ impl QuillApp {
                             .child(format!(":{}", active.items[selected].name)),
                     )
             }
-        })
-        .map(IntoElement::into_any_element)
+        }))
     }
 }
 

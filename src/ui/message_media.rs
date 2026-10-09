@@ -2140,19 +2140,6 @@ pub(super) fn dice_row(row_id: u64, dice: &quill::telegram::envelope::DiceConten
         .into_any_element()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::document_kind_label;
-
-    #[test]
-    fn document_kind_prefers_extension_then_mime_subtype() {
-        assert_eq!(document_kind_label("report.pdf", "application/pdf"), "PDF");
-        assert_eq!(document_kind_label("notes", "text/plain"), "PLAIN");
-        assert_eq!(document_kind_label("", ""), "");
-        assert_eq!(document_kind_label("weird.verylongext", ""), "");
-    }
-}
-
 /// An autoplaying clip's current frame, cropped to the media frame.
 fn inline_surface(
     inline: super::inline_video::InlineFrame,
@@ -2422,7 +2409,7 @@ fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
         image::imageops::FilterType::Triangle,
     );
     let mut blurred = image::imageops::blur(&large, 6.0);
-    for pixel in blurred.chunks_exact_mut(4) {
+    for pixel in blurred.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     let render = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
@@ -2436,4 +2423,17 @@ fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
         cache.insert(row_id, render.clone());
     });
     Some(render)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::document_kind_label;
+
+    #[test]
+    fn document_kind_prefers_extension_then_mime_subtype() {
+        assert_eq!(document_kind_label("report.pdf", "application/pdf"), "PDF");
+        assert_eq!(document_kind_label("notes", "text/plain"), "PLAIN");
+        assert_eq!(document_kind_label("", ""), "");
+        assert_eq!(document_kind_label("weird.verylongext", ""), "");
+    }
 }

@@ -462,11 +462,11 @@ impl QuillApp {
     /// "View Sticker Set" / "Add Stickers": the set in a dialog.
     fn view_message_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         self.message_menu_ui.sticker_set_open = true;
-        if let Some(live) = self.live.as_mut() {
-            if live.driver.view_sticker_set(set_id).is_err() {
-                self.message_menu_ui.sticker_set_open = false;
-                self.status_note = "could not open the sticker set".into();
-            }
+        if let Some(live) = self.live.as_mut()
+            && live.driver.view_sticker_set(set_id).is_err()
+        {
+            self.message_menu_ui.sticker_set_open = false;
+            self.status_note = "could not open the sticker set".into();
         }
         cx.notify();
     }

@@ -188,9 +188,7 @@ pub(super) fn apply_ready_service_messages(
         format!(
             r#"{{"@type":"updateOption","name":"my_id","value":{{"@type":"optionValueInteger","value":"{ME}"}}}}"#
         ),
-        format!(
-            r#"{{"@type":"updateNewChat","chat":{{"id":-1002002,"title":"Launch Channel","type":{{"@type":"chatTypeSupergroup","supergroup_id":2002,"is_channel":true}},"unread_count":0}}}}"#
-        ),
+        r#"{"@type":"updateNewChat","chat":{"id":-1002002,"title":"Launch Channel","type":{"@type":"chatTypeSupergroup","supergroup_id":2002,"is_channel":true},"unread_count":0}}"#.to_string(),
         format!(
             r#"{{"@type":"updateNewChat","chat":{{"id":{CHAT},"title":"Design Club","type":{{"@type":"chatTypeBasicGroup","basic_group_id":{CHAT}}},"unread_count":0}}}}"#
         ),

@@ -627,7 +627,7 @@ fn stress_photos_fixture(dir: &std::path::Path) -> Vec<String> {
         let Ok((width, height)) = image::image_dimensions(&path) else {
             break;
         };
-        let file = demo_file_json(60_000 + i as i32, &path.to_string_lossy(), true);
+        let file = demo_file_json(60_000 + i, &path.to_string_lossy(), true);
         out.push(format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":{out},"date":{date},"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{file},"width":{width},"height":{height},"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Photo {i}","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#,
             id = 50_000 + i as i64,
@@ -1175,7 +1175,13 @@ impl QuillApp {
             return;
         };
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-        let id = -(session.view_generation.0 as i64);
+        // After the newest loaded message, so the send lands at the bottom
+        // and repeated sends don't replace each other.
+        let id = session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.keys().next_back().copied())
+            .map_or(1, |last| last.max(0) + 1);
         let caption = text.trim();
         let reply_json = reply
             .filter(|r| r.chat_id == chat_id)
@@ -1450,7 +1456,7 @@ impl QuillApp {
                 .histories
                 .get(&draft.from_chat_id.0)
                 .and_then(|history| history.messages.get(&id.0))
-                .map(|message| effective_preview(message))
+                .map(effective_preview)
                 .unwrap_or_else(|| "Message".into());
             let body = serde_json::to_string(&preview).unwrap_or_else(|_| "\"\"".into());
             copies.push(format!(

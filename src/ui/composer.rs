@@ -225,8 +225,7 @@ impl QuillApp {
                             // MED4: runtime `message_caption_length_max`
                             // refusal — the counter already warned; this
                             // names the limit.
-                            self.status_note =
-                                format!("caption too long (max {limit} characters)").into();
+                            self.status_note = format!("caption too long (max {limit} characters)");
                         }
                         Err(_) => {
                             let video_unreadable = snaps
@@ -399,8 +398,7 @@ impl QuillApp {
             self.status_note = format!(
                 "rich message too long (max {} characters)",
                 quill::rich::RICH_TEXT_MAX_CHARS
-            )
-            .into();
+            );
             cx.notify();
             return;
         }
@@ -723,12 +721,12 @@ impl QuillApp {
     /// M1: load the chat's scheduled sends and open the dialog.
     pub(super) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
         self.schedule_popup_open = false;
-        if let Some(live) = self.live.as_mut() {
-            if let Some(chat_id) = live.driver.session.open_chat {
-                match live.driver.get_chat_scheduled_messages(chat_id) {
-                    Ok(_) => self.status_note = "loading scheduled messages…".into(),
-                    Err(_) => self.status_note = "could not load scheduled messages".into(),
-                }
+        if let Some(live) = self.live.as_mut()
+            && let Some(chat_id) = live.driver.session.open_chat
+        {
+            match live.driver.get_chat_scheduled_messages(chat_id) {
+                Ok(_) => self.status_note = "loading scheduled messages…".into(),
+                Err(_) => self.status_note = "could not load scheduled messages".into(),
             }
         }
         self.scheduled_dialog_open = true;
@@ -956,7 +954,7 @@ impl QuillApp {
             ComposerScheduling::None => None,
             ComposerScheduling::SendAtDate(date) => Some(format!(
                 "Scheduled · {}",
-                super::message_text::format_unix_date_time(i64::from(date))
+                super::message_text::format_unix_date_time(date)
             )),
             ComposerScheduling::SendWhenOnline => Some("When online".to_string()),
         };
@@ -1310,7 +1308,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
             .and_then(|history| history.messages.get(&message_id.0))
-            .map(|message| effective_preview(message))
+            .map(effective_preview)
             .unwrap_or_default();
         self.begin_reply_to(
             ComposerReplyTo::new(chat_id, message_id, preview),

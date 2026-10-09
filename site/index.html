@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quill — a native Telegram client for the desktop</title>
+  <meta name="description" content="Quill is an independent, open-source Telegram client for macOS, Windows and Linux, written in Rust. Unofficial and not affiliated with Telegram.">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b0f17">
+  <meta property="og:title" content="Quill">
+  <meta property="og:description" content="An independent, open-source Telegram client for macOS, Windows and Linux, written in Rust.">
+  <meta property="og:image" content="img/hero-poster.webp">
+  <link rel="icon" href="img/favicon-64.png" sizes="64x64">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav" id="top">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="Quill home">
+        <img src="img/icon-256.webp" alt="" width="28" height="28">
+        <span>Quill</span>
+      </a>
+      <nav aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#screens">Screenshots</a>
+        <a href="#missing">What's missing</a>
+        <a href="#download">Download</a>
+      </nav>
+      <a class="gh" href="https://github.com/shinycake/quill" aria-label="Quill on GitHub">
+        <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="wrap hero-inner">
+        <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Early preview · open source</p>
+        <h1>An alternative native desktop client for Telegram, <span class="accent">written in Rust and GPUI.</span></h1>
+        <p class="lede">Quill runs on macOS, Windows and Linux and draws its whole interface on the GPU. It talks to Telegram through the official TDLib library, so your chats, contacts and account are the real thing.</p>
+        <div class="cta">
+          <a class="btn primary" id="hero-download" href="#download">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+            <span id="hero-download-label">Download</span>
+          </a>
+          <a class="btn ghost" href="https://github.com/shinycake/quill">View source</a>
+        </div>
+        <p class="fine" id="hero-meta">Unofficial. Not affiliated with Telegram.</p>
+        <figure class="laptop" aria-label="Quill running on a laptop">
+          <div class="laptop-lid">
+            <div class="laptop-screen">
+              <video id="hero-video" autoplay muted loop playsinline preload="auto" width="1920" height="1080" poster="img/hero-poster.webp" aria-label="Quill in action: scrolling a group chat, replying to a friend, browsing polls, searching for a channel and opening its photos">
+                <source src="media/hero-1280.mp4" type="video/mp4" media="(max-width: 760px)">
+                <source src="media/hero-1920.mp4" type="video/mp4">
+              </video>
+            </div>
+            <span class="laptop-notch" aria-hidden="true"></span>
+          </div>
+          <div class="laptop-base" aria-hidden="true"><span class="laptop-groove"></span></div>
+        </figure>
+      </div>
+    </section>
+
+    <section class="notice wrap" aria-labelledby="notice-title">
+      <div class="notice-card">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <div>
+          <h2 id="notice-title">Experimental software</h2>
+          <p>Quill is early and still changing quickly. Use it at your own risk: it comes with no warranty, and the maintainers aren't responsible for lost data, account restrictions or bans, missed messages, or any other damage. Keep an official Telegram app installed alongside it.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="features wrap" id="features" aria-labelledby="features-title">
+      <h2 class="section-title" id="features-title">Everything you use every day</h2>
+      <p class="section-lede">Quill is built from scratch, but it isn't a toy. Most of what you do in Telegram on a desktop already works.</p>
+      <div class="grid">
+        <article class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+          <h3>Messaging</h3>
+          <p>Bold, italic, code, spoilers, quotes and links. Replies and quote-replies, forwarding, scheduled and silent messages, cloud drafts, reactions and polls.</p>
+        </article>
+        <article class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
+          <h3>Media</h3>
+          <p>Photos, videos, albums, GIFs and stickers. Voice and video messages recorded right in the app, with transcription. A fullscreen viewer, an audio player bar and a downloads list.</p>
+        </article>
+        <article class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg></div>
+          <h3>Calls</h3>
+          <p>One-to-one audio and video calls with screen sharing, and group voice chats.</p>
+        </article>
+        <article class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg></div>
+          <h3>Groups &amp; channels</h3>
+          <p>Admin tools, invite links, join requests, forum topics, comments, and channel statistics. Bots with keyboards, inline results and games.</p>
+        </article>
+        <article class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+          <h3>Privacy</h3>
+          <p>Secret chats, a local passcode lock, active-session management and two-step verification. No analytics: apart from Telegram, Quill only contacts GitHub to look for updates, and you can switch that off.</p>
+        </article>
+        <article class="card">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 0 0 0 20c.9 0 1.7-.8 1.7-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.7 1.7-1.7h2a5.6 5.6 0 0 0 5.4-5.6C22 6 17.5 2 12 2z"/></svg></div>
+          <h3>Make it yours</h3>
+          <p>Light and dark themes with automatic night mode, accent colors, chat wallpapers, text size, and bubble or plain message layouts.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="screens" id="screens" aria-labelledby="screens-title">
+      <div class="wrap">
+        <h2 class="section-title" id="screens-title">A closer look</h2>
+        <p class="section-lede">Captured from the real app window, filled with demo conversations.</p>
+        <div class="tabs" role="tablist" aria-label="Screenshots">
+          <button role="tab" aria-selected="true" data-shot="chat-light" data-alt="A group chat in the light theme with reactions, replies and colored sender names">Light theme</button>
+          <button role="tab" aria-selected="false" data-shot="media-viewer" data-alt="The fullscreen media viewer with zoom, forward and download actions">Media viewer</button>
+          <button role="tab" aria-selected="false" data-shot="reactions-menu" data-alt="The reaction picker above a message's context menu">Reactions</button>
+          <button role="tab" aria-selected="false" data-shot="polls" data-alt="A poll and a closed quiz with its explanation">Polls</button>
+          <button role="tab" aria-selected="false" data-shot="player-bar" data-alt="The audio player bar above a private chat with music, a photo and reactions">Music</button>
+          <button role="tab" aria-selected="false" data-shot="channel-photos" data-alt="A channel with photo posts, reactions and view counts">Channels</button>
+          <button role="tab" aria-selected="false" data-shot="appearance-dark" data-alt="Appearance settings with themes, accent colors and wallpapers">Appearance</button>
+          <button role="tab" aria-selected="false" data-shot="accent-light" data-alt="A private chat in the light theme with a purple accent color">Accent colors</button>
+        </div>
+        <figure class="shot gallery-shot" role="tabpanel">
+          <div class="chrome" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img id="gallery-img" src="img/chat-light.webp" width="1400" height="900" loading="lazy" alt="A group chat in the light theme with reactions, replies and colored sender names">
+        </figure>
+      </div>
+    </section>
+
+    <section class="built wrap" aria-labelledby="built-title">
+      <h2 class="section-title" id="built-title">How it's built</h2>
+      <div class="built-grid">
+        <div>
+          <h3>TDLib does the talking</h3>
+          <p>Quill doesn't reimplement Telegram's protocol. Every request goes through <a href="https://core.telegram.org/tdlib">TDLib</a>, Telegram's own client library, the same one many third-party apps use. Encryption, sync and the local message database are TDLib's job.</p>
+        </div>
+        <div>
+          <h3>GPUI draws the window</h3>
+          <p>The interface is native Rust on <a href="https://www.gpui.rs">GPUI</a>, the GPU-accelerated UI framework from the Zed editor. There's no browser engine and no web view inside.</p>
+        </div>
+        <div>
+          <h3>Open, and checkable</h3>
+          <p>The source is on GitHub under the MIT license. Every third-party component and its license is listed in the repository and inside the app under Settings → Appearance → About Quill.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="missing" id="missing" aria-labelledby="missing-title">
+      <div class="wrap">
+        <h2 class="section-title" id="missing-title">What's missing, and why</h2>
+        <p class="section-lede">Some features can't be built yet, and some haven't been. Here's the honest list of the bigger ones, checked against <span id="tdlib-version">TDLib 1.8.67</span>. Smaller gaps are tracked in the <a href="https://github.com/shinycake/quill#status">repository's checklist</a>.</p>
+        <div class="legend" id="missing-legend"></div>
+        <div class="missing-list" id="missing-list">
+          <p class="loading">Loading…</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="download wrap" id="download" aria-labelledby="download-title">
+      <h2 class="section-title" id="download-title">Download</h2>
+      <div id="release">
+        <div class="no-release" id="no-release">
+          <p><strong>There's no release yet.</strong> The first builds will show up here, and on <a href="https://github.com/shinycake/quill/releases">GitHub Releases</a>, when they're ready. Until then you can <a href="https://github.com/shinycake/quill/blob/main/docs/build.md">build Quill from source</a>.</p>
+        </div>
+      </div>
+      <div class="platforms" id="platforms" hidden></div>
+      <div class="whatsnew" id="whatsnew" hidden>
+        <h3 id="whatsnew-title">What's new</h3>
+        <div class="notes" id="whatsnew-body"></div>
+        <a class="more" id="whatsnew-link" href="https://github.com/shinycake/quill/releases">All releases</a>
+      </div>
+      <p class="reqs">macOS 14 or later on Apple Silicon · Windows 10 or later (x64) · Linux x86_64 with glibc. Builds aren't signed with a paid developer certificate yet, so your system will ask you to confirm the first launch.</p>
+    </section>
+
+    <section class="faq wrap" aria-labelledby="faq-title">
+      <h2 class="section-title" id="faq-title">Questions</h2>
+      <details>
+        <summary>Is Quill made by Telegram?</summary>
+        <p>No. Quill is an independent project. It isn't affiliated with, endorsed by, or sponsored by Telegram. It uses the public <a href="https://core.telegram.org/api">Telegram API</a> under Telegram's <a href="https://core.telegram.org/api/terms">API Terms of Service</a>, through Telegram's own TDLib library.</p>
+      </details>
+      <details>
+        <summary>Can my account get banned for using it?</summary>
+        <p>Quill follows Telegram's rules for third-party apps as closely as we can, but Telegram decides what it allows, and we can't promise anything. Quill is experimental: use it at your own risk.</p>
+      </details>
+      <details>
+        <summary>Does Quill see my messages?</summary>
+        <p>Quill runs on your computer and stores its data there, encrypted with a key kept in your system's keychain (macOS), DPAPI (Windows) or a private file (Linux). It has no server of its own and collects no analytics.</p>
+      </details>
+      <details>
+        <summary>Why do I need to confirm the first launch?</summary>
+        <p>Releases aren't signed with a paid Apple or Microsoft certificate yet. On macOS, open System Settings → Privacy &amp; Security and choose Open Anyway. On Windows, choose More info → Run anyway. Each release lists SHA-256 checksums so you can verify the download.</p>
+      </details>
+      <details>
+        <summary>How can I help?</summary>
+        <p>Try it, and <a href="https://github.com/shinycake/quill/issues">open an issue</a> when something breaks or feels off. Pull requests are welcome too.</p>
+      </details>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap foot-inner">
+      <div class="foot-brand">
+        <img src="img/icon-256.webp" alt="" width="24" height="24">
+        <span>Quill</span>
+      </div>
+      <p>Quill is free software under the <a href="https://github.com/shinycake/quill/blob/main/LICENSE">MIT License</a>. Third-party components and their licenses are listed in <a href="https://github.com/shinycake/quill/blob/main/THIRD_PARTY.md">THIRD_PARTY.md</a>.</p>
+      <p>Quill is not affiliated with, endorsed by, or sponsored by Telegram FZ-LLC or Telegram Messenger Inc. "Telegram" is a trademark of its owner and is used here only to describe what Quill works with.</p>
+    </div>
+  </footer>
+</body>
+</html>

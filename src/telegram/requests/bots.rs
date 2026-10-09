@@ -181,3 +181,14 @@ pub fn stop_pending_message(
         "topic_id":super::message_topic_value(topic_id), "draft_id":draft_id.to_string()})
     .to_string()
 }
+
+/// `toggleHasSponsoredMessagesEnabled` (TDLib 1.8.67, `schema/td_api.tl:14854`):
+/// the Premium "hide ads" setting; has no effect without Telegram Premium.
+pub fn toggle_has_sponsored_messages_enabled(extra: RequestId, enabled: bool) -> String {
+    json!({
+        "@type": "toggleHasSponsoredMessagesEnabled",
+        "@extra": extra.as_extra(),
+        "has_sponsored_messages_enabled": enabled,
+    })
+    .to_string()
+}

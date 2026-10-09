@@ -1142,17 +1142,17 @@ impl QuillApp {
                 Err(_) => "could not open chat".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(prev) = session.open_chat {
-                if prev != chat_id {
-                    let stored = draft_text_to_store(&text, reply.is_some()).map(str::to_string);
-                    let reply_to = stored.as_ref().and(reply);
-                    let draft = stored.map(|body| ChatDraft {
-                        text: body,
-                        reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
-                        quote: reply_to.and_then(|reply| reply.quote),
-                    });
-                    session.store_composer_draft(prev, draft);
-                }
+            if let Some(prev) = session.open_chat
+                && prev != chat_id
+            {
+                let stored = draft_text_to_store(&text, reply.is_some()).map(str::to_string);
+                let reply_to = stored.as_ref().and(reply);
+                let draft = stored.map(|body| ChatDraft {
+                    text: body,
+                    reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+                    quote: reply_to.and_then(|reply| reply.quote),
+                });
+                session.store_composer_draft(prev, draft);
             }
             session.close_search();
             session.open_chat(chat_id);
@@ -1182,17 +1182,17 @@ impl QuillApp {
                 Err(_) => "could not open chat".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(prev) = session.open_chat {
-                if prev != chat_id {
-                    let stored = draft_text_to_store(&text, reply.is_some()).map(str::to_string);
-                    let reply_to = stored.as_ref().and(reply);
-                    let draft = stored.map(|body| ChatDraft {
-                        text: body,
-                        reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
-                        quote: reply_to.and_then(|reply| reply.quote),
-                    });
-                    session.store_composer_draft(prev, draft);
-                }
+            if let Some(prev) = session.open_chat
+                && prev != chat_id
+            {
+                let stored = draft_text_to_store(&text, reply.is_some()).map(str::to_string);
+                let reply_to = stored.as_ref().and(reply);
+                let draft = stored.map(|body| ChatDraft {
+                    text: body,
+                    reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+                    quote: reply_to.and_then(|reply| reply.quote),
+                });
+                session.store_composer_draft(prev, draft);
             }
             session.promote_search_message(chat_id, message_id);
             session.close_search();
@@ -1269,7 +1269,7 @@ impl QuillApp {
         if communities.is_empty() {
             return None;
         }
-        communities.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        communities.sort_by_key(|a| a.1.to_lowercase());
         let mut chips = div()
             .id("search-community-filter")
             .flex()

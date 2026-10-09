@@ -1,0 +1,91 @@
+{
+  "updated": "2026-10-08",
+  "tdlib": "1.8.67",
+  "kinds": {
+    "tdlib": "Not in TDLib",
+    "official-only": "Official apps only",
+    "platform": "OS limitation",
+    "not-yet": "Not built yet",
+    "unverified": "Needs testing"
+  },
+  "items": [
+    {
+      "category": "Account",
+      "title": "Change your phone number",
+      "kind": "official-only",
+      "reason": "Telegram's API marks the code type for changing a number as reserved for the official Android and iOS apps. Quill has the code for it but won't turn it on until it's confirmed to be allowed."
+    },
+    {
+      "category": "Account",
+      "title": "Sign-ups that require buying Premium in an app store",
+      "kind": "official-only",
+      "reason": "The in-store purchase calls are limited to official apps. Quill stops with a clear message instead."
+    },
+    {
+      "category": "Account",
+      "title": "Show a QR code so another device can sign in",
+      "kind": "not-yet",
+      "reason": "Signing in to Quill with a QR code works. Showing a QR code from Quill for a different device has no screen yet."
+    },
+    {
+      "category": "Account",
+      "title": "Count the secret chats an ended session will close",
+      "kind": "tdlib",
+      "reason": "TDLib doesn't link secret chats to sessions, so there is nothing to count."
+    },
+    {
+      "category": "Account",
+      "title": "Full account data export",
+      "kind": "unverified",
+      "reason": "Per-chat export works. The full account exporter is written but hasn't been tested from start to finish."
+    },
+    {
+      "category": "Groups & channels",
+      "title": "Add a chat to a community",
+      "kind": "tdlib",
+      "reason": "TDLib 1.8.67 can create and rename communities, but has no call for adding an existing chat."
+    },
+    {
+      "category": "Groups & channels",
+      "title": "Show or hide a chat inside a community",
+      "kind": "tdlib",
+      "reason": "The hidden flag can only be set when the community is created. TDLib has no call to change it later."
+    },
+    {
+      "category": "Groups & channels",
+      "title": "Community administrator rights",
+      "kind": "tdlib",
+      "reason": "TDLib describes administrator rights for communities but has no call to change them."
+    },
+    {
+      "category": "Calls",
+      "title": "Echo cancellation and noise suppression settings",
+      "kind": "not-yet",
+      "reason": "Calls use the call engine's default audio processing. There are no switches for it yet."
+    },
+    {
+      "category": "Calls",
+      "title": "Live video and screen sharing in group calls",
+      "kind": "unverified",
+      "reason": "The code paths exist and pass mock tests, but haven't been tried in a real group call."
+    },
+    {
+      "category": "Gifts",
+      "title": "Signature on a gift bought from the Marketplace",
+      "kind": "tdlib",
+      "reason": "TDLib's resale purchase call takes a message and a privacy flag, but no signature."
+    },
+    {
+      "category": "Secret chats",
+      "title": "Screenshot alerts and screenshot blocking on Linux",
+      "kind": "platform",
+      "reason": "Linux desktops have no standard way for an app to detect or block screenshots. On macOS and Windows, Quill keeps open secret chats out of screenshots and screen recordings."
+    },
+    {
+      "category": "Accessibility",
+      "title": "Full VoiceOver navigation",
+      "kind": "unverified",
+      "reason": "Quill exposes its interface to accessibility tools on macOS, but spoken navigation hasn't been checked in every screen."
+    }
+  ]
+}

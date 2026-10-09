@@ -11,7 +11,8 @@ use crate::telegram::requests::{
     get_chat_message_by_date, get_chat_message_calendar, get_chat_sponsored_messages,
     report_chat_sponsored_message, search_chat_members, search_chat_messages,
     search_chat_messages_from, search_chats, search_messages_filter_json, search_messages_filtered,
-    search_public_chats, search_recently_found_chats, view_sponsored_chat,
+    search_public_chats, search_recently_found_chats, toggle_has_sponsored_messages_enabled,
+    view_messages, view_sponsored_chat,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -43,6 +44,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .requests
             .has_purpose_for_chat(RequestPurpose::GetChatSponsoredMessages, chat_id)
+            || !self
+                .session
+                .sponsored_fetch_due(chat_id, std::time::Instant::now())
         {
             return Ok(None);
         }
@@ -52,6 +56,74 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self
             .sender
             .send_json(&get_chat_sponsored_messages(extra, chat_id))
+        {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// Tell TDLib the sponsored messages `shown` are on screen
+    /// (`viewMessages`, `messageSourceChatHistory`; TDLib 1.8.67 has no
+    /// separate `viewSponsoredMessage`). The session counts each id once, so
+    /// calling this every frame the ad is visible sends at most one request
+    /// per ad. Returns the request id when something was sent.
+    pub fn view_sponsored_messages(
+        &mut self,
+        chat_id: ChatId,
+        shown: &[i64],
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let due = self.session.take_sponsored_views(chat_id, shown);
+        if due.is_empty() {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ViewSponsoredMessages, Some(chat_id));
+        let ids: Vec<MessageId> = due.iter().copied().map(MessageId).collect();
+        match self.sender.send_json(&view_messages(
+            extra,
+            chat_id,
+            &ids,
+            "messageSourceChatHistory",
+            false,
+        )) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.untake_sponsored_views(chat_id, &due);
+                Err(err)
+            }
+        }
+    }
+
+    /// "Hide ads" (tdesktop `HideSponsoredClickHandler`): Premium accounts
+    /// send `toggleHasSponsoredMessagesEnabled(false)`; for anyone else the
+    /// session records the "needs Premium" notice and nothing is sent
+    /// (`Ok(None)`).
+    pub fn hide_sponsored_messages(
+        &mut self,
+        chat_id: ChatId,
+        message_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.begin_sponsored_hide(chat_id, message_id) != Some(true) {
+            return Ok(None);
+        }
+        let extra = self.session.request(
+            RequestPurpose::ToggleHasSponsoredMessagesEnabled,
+            Some(chat_id),
+        );
+        match self
+            .sender
+            .send_json(&toggle_has_sponsored_messages_enabled(extra, false))
         {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
