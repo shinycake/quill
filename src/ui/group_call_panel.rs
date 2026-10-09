@@ -898,6 +898,7 @@ impl QuillApp {
 
     /// Open or close the group call window with the tracked group call.
     pub(super) fn sync_group_call_window(&mut self, cx: &mut Context<Self>) {
+        self.sync_global_ptt(cx);
         let wanted = self
             .session()
             .and_then(|s| s.active_group_call.as_ref())
