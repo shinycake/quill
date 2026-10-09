@@ -1,2 +1,0 @@
-# Gift, giveaway, gift-code, refunded and prize messages render as bubble cards
-parity:render-gift-cards
