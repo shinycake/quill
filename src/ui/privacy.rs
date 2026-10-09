@@ -81,7 +81,7 @@ impl QuillApp {
     /// Slice S3: close the topmost privacy layer (exceptions →
     /// exceptions-picker → editor → main overlay), like TGX's back stack.
     #[allow(clippy::if_same_then_else)]
-    fn close_privacy_top(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_privacy_top(&mut self, cx: &mut Context<Self>) {
         if self.exception_picker_open || self.block_picker_open {
             self.exception_picker_open = false;
             self.block_picker_open = false;

@@ -18,6 +18,7 @@ mod clipboard_files;
 mod composer_rtl;
 mod composer_thumb;
 mod editor_art;
+mod esc_stack;
 mod ffmpeg_video;
 mod force_reply;
 mod frame_clock;
