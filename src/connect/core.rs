@@ -260,19 +260,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         // variants); the UI drains `Session::ai_composer_text` into the
         // composer draft.
         let ai_text_answer: Option<(ChatId, String)> = match &owned.envelope.payload {
-            EnvelopePayload::FixedText { text, .. } | EnvelopePayload::FormattedText { text } => {
-                owned
-                    .envelope
-                    .extra
-                    .and_then(|id| self.session.requests.get(id))
-                    .filter(|pending| {
-                        matches!(
-                            pending.purpose,
-                            RequestPurpose::FixTextWithAi | RequestPurpose::ComposeTextWithAi
-                        )
-                    })
-                    .and_then(|pending| pending.chat_id.map(|chat_id| (chat_id, text.clone())))
-            }
+            EnvelopePayload::FixedText { text, .. }
+            | EnvelopePayload::FormattedText { text, .. } => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.get(id))
+                .filter(|pending| {
+                    matches!(
+                        pending.purpose,
+                        RequestPurpose::FixTextWithAi | RequestPurpose::ComposeTextWithAi
+                    )
+                })
+                .and_then(|pending| pending.chat_id.map(|chat_id| (chat_id, text.clone()))),
             _ => None,
         };
         // Slice msg-richtext-ai-tools: capture AI rich-message answers
@@ -664,6 +663,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` `ok`
         // marks the websites list stale in the reducer; same pattern.
         let _ = self.refresh_connected_websites_if_stale();
+        // `parity:proxy-settings`: a proxy mutation marks the list stale.
+        let _ = self.refresh_proxies_if_stale();
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` `ok` marks the
         // subscriptions list stale in the reducer; same pattern.

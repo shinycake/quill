@@ -1,4 +1,4 @@
-//! forum topics + comment threads.
+//! forum topics.
 
 use super::app::QuillApp;
 use super::app::pane_placeholder;
@@ -13,10 +13,10 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::{ChatId, MessageId};
+use quill::ids::ChatId;
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{ForumTopic, effective_content};
+use quill::telegram::envelope::ForumTopic;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -286,35 +286,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice G2: open the channel-post comment-thread viewer and
-    /// fetch the thread history.
-    pub(super) fn open_comment_thread_dialog(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.comment_thread_dialog = Some(CommentThreadDialog {
-            chat_id,
-            message_id,
-        });
-        if let Some(live) = self.live.as_mut()
-            && live
-                .driver
-                .fetch_message_thread_history(chat_id, message_id)
-                .is_err()
-        {
-            self.status_note = "could not load comments".into();
-        }
-        cx.notify();
-    }
-
-    pub(super) fn close_comment_thread_dialog(&mut self, cx: &mut Context<Self>) {
-        self.comment_thread_dialog = None;
-        cx.notify();
-    }
-
     /// kit Phase 2 (redo): forum manage hosted in a kit `Dialog` via
     /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
     pub(super) fn build_forum_manage_dialog(
@@ -371,139 +342,6 @@ impl QuillApp {
                 list = list.child(this.forum_topic_manage_row(chat_id, topic, editing, cx));
             }
             body = body.child(list);
-            let body = body.into_any_element();
-            dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .on_close(on_close)
-        })
-    }
-
-    /// kit Phase 2 (redo): comment thread hosted in a kit `Dialog` via
-    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
-    pub(super) fn build_comment_thread_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::CommentThread, |this, _, cx| {
-                this.close_comment_thread_dialog(cx);
-            });
-        app.update(cx, |this, cx| {
-            let dialog = dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title("Comments"));
-            let Some((chat_id, message_id)) = this
-                .comment_thread_dialog
-                .as_ref()
-                .map(|dialog| (dialog.chat_id, dialog.message_id))
-            else {
-                return dialog.on_close(on_close);
-            };
-            let fetch = this
-                .session()
-                .and_then(|session| session.comment_thread.clone());
-            let mut body = div().flex().flex_col().gap_2();
-            match fetch {
-                Some(thread) if thread.chat_id == chat_id && thread.message_id == message_id => {
-                    if let Some(error) = thread.failed {
-                        body = body.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .w_full()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(error),
-                                )
-                                .child(
-                                    Button::new("g2-comments-retry")
-                                        .label("Retry")
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.open_comment_thread_dialog(
-                                                chat_id, message_id, window, cx,
-                                            );
-                                            this.close_kit_dialog_if_done(
-                                                DialogKind::CommentThread,
-                                                window,
-                                                cx,
-                                            );
-                                        })),
-                                ),
-                        );
-                    } else if thread.messages.is_empty() {
-                        body = body.child(
-                            div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("No comments yet."),
-                        );
-                    } else {
-                        let mut list = div()
-                            .id("g2-comment-list")
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .max_h(px(360.))
-                            .overflow_y_scroll();
-                        for message in &thread.messages {
-                            let name = if message.is_outgoing {
-                                "You".to_string()
-                            } else {
-                                message
-                                    .author_signature
-                                    .clone()
-                                    .unwrap_or_else(|| "Comment".to_string())
-                            };
-                            let text = Self::message_copyable_text(effective_content(
-                                &message.content,
-                                message.ephemeral.as_ref(),
-                            ))
-                            .unwrap_or_else(|| "(no text)".to_string());
-                            list = list.child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_semibold()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(name),
-                                    )
-                                    .child(div().text_sm().child(text)),
-                            );
-                        }
-                        body = body.child(list);
-                    }
-                }
-                _ => {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Loading comments…"),
-                    );
-                }
-            }
             let body = body.into_any_element();
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({

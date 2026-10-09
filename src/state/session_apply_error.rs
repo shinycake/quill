@@ -1042,6 +1042,12 @@ impl Session {
                 self.sessions_mutating = false;
                 self.sessions_error = Some(sessions_error_line("link the device", &err));
             }
+            Some(
+                purpose @ (RequestPurpose::GetProxies
+                | RequestPurpose::MutateProxy
+                | RequestPurpose::PingProxy { .. }
+                | RequestPurpose::SetPreferIpv6 { .. }),
+            ) => self.apply_proxy_error(purpose, &err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;
                 self.sessions_stale = false;
@@ -1117,6 +1123,11 @@ impl Session {
             ) => {
                 self.websites_mutating = false;
                 self.websites_error = Some(sessions_error_line("disconnect the website", &err));
+            }
+            // A failed translation shows "Translate failed." where the text
+            // would have gone, in the box and in the translated bubble alike.
+            Some(RequestPurpose::TranslateJob { job }) => {
+                self.finish_translation(job, Translation::Failed(error_reason(&err)));
             }
             // M1 fix-up: a failed `resendMessages` surfaces in the
             // status note instead of vanishing into `_ => {}` —
@@ -1305,19 +1316,11 @@ impl Session {
                 )),
             );
         }
-        // Slice G2: failed thread-history fetch — mark the comment
-        // viewer so it shows an error.
-        if let Some(RequestPurpose::GetMessageThreadHistory { message_id }) =
-            pending.map(|p| p.purpose)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-        {
-            self.comment_thread = Some(CommentThreadFetch {
-                chat_id,
-                message_id: MessageId(message_id),
-                messages: Vec::new(),
-                failed: Some(call_request_error_line(&err, "Could not load comments")),
-            });
-        }
+        // A failed thread request marks the open thread view.
+        self.fail_thread(
+            pending,
+            call_request_error_line(&err, "Could not load comments"),
+        );
         // Slice CL: failed preview-history fetch — mark the peek
         // preview so it shows an error instead of a spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatPreview)

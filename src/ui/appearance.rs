@@ -293,7 +293,9 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let mut body = div().flex().flex_col().gap_3();
-            if this.keybindings_screenshot {
+            if this.translate_ui.settings_only {
+                body = body.child(this.translate_settings_section(cx));
+            } else if this.keybindings_screenshot {
                 body = body.child(
                     div()
                         .text_xs()
@@ -322,12 +324,16 @@ impl QuillApp {
                 body = body.child(this.appearance_bubble_section(cx));
                 body = body.child(this.appearance_chat_list_section(cx));
                 body = body.child(this.appearance_send_key_section(cx));
+                // Batch 7: Show Translate Button / Translate Entire Chats /
+                // Do Not Translate.
+                body = body.child(this.translate_settings_section(cx));
                 // Slice parity:settings-language: the app language picker
                 // (the tag TDLib gets in `setTdlibParameters`).
                 body = body.child(this.appearance_language_section(cx));
                 body = body.child(this.general_autostart_section(cx));
                 body = body.child(this.general_link_handler_section(cx));
                 body = body.child(this.update_settings_section(cx));
+                body = body.child(this.about_settings_section(cx));
                 // Tray-dependent switches only exist while a tray icon does:
                 // a hidden window with no tray to reopen it from would
                 // strand the user (Linux without a StatusNotifier host).

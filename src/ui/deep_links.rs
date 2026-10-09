@@ -40,6 +40,16 @@ impl QuillApp {
     /// terminal session state into the next step: follow-up request,
     /// info dialog, or a deferred chat open for render.
     pub(super) fn pump_deep_link(&mut self, cx: &mut Context<Self>) {
+        // `tg://proxy` / `tg://socks` (and the t.me forms) are parsed
+        // locally and need no sign-in: a user who is blocked from
+        // Telegram can only get in through them.
+        if let Some(link) = self
+            .pending_deep_link
+            .take_if(|link| quill::proxy::parse_proxy_link(link).is_some())
+        {
+            self.handle_proxy_link(&link, cx);
+            return;
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };

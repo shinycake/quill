@@ -683,6 +683,16 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             })
         }
         "ok" => Ok(EnvelopePayload::Ok),
+        // `parity:proxy-settings`: schema 1.8.67 :10118 / :10121 / :10077.
+        "addedProxies" => Ok(EnvelopePayload::AddedProxies {
+            proxies: crate::proxy::parse_added_proxies(&value),
+        }),
+        "addedProxy" => Ok(EnvelopePayload::AddedProxy {
+            proxy: crate::proxy::parse_added_proxy(&value),
+        }),
+        "seconds" => Ok(EnvelopePayload::Seconds {
+            seconds: value.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
+        }),
         // A5: `checkChatUsernameResult*` (schema 1.8.67, lines 8583–8598).
         "checkChatUsernameResultOk" => Ok(EnvelopePayload::CheckChatUsernameResult(
             UsernameCheckResult::Available,
@@ -725,9 +735,11 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         }),
         // Slice msg-richtext-ai-tools: bare `formattedText` (schema:3046)
         // — the `composeTextWithAi` answer.
-        "formattedText" => Ok(EnvelopePayload::FormattedText {
-            text: parse_formatted_text(Some(&value)),
-        }),
+        "formattedText" => {
+            let text = parse_formatted_text(Some(&value));
+            let entities = parse_text_entities(&text, Some(&value));
+            Ok(EnvelopePayload::FormattedText { text, entities })
+        }
         // MED4: `webPageInstantView` (schema:4377) — same `blocks` /
         // `is_full` shape as `richMessage`, so the M2 parser applies.
         "webPageInstantView" => {
@@ -1016,6 +1028,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .collect();
             Ok(EnvelopePayload::Messages(parsed))
         }
+        // `getMessageThread` answer (schema 1.8.67, line 3897).
+        "messageThreadInfo" => Ok(EnvelopePayload::MessageThreadInfo(Box::new(
+            parse_message_thread_info(&value)?,
+        ))),
         "chats" => Ok(EnvelopePayload::Chats {
             total_count: value
                 .get("total_count")
@@ -1986,6 +2002,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             chat_id: int53(value.get("chat_id"))?,
             has_protected_content: value
                 .get("has_protected_content")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        "updateChatIsTranslatable" => Ok(EnvelopePayload::UpdateChatIsTranslatable {
+            chat_id: int53(value.get("chat_id"))?,
+            is_translatable: value
+                .get("is_translatable")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),

@@ -137,6 +137,9 @@ pub struct ParsedMessage {
     /// messages) and when the field is absent. Parity slice 4 routes topic
     /// messages into the topic's history.
     pub topic_id: Option<i32>,
+    /// `message_thread_id` when `message.topic_id` is `messageTopicThread`
+    /// (a comment / reply thread), `None` otherwise.
+    pub thread_id: Option<i64>,
     /// Schema `message.media_album_id` (int64). `0` means the message is not in an album.
     pub media_album_id: i64,
     /// Phase D2: schema `message.author_signature` (TDLib 1.8.67, lines
@@ -439,6 +442,7 @@ pub(crate) fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> 
             .filter(|s| !s.is_empty())
             .map(str::to_string),
         topic_id: parse_message_topic(value.get("topic_id")),
+        thread_id: parse_message_thread_topic(value.get("topic_id")),
         content,
         ephemeral: parse_ephemeral_message_content(value.get("ephemeral_content")),
         files,

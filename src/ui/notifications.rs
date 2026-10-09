@@ -152,6 +152,8 @@ impl QuillApp {
                 break;
             }
         }
+        // `parity:proxy-settings`: first `getProxies` + auto-switch.
+        progressed |= live.driver.proxy_tick(quill::state::unix_ms_now());
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.folder_tab
@@ -258,6 +260,10 @@ impl QuillApp {
                 "This link will only work for members of this chat."
             }
             .into();
+            progressed = true;
+        }
+        // Batch 7: keep a translated chat's translations coming.
+        if self.pump_translation() {
             progressed = true;
         }
         // `parity:platform-deep-links`: drive the launch-link flow —
@@ -467,6 +473,8 @@ impl QuillApp {
     /// dispatch newly queued notifications on worker threads. Runs from
     /// `render`, which is the only UI path with a `&mut Window`.
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A resolved comment thread moves the view into its discussion group.
+        self.advance_thread(window, cx);
         let clicks: Vec<ChatId> = self
             .notify_clicks
             .lock()

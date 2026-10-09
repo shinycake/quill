@@ -1,6 +1,7 @@
 //! Quill core: ordered TDLib envelopes, reducers, and synthetic UI helpers.
 //! The GPUI binary lives in `src/main.rs` and is compiled with `--features ui`.
 
+pub mod about;
 pub mod account_export;
 pub mod album;
 pub mod animation;
@@ -48,6 +49,7 @@ pub mod playlist;
 pub mod poll;
 pub mod presence;
 pub mod privacy;
+pub mod proxy;
 pub mod rich;
 pub mod row_fx;
 pub mod search_filters;
@@ -75,6 +77,7 @@ pub mod subsection_tabs;
 pub mod suggest;
 pub mod telegram;
 pub mod text;
+pub mod translate;
 pub mod tray;
 #[cfg(all(target_os = "macos", feature = "ui"))]
 pub mod tray_mac;

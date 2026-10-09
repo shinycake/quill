@@ -219,6 +219,58 @@ impl QuillApp {
                 }
             );
         }
+        // Translate Selected Text over a selection, Translate for the
+        // message's own text (Telegram Desktop: both can show; the second
+        // only while the chat is not already shown translated).
+        if let Some(selected) = self
+            .message_menu_selection
+            .clone()
+            .filter(|selected| self.translate_menu_offered(chat_id, selected))
+        {
+            item!(
+                order::TRANSLATE_SELECTED,
+                gpui_kit::assets::IconName::Languages,
+                "menu-translate-selected",
+                "Translate Selected Text",
+                this,
+                window,
+                cx,
+                {
+                    this.message_menu = None;
+                    this.open_translate_selection(chat_id, selected.clone(), window, cx);
+                }
+            );
+        }
+        let already_translated = self.session().is_some_and(|s| {
+            s.chat_translated_to(chat_id).is_some_and(|to| {
+                matches!(
+                    s.message_translation(chat_id, message_id, to),
+                    Some(quill::state::Translation::Done { .. })
+                )
+            })
+        });
+        if !already_translated
+            && message_id.0 > 0
+            && quill::translate::translatable_content(effective_content(
+                &message.content,
+                message.ephemeral.as_ref(),
+            ))
+            .is_some_and(|(text, _)| self.translate_menu_offered(chat_id, text))
+        {
+            item!(
+                order::TRANSLATE,
+                gpui_kit::assets::IconName::Languages,
+                "menu-translate",
+                "Translate",
+                this,
+                window,
+                cx,
+                {
+                    this.message_menu = None;
+                    this.open_translate_message(chat_id, message_id, window, cx);
+                }
+            );
+        }
         // Over a link, the menu leads with what Telegram Desktop adds for it:
         // a copy entry named for the kind of link (`copyToClipboardContextItemText`),
         // and, for web links, Open.
@@ -381,20 +433,29 @@ impl QuillApp {
                 }
             );
         }
-        // Slice G2: channel-post comment threads (`getMessageThreadHistory`,
-        // schema 1.8.67, line 11839). The dialog shows an honest error
-        // when the post has no discussion thread.
-        if is_channel_post && allows(false, |a| a.can_get_message_thread) {
+        // Channel-post comments and group reply threads: `getMessageThread`
+        // (schema 1.8.67, line 11566) gated by
+        // `messageProperties.can_get_message_thread`.
+        let has_replies = message
+            .interaction_info
+            .as_ref()
+            .and_then(|info| info.reply_info.as_ref())
+            .is_some_and(|reply| reply.reply_count > 0);
+        if (is_channel_post || has_replies) && allows(false, |a| a.can_get_message_thread) {
             item!(
-                15,
+                order::VIEW_COMMENTS,
                 gpui_kit::assets::IconName::MessageSquare,
                 "menu-comments",
-                "View Comments",
+                if is_channel_post {
+                    "View Comments"
+                } else {
+                    "View Thread"
+                },
                 this,
                 window,
                 cx,
                 {
-                    this.open_comment_thread_dialog(chat_id, message_id, window, cx);
+                    this.open_thread_view(chat_id, message_id, window, cx);
                     this.message_menu = None;
                     cx.notify();
                 }
@@ -513,9 +574,6 @@ impl QuillApp {
                 ),
             ));
         }
-        let _translate_hook = (order::TRANSLATE_SELECTED, order::TRANSLATE);
-        // Batch 7 adds "Translate Selected Text" and "Translate" to `rows`
-        // with those two sort keys.
         let page_rows: Vec<MenuRow> = match page {
             MessageMenuPage::Main => rows,
             sub => {

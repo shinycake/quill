@@ -811,6 +811,9 @@ pub struct Session {
     /// Chats whose content is protected (`chat.has_protected_content`,
     /// schema 1.8.67 line 3598): no saving, forwarding or copying.
     pub protected_chats: HashSet<i64>,
+    /// Translation state (`translateText` / `translateMessageText`, the
+    /// chat translate bar).
+    pub translate: TranslateState,
     /// Slice G2: the welcome-message pack per chat
     /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
     pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
@@ -828,7 +831,7 @@ pub struct Session {
     pub boost_intent: Option<i64>,
     /// Slice G2: channel-comments viewer — the latest
     /// `getMessageThreadHistory` result (channel post → comment thread).
-    pub comment_thread: Option<CommentThreadFetch>,
+    pub thread: Option<ThreadView>,
     /// Slice CL: chat-list peek preview — the latest `getChatHistory`
     /// result for one unopened chat (`parity:chatlist-chat-preview`).
     pub chat_preview_fetch: Option<PreviewHistoryFetch>,
@@ -884,6 +887,9 @@ pub struct Session {
     pub deep_link: Option<DeepLinkState>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
+    /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
+    /// auto-switch / IPv6 preferences.
+    pub proxy: crate::proxy::ProxyState,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -1283,12 +1289,13 @@ impl Session {
             supergroup_send_welcome_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
             protected_chats: HashSet::new(),
+            translate: TranslateState::default(),
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),
             boost_slots_by_chat: HashMap::new(),
             boost_intent: None,
-            comment_thread: None,
+            thread: None,
             chat_preview_fetch: None,
             chat_export: None,
             account_export: None,
@@ -1303,6 +1310,7 @@ impl Session {
             inline_bot_resolve_seq: 0,
             deep_link: None,
             deep_link_seq: 0,
+            proxy: Default::default(),
             supergroup_join_by_request: HashMap::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),

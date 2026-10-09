@@ -177,6 +177,53 @@ impl QuillApp {
         section.into_any_element()
     }
 
+    /// "About Quill": version, the unofficial-client and no-warranty notice,
+    /// and the bundled open-source license notices.
+    pub(super) fn about_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let version = format!("Quill {}", env!("CARGO_PKG_VERSION"));
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .id("about-quill-heading")
+                    .role(Role::Heading)
+                    .aria_label("About Quill")
+                    .font_semibold()
+                    .child("About Quill"),
+            )
+            .child(
+                div()
+                    .id("about-quill-version")
+                    .role(Role::Label)
+                    .aria_label(version.clone())
+                    .text_sm()
+                    .child(version),
+            )
+            .child(
+                div()
+                    .id("about-quill-disclaimer")
+                    .role(Role::Label)
+                    .aria_label(quill::about::DISCLAIMER)
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(quill::about::DISCLAIMER),
+            )
+            .child(
+                Button::new("open-source-licenses")
+                    .label("Open-source licenses")
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        let opened = quill::about::bundled_notices()
+                            .is_some_and(|path| quill::platform::open_local_file(&path));
+                        if !opened {
+                            cx.open_url(quill::about::NOTICES_URL);
+                        }
+                    })),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn update_banner(&self, cx: &mut Context<Self>) -> AnyElement {
         if !matches!(
             self.update_state,

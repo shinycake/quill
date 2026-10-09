@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.0 (Apache-2.0):
+// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 //! A text input field that allows the user to enter text.
 //!
 //! Based on the `Input` example from the `gpui` crate.

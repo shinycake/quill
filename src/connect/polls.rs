@@ -339,6 +339,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 topic_id,
             },
         );
+        let json = self.thread_routed(chat_id, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();

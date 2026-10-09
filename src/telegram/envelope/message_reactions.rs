@@ -109,11 +109,32 @@ impl MessageReactions {
     }
 }
 
-/// `messageInteractionInfo` (TDLib 1.8.67). `reply_info` stays out of this slice.
+/// `messageReplyInfo` (TDLib 1.8.67, schema line 2967): the comment /
+/// reply counter of a channel post or a thread root.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessageReplyInfo {
+    pub reply_count: i32,
+    /// Up to three recent repliers, newest first (the comments bar avatars).
+    pub recent_repliers: Vec<MessageSender>,
+    pub last_read_inbox_message_id: i64,
+    pub last_read_outbox_message_id: i64,
+    pub last_message_id: i64,
+}
+
+impl MessageReplyInfo {
+    /// tdesktop `areCommentsUnread`: the newest reply is newer than the
+    /// viewer's read position.
+    pub fn has_unread(&self) -> bool {
+        self.last_message_id > self.last_read_inbox_message_id && self.reply_count > 0
+    }
+}
+
+/// `messageInteractionInfo` (TDLib 1.8.67).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MessageInteractionInfo {
     pub view_count: i32,
     pub forward_count: i32,
+    pub reply_info: Option<MessageReplyInfo>,
     pub reactions: Option<MessageReactions>,
 }
 
@@ -190,10 +211,32 @@ pub(crate) fn parse_interaction_info(value: Option<&Value>) -> Option<MessageInt
                 .get("forward_count")
                 .and_then(Value::as_i64)
                 .unwrap_or(0) as i32,
+            reply_info: parse_reply_info(value.get("reply_info")),
             reactions: parse_message_reactions(value.get("reactions")),
         }),
         _ => None,
     }
+}
+
+pub(crate) fn parse_reply_info(value: Option<&Value>) -> Option<MessageReplyInfo> {
+    let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    let int = |key: &str| value.get(key).and_then(Value::as_i64).unwrap_or(0);
+    Some(MessageReplyInfo {
+        reply_count: int("reply_count") as i32,
+        recent_repliers: value
+            .get("recent_replier_ids")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|sender| super::message::parse_message_sender(Some(sender)).ok())
+            .collect(),
+        last_read_inbox_message_id: int("last_read_inbox_message_id"),
+        last_read_outbox_message_id: int("last_read_outbox_message_id"),
+        last_message_id: int("last_message_id"),
+    })
 }
 
 pub(crate) fn parse_message_reactions(value: Option<&Value>) -> Option<MessageReactions> {

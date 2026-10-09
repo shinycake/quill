@@ -8,9 +8,9 @@ use crate::telegram::requests::{
     create_new_basic_group_chat, create_new_supergroup_chat, delete_chat_welcome_message,
     delete_forum_topic, edit_chat_welcome_message, edit_forum_topic,
     get_available_chat_boost_slots, get_chat_boost_status, get_chat_history, get_chat_member,
-    get_chat_statistics, get_forum_topics, get_me, get_message_thread_history, get_supergroup,
-    get_supergroup_full_info, join_chat, leave_chat, load_chat_welcome_messages,
-    load_community_full_info, search_chat_messages, set_chat_description, set_chat_member_tag,
+    get_chat_statistics, get_forum_topics, get_me, get_supergroup, get_supergroup_full_info,
+    join_chat, leave_chat, load_chat_welcome_messages, load_community_full_info,
+    search_chat_messages, set_chat_description, set_chat_member_tag,
     set_chat_message_auto_delete_time, set_chat_photo, set_chat_slow_mode_delay, set_chat_title,
     set_community_name, toggle_forum_topic_closed, toggle_forum_topic_pinned,
     toggle_general_forum_topic_hidden, toggle_supergroup_aggressive_anti_spam,
@@ -1340,38 +1340,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&toggle_general_forum_topic_hidden(extra, chat_id, hidden))
         {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
-    }
-
-    /// Slice G2: `getMessageThreadHistory` (schema 1.8.67, line 11839)
-    /// for the channel-comments viewer — the first page of the comment
-    /// thread under a channel post. Deduped per channel post while one
-    /// is in flight.
-    pub fn fetch_message_thread_history(
-        &mut self,
-        chat_id: ChatId,
-        message_id: MessageId,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let purpose = RequestPurpose::GetMessageThreadHistory {
-            message_id: message_id.0,
-        };
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
-        let extra = self.session.request(purpose, Some(chat_id));
-        if let Err(err) = self.sender.send_json(&get_message_thread_history(
-            extra,
-            chat_id,
-            message_id,
-            MessageId(0),
-            50,
-        )) {
             self.session.requests.take(extra);
             return Err(err);
         }

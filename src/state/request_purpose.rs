@@ -338,6 +338,23 @@ pub enum RequestPurpose {
     /// `connectedWebsites`; the list is replaced from the authoritative
     /// answer (never optimistic).
     GetConnectedWebsites,
+    /// `parity:proxy-settings`: `getProxies`. Response is `addedProxies`.
+    GetProxies,
+    /// `parity:proxy-settings`: `addProxy` / `editProxy` / `enableProxy`
+    /// / `disableProxy` / `removeProxy`. The answer (`addedProxy` /
+    /// `ok`) only marks the list stale; the authoritative `getProxies`
+    /// refetch replaces it (never optimistic).
+    MutateProxy,
+    /// `parity:proxy-settings`: `pingProxy`. Response is `seconds`; an
+    /// error means the proxy is not available.
+    PingProxy {
+        proxy_id: i32,
+    },
+    /// `parity:proxy-settings`: `setOption("prefer_ipv6")`. Response is
+    /// `ok`; `on` is the value that was requested.
+    SetPreferIpv6 {
+        on: bool,
+    },
     /// Slice A4: `disconnectWebsite`. Response is `ok`; the list is
     /// refetched from the authoritative answer (never optimistic).
     DisconnectWebsite {
@@ -793,10 +810,17 @@ pub enum RequestPurpose {
     GetForumTopic {
         forum_topic_id: i32,
     },
-    /// Slice G2: `getMessageThreadHistory` (schema 1.8.67, line 11839)
-    /// — the channel-comments viewer. Response is `messages`;
-    /// `message_id` identifies the channel post, correlated to the chat
-    /// via `PendingRequest::chat_id`.
+    /// `getMessageThread` (schema 1.8.67, line 11566) — resolves the
+    /// comment / reply thread of `message_id`. Response is
+    /// `messageThreadInfo`; correlated to the origin chat via
+    /// `PendingRequest::chat_id`.
+    GetMessageThread {
+        message_id: i64,
+    },
+    /// `getMessageThreadHistory` (schema 1.8.67, line 11839) — one page of
+    /// the open thread. Response is `messages`; `message_id` identifies the
+    /// thread's origin message, correlated to the chat via
+    /// `PendingRequest::chat_id`.
     GetMessageThreadHistory {
         message_id: i64,
     },
@@ -1352,6 +1376,11 @@ pub enum RequestPurpose {
     /// 15289). Response is `ok`; same no-local-state treatment as
     /// `DeleteSavedOrderInfo`.
     DeleteSavedCredentials,
+    /// `translateText` / `translateMessageText` (schema 1.8.67). Response
+    /// is `formattedText`; `job` indexes `Session::translate.jobs`.
+    TranslateJob {
+        job: u64,
+    },
     /// Slice msg-richtext-ai-tools: `fixTextWithAi` (schema 1.8.67,
     /// :12172). Response is `fixedText`; the fixed text replaces the
     /// open chat's composer draft.

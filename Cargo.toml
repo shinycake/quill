@@ -8,7 +8,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
-description = "Independent GPUI + TDLib Telegram desktop client (working name Quill)"
+description = "Quill, an independent, unofficial Telegram desktop client built on GPUI and TDLib"
 repository = "https://github.com/shinycake/quill"
 publish = false
 

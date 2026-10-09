@@ -745,6 +745,45 @@ pub(super) fn session_history_row(
         .and_then(|info| info.reactions.as_ref())
         .is_some_and(|reactions| reactions.are_tags);
     let has_chips = !chips.is_empty();
+    // Channel posts open their comments, group messages their replies
+    // (tdesktop `paintCommentsButton`). Inside the open thread itself the
+    // bar would only point back at the view.
+    let in_thread = session.is_some_and(|s| s.thread_for_chat(message.chat_id).is_some());
+    let in_group = session
+        .and_then(|s| s.chats.get(&message.chat_id.0))
+        .is_some_and(|chat| {
+            matches!(
+                chat.kind,
+                quill::telegram::envelope::ChatKind::BasicGroup { .. }
+                    | quill::telegram::envelope::ChatKind::Supergroup {
+                        is_channel: false,
+                        ..
+                    }
+            )
+        });
+    let mut reply_bar_el = message
+        .interaction_info
+        .as_ref()
+        .and_then(|info| info.reply_info.as_ref())
+        .filter(|_| !in_thread && message.id.0 > 0 && !message.pending)
+        .and_then(|info| {
+            let kind = if in_channel {
+                super::threads::ReplyBarKind::Comments
+            } else if in_group && info.reply_count > 0 {
+                super::threads::ReplyBarKind::Replies
+            } else {
+                return None;
+            };
+            Some(super::threads::reply_bar(
+                message.chat_id,
+                message.id,
+                kind,
+                info,
+                message.is_outgoing,
+                super::threads::replier_avatars(info, session, media_roots),
+                cx,
+            ))
+        });
     let chip_row = (!chips.is_empty()).then(|| {
         let mut row = div()
             .id(("reaction-chips", message_id.0 as u64))
@@ -1108,6 +1147,7 @@ pub(super) fn session_history_row(
         && auto_delete_chip.is_none()
         && views.is_none()
         && signature.is_none()
+        && reply_bar_el.is_none()
         && chip_row.is_none();
     // A message ending in a right-to-left line takes its time on a line of
     // its own (Telegram Desktop): that line ends at the bubble's left.
@@ -1375,6 +1415,7 @@ pub(super) fn session_history_row(
         }
         chrome.media_led = media_led;
         chrome.actions = more_btn.take().map(IntoElement::into_any_element);
+        chrome.bottom_bar = reply_bar_el.take();
         chrome
     };
     // M2: `messageRichMessage` (schema 1.8.67, line 5143) renders its
@@ -1454,7 +1495,13 @@ impl QuillApp {
                         .as_ref()
                         .and_then(|live| live.driver.session.open_topic)
                         .is_some();
-                    let result = if topic_open {
+                    let result = if self.thread_active() {
+                        self.live
+                            .as_mut()
+                            .expect("live")
+                            .driver
+                            .fetch_thread_history()
+                    } else if topic_open {
                         self.live
                             .as_mut()
                             .expect("live")

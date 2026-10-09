@@ -148,6 +148,7 @@ mod polls;
 mod pressable;
 mod profile;
 mod profile_modal;
+mod proxy;
 mod reactions;
 mod recording;
 mod round_record;
@@ -181,6 +182,10 @@ mod story_ring;
 mod story_viewer;
 mod subsection_tabs;
 mod system_unlock;
+mod threads;
+mod threads_demo;
+mod translate_demo;
+mod translate_ui;
 mod video_pip;
 mod viewer_demo;
 

@@ -26,6 +26,7 @@ mod moderation;
 mod payments;
 mod polls;
 mod profile;
+mod proxy;
 mod search;
 mod secret_chats;
 mod sender;
@@ -33,6 +34,8 @@ mod settings;
 mod stickers;
 mod stories;
 mod subsection_tabs;
+mod threads;
+mod translate;
 mod types;
 mod typing;
 
@@ -44,7 +47,7 @@ pub use sender::*;
 pub use types::*;
 
 pub(crate) use connect_flow::group_video_sources;
-pub(crate) use deep_links::parse_deep_link_action;
+pub(crate) use deep_links::{parse_deep_link_action, tg_query_params};
 pub(crate) use sender::{SignalingOutbox, TransportOutbox, VideoStateOutbox};
 pub(crate) use types::{OutgoingTyping, PendingDraft, ToggleSessionKind};
 

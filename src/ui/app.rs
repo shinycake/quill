@@ -82,7 +82,9 @@ pub struct QuillApp {
     pub(super) history_shared: HistoryShared,
     /// kit Phase 3: `(open_chat_id, open_topic)` the scroller state was
     /// last synced for — a change means reset + scroll to bottom.
-    pub(super) history_key: Option<(i64, Option<i32>)>,
+    pub(super) history_key: Option<(i64, Option<i32>, i64)>,
+    /// "Jump to root" was asked while older replies were still loading.
+    pub(super) thread_root_jump: bool,
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) history_ends: Option<(MessageId, MessageId)>,
@@ -419,6 +421,9 @@ pub struct QuillApp {
     /// Chat prefs slice: chat-composer behavior (send-key mode),
     /// persisted to `chat_prefs.json`.
     pub(super) chat_prefs: ChatPrefs,
+    /// Translation: prefs (`translate_prefs.json`), the translate dialog,
+    /// the bar's toast.
+    pub(super) translate_ui: super::translate_ui::TranslateUi,
     /// Settings → Appearance slice: the dialog is on screen.
     pub(super) appearance_open: bool,
     pub(super) settings_open: bool,
@@ -442,6 +447,8 @@ pub struct QuillApp {
     /// Slice parity:platform-shortcuts-reference: the keyboard shortcuts
     /// reference dialog is on screen.
     pub(super) shortcuts_open: bool,
+    /// `parity:proxy-settings`: proxy list / editor / link-confirm state.
+    pub(super) proxy_ui: super::proxy::ProxyUi,
     pub(super) sticker_settings_open: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
@@ -723,8 +730,6 @@ pub struct QuillApp {
     pub(super) group_confirm_dialog: Option<GroupConfirmDialog>,
     /// Slice G2: forum-topic management dialog.
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
-    /// Slice G2: channel-post comment-thread viewer.
-    pub(super) comment_thread_dialog: Option<CommentThreadDialog>,
     /// B4: poll voter-list viewer.
     pub(super) poll_voters_dialog: Option<PollVotersDialog>,
     /// Slice G2: chat welcome-message editor.

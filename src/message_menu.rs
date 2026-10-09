@@ -18,7 +18,7 @@ pub mod order {
     pub const OPEN_LINK: u8 = 4;
     pub const REPLY: u8 = 10;
     pub const COPY_SELECTED: u8 = 12;
-    /// Batch 7 (translation) puts "Translate Selected Text" here.
+    /// "Translate Selected Text" (`ui/translate_ui.rs`).
     pub const TRANSLATE_SELECTED: u8 = 13;
     pub const GO_TO_MESSAGE: u8 = 14;
     pub const VIEW_COMMENTS: u8 = 15;
@@ -28,7 +28,7 @@ pub mod order {
     pub const MEDIA: u8 = 32;
     pub const COPY_TEXT: u8 = 40;
     pub const COPY_LINK: u8 = 41;
-    /// Batch 7 (translation) puts "Translate" here.
+    /// "Translate" (`ui/translate_ui.rs`).
     pub const TRANSLATE: u8 = 42;
     pub const COPY_POST_LINK: u8 = 45;
     pub const FORWARD: u8 = 50;

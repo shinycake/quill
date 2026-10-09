@@ -47,6 +47,8 @@ pub(super) struct HistoryRowsKey {
     unread_anchor: Option<MessageId>,
     highlight: Option<MessageId>,
     ui: u64,
+    /// Translations received or switched (`Session::translate.revision`).
+    translate: u64,
     /// Local day: "Today"/"Yesterday" labels roll over at midnight.
     today: i64,
 }
@@ -80,6 +82,19 @@ impl QuillApp {
             self.session()
                 .and_then(|s| s.info_panel_target_for_chat(chat_id))
         });
+        // A comment / reply thread titles the header with its channel (or
+        // group) and the reply count; the info panel does not apply.
+        let thread_header: Option<(String, String, bool)> =
+            actions.and_then(|(chat_id, _, _, _)| {
+                let session = self.session()?;
+                let thread = session.thread_for_chat(chat_id)?;
+                let origin = session
+                    .chats
+                    .get(&thread.origin_chat_id.0)
+                    .map_or_else(|| title.to_string(), |chat| chat.title.clone());
+                Some((origin, thread.subtitle(), thread.is_comments()))
+            });
+        let info_target = info_target.filter(|_| thread_header.is_none());
         // Parity slice: channel/supergroup header extras — photo,
         // description snippet, primary @username, subscriber/member count,
         // and the linked discussion chat ("Discuss").
@@ -118,7 +133,9 @@ impl QuillApp {
             self.session()
                 .and_then(|s| s.subsection_topic_header(chat_id))
         });
-        let title_text = if saved {
+        let title_text = if let Some((name, _, _)) = &thread_header {
+            name.clone()
+        } else if saved {
             "Saved Messages".to_string()
         } else if let Some((name, _)) = &topic_header {
             name.clone()
@@ -202,6 +219,8 @@ impl QuillApp {
                 Some(activity_line.map_or_else(|| "typing".to_string(), |l| l.text)),
                 true,
             )
+        } else if let Some((_, line, _)) = thread_header.clone() {
+            (Some(line), false)
         } else if let Some((_, line)) = topic_header.filter(|(_, line)| !line.is_empty()) {
             (Some(line), false)
         } else if let Some(line) = secret_line {
@@ -279,7 +298,17 @@ impl QuillApp {
             .items_center()
             .justify_between()
             .gap_2()
-            .child(identity)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .min_w_0()
+                    .when(thread_header.is_some(), |this| {
+                        this.child(self.thread_back_button(cx))
+                    })
+                    .child(identity),
+            )
             .when(actions.is_some(), |this| {
                 // Phase C3a: voice-chat affordance for groups/channels —
                 // join the live voice chat, or start one when none is
@@ -295,11 +324,27 @@ impl QuillApp {
                         (kind_ok, kind_ok && c.video_chat.is_some())
                     })
                     .unwrap_or((false, false));
+                let voice_ok = voice_ok && thread_header.is_none();
+                let view_in_chat = thread_header
+                    .as_ref()
+                    .is_some_and(|(_, _, comments)| *comments);
                 this.child(
                     div()
                         .flex()
                         .items_center()
                         .gap_1()
+                        .when(view_in_chat, |this| {
+                            this.child(
+                                Button::new("thread-view-in-chat")
+                                    .label("View in chat")
+                                    .ghost()
+                                    .tooltip("Show the post in the discussion group")
+                                    .accessibility_label("View in chat")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.view_thread_in_chat(cx);
+                                    })),
+                            )
+                        })
                         .when_some(private_user.filter(|_| can_call), |this, user_id| {
                             this.child(
                                 Button::new("chat-call")
@@ -393,12 +438,17 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .map(|c| c.title.clone())
             .unwrap_or_else(|| "chat".to_string());
+        let protected = self
+            .session()
+            .is_some_and(|s| s.chat_has_protected_content(chat_id));
         let started = self
             .live
             .as_mut()
             .is_some_and(|live| live.driver.start_chat_export(chat_id, title).is_ok());
         self.status_note = if started {
             "Exporting chat history…".into()
+        } else if protected {
+            "This chat's content is protected and can't be exported.".into()
         } else {
             "Could not start the export (another export is running).".into()
         };
@@ -814,7 +864,9 @@ impl QuillApp {
                 )
             })
             .when_some(
-                part.bottom().then(|| self.channel_footer(cx)).flatten(),
+                (part.bottom() && !self.thread_pending())
+                    .then(|| self.channel_footer(cx))
+                    .flatten(),
                 |this, footer| this.child(footer),
             )
             // A deleted message's dust drifts over everything.
@@ -877,6 +929,13 @@ impl QuillApp {
             _ => None,
         };
         let topic_empty = topic_history.is_none_or(|h| h.messages.is_empty());
+        // Channel comments / group reply thread of the open chat.
+        let thread_open = open
+            .and_then(|id| session.and_then(|s| s.thread_for_chat(id)))
+            .filter(|thread| !matches!(thread.status, quill::state::ThreadStatus::Failed(_)));
+        let thread_messages: Option<Vec<HistoryMessage>> =
+            thread_open.map(|thread| thread.ordered().into_iter().cloned().collect());
+        let thread_pending = session.is_some_and(Session::thread_unavailable);
         // Rebuild the history rows only when something that feeds them
         // changed; otherwise skip snapshotting the messages altogether.
         let ui_hash = self.history_rows_ui_hash();
@@ -892,13 +951,19 @@ impl QuillApp {
                 unread_anchor: history.and_then(|h| h.unread_anchor),
                 highlight: highlight_id,
                 ui,
+                translate: self.translate_revision(),
                 today,
             });
             let reuse = key.is_some() && key == self.history_rows_key;
             let messages = (!reuse).then(|| {
-                history
+                let mut messages: Vec<quill::state::HistoryMessage> = history
                     .map(|h| h.ordered().into_iter().cloned().collect())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                // A translated chat shows the translations in place.
+                if let Some(chat_id) = open {
+                    self.apply_chat_translation(chat_id, &mut messages);
+                }
+                messages
             });
             (key, messages)
         };
@@ -969,6 +1034,29 @@ impl QuillApp {
                         cx,
                     )
                     .into_any_element()
+                } else if thread_pending {
+                    self.thread_status_pane(cx)
+                } else if let Some(rows) = thread_messages {
+                    let list = self.history_message_list(
+                        "thread-history",
+                        Some(rows),
+                        chat.as_ref(),
+                        &sender_name,
+                        highlight_id,
+                        media_roots,
+                        cx,
+                    );
+                    // Thread views rebuild their rows every frame, like topics.
+                    self.history_rows_key = None;
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_h_0()
+                        .min_w_0()
+                        .children(self.thread_root_bar(cx))
+                        .child(list)
+                        .into_any_element()
                 } else if is_forum && open_topic.is_none() && !tabs_used {
                     // Phase 5.1: opening a forum supergroup shows its topics.
                     self.forum_topics_pane(open, cx).into_any_element()
@@ -1119,21 +1207,33 @@ impl QuillApp {
         // kit Phase 3: the scroller resets when the open chat/topic
         // changes. Read the key up front — the `session` borrow must end
         // before the state below is assigned.
+        let thread_window = session
+            .and_then(|s| s.open_chat.and_then(|chat| s.thread_for_chat(chat)))
+            .map(|thread| (thread.thread_id, thread.unread_anchor, thread.unread_count));
         let history_key = (
             session
                 .and_then(|s| s.open_chat)
                 .map(|chat| chat.0)
                 .unwrap_or(-1),
             session.and_then(|s| s.open_topic),
+            thread_window.map_or(0, |(thread_id, _, _)| thread_id),
         );
         // The main history's loaded window (topic views page their own
         // history and have none of this).
-        let (unread_anchor, has_newer, window_epoch) = session
-            .filter(|s| s.open_topic.is_none())
-            .and_then(|s| s.open_chat.and_then(|chat| s.histories.get(&chat.0)))
-            .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
-            .unwrap_or((None, false, 0));
-        let unread_count = chat.map_or(0, |chat| chat.unread_count);
+        let (unread_anchor, has_newer, window_epoch) = match thread_window {
+            // A thread loads from its newest page: no newer window, and its
+            // own read position places the divider.
+            Some((_, anchor, _)) => (anchor, false, 0),
+            None => session
+                .filter(|s| s.open_topic.is_none())
+                .and_then(|s| s.open_chat.and_then(|chat| s.histories.get(&chat.0)))
+                .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
+                .unwrap_or((None, false, 0)),
+        };
+        let unread_count = match thread_window {
+            Some((_, _, count)) => count,
+            None => chat.map_or(0, |chat| chat.unread_count),
+        };
         if let Some(mut messages) = messages {
             // Deleted messages dissolve in place before they go.
             self.merge_vanishing(&mut messages, cx);
@@ -1961,6 +2061,7 @@ impl QuillApp {
     pub(super) fn maybe_auto_load_newer(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
             && live.driver.session.open_topic.is_none()
+            && live.driver.session.thread.is_none()
             && live.driver.fetch_history_newer().ok().flatten().is_some()
         {
             cx.notify();
@@ -1971,14 +2072,16 @@ impl QuillApp {
     /// message is replaced by the newest page (the scroller re-anchors at
     /// the bottom when it lands); otherwise just scroll down.
     pub(super) fn jump_to_latest_messages(&mut self, cx: &mut Context<Self>) {
-        let replaced = self.live.as_mut().is_some_and(|live| {
-            live.driver
-                .session
-                .open_chat
-                .and_then(|chat| live.driver.session.histories.get(&chat.0))
-                .is_some_and(|h| h.has_newer)
-                && live.driver.jump_to_latest().is_ok()
-        });
+        let in_thread = self.thread_active();
+        let replaced = !in_thread
+            && self.live.as_mut().is_some_and(|live| {
+                live.driver
+                    .session
+                    .open_chat
+                    .and_then(|chat| live.driver.session.histories.get(&chat.0))
+                    .is_some_and(|h| h.has_newer)
+                    && live.driver.jump_to_latest().is_ok()
+            });
         if !replaced {
             if let Some(live) = self.live.as_mut()
                 && let Some(chat) = live.driver.session.open_chat
@@ -1995,7 +2098,9 @@ impl QuillApp {
     pub(super) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.
-            let sent = if live.driver.session.open_topic.is_some() {
+            let sent = if live.driver.session.thread.is_some() {
+                live.driver.fetch_thread_history()
+            } else if live.driver.session.open_topic.is_some() {
                 live.driver.fetch_topic_history()
             } else {
                 live.driver.fetch_history()

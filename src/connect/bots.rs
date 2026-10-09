@@ -322,6 +322,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::SendMessage, Some(chat_id));
         let topic_id = self.send_topic(chat_id);
         let json = send_game_request(extra, chat_id, topic_id, bot_user_id, game_short_name);
+        let json = self.thread_routed(chat_id, json);
         self.send_json_request(extra, &json)
     }
 
