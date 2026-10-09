@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 /// Display mapping system for Editor/Input.
 ///
 /// This module implements a layered display mapping architecture:
@@ -8,8 +10,10 @@
 /// The goal is to provide a clean, unified API where Editor only needs to know
 /// about `BufferPoint ↔ DisplayPoint` mapping, without worrying about internal wrap/fold complexity.
 mod display_map;
+mod bidi;
 mod inline_line;
-pub(crate) use inline_line::{InlineFragment, InputLine};
+pub(crate) use bidi::{BidiLine, Paragraph, mirror_neutral_run, needs_bidi};
+pub(crate) use inline_line::{InlineFragment, InputLine, fragment_from_shaped};
 mod fold_map;
 mod folding;
 mod text_wrapper;

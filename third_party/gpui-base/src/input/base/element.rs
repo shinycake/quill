@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 use crate::input::{InputExtras as _, InputModeKind};
 use gpui::Corners;
 use gpui::Half;
@@ -17,7 +19,13 @@ use std::{ops::Range, rc::Rc};
 
 use crate::{
     Scrollbar,
-    input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
+    input::{
+        RopeExt as _,
+        blink_cursor::CURSOR_WIDTH,
+        display_map::{
+            BidiLine, InputLine, LineLayout, Paragraph, fragment_from_shaped, mirror_neutral_run,
+        },
+    },
 };
 
 use super::{
@@ -608,6 +616,12 @@ impl<M: InputModeKind> TextElement<M> {
 
             let affinity = is_active && state.cursor_line_end_affinity;
             let cursor_pos = caret_for(cursor_row, cursor, affinity);
+            // A caret on a right-to-left paragraph rests against the right edge, like a
+            // right-aligned input.
+            let cursor_rtl = visible_buffer_lines
+                .iter()
+                .position(|&bl| bl == cursor_row)
+                .is_some_and(|vi| lines[vi].is_rtl());
             let cursor_start = caret_for(sel_start_row, selected_range.start, false);
             let cursor_end = caret_for(sel_end_row, selected_range.end, false);
 
@@ -620,6 +634,7 @@ impl<M: InputModeKind> TextElement<M> {
                     // For Right alignment use 0 margin: cursor is clamped to bounds separately,
                     // so we never scroll the text for cursor-at-edge, avoiding a first-click jump.
                     let safety_margin = match last_layout.text_align {
+                        _ if cursor_rtl => px(0.),
                         TextAlign::Left => RIGHT_MARGIN,
                         TextAlign::Right => px(0.),
                         TextAlign::Center => CURSOR_WIDTH,
@@ -694,6 +709,7 @@ impl<M: InputModeKind> TextElement<M> {
                     size(CURSOR_WIDTH, cursor_height),
                 ),
                 is_active,
+                rtl: cursor_rtl,
             });
         }
 
@@ -708,8 +724,9 @@ impl<M: InputModeKind> TextElement<M> {
         );
         for info in &mut cursor_infos {
             info.bounds.origin.x += scroll_offset.x;
-            // Right-aligned text keeps the caret inside the viewport edge.
-            if last_layout.text_align == TextAlign::Right {
+            // Right-aligned text, and a caret on a right-to-left paragraph,
+            // keeps the caret inside the viewport edge.
+            if last_layout.text_align == TextAlign::Right || info.rtl {
                 info.bounds.origin.x = info.bounds.origin.x.min(bounds.right() - CURSOR_WIDTH);
             }
         }
@@ -725,28 +742,36 @@ impl<M: InputModeKind> TextElement<M> {
         (cursor_infos, scroll_offset, current_row)
     }
 
-    /// Layout the match range to a Path.
+    /// Layout the match range to filled Paths: one outline per run of stacked rows, and one
+    /// per piece for a row that a direction change splits into several.
     pub(crate) fn layout_match_range(
         range: Range<usize>,
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
-    ) -> Option<Path<Pixels>> {
-        let corners = Self::layout_range_corners(&range, last_layout)?;
-        let points = frame_outline_points(&corners);
+    ) -> Vec<Path<Pixels>> {
+        let Some(corners) = Self::layout_range_corners(&range, last_layout) else {
+            return Vec::new();
+        };
         let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
-        let mut builder = gpui::PathBuilder::fill();
-        builder.move_to(origin + *points.first()?);
-        for point in points.iter().skip(1) {
-            builder.line_to(origin + *point);
-        }
-        builder.close();
-        builder.build().ok()
+        split_frame_chains(corners)
+            .into_iter()
+            .filter_map(|chain| {
+                let points = frame_outline_points(&chain);
+                let mut builder = gpui::PathBuilder::fill();
+                builder.move_to(origin + *points.first()?);
+                for point in points.iter().skip(1) {
+                    builder.line_to(origin + *point);
+                }
+                builder.close();
+                builder.build().ok()
+            })
+            .collect()
     }
 
     /// Project a buffer range through the visible (non-folded) shaped lines.
     /// Half-open intersections give soft-wrap ends their trailing affinity and
     /// prevent ranges on later lines from painting an earlier line's first glyph.
-    fn layout_range_corners(
+    pub(super) fn layout_range_corners(
         range: &Range<usize>,
         last_layout: &LastLayout,
     ) -> Option<Vec<Corners<Point<Pixels>>>> {
@@ -764,8 +789,8 @@ impl<M: InputModeKind> TextElement<M> {
             .zip(last_layout.lines.iter())
         {
             let mut offset = line_offset;
-            let alignment = last_layout.alignment_offset(line.longest_width);
             for (row, shaped) in line.wrapped_lines.iter().enumerate() {
+                let alignment = line.sub_line_offset(row, last_layout);
                 let end = offset + shaped.len;
                 let start_ix = range.start.max(offset);
                 let end_ix = range.end.min(end);
@@ -775,20 +800,43 @@ impl<M: InputModeKind> TextElement<M> {
                 let newline = is_last && range.start <= end && range.end > end;
                 if start_ix < end_ix || newline {
                     let indent = if row == 0 { px(0.) } else { line.wrap_indent };
-                    let left = alignment + indent + shaped.x_for_index(start_ix.min(end) - offset);
-                    let right = alignment
-                        + indent
-                        + if newline {
+                    let spans: Vec<(Pixels, Pixels)> = if shaped.is_bidi() {
+                        // A logical range can cover several visual pieces when it crosses a
+                        // direction change; the newline cell sits past the logical end of the
+                        // paragraph: left of an RTL row, right of any other.
+                        let mut spans = if start_ix < end_ix {
+                            shaped.range_rects(start_ix - offset..end_ix - offset)
+                        } else {
+                            Vec::new()
+                        };
+                        if newline {
+                            let cell = last_layout.space_width;
+                            spans.push(if line.is_rtl() {
+                                (px(0.) - cell, px(0.))
+                            } else {
+                                (shaped.width, shaped.width + cell)
+                            });
+                        }
+                        merge_touching_spans(spans)
+                    } else {
+                        let left = shaped.x_for_index(start_ix.min(end) - offset);
+                        let right = if newline {
                             shaped.width + last_layout.space_width
                         } else {
                             shaped.x_for_index(end_ix - offset)
                         };
-                    corners.push(Corners {
-                        top_left: point(left, y),
-                        top_right: point(right, y),
-                        bottom_left: point(left, y + last_layout.line_height),
-                        bottom_right: point(right, y + last_layout.line_height),
-                    });
+                        vec![(left, right)]
+                    };
+                    for (left, right) in spans {
+                        let left = alignment + indent + left;
+                        let right = alignment + indent + right;
+                        corners.push(Corners {
+                            top_left: point(left, y),
+                            top_right: point(right, y),
+                            bottom_left: point(left, y + last_layout.line_height),
+                            bottom_right: point(right, y + last_layout.line_height),
+                        });
+                    }
                 }
                 offset = end;
                 y += last_layout.line_height;
@@ -829,7 +877,7 @@ impl<M: InputModeKind> TextElement<M> {
                     let color = decoration
                         .color()
                         .unwrap_or(state.editor_style.foreground.opacity(0.12));
-                    if let Some(path) =
+                    for path in
                         Self::layout_match_range(decoration.range().clone(), last_layout, bounds)
                     {
                         fills.push((path, color));
@@ -892,7 +940,7 @@ impl<M: InputModeKind> TextElement<M> {
             .skip(first)
             .take_while(|(_, range)| range.start < visible_range.end)
         {
-            if let Some(path) = Self::layout_match_range(range.clone(), last_layout, bounds) {
+            for path in Self::layout_match_range(range.clone(), last_layout, bounds) {
                 paths.push((path, current_match_ix == index));
             }
         }
@@ -912,6 +960,8 @@ impl<M: InputModeKind> TextElement<M> {
         };
 
         Self::layout_match_range(symbol_range, last_layout, bounds)
+            .into_iter()
+            .next()
     }
 
     fn layout_document_colors(
@@ -923,7 +973,7 @@ impl<M: InputModeKind> TextElement<M> {
     ) -> Vec<(Path<Pixels>, Hsla)> {
         let mut paths = vec![];
         for (range, color) in document_colors.iter() {
-            if let Some(path) = Self::layout_match_range(range.clone(), last_layout, bounds) {
+            for path in Self::layout_match_range(range.clone(), last_layout, bounds) {
                 paths.push((path, *color));
             }
         }
@@ -2065,10 +2115,30 @@ impl<M: InputModeKind> TextElement<M> {
 
             debug_assert_eq!(line_item.len(), line_text.len());
 
-            let mut wrapped_lines: SmallVec<[ShapedLine; 1]> = SmallVec::with_capacity(1);
+            let mut wrapped_lines: SmallVec<[InputLine; 1]> = SmallVec::with_capacity(1);
             let mut line_has_background = false;
+            // Right-to-left content: the paragraph is analysed once and each wrapped row is
+            // shaped run by run in visual order (see `display_map::bidi`).
+            let paragraph = Paragraph::analyze(&line_text);
+            let paragraph_rtl = paragraph.as_ref().is_some_and(|p| p.is_rtl());
 
             for range in &line_item.wrapped_lines {
+                if let Some(paragraph) = &paragraph {
+                    let (row, has_bg) = Self::layout_bidi_row(
+                        paragraph,
+                        &line_text,
+                        range.clone(),
+                        run_offset,
+                        runs,
+                        bg_segments,
+                        last_layout.visible_line_byte_offsets[vi],
+                        font_size,
+                        window,
+                    );
+                    line_has_background |= has_bg;
+                    wrapped_lines.push(row);
+                    continue;
+                }
                 let line_runs = runs_for_range(runs, run_offset, &range);
                 let line_runs = if bg_segments.is_empty() {
                     line_runs
@@ -2088,7 +2158,7 @@ impl<M: InputModeKind> TextElement<M> {
                     .shape_line(sub_line, font_size, &line_runs, None);
 
                 line_has_background |= has_background(&line_runs);
-                wrapped_lines.push(shaped_line);
+                wrapped_lines.push(InputLine::from(shaped_line));
             }
 
             // Use the first visual line's indentation width for continuation lines.
@@ -2104,7 +2174,8 @@ impl<M: InputModeKind> TextElement<M> {
             };
 
             let line_layout = LineLayout::new()
-                .lines(wrapped_lines)
+                .inline_lines(wrapped_lines)
+                .rtl(paragraph_rtl)
                 .wrap_indent(wrap_indent)
                 .with_background(line_has_background)
                 .with_whitespaces(whitespace_indicators.clone());
@@ -2115,6 +2186,68 @@ impl<M: InputModeKind> TextElement<M> {
         }
 
         lines
+    }
+
+    /// Shape one wrapped row of a paragraph that holds right-to-left content: one shaped line
+    /// per single-direction run, placed left to right in visual order. Returns the row and
+    /// whether any of its runs carries a background.
+    #[allow(clippy::too_many_arguments)]
+    fn layout_bidi_row(
+        paragraph: &Paragraph<'_>,
+        line_text: &str,
+        range: Range<usize>,
+        run_offset: usize,
+        runs: &[TextRun],
+        bg_segments: &[(Range<usize>, Hsla)],
+        line_byte_offset: usize,
+        font_size: Pixels,
+        window: &mut Window,
+    ) -> (InputLine, bool) {
+        let row_text: SharedString = line_text[range.clone()].to_string().into();
+        let mut fragments = Vec::new();
+        let mut shaped_lines = Vec::new();
+        let mut has_bg = false;
+        let mut x = px(0.);
+
+        for run in paragraph.visual_runs(range.clone()) {
+            let text = &line_text[run.range.clone()];
+            let run_runs = runs_for_range(runs, run_offset, &run.range);
+            let run_runs = if bg_segments.is_empty() {
+                run_runs
+            } else {
+                split_runs_by_bg_segments(line_byte_offset + run.range.start, &run_runs, bg_segments)
+            };
+            // A run of brackets alone has no right-to-left context for the platform
+            // shaper to mirror them from; mirror them here.
+            let shaped_text: SharedString = if run.rtl {
+                mirror_neutral_run(text).unwrap_or_else(|| text.to_string())
+            } else {
+                text.to_string()
+            }
+            .into();
+            let run_runs =
+                align_runs_to_char_boundaries(&shaped_text, &run_runs).unwrap_or(run_runs);
+            let shaped = window
+                .text_system()
+                .shape_line(shaped_text, font_size, &run_runs, None);
+            has_bg |= has_background(&run_runs);
+
+            let local = run.range.start - range.start..run.range.end - range.start;
+            let fragment = fragment_from_shaped(
+                &shaped,
+                local,
+                run.rtl,
+                x,
+                text,
+                window.text_system(),
+            );
+            x += px(fragment.width);
+            fragments.push(fragment);
+            shaped_lines.push(shaped);
+        }
+
+        let geometry = BidiLine::new(row_text.len(), fragments);
+        (InputLine::bidi(row_text, geometry, shaped_lines), has_bg)
     }
 
     /// First usize is the offset of skipped.
@@ -2275,6 +2408,8 @@ impl<M: InputModeKind> TextElement<M> {
 struct CursorRenderInfo {
     bounds: Bounds<Pixels>,
     is_active: bool,
+    /// The caret sits on a right-to-left paragraph (Quill bidi patch).
+    rtl: bool,
 }
 
 pub(super) struct PrepaintState {
@@ -2324,6 +2459,7 @@ impl PrepaintState {
                 CursorRenderInfo {
                     bounds,
                     is_active: info.is_active,
+                    rtl: info.rtl,
                 }
             })
             .collect()
@@ -2368,6 +2504,48 @@ fn print_points_as_svg_path(
             println!("L{},{}", p.x.as_f32() as i32, p.y.as_f32() as i32);
         }
     }
+}
+
+/// Merge `[left, right]` spans that touch or overlap, left to right.
+fn merge_touching_spans(mut spans: Vec<(Pixels, Pixels)>) -> Vec<(Pixels, Pixels)> {
+    spans.sort_by_key(|span| span.0);
+    let mut merged: Vec<(Pixels, Pixels)> = Vec::with_capacity(spans.len());
+    for (left, right) in spans {
+        match merged.last_mut() {
+            Some(last) if left <= last.1 + px(0.01) => last.1 = last.1.max(right),
+            _ => merged.push((left, right)),
+        }
+    }
+    merged
+}
+
+/// Split the row rectangles of a range into chains that [`frame_outline_points`] can outline
+/// as one polygon: consecutive rows holding one rectangle each. A row split into several
+/// rectangles (a range crossing a direction change) outlines each piece on its own.
+fn split_frame_chains(corners: Vec<Corners<Point<Pixels>>>) -> Vec<Vec<Corners<Point<Pixels>>>> {
+    let mut chains: Vec<Vec<Corners<Point<Pixels>>>> = Vec::new();
+    let mut chain: Vec<Corners<Point<Pixels>>> = Vec::new();
+    let mut ix = 0;
+    while ix < corners.len() {
+        let y = corners[ix].top_left.y;
+        let row_end = corners[ix..]
+            .iter()
+            .position(|c| c.top_left.y != y)
+            .map_or(corners.len(), |n| ix + n);
+        if row_end - ix == 1 {
+            chain.push(corners[ix]);
+        } else {
+            if !chain.is_empty() {
+                chains.push(std::mem::take(&mut chain));
+            }
+            chains.extend(corners[ix..row_end].iter().map(|c| vec![*c]));
+        }
+        ix = row_end;
+    }
+    if !chain.is_empty() {
+        chains.push(chain);
+    }
+    chains
 }
 
 fn frame_outline_points(corners: &[Corners<Point<Pixels>>]) -> Vec<Point<Pixels>> {

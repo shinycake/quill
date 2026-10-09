@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 use super::inline_line::InputLine;
 use gpui::Half;
 use std::borrow::Cow;
@@ -749,11 +751,16 @@ pub(crate) struct LineLayout {
     /// Whether any run of this line carries a background color, so [`Self::paint_background`]
     /// can skip the glyph walk for the common case of a line without highlights.
     has_background: bool,
+    /// Whether the paragraph's base direction is right-to-left (first strong character,
+    /// UAX #9 P2/P3). Such a line is aligned to the right edge, whatever the input's
+    /// own alignment is.
+    rtl: bool,
 }
 
 impl LineLayout {
     pub(crate) fn new() -> Self {
         Self {
+            rtl: false,
             len: 0,
             longest_width: px(0.),
             wrapped_lines: SmallVec::new(),
@@ -768,6 +775,45 @@ impl LineLayout {
     pub(crate) fn with_background(mut self, has_background: bool) -> Self {
         self.has_background = has_background;
         self
+    }
+
+    /// Mark the paragraph as right-to-left.
+    pub(crate) fn rtl(mut self, rtl: bool) -> Self {
+        self.rtl = rtl;
+        self
+    }
+
+    /// Whether this paragraph's base direction is right-to-left.
+    pub(crate) fn is_rtl(&self) -> bool {
+        self.rtl
+    }
+
+    /// Whether any visual row of this paragraph was laid out by the bidi path.
+    pub(crate) fn has_bidi(&self) -> bool {
+        self.wrapped_lines.iter().any(InputLine::is_bidi)
+    }
+
+    /// The alignment this paragraph is painted with: right for a right-to-left
+    /// paragraph, otherwise the input's own.
+    pub(crate) fn align(&self, text_align: TextAlign) -> TextAlign {
+        if self.rtl {
+            TextAlign::Right
+        } else {
+            text_align
+        }
+    }
+
+    /// Distance from the line's left edge to the left edge of visual line `i`.
+    ///
+    /// A right-to-left paragraph hugs the right edge row by row; any other paragraph uses the
+    /// input's alignment against the longest row.
+    pub(crate) fn sub_line_offset(&self, i: usize, last_layout: &LastLayout) -> Pixels {
+        if self.rtl {
+            let width = self.wrapped_lines.get(i).map_or(px(0.), |line| line.width);
+            (last_layout.content_width - width).max(px(0.))
+        } else {
+            last_layout.alignment_offset(self.longest_width)
+        }
     }
 
     /// Set the left offset reserved for continuation wrapped lines.
@@ -862,7 +908,6 @@ impl LineLayout {
         let mut acc_len = 0;
         let mut offset_y = px(0.);
 
-        let x_offset = last_layout.alignment_offset(self.longest_width);
 
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let is_last = i + 1 == self.wrapped_lines.len();
@@ -879,8 +924,14 @@ impl LineLayout {
             };
 
             if matches {
-                let x = line.x_for_index(offset.saturating_sub(acc_len))
-                    + x_offset
+                let local = offset.saturating_sub(acc_len);
+                // With affinity the caret hangs on the character before the offset: at a
+                // wrapped row's end, or at a direction change inside a bidi row.
+                let x = if line_end_affinity {
+                    line.x_for_index_trailing(local)
+                } else {
+                    line.x_for_index(local)
+                } + self.sub_line_offset(i, last_layout)
                     + self.line_indent(i);
                 return Some(point(x, offset_y));
             }
@@ -894,6 +945,55 @@ impl LineLayout {
         None
     }
 
+    /// The caret stop one step visually left (`left`) or right of the stop `(offset,
+    /// trailing)`, local byte indexes in this line layout. `trailing` is the caret affinity:
+    /// the caret hangs on the character before `offset` (the end of a wrapped row, or the other
+    /// side of a direction change). `None` when the visual row holding the stop has no bidi
+    /// content or the caret is already at its visual edge; the caller then steps logically.
+    pub(crate) fn visual_step(
+        &self,
+        offset: usize,
+        trailing: bool,
+        left: bool,
+    ) -> Option<(usize, bool)> {
+        let (i, acc_len) = self.row_of_stop(offset, trailing)?;
+        self.wrapped_lines[i]
+            .visual_step(offset - acc_len, trailing, left)
+            .map(|(ix, trailing)| (ix + acc_len, trailing))
+    }
+
+    /// The row a caret stop is drawn on, with the offset the row starts at.
+    fn row_of_stop(&self, offset: usize, trailing: bool) -> Option<(usize, usize)> {
+        let mut acc_len = 0;
+        for (i, line) in self.wrapped_lines.iter().enumerate() {
+            let is_last = i + 1 == self.wrapped_lines.len();
+            let inside = if trailing && offset > acc_len {
+                offset <= acc_len + line.len
+            } else {
+                offset >= acc_len && (offset < acc_len + line.len || is_last)
+            };
+            if inside {
+                return Some((i, acc_len));
+            }
+            acc_len += line.len;
+        }
+        None
+    }
+
+    /// Steps over the characters between two stops: the character the caret passes going
+    /// from `from` to `to`, both `(offset, trailing)` stops of this layout.
+    pub(crate) fn char_between_stops(
+        &self,
+        from: (usize, bool),
+        to: (usize, bool),
+    ) -> Option<char> {
+        let (i, acc_len) = self.row_of_stop(from.0, from.1)?;
+        let line = &self.wrapped_lines[i];
+        let a = line.stop_x(from.0 - acc_len, from.1);
+        let b = line.stop_x(to.0.checked_sub(acc_len)?, to.1);
+        line.char_between(a, b)
+    }
+
     /// Get the closest index for the given x in this line layout.
     ///
     /// This ignores y, so it only makes sense for a layout that is known to occupy a single
@@ -901,11 +1001,9 @@ impl LineLayout {
     /// reports the caret affinity that a wrap boundary needs.
     pub(crate) fn closest_index_for_x(&self, x: Pixels, last_layout: &LastLayout) -> usize {
         let mut acc_len = 0;
-        let x_offset = last_layout.alignment_offset(self.longest_width);
-        let x = x - x_offset;
-
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let line_indent = self.line_indent(i);
+            let x = x - self.sub_line_offset(i, last_layout);
             if x <= line_indent + line.width {
                 return acc_len + line.closest_index_for_x(x - line_indent);
             }
@@ -926,11 +1024,11 @@ impl LineLayout {
     ) -> Option<(usize, usize, Pixels)> {
         let mut offset = 0;
         let mut line_top = px(0.);
-        let x_offset = last_layout.alignment_offset(self.longest_width);
 
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let line_bottom = line_top + last_layout.line_height;
             if pos.y >= line_top && pos.y < line_bottom {
+                let x_offset = self.sub_line_offset(i, last_layout);
                 return Some((i, offset, pos.x - x_offset - self.line_indent(i)));
             }
 
@@ -958,8 +1056,10 @@ impl LineLayout {
     ) -> Option<(usize, bool)> {
         let (i, offset, x) = self.wrapped_line_at(pos, last_layout)?;
         let line = &self.wrapped_lines[i];
-        let ix = line.closest_index_for_x(x);
-        let line_end_affinity = i + 1 < self.wrapped_lines.len() && ix == line.len;
+        let (ix, trailing) = line.closest_stop_for_x(x);
+        // The same flag serves a bidi direction change: the caret hangs on the character
+        // before the offset, at the end of a wrapped row or on the near side of a run.
+        let line_end_affinity = (i + 1 < self.wrapped_lines.len() && ix == line.len) || trailing;
 
         Some((offset + ix, line_end_affinity))
     }
@@ -1039,7 +1139,7 @@ impl LineLayout {
             _ = line.paint_background(
                 pos + point(self.line_indent(ix), ix * line_height),
                 line_height,
-                text_align,
+                self.align(text_align),
                 align_width,
                 window,
                 cx,
@@ -1060,7 +1160,7 @@ impl LineLayout {
             _ = line.paint(
                 pos + point(self.line_indent(ix), ix * line_height),
                 line_height,
-                text_align,
+                self.align(text_align),
                 align_width,
                 window,
                 cx,
