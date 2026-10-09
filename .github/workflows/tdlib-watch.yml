@@ -1,0 +1,61 @@
+name: tdlib-watch
+
+# Weekly check for a newer TDLib on tdlib/td master than the pin in
+# src/pins.rs. Opens one "TDLib X.Y.Z available" issue (label tdlib-update)
+# with the compare link, commit count and td_api.tl constructor diff, and
+# updates that issue on later runs instead of opening duplicates.
+# Read-only toward tdlib/td (docs/decisions/codex-tdlib-1.8.68.md).
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: tdlib-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: tdlib-watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: compare pin with tdlib/td master
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/tdlib-watch.py --out "$RUNNER_TEMP/tdlib-watch"
+      - name: open or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OUT: ${{ runner.temp }}/tdlib-watch
+        run: |
+          set -euo pipefail
+          if [ "$(cat "$OUT/newer")" != "true" ]; then
+            echo "TDLib pin is current; nothing to do."
+            exit 0
+          fi
+          title="$(cat "$OUT/title.txt")"
+          gh label create tdlib-update --color 1d76db \
+            --description "A newer TDLib is available upstream" 2>/dev/null || true
+          # One open issue at a time: match the label, or the fixed title
+          # prefix in case the label was removed by hand.
+          number="$(gh issue list --state open --label tdlib-update --limit 1 \
+            --json number --jq '.[0].number // empty')"
+          if [ -z "$number" ]; then
+            number="$(gh issue list --state open --search 'in:title "TDLib" "available"' \
+              --limit 20 --json number,title \
+              --jq '[.[] | select(.title | test("^TDLib [0-9]+\\.[0-9]+\\.[0-9]+ available$"))][0].number // empty')"
+          fi
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --title "$title" --body-file "$OUT/body.md" --add-label tdlib-update
+            echo "Updated issue #$number: $title"
+          else
+            gh issue create --title "$title" --body-file "$OUT/body.md" --label tdlib-update
+          fi

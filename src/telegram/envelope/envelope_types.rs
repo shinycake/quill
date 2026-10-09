@@ -1278,15 +1278,23 @@ pub enum EnvelopePayload {
     /// Slice (communities backend core): `updateCommunityFullInfo`
     /// (schema 1.8.67, line 10753) — carries its own `community_id`, so
     /// it applies whenever it arrives (no pending-request correlation).
-    /// This is the arrival path for `loadCommunityFullInfo` (schema line
-    /// 11799, which answers `ok` and delivers the data through update).
+    /// TDLib sends it whenever the pack changes; the first fetch is the
+    /// direct `getCommunityFullInfo` answer below.
     UpdateCommunityFullInfo {
         community_id: i64,
         full_info: ParsedCommunityFullInfo,
     },
+    /// TDLib 1.8.68: `communityFullInfo` — the direct answer of
+    /// `getCommunityFullInfo` (replaced 1.8.67's `loadCommunityFullInfo`,
+    /// which answered `ok` and delivered the pack through
+    /// `updateCommunityFullInfo`). Carries no community id; the reducer
+    /// correlates it through `PendingRequest::community_id`.
+    CommunityFullInfo {
+        full_info: ParsedCommunityFullInfo,
+    },
     /// Slice (communities backend core): `communityId` (schema 1.8.67,
     /// line 2264) — the response of `createCommunity` (line 11806). The
-    /// driver chains it into `loadCommunityFullInfo`.
+    /// driver chains it into `getCommunityFullInfo`.
     CommunityId {
         id: i64,
     },

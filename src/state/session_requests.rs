@@ -89,7 +89,7 @@ impl Session {
     }
 
     /// Slice (communities backend core): like `request`, but stamps the
-    /// community id for `LoadCommunityFullInfo` / `SetCommunityName`
+    /// community id for `GetCommunityFullInfo` / `SetCommunityName`
     /// correlation (`PendingRequest::community_id`).
     pub fn request_for_community(
         &mut self,

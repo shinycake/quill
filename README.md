@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/shinycake/quill/actions/workflows/ci.yml/badge.svg)](https://github.com/shinycake/quill/actions/workflows/ci.yml)
 ![Rust 1.92](https://img.shields.io/badge/rust-1.92-orange)
-![TDLib 1.8.67](https://img.shields.io/badge/TDLib-1.8.67-blue)
+![TDLib 1.8.68](https://img.shields.io/badge/TDLib-1.8.68-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 Quill is an independent, unofficial Telegram desktop client written in Rust. It uses Telegram's official [TDLib](https://core.telegram.org/tdlib) library for everything that talks to Telegram, and draws its interface with [GPUI](https://www.gpui.rs).
@@ -79,7 +79,7 @@ Without credentials, `cargo run --features ui` opens a synthetic demo chat. To s
 
 On Linux, building the UI also needs the GTK 3 and ALSA development packages (`libgtk-3-dev` and `libasound2-dev` on Debian and Ubuntu).
 
-Toolchain: Rust 1.98.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.0. TDLib: 1.8.67.
+Toolchain: Rust 1.98.1, pinned in `rust-toolchain.toml` (the minimum supported version is 1.92). UI: gpui-kit 0.7.0. TDLib: 1.8.68.
 
 ## Status
 
@@ -534,10 +534,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Welcome message setup: Welcome-message row in the group/channel info panel opens the pack editor dialog (src/ui/mod.rs) <!-- parity:groups-welcome-setup -->
 - [x] Communities: create a community (createCommunity exists in TDLib 1.8.67; backend — builder + driver + state sync — plus "New community" dialog UI: name field, base-chat picker, hide-chat option) <!-- parity:communities-create -->
 - [x] Communities: browse and manage owned communities (backend — builders + drivers + state sync for create/loadFullInfo/setName — plus Communities hub dialog listing owned communities with per-row info buttons) <!-- parity:communities-hub -->
-- [ ] Communities: toggle community chat visibility (blocked: no TDLib 1.8.67 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
+- [ ] Communities: toggle community chat visibility (blocked: no TDLib 1.8.68 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
 - [x] Communities: community chat-list mode (view a community's chats as a filtered chat list) <!-- parity:communities-chatlist-mode -->
-- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.67 method) <!-- parity:communities-add-chat -->
-- [ ] Communities: admin-rights management (blocked: no TDLib 1.8.67 method) <!-- parity:communities-admin-rights -->
+- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.68 method) <!-- parity:communities-add-chat -->
+- [ ] Communities: admin-rights management (blocked: no TDLib 1.8.68 method) <!-- parity:communities-admin-rights -->
+- [x] Communities: members can edit the chat list switch (setCommunityPermissions, TDLib 1.8.68) <!-- parity:communities-permissions -->
+- [x] Communities: delete a community, owner only, with confirmation (deleteCommunity, TDLib 1.8.68) <!-- parity:communities-delete -->
 - [x] Communities: info panel (backend — loadFullInfo/setName builders + drivers + state sync — plus community info panel UI: name with edit prompt, admin/banned/request counts, chat list with hidden badges) <!-- parity:communities-info -->
 - [x] Communities: "chat added to community" service message (`messageChatAddedToCommunity`; TGX `ActionChatAddedToCommunity`/`ActionChatAddedToCommunityUnknown` verbatim — `This chat was added to community "NAME"` with the name from the session `updateCommunity` cache, nameless fallback when unknown) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:groups-added-to-community -->
 - [x] Communities: "chat removed from community" service message (`messageChatRemovedFromCommunity`; TGX `ActionChatRemovedFromCommunity` verbatim — `This chat was removed from community`) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:groups-removed-from-community -->

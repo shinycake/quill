@@ -1,14 +1,14 @@
 use super::*;
 use serde_json::Value;
 
-/// Slice (communities backend core): `community` (TDLib 1.8.67,
-/// `schema/td_api.tl:2305`):
+/// Slice (communities backend core): `community` (TDLib 1.8.68,
+/// `schema/td_api.tl:2612`):
 /// `community id:int53 have_access:Bool name:string photo:chatPhotoInfo date:int32 status:CommunityMemberStatus permissions:communityPermissions = Community;`
-/// Scalar fields only — `photo` (chatPhotoInfo), `status`
-/// (CommunityMemberStatus) and `permissions` (communityPermissions) are
-/// intentionally NOT parsed: no driver in this slice consumes them and no
-/// UI exists yet (post-Phase-9 UI slices extend these structs).
-// ponytail: flat scalar subset; nested photo/status/permissions objects when a consumer needs them.
+/// `photo` (chatPhotoInfo) is not parsed (no consumer yet). `status` and
+/// `permissions` are flattened into the rights the TDLib 1.8.68
+/// management methods check (`setCommunityPermissions`,
+/// `deleteCommunity`; docs/decisions/codex-tdlib-1.8.68.md).
+// ponytail: flat scalar subset; nested photo object when a consumer needs it.
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedCommunity {
@@ -18,10 +18,24 @@ pub struct ParsedCommunity {
     pub have_access: bool,
     pub name: String,
     pub date: i32,
+    /// `status` is `communityMemberStatusCreator` — the only status
+    /// `deleteCommunity` accepts ("requires owner privileges").
+    pub is_owner: bool,
+    /// The owner, or an administrator whose
+    /// `communityAdministratorRights.can_change_info` is set
+    /// (`setCommunityName` / `setCommunityPhoto`).
+    pub can_change_info: bool,
+    /// The owner, or an administrator whose
+    /// `communityAdministratorRights.can_ban_members` is set — the right
+    /// `setCommunityPermissions` requires.
+    pub can_ban_members: bool,
+    /// `permissions.can_edit_chat_list` — regular members may change the
+    /// chats added to the community.
+    pub members_can_edit_chat_list: bool,
 }
 
-/// Slice (communities backend core): `communityChat` (TDLib 1.8.67,
-/// `schema/td_api.tl:2311`):
+/// Slice (communities backend core): `communityChat` (TDLib 1.8.68,
+/// `schema/td_api.tl:2618`):
 /// `communityChat chat_id:int53 can_view_history:Bool is_hidden:Bool = CommunityChat;`
 /// `is_hidden` is read-only — there is NO schema method to toggle it
 /// (concept-level scan; 265/267/268 stay BLOCKED).
@@ -32,8 +46,8 @@ pub struct ParsedCommunityChat {
     pub is_hidden: bool,
 }
 
-/// Slice (communities backend core): `communityFullInfo` (TDLib 1.8.67,
-/// `schema/td_api.tl:2319`):
+/// Slice (communities backend core): `communityFullInfo` (TDLib 1.8.68,
+/// `schema/td_api.tl:2626`; also the direct `getCommunityFullInfo` answer):
 /// `communityFullInfo photo:chatPhoto chats:vector<communityChat> administrator_count:int32 banned_count:int32 add_chat_request_count:int32 = CommunityFullInfo;`
 /// `photo` intentionally skipped (no consumer yet; see ParsedCommunity note).
 // ponytail: flat scalar subset; nested chatPhoto when a consumer needs it.
@@ -50,6 +64,20 @@ pub(crate) fn parse_community(value: &Value) -> Option<ParsedCommunity> {
     if value.get("@type").and_then(Value::as_str) != Some("community") {
         return None;
     }
+    let status = value.get("status");
+    let status_type = status
+        .and_then(|s| s.get("@type"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let is_owner = status_type == "communityMemberStatusCreator";
+    let admin_right = |right: &str| {
+        status_type == "communityMemberStatusAdministrator"
+            && status
+                .and_then(|s| s.get("rights"))
+                .and_then(|r| r.get(right))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+    };
     Some(ParsedCommunity {
         id: int53(value.get("id")).ok()?,
         have_access: value
@@ -62,6 +90,14 @@ pub(crate) fn parse_community(value: &Value) -> Option<ParsedCommunity> {
             .unwrap_or_default()
             .to_owned(),
         date: int53(value.get("date")).ok().unwrap_or(0) as i32,
+        is_owner,
+        can_change_info: is_owner || admin_right("can_change_info"),
+        can_ban_members: is_owner || admin_right("can_ban_members"),
+        members_can_edit_chat_list: value
+            .get("permissions")
+            .and_then(|p| p.get("can_edit_chat_list"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 

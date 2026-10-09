@@ -2208,15 +2208,19 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .ok_or(ParseError::MissingField)?,
         }),
         // Slice (communities backend core): `updateCommunityFullInfo`
-        // (schema 1.8.67, line 10753) — the arrival path for
-        // `loadCommunityFullInfo` (line 11799 answers `ok`; the data is
-        // sent through update). Carries its own `community_id`.
+        // (schema 1.8.68, line 11116) — sent whenever the pack changes.
+        // Carries its own `community_id`.
         "updateCommunityFullInfo" => Ok(EnvelopePayload::UpdateCommunityFullInfo {
             community_id: int53(value.get("community_id"))?,
             full_info: value
                 .get("community_full_info")
                 .and_then(parse_community_full_info)
                 .ok_or(ParseError::MissingField)?,
+        }),
+        // TDLib 1.8.68: `getCommunityFullInfo` answers the pack directly
+        // (no community id — correlated through the pending request).
+        "communityFullInfo" => Ok(EnvelopePayload::CommunityFullInfo {
+            full_info: parse_community_full_info(&value).ok_or(ParseError::MissingField)?,
         }),
         // Slice (communities backend core): `communityId` (schema 1.8.67,
         // line 2264) — the `createCommunity` response (line 11806).

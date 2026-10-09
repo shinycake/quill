@@ -419,7 +419,7 @@ impl Session {
             }
             // Slice (communities backend core): `communityId` (schema 1.8.67,
             // line 2264) is the `createCommunity` response — the driver
-            // chains it into `loadCommunityFullInfo`; nothing to reduce.
+            // chains it into `getCommunityFullInfo`; nothing to reduce.
             EnvelopePayload::CommunityId { .. } => {}
             // Slice (communities backend core): `updateCommunity` (schema
             // 1.8.67, line 10726) — create-on-first-sight, like chat
@@ -436,6 +436,16 @@ impl Session {
                 full_info,
             } => {
                 self.community_full_infos.insert(community_id, full_info);
+            }
+            // TDLib 1.8.68: the direct `getCommunityFullInfo` answer has
+            // no community id; the pending request carries it.
+            EnvelopePayload::CommunityFullInfo { full_info } => {
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetCommunityFullInfo
+                    && let Some(community_id) = pending.community_id
+                {
+                    self.community_full_infos.insert(community_id, full_info);
+                }
             }
             // Slice G2: welcome-message pack (`updateChatWelcomeMessages`,
             // schema 1.8.67, line 10649) — the full pack replaces the

@@ -7,7 +7,7 @@ DECISIONS.md entry.
 
 Sources of truth, in order: `DECISIONS.md` per-slice specs (the "Out of this
 slice" lists are the near-term backlog), this roadmap, the vendored
-`schema/td_api.tl` (official TDLib 1.8.67 — never invent constructors).
+`schema/td_api.tl` (official TDLib 1.8.68 — never invent constructors).
 
 ## Phase 2 — Sponsored content + channels (keystone)
 

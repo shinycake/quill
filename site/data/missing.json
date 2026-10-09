@@ -1,6 +1,6 @@
 {
-  "updated": "2026-10-08",
-  "tdlib": "1.8.67",
+  "updated": "2026-10-09",
+  "tdlib": "1.8.68",
   "kinds": {
     "tdlib": "Not in TDLib",
     "official-only": "Official apps only",
@@ -43,7 +43,7 @@
       "category": "Groups & channels",
       "title": "Add a chat to a community",
       "kind": "tdlib",
-      "reason": "TDLib 1.8.67 can create and rename communities, but has no call for adding an existing chat."
+      "reason": "TDLib 1.8.68 can create, rename, re-photo and delete communities and set member permissions, but has no call for adding an existing chat."
     },
     {
       "category": "Groups & channels",
