@@ -59,6 +59,10 @@ jobs:
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
         env:
           TDLIB_BUILD_TARGET: tdjson tdjson_static
+          # The hosted runner has 3 cores and 7 GB; TDLib's generated API
+          # files need several GB per compiler, and one job per core made
+          # clang crash out of memory (Abort trap: 6) on a cold build.
+          JOBS: '2'
         run: bash scripts/build-tdlib.sh
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
