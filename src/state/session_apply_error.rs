@@ -312,6 +312,31 @@ impl Session {
             // request failed — surface the reason in the dialog
             // instead of spinning forever; a failed mutation also
             // releases the disabled buttons.
+            Some(RequestPurpose::GetStarTransactions { .. }) => {
+                self.hub.tx_loading = false;
+                self.hub.tx_error = Some(format!(
+                    "Couldn't load transactions: {}",
+                    error_reason(&err)
+                ));
+            }
+            Some(RequestPurpose::GetReceivedGifts { .. }) => {
+                self.hub.gifts_loading = false;
+                self.hub.gifts_error =
+                    Some(format!("Couldn't load gifts: {}", error_reason(&err)));
+            }
+            Some(RequestPurpose::ToggleGiftSaved { .. } | RequestPurpose::SellGift) => {
+                self.hub.gift_mutating = false;
+                self.hub.gift_convert_confirm = None;
+                self.hub.gifts_error =
+                    Some(format!("Couldn't update the gift: {}", error_reason(&err)));
+            }
+            Some(RequestPurpose::GetPremiumFeatures) => {
+                self.hub.premium_loading = false;
+                self.hub.premium_error = Some(format!(
+                    "Couldn't load Premium features: {}",
+                    error_reason(&err)
+                ));
+            }
             Some(RequestPurpose::GetStarSubscriptions { .. }) => {
                 self.star_subscriptions_loading = false;
                 self.star_subscriptions_error = Some(format!(
