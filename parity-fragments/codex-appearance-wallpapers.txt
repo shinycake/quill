@@ -1,1 +1,1 @@
-parity:appearance-scale
+# Appearance: interface scale (text/rem only; fixed-pixel parts not yet scaled) and opt-in Telegram default wallpapers. No checklist ids completed yet.
