@@ -125,11 +125,38 @@ pub enum KeyboardButtonType {
     RequestPhoneNumber,
     RequestLocation,
     RequestPoll,
-    RequestUsers,
-    RequestChat,
+    /// `keyboardButtonTypeRequestUsers` (schema 1.8.67, line 3735).
+    RequestUsers(RequestUsersSpec),
+    /// `keyboardButtonTypeRequestChat` (schema 1.8.67, line 3751).
+    RequestChat(RequestChatSpec),
     RequestManagedBot,
-    WebApp { url: String },
-    Unknown { type_name: String },
+    WebApp {
+        url: String,
+    },
+    Unknown {
+        type_name: String,
+    },
+}
+
+/// `keyboardButtonTypeRequestUsers`: what the bot asks the user to share.
+/// `Option<bool>` restrictions are `None` when the bot does not restrict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestUsersSpec {
+    pub id: i32,
+    pub user_is_bot: Option<bool>,
+    pub user_is_premium: Option<bool>,
+    pub max_quantity: i32,
+}
+
+/// `keyboardButtonTypeRequestChat`: what chat the bot asks the user to share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestChatSpec {
+    pub id: i32,
+    pub chat_is_channel: bool,
+    pub chat_is_forum: Option<bool>,
+    pub chat_has_username: Option<bool>,
+    pub chat_is_created: bool,
+    pub bot_is_member: bool,
 }
 
 /// B1: `LoginUrlInfo` (TDLib 1.8.67, `schema/td_api.tl:3862` /
@@ -259,8 +286,48 @@ pub(crate) fn parse_keyboard_button(value: &Value) -> KeyboardButton {
         "keyboardButtonTypeRequestPhoneNumber" => KeyboardButtonType::RequestPhoneNumber,
         "keyboardButtonTypeRequestLocation" => KeyboardButtonType::RequestLocation,
         "keyboardButtonTypeRequestPoll" => KeyboardButtonType::RequestPoll,
-        "keyboardButtonTypeRequestUsers" => KeyboardButtonType::RequestUsers,
-        "keyboardButtonTypeRequestChat" => KeyboardButtonType::RequestChat,
+        "keyboardButtonTypeRequestUsers" => {
+            let t = value.get("type");
+            let flag = |name: &str| t.and_then(|t| t.get(name)).and_then(Value::as_bool);
+            let restricted = |restrict: &str, value: &str| {
+                flag(restrict)
+                    .unwrap_or(false)
+                    .then(|| flag(value).unwrap_or(false))
+            };
+            KeyboardButtonType::RequestUsers(RequestUsersSpec {
+                id: t
+                    .and_then(|t| t.get("id"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                user_is_bot: restricted("restrict_user_is_bot", "user_is_bot"),
+                user_is_premium: restricted("restrict_user_is_premium", "user_is_premium"),
+                max_quantity: t
+                    .and_then(|t| t.get("max_quantity"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(1)
+                    .max(1) as i32,
+            })
+        }
+        "keyboardButtonTypeRequestChat" => {
+            let t = value.get("type");
+            let flag = |name: &str| t.and_then(|t| t.get(name)).and_then(Value::as_bool);
+            let restricted = |restrict: &str, value: &str| {
+                flag(restrict)
+                    .unwrap_or(false)
+                    .then(|| flag(value).unwrap_or(false))
+            };
+            KeyboardButtonType::RequestChat(RequestChatSpec {
+                id: t
+                    .and_then(|t| t.get("id"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32,
+                chat_is_channel: flag("chat_is_channel").unwrap_or(false),
+                chat_is_forum: restricted("restrict_chat_is_forum", "chat_is_forum"),
+                chat_has_username: restricted("restrict_chat_has_username", "chat_has_username"),
+                chat_is_created: flag("chat_is_created").unwrap_or(false),
+                bot_is_member: flag("bot_is_member").unwrap_or(false),
+            })
+        }
         "keyboardButtonTypeRequestManagedBot" => KeyboardButtonType::RequestManagedBot,
         "keyboardButtonTypeWebApp" => KeyboardButtonType::WebApp {
             url: value

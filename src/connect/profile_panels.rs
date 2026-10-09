@@ -5,9 +5,9 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose};
 use crate::telegram::requests::{
-    get_chat_similar_chats, get_groups_in_common, get_suitable_personal_chats,
-    get_user_profile_photos, send_contact, set_birthdate, set_personal_chat,
-    set_profile_photo_previous, set_user_note,
+    get_chat_similar_chats, get_groups_in_common, get_suitable_discussion_chats,
+    get_suitable_personal_chats, get_user_profile_photos, send_contact, set_birthdate,
+    set_personal_chat, set_profile_photo_previous, set_user_note,
 };
 
 /// Groups in common are listed in one page (tdesktop pages by 50 as you
@@ -20,7 +20,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Send a profile-list request unless that list is loading or loaded
     /// (a `Failed` list is retried). The `Loading` marker is dropped again
     /// when the send fails.
-    fn fetch_profile_chats(
+    pub(super) fn fetch_profile_chats(
         &mut self,
         kind: ProfileChatsKind,
         id: i64,
@@ -38,7 +38,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = match kind {
             ProfileChatsKind::GroupsInCommon => self.session.request_for_user(purpose, id),
             ProfileChatsKind::SimilarChats => self.session.request(purpose, Some(ChatId(id))),
-            ProfileChatsKind::SuitablePersonalChats => self.session.request(purpose, None),
+            ProfileChatsKind::SuitablePersonalChats | ProfileChatsKind::SuitableDiscussionChats => {
+                self.session.request(purpose, None)
+            }
         };
         let json = match kind {
             ProfileChatsKind::GroupsInCommon => {
@@ -46,6 +48,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             ProfileChatsKind::SimilarChats => get_chat_similar_chats(extra, ChatId(id)),
             ProfileChatsKind::SuitablePersonalChats => get_suitable_personal_chats(extra),
+            ProfileChatsKind::SuitableDiscussionChats => get_suitable_discussion_chats(extra),
         };
         self.session
             .profile_chat_lists

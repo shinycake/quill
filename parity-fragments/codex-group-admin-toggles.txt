@@ -1,0 +1,9 @@
+# B7 group admin toggles
+parity:admin-history-new-members
+parity:admin-enable-topics
+parity:admin-allowed-reactions
+parity:admin-linked-discussion
+parity:admin-join-to-send
+parity:admin-hide-members
+parity:admin-protected-content
+parity:admin-upgrade-basic

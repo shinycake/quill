@@ -1432,6 +1432,34 @@ impl QuillApp {
         }
     }
 
+    /// Demo "send as": apply the `updateChatMessageSender` TDLib would send
+    /// after `setChatMessageSender`.
+    pub(super) fn apply_demo_message_sender(
+        &mut self,
+        chat_id: ChatId,
+        sender: quill::telegram::envelope::MessageSender,
+    ) {
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        let sender_json = match sender {
+            quill::telegram::envelope::MessageSender::User { user_id } => {
+                format!(r#"{{"@type":"messageSenderUser","user_id":{user_id}}}"#)
+            }
+            quill::telegram::envelope::MessageSender::Chat { chat_id } => {
+                format!(r#"{{"@type":"messageSenderChat","chat_id":{chat_id}}}"#)
+            }
+        };
+        let json = format!(
+            r#"{{"@type":"updateChatMessageSender","chat_id":{},"message_sender_id":{sender_json}}}"#,
+            chat_id.0
+        );
+        let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
+        if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+
     pub(super) fn apply_demo_forward(&mut self, dest: ChatId, draft: &ForwardDraft) {
         let Some(session) = self.demo_session.as_mut() else {
             return;

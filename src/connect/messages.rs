@@ -12,7 +12,7 @@ use crate::telegram::requests::{
     AnimationSend, SendReply, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
     VoiceNoteSend, compose_rich_message_with_ai, compose_text_with_ai, create_rich_message_with_ai,
     delete_messages, edit_message_caption, edit_message_scheduling_state, edit_message_text,
-    fix_rich_message_with_ai, fix_text_with_ai, forward_messages, get_chat_history,
+    fix_rich_message_with_ai, fix_text_with_ai, forward_messages_with_options, get_chat_history,
     get_chat_scheduled_messages, get_full_rich_message, input_message_photo, input_message_video,
     open_message_content, recognize_speech, resend_messages, send_animation, send_document,
     send_message_album, send_photo, send_rich_message, send_sticker, send_text, send_video,
@@ -164,6 +164,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .is_some_and(|h| h.loaded_complete)
+        {
+            return Ok(None);
+        }
+        // R5: a failed first page waits for the explicit Retry row
+        // (`retry_history`) instead of re-sending on every render.
+        if self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .is_some_and(|h| h.load_failed && h.messages.is_empty())
         {
             return Ok(None);
         }
@@ -1292,6 +1302,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         dest: ChatId,
         draft: &ForwardDraft,
     ) -> Result<RequestId, ConnectSendError> {
+        self.forward_messages_with_options(dest, draft, &SendOptions::default())
+    }
+
+    /// `forwardMessages` with the share box's silent / scheduled options.
+    pub fn forward_messages_with_options(
+        &mut self,
+        dest: ChatId,
+        draft: &ForwardDraft,
+        options: &SendOptions,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -1327,25 +1347,40 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::ForwardMessages, Some(dest));
-        self.session.in_flight_forward = Some(ForwardFlight {
+        let flight = ForwardFlight {
             extra,
             dest_chat_id: dest,
             from_chat_id: draft.from_chat_id,
             requested: draft.message_ids.len(),
-        });
-        let json = forward_messages(
+        };
+        // Several destinations (share box) are in flight at once: the first
+        // takes the main slot, the rest queue behind it.
+        let queued = self.session.in_flight_forward.is_some();
+        if queued {
+            self.session.queued_forward_flights.push(flight);
+        } else {
+            self.session.in_flight_forward = Some(flight);
+        }
+        let json = forward_messages_with_options(
             extra,
             dest,
             draft.from_chat_id,
             &draft.message_ids,
             draft.send_copy,
             draft.remove_caption,
+            options,
         );
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.in_flight_forward = None;
+                if queued {
+                    self.session
+                        .queued_forward_flights
+                        .retain(|f| f.extra != extra);
+                } else {
+                    self.session.in_flight_forward = None;
+                }
                 Err(err)
             }
         }

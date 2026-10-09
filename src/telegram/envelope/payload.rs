@@ -19,6 +19,22 @@ pub(crate) fn is_block_list_main(block_list: Option<&Value>) -> bool {
         == Some("blockListMain")
 }
 
+/// B7: the admin-toggle flags of a `supergroupFullInfo` object (schema
+/// 1.8.67, line 2792); missing flags read as false.
+pub(crate) fn parse_supergroup_full_admin(info: Option<&Value>) -> SupergroupFullAdmin {
+    let flag = |name: &str| {
+        info.and_then(|info| info.get(name))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    SupergroupFullAdmin {
+        can_hide_members: flag("can_hide_members"),
+        has_hidden_members: flag("has_hidden_members"),
+        is_all_history_available: flag("is_all_history_available"),
+        can_enable_paid_reaction: flag("can_enable_paid_reaction"),
+    }
+}
+
 pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePayload, ParseError> {
     let value: Value = serde_json::from_str(json).map_err(|_| ParseError::InvalidJson)?;
     match type_name {
@@ -526,15 +542,60 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 value.get("vote_graph").ok_or(ParseError::MissingField)?,
             )?,
         }),
-        "updateChatUnreadReactionCount" | "updateMessageUnreadReactions" => {
-            Ok(EnvelopePayload::UpdateChatUnreadReactionCount {
-                chat_id: ChatId(int53(value.get("chat_id"))?),
-                unread_reaction_count: value
-                    .get("unread_reaction_count")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
-            })
-        }
+        "updateMessageUnreadReactions" => Ok(EnvelopePayload::UpdateMessageUnreadReactions {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53_or_zero(value.get("message_id"))),
+            unread_reaction_count: value
+                .get("unread_reaction_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            newest: value
+                .get("unread_reactions")
+                .and_then(Value::as_array)
+                .and_then(|list| list.last())
+                .and_then(parse_unread_reaction),
+        }),
+        "updateNotificationGroup" => Ok(EnvelopePayload::UpdateNotificationGroup {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            total_count: value
+                .get("total_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            added_count: value
+                .get("added_notifications")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len),
+            removed_count: value
+                .get("removed_notification_ids")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len),
+        }),
+        "updateActiveNotifications" => Ok(EnvelopePayload::UpdateActiveNotifications {
+            chat_ids: value
+                .get("groups")
+                .and_then(Value::as_array)
+                .map(|groups| {
+                    groups
+                        .iter()
+                        .filter(|group| {
+                            group
+                                .get("total_count")
+                                .and_then(Value::as_i64)
+                                .unwrap_or(0)
+                                > 0
+                        })
+                        .filter_map(|group| int53(group.get("chat_id")).ok().map(ChatId))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        "updateChatUnreadReactionCount" => Ok(EnvelopePayload::UpdateChatUnreadReactionCount {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            unread_reaction_count: value
+                .get("unread_reaction_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+        }),
         // Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594).
         "updateChatBlockList" => Ok(EnvelopePayload::UpdateChatBlockList {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -1065,6 +1126,24 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .map(ChatId)
                 .collect(),
         }),
+        "foundPublicPosts" => Ok(EnvelopePayload::FoundPublicPosts {
+            messages: value
+                .get("messages")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|m| parse_message(m).ok())
+                .collect(),
+            next_offset: value
+                .get("next_offset")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            are_limits_exceeded: value
+                .get("are_limits_exceeded")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         "chatPhotos" => Ok(EnvelopePayload::ChatPhotos {
             total_count: value
                 .get("total_count")
@@ -1223,6 +1302,14 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             Ok(EnvelopePayload::UpdateBasicGroup {
                 basic_group_id: int53(group.get("id"))?,
                 member_count: int53(group.get("member_count")).unwrap_or(0) as i32,
+                status: parse_channel_member_status(group.get("status"))
+                    .map(|(status, _)| status)
+                    .unwrap_or(ChannelMemberStatus::Unknown),
+                can_change_info: parse_change_info_right(group.get("status")),
+                is_active: group
+                    .get("is_active")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
             })
         }
         "updateChatOnlineMemberCount" => Ok(EnvelopePayload::UpdateChatOnlineMemberCount {
@@ -1252,6 +1339,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .unwrap_or(false),
                 has_forum_tabs: supergroup
                     .get("has_forum_tabs")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                has_automatic_translation: supergroup
+                    .get("has_automatic_translation")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 username: parse_first_active_username(supergroup.get("usernames")),
@@ -1295,6 +1386,12 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .get("show_message_sender")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                // B7: `supergroup.join_to_send_messages` (schema 1.8.67,
+                // line 2746).
+                join_to_send_messages: supergroup
+                    .get("join_to_send_messages")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             })
         }
         "supergroup" => Ok(EnvelopePayload::Supergroup {
@@ -1305,6 +1402,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .unwrap_or(false),
             has_forum_tabs: value
                 .get("has_forum_tabs")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_automatic_translation: value
+                .get("has_automatic_translation")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             username: parse_first_active_username(value.get("usernames")),
@@ -1341,6 +1442,10 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .unwrap_or(false),
             show_message_sender: value
                 .get("show_message_sender")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            join_to_send_messages: value
+                .get("join_to_send_messages")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
@@ -1677,6 +1782,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // 1.8.67, line 9053). A missing/invalid `days` degrades to 0
         // rather than failing the parse; the authoritative refetch
         // decides.
+        "messageAutoDeleteTime" => Ok(EnvelopePayload::MessageAutoDeleteTime {
+            seconds: value
+                .get("time")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .clamp(0, i32::MAX as i64) as i32,
+        }),
         "accountTtl" => {
             let days = value
                 .get("days")
@@ -1894,6 +2006,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
             sticker_set_id: int64(value.get("sticker_set_id")).unwrap_or(0),
             custom_emoji_sticker_set_id: int64(value.get("custom_emoji_sticker_set_id"))
                 .unwrap_or(0),
+            admin: parse_supergroup_full_admin(Some(&value)),
         }),
         // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line
         // 10750) — same fields as the `supergroupFullInfo` response, with
@@ -1977,6 +2090,7 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .and_then(|info| info.get("custom_emoji_sticker_set_id")),
             )
             .unwrap_or(0),
+            admin: parse_supergroup_full_admin(value.get("supergroup_full_info")),
         }),
         // Slice (communities backend core): `updateCommunity` (schema
         // 1.8.67, line 10726) — the update carries the full `community`
@@ -2030,6 +2144,23 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        // B7: `updateChatAvailableReactions` (schema 1.8.67, line 10532).
+        "updateChatAvailableReactions" => Ok(EnvelopePayload::UpdateChatAvailableReactions {
+            chat_id: int53(value.get("chat_id"))?,
+            available_reactions: parse_chat_available_reactions(value.get("available_reactions"))
+                .ok_or(ParseError::MissingField)?,
+        }),
+        // B7: `updateActiveEmojiReactions` (schema 1.8.67, line 10999).
+        "updateActiveEmojiReactions" => Ok(EnvelopePayload::UpdateActiveEmojiReactions {
+            emojis: value
+                .get("emojis")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+        }),
         "updateChatHasProtectedContent" => Ok(EnvelopePayload::UpdateChatHasProtectedContent {
             chat_id: int53(value.get("chat_id"))?,
             has_protected_content: value
@@ -2043,6 +2174,38 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .get("has_scheduled_messages")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+        }),
+        "updateChatReplyMarkup" => {
+            let message = match value.get("reply_markup_message") {
+                Some(m) if !m.is_null() => Some(parse_message(m)?),
+                _ => None,
+            };
+            Ok(EnvelopePayload::UpdateChatReplyMarkup {
+                chat_id: ChatId(int53(value.get("chat_id"))?),
+                message_id: message.as_ref().map(|m| m.id),
+                reply_markup: message.and_then(|m| m.reply_markup),
+            })
+        }
+        "updateChatMessageSender" => Ok(EnvelopePayload::UpdateChatMessageSender {
+            chat_id: int53(value.get("chat_id"))?,
+            message_sender: parse_message_sender(value.get("message_sender_id")).ok(),
+        }),
+        "chatMessageSenders" => Ok(EnvelopePayload::ChatMessageSenders {
+            senders: value
+                .get("senders")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| {
+                    Some(AvailableMessageSender {
+                        sender: parse_message_sender(entry.get("sender")).ok()?,
+                        needs_premium: entry
+                            .get("needs_premium")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    })
+                })
+                .collect(),
         }),
         "updateChatIsTranslatable" => Ok(EnvelopePayload::UpdateChatIsTranslatable {
             chat_id: int53(value.get("chat_id"))?,

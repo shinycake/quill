@@ -176,6 +176,10 @@ pub struct Session {
     /// followed by silence.
     pub resend_error: Option<String>,
     pub send_permission_error: Option<String>,
+    /// Q1: one-shot; "Too many attempts. Try again in N seconds." after a
+    /// user action (send, edit, join, ...) hit a rate limit. The UI drains
+    /// it into the status note; the composer text is left untouched.
+    pub flood_notice: Option<String>,
     /// Slice G1 fix-up: one-shot; set when an invite-link mutation
     /// (create/edit/revoke/replace-primary) errors. The UI drains it into
     /// the status note — the previously loaded list is kept, not wiped.
@@ -203,6 +207,18 @@ pub struct Session {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
+    /// Chats whose OS notification should be withdrawn (read elsewhere or
+    /// removed by TDLib); drained by the UI, which dismisses the toast.
+    pub pending_notification_clears: Vec<ChatId>,
+    /// Chats with an OS notification we showed (or TDLib reports active
+    /// from a previous launch); only these produce a clear.
+    pub shown_notification_chats: std::collections::HashSet<ChatId>,
+    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off).
+    pub default_auto_delete_secs: Option<i32>,
+    /// A default auto-delete fetch or write is in flight.
+    pub default_auto_delete_busy: bool,
+    /// Honest one-line failure of the last default auto-delete request.
+    pub default_auto_delete_error: Option<String>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
     pub saved_notification_sounds: Vec<NotificationSound>,
@@ -512,6 +528,16 @@ pub struct Session {
     pub last_auth_error: Option<AuthRequestError>,
     /// In-flight `forwardMessages` (dest / source / requested count).
     pub in_flight_forward: Option<ForwardFlight>,
+    /// Further `forwardMessages` in flight while the share box sends to
+    /// several chats at once (`in_flight_forward` holds the first).
+    pub queued_forward_flights: Vec<ForwardFlight>,
+    /// `chat.message_sender_id` / `updateChatMessageSender`: the "send as"
+    /// identity selected per chat (absent when the user cannot change it).
+    pub chat_message_sender: HashMap<i64, MessageSender>,
+    /// `getChatAvailableMessageSenders` answers per chat.
+    pub send_as_options: HashMap<i64, Vec<AvailableMessageSender>>,
+    /// Share box search (local `searchChats` + `searchChatsOnServer`).
+    pub share_search: ShareSearch,
     /// Last `forwardMessages` outcome for the dest picker success surface.
     pub last_forward: Option<ForwardResult>,
     /// Last `callbackQueryAnswer` to an inline keyboard callback-button press
@@ -829,6 +855,8 @@ pub struct Session {
     /// Translation state (`translateText` / `translateMessageText`, the
     /// chat translate bar).
     pub translate: TranslateState,
+    /// Bot reply keyboards as TDLib reports them, and recent inline bots.
+    pub reply_keyboards: ReplyKeyboardState,
     /// Slice G2: the welcome-message pack per chat
     /// (`updateChatWelcomeMessages`, schema 1.8.67, line 10649).
     pub welcome_messages: HashMap<i64, Vec<ParsedWelcomeMessage>>,
@@ -919,6 +947,25 @@ pub struct Session {
     /// 2733/2746), keyed by supergroup id. Drives the "Approve new
     /// members" toggle.
     pub supergroup_join_by_request: HashMap<i64, bool>,
+    /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line 2746),
+    /// keyed by supergroup id.
+    pub supergroup_join_to_send: HashMap<i64, bool>,
+    /// B7: the viewer's own `basicGroup.status`, keyed by basic group id.
+    pub basic_group_status: HashMap<i64, ChannelMemberStatus>,
+    /// B7: `can_change_info` of the viewer's administrator status in a
+    /// basic group.
+    pub basic_group_change_info_right: HashMap<i64, bool>,
+    /// B7: `basicGroup.is_active` (false after the upgrade).
+    pub basic_group_active: HashMap<i64, bool>,
+    /// B7: `chat.available_reactions` / `updateChatAvailableReactions`,
+    /// keyed by chat id.
+    pub chat_available_reactions: HashMap<i64, crate::telegram::envelope::ChatAvailableReactions>,
+    /// B7: `updateActiveEmojiReactions` — the emoji usable as reactions.
+    pub active_emoji_reactions: Vec<String>,
+    /// B7: steps waiting for a group-admin request to succeed.
+    pub admin_followups: Vec<(RequestId, AdminFollowup)>,
+    /// B7: finished basic group upgrades, `(old chat id, new chat id)`.
+    pub chat_upgrades: Vec<(i64, i64)>,
     /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67, lines
     /// 2736/2746), keyed by supergroup id. Set by
     /// `toggleSupergroupIsBroadcastGroup` (one-way upgrade).
@@ -1107,6 +1154,7 @@ impl Session {
             recognize_speech_error: None,
             resend_error: None,
             send_permission_error: None,
+            flood_notice: None,
             invite_link_error: None,
             scheduled_messages: Vec::new(),
             open_chat: None,
@@ -1115,6 +1163,11 @@ impl Session {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
+            pending_notification_clears: Vec::new(),
+            shown_notification_chats: std::collections::HashSet::new(),
+            default_auto_delete_secs: None,
+            default_auto_delete_busy: false,
+            default_auto_delete_error: None,
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
             saved_sounds_stale: false,
@@ -1212,6 +1265,10 @@ impl Session {
             last_seq: 0,
             last_auth_error: None,
             in_flight_forward: None,
+            queued_forward_flights: Vec::new(),
+            chat_message_sender: HashMap::new(),
+            send_as_options: HashMap::new(),
+            share_search: ShareSearch::default(),
             last_forward: None,
             last_callback_answer: None,
             last_login_url_info: None,
@@ -1315,6 +1372,7 @@ impl Session {
             protected_chats: HashSet::new(),
             scheduled_chats: HashSet::new(),
             translate: TranslateState::default(),
+            reply_keyboards: ReplyKeyboardState::default(),
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),
             chat_boost_status: HashMap::new(),
@@ -1339,6 +1397,14 @@ impl Session {
             deep_link_original: String::new(),
             proxy: Default::default(),
             supergroup_join_by_request: HashMap::new(),
+            supergroup_join_to_send: HashMap::new(),
+            basic_group_status: HashMap::new(),
+            basic_group_change_info_right: HashMap::new(),
+            basic_group_active: HashMap::new(),
+            chat_available_reactions: HashMap::new(),
+            active_emoji_reactions: Vec::new(),
+            admin_followups: Vec::new(),
+            chat_upgrades: Vec::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
             member_list_stale: Vec::new(),

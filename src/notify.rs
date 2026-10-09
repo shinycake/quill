@@ -22,7 +22,7 @@
 //! dispatch runs on UI-thread-spawned worker threads.
 
 use crate::ids::{ChatId, MessageId};
-use crate::telegram::envelope::{ParsedMessage, effective_content};
+use crate::telegram::envelope::{ParsedMessage, ReactionNotificationSource, effective_content};
 
 /// Generic body used when previews are hidden (user setting or per-chat
 /// `chatNotificationSettings`), or when the content has no preview text.
@@ -249,6 +249,113 @@ pub fn decide_notification_sound(input: &SoundInput) -> Option<NotificationSound
     }
 }
 
+/// A button on an OS notification. tdesktop shows "Reply" and "Mark as
+/// read" on the platforms that support notification actions
+/// (`Window::Notifications::Manager`, `platform/*/notifications_manager_*`).
+///
+/// GPUI's `SystemNotification` offers action buttons on macOS, Windows and
+/// Linux but no inline text field, so "Reply" brings the app forward with
+/// the chat open and the composer focused (the documented fallback for
+/// inline text input).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationAction {
+    /// The notification body itself: open the chat.
+    Open,
+    /// Open the chat and focus the composer.
+    Reply,
+    /// Mark the chat as read without opening it.
+    MarkRead,
+}
+
+impl NotificationAction {
+    /// Buttons offered, in order (tdesktop `lng_notification_reply` then
+    /// `lng_context_mark_read`).
+    pub const BUTTONS: [NotificationAction; 2] =
+        [NotificationAction::Reply, NotificationAction::MarkRead];
+
+    /// Stable id carried through the platform response; also the
+    /// `notify-send --action` name on Linux (`default` is the body click).
+    pub fn id(self) -> &'static str {
+        match self {
+            NotificationAction::Open => "default",
+            NotificationAction::Reply => "reply",
+            NotificationAction::MarkRead => "read",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NotificationAction::Open => "Open",
+            NotificationAction::Reply => "Reply",
+            NotificationAction::MarkRead => "Mark as read",
+        }
+    }
+
+    /// Inverse of [`NotificationAction::id`]; `None` (a body activation) and
+    /// unknown ids open the chat.
+    pub fn from_id(id: Option<&str>) -> NotificationAction {
+        match id {
+            Some("reply") => NotificationAction::Reply,
+            Some("read") => NotificationAction::MarkRead,
+            _ => NotificationAction::Open,
+        }
+    }
+}
+
+/// The `(id, label)` buttons to attach to a notification. A locked app
+/// offers none: a reply or read receipt must not bypass the passcode.
+pub fn action_buttons(locked: bool) -> Vec<(&'static str, &'static str)> {
+    if locked {
+        return Vec::new();
+    }
+    NotificationAction::BUTTONS
+        .iter()
+        .map(|action| (action.id(), action.label()))
+        .collect()
+}
+
+/// Pure inputs for a reaction notification ("X reacted to your message").
+pub struct ReactionNotifyInput<'a> {
+    pub chat_id: ChatId,
+    pub chat_title: &'a str,
+    /// `reactionNotificationSettings.message_reaction_source`.
+    pub source: ReactionNotificationSource,
+    pub sender_name: Option<&'a str>,
+    pub sender_is_contact: bool,
+    /// The emoji, when the reaction is a plain emoji.
+    pub emoji: Option<&'a str>,
+    /// `reactionNotificationSettings.show_preview`.
+    pub show_preview: bool,
+    pub chat_muted: bool,
+    pub app_active: bool,
+    pub open_chat: Option<ChatId>,
+}
+
+/// tdesktop only notifies about reactions the user's settings allow
+/// (`None` / `Contacts` / `All`), never in a muted chat, and not while the
+/// chat is open in the focused window.
+pub fn decide_reaction_notify(input: &ReactionNotifyInput) -> Option<OsNotification> {
+    match input.source {
+        ReactionNotificationSource::None => return None,
+        ReactionNotificationSource::Contacts if !input.sender_is_contact => return None,
+        ReactionNotificationSource::Contacts | ReactionNotificationSource::All => {}
+    }
+    if input.chat_muted || (input.app_active && input.open_chat == Some(input.chat_id)) {
+        return None;
+    }
+    let body = match (input.show_preview, input.sender_name, input.emoji) {
+        (true, Some(name), Some(emoji)) => format!("{name} reacted {emoji} to your message"),
+        (true, Some(name), None) => format!("{name} reacted to your message"),
+        (true, None, Some(emoji)) => format!("Reacted {emoji} to your message"),
+        _ => "New reaction to your message".to_string(),
+    };
+    Some(OsNotification {
+        chat_id: input.chat_id,
+        title: input.chat_title.to_string(),
+        body,
+    })
+}
+
 /// Platform notification backend available on this build target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifyBackend {
@@ -329,12 +436,15 @@ fn linux_notify_send_command(notification: &OsNotification) -> NotificationComma
     NotificationCommand {
         program: "notify-send".to_string(),
         // `--wait` blocks until the notification is dismissed or an action
-        // fires; `--action=default=Open` prints "default" on stdout when the
-        // user clicks, which the caller maps to focusing the chat.
+        // fires; each `--action=name=Label` prints its name on stdout when
+        // the user picks it ("default" for a click on the body), which the
+        // caller maps to a [`NotificationAction`].
         args: vec![
             "--app-name=Quill".to_string(),
             "--wait".to_string(),
             "--action=default=Open".to_string(),
+            "--action=reply=Reply".to_string(),
+            "--action=read=Mark as read".to_string(),
             // `--` ends option parsing so a title like `--action=x=Label`
             // is treated as the title, not another action button.
             "--".to_string(),
@@ -356,6 +466,16 @@ pub fn build_notification_command(notification: &OsNotification) -> Option<Notif
 pub struct NotificationOutcome {
     /// True when the user clicked the notification (Linux `--wait` action).
     pub clicked: bool,
+    /// Which action was picked, when `clicked`.
+    pub action: Option<NotificationAction>,
+}
+
+/// Map `notify-send --wait` stdout (the picked action name) to an action.
+fn parse_notify_send_output(stdout: &str) -> Option<NotificationAction> {
+    stdout.lines().map(str::trim).find_map(|line| match line {
+        "default" | "reply" | "read" => Some(NotificationAction::from_id(Some(line))),
+        _ => None,
+    })
 }
 
 /// Run the command to completion. Spawning the process itself failing (e.g.
@@ -364,16 +484,16 @@ pub fn run_notification_command(command: &NotificationCommand) -> NotificationOu
     let output = std::process::Command::new(&command.program)
         .args(&command.args)
         .output();
-    let clicked = match output {
-        Ok(output) => {
-            command.report_click
-                && String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .any(|line| line.trim() == "default")
+    let action = match output {
+        Ok(output) if command.report_click => {
+            parse_notify_send_output(&String::from_utf8_lossy(&output.stdout))
         }
-        Err(_) => false,
+        _ => None,
     };
-    NotificationOutcome { clicked }
+    NotificationOutcome {
+        clicked: action.is_some(),
+        action,
+    }
 }
 
 #[cfg(test)]
@@ -591,6 +711,8 @@ mod tests {
                 "--app-name=Quill",
                 "--wait",
                 "--action=default=Open",
+                "--action=reply=Reply",
+                "--action=read=Mark as read",
                 "--",
                 "Ada",
                 "hello",
@@ -719,6 +841,103 @@ mod tests {
         assert_eq!(
             decide_notification_sound(&input),
             Some(NotificationSoundKind::Custom(42))
+        );
+    }
+
+    #[test]
+    fn action_ids_roundtrip() {
+        for action in NotificationAction::BUTTONS {
+            assert_eq!(NotificationAction::from_id(Some(action.id())), action);
+        }
+        assert_eq!(NotificationAction::from_id(None), NotificationAction::Open);
+        assert_eq!(
+            NotificationAction::from_id(Some("default")),
+            NotificationAction::Open
+        );
+        assert_eq!(
+            NotificationAction::from_id(Some("garbage")),
+            NotificationAction::Open
+        );
+        assert_eq!(NotificationAction::MarkRead.label(), "Mark as read");
+    }
+
+    #[test]
+    fn locked_apps_offer_no_buttons() {
+        assert!(action_buttons(true).is_empty());
+        assert_eq!(
+            action_buttons(false),
+            vec![("reply", "Reply"), ("read", "Mark as read")]
+        );
+    }
+
+    #[test]
+    fn notify_send_output_picks_the_action() {
+        assert_eq!(
+            parse_notify_send_output("reply\n"),
+            Some(NotificationAction::Reply)
+        );
+        assert_eq!(
+            parse_notify_send_output("read"),
+            Some(NotificationAction::MarkRead)
+        );
+        assert_eq!(
+            parse_notify_send_output("default\n"),
+            Some(NotificationAction::Open)
+        );
+        assert_eq!(parse_notify_send_output(""), None);
+        assert_eq!(parse_notify_send_output("closed"), None);
+    }
+
+    fn reaction_input<'a>(source: ReactionNotificationSource) -> ReactionNotifyInput<'a> {
+        ReactionNotifyInput {
+            chat_id: ChatId(7),
+            chat_title: "Ada",
+            source,
+            sender_name: Some("Grace"),
+            sender_is_contact: true,
+            emoji: Some("\u{2764}"),
+            show_preview: true,
+            chat_muted: false,
+            app_active: false,
+            open_chat: None,
+        }
+    }
+
+    #[test]
+    fn reaction_source_gates_the_notification() {
+        assert!(
+            decide_reaction_notify(&reaction_input(ReactionNotificationSource::None)).is_none()
+        );
+        let all = decide_reaction_notify(&reaction_input(ReactionNotificationSource::All)).unwrap();
+        assert_eq!(all.title, "Ada");
+        assert_eq!(all.body, "Grace reacted \u{2764} to your message");
+        let mut stranger = reaction_input(ReactionNotificationSource::Contacts);
+        stranger.sender_is_contact = false;
+        assert!(decide_reaction_notify(&stranger).is_none());
+        stranger.sender_is_contact = true;
+        assert!(decide_reaction_notify(&stranger).is_some());
+    }
+
+    #[test]
+    fn reaction_respects_mute_focus_and_preview() {
+        let mut muted = reaction_input(ReactionNotificationSource::All);
+        muted.chat_muted = true;
+        assert!(decide_reaction_notify(&muted).is_none());
+        let mut open = reaction_input(ReactionNotificationSource::All);
+        open.app_active = true;
+        open.open_chat = Some(ChatId(7));
+        assert!(decide_reaction_notify(&open).is_none());
+        let mut hidden = reaction_input(ReactionNotificationSource::All);
+        hidden.show_preview = false;
+        assert_eq!(
+            decide_reaction_notify(&hidden).unwrap().body,
+            "New reaction to your message"
+        );
+        let mut custom = reaction_input(ReactionNotificationSource::All);
+        custom.emoji = None;
+        assert_eq!(
+            decide_reaction_notify(&custom).unwrap().body,
+            "Grace reacted to your message"
         );
     }
 }

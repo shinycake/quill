@@ -9,10 +9,12 @@ use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests::{
     SendReply, add_recently_found_chat, click_chat_sponsored_message, get_chat_history,
     get_chat_message_by_date, get_chat_message_calendar, get_chat_sponsored_messages,
+    get_top_chats_users, remove_recently_found_chat, remove_top_chat_users,
     report_chat_sponsored_message, search_chat_members, search_chat_messages,
-    search_chat_messages_from, search_chats, search_messages_filter_json, search_messages_filtered,
-    search_public_chats, search_recently_found_chats, toggle_has_sponsored_messages_enabled,
-    view_messages, view_sponsored_chat,
+    search_chat_messages_from, search_chats, search_chats_on_server, search_messages_filter_json,
+    search_messages_filtered, search_public_chats, search_public_messages_by_tag,
+    search_public_posts, search_recently_found_chats, set_option_boolean,
+    toggle_has_sponsored_messages_enabled, view_messages, view_sponsored_chat,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -393,6 +395,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         trimmed: &str,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
         let search_gen = self.session.search.generation;
+        if self.session.search.filters.scope == crate::search_filters::SearchScope::PublicPosts {
+            return self.send_public_posts_search(trimmed, search_gen);
+        }
         let chats_extra = self
             .session
             .request_search(RequestPurpose::SearchChats, search_gen);
@@ -419,6 +424,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .filters
                 .date
                 .min_date(crate::local_time::now_unix()),
+            max_date: self
+                .session
+                .search
+                .filters
+                .date
+                .max_date(crate::local_time::now_unix()),
+            archived: self.session.search.filters.archived,
         };
         if let Err(err) = self.sender.send_json(&search_messages_filtered(
             messages_extra,
@@ -428,6 +440,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         )) {
             self.abort_typed_search(chats_extra, messages_extra, public_extra);
             return Err(err);
+        }
+        // The server's own title/username search: a supplement merged behind
+        // the offline hits, fire-and-forget on failure.
+        let server_extra = self
+            .session
+            .request_search(RequestPurpose::SearchChatsOnServer, search_gen);
+        if self
+            .sender
+            .send_json(&search_chats_on_server(server_extra, trimmed, SEARCH_LIMIT))
+            .is_err()
+        {
+            self.session.requests.take(server_extra);
         }
         match self
             .sender
@@ -445,7 +469,160 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// The "Public posts" scope: a hashtag or cashtag goes to
+    /// `searchPublicMessagesByTag`, anything else to `searchPublicPosts`
+    /// (free searches only). The chat sections are not searched.
+    fn send_public_posts_search(
+        &mut self,
+        trimmed: &str,
+        search_gen: u64,
+    ) -> Result<Option<SearchFlight>, ConnectSendError> {
+        self.session.search.begin_public_scope();
+        let tag = crate::search_filters::tag_query(trimmed);
+        let purpose = if tag.is_some() {
+            RequestPurpose::SearchPublicMessagesByTag
+        } else {
+            RequestPurpose::SearchPublicPosts
+        };
+        let extra = self.session.request_search(purpose, search_gen);
+        let json = match tag {
+            Some(tag) => search_public_messages_by_tag(extra, tag, "", SEARCH_LIMIT),
+            None => search_public_posts(extra, trimmed, "", SEARCH_LIMIT),
+        };
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(SearchFlight::PublicPosts(extra))),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.search.accept_messages(Vec::new(), true);
+                Err(err)
+            }
+        }
+    }
+
+    /// Hashtag click (tdesktop `searchByHashtag`): search `tag` in the
+    /// chosen scope — "My messages" or "Public posts" (the third scope,
+    /// "This chat", is the in-chat search and lives in the UI).
+    pub fn search_hashtag(
+        &mut self,
+        tag: &str,
+        scope: crate::search_filters::SearchScope,
+    ) -> Result<Option<SearchFlight>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.clear_typed_debounce();
+        self.session.search.open = true;
+        self.session.search.filters.scope = scope;
+        let _search_gen = self.session.search.begin_query(tag);
+        self.send_typed_search(tag)
+    }
+
+    /// `removeRecentlyFoundChat`: one entry leaves the Recent list at once
+    /// (the schema has no update for it; a refusal surfaces as a note).
+    pub fn remove_recent_search(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.search.remove_recent(chat_id) {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::RemoveRecentlyFoundChat, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&remove_recently_found_chat(extra, chat_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// `getTopChats(users)` for the "Frequent contacts" strip; skipped while
+    /// the strip is disabled.
+    pub fn fetch_top_chats(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.search.top_chats_disabled
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetTopChats)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request(RequestPurpose::GetTopChats, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&get_top_chats_users(extra, TOP_CHATS_LIMIT))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// "Remove from Recent" on a frequent contact (`removeTopChat`).
+    pub fn remove_top_chat(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.search.remove_top_chat(chat_id) {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::RemoveTopChat, Some(chat_id));
+        if let Err(err) = self
+            .sender
+            .send_json(&remove_top_chat_users(extra, chat_id))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Settings > "Suggest frequent contacts" (and tdesktop's "Remove all &
+    /// Disable"): `setOption(disable_top_chats)`. Turning it off clears the
+    /// strip at once; `updateOption` confirms the truth.
+    pub fn set_top_chats_disabled(
+        &mut self,
+        disabled: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::SetTopChatsDisabled, None);
+        if let Err(err) =
+            self.sender
+                .send_json(&set_option_boolean(extra, "disable_top_chats", disabled))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.search.top_chats_disabled = disabled;
+        if disabled {
+            self.session.search.top_chats.clear();
+            self.session.search.top_menu = None;
+        }
+        Ok(extra)
+    }
+
     fn request_recents(&mut self) -> Result<Option<SearchFlight>, ConnectSendError> {
+        // The frequent contacts ride along; their failure never blocks the
+        // Recent list.
+        let _ = self.fetch_top_chats();
         let search_gen = self.session.search.begin_recents();
         let extra = self
             .session

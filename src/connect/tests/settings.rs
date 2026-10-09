@@ -685,3 +685,54 @@ fn media_download_resolves_message_origin_and_picker_files_use_direct_api() {
     assert_eq!(request["@type"], "cancelDownloadFile");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The default auto-delete timer: fetched once, only valid values leave,
+/// and the confirmed value lands from the `ok`.
+#[test]
+fn default_auto_delete_fetch_and_set() {
+    let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
+    let extra = driver
+        .get_default_auto_delete()
+        .expect("send")
+        .expect("request id");
+    assert!(
+        recorder
+            .snapshot()
+            .iter()
+            .any(|s| s.contains("\"@type\":\"getDefaultMessageAutoDeleteTime\""))
+    );
+    // Deduped while in flight.
+    assert!(driver.get_default_auto_delete().expect("dedupe").is_none());
+    let answer = format!(
+        r#"{{"@type":"messageAutoDeleteTime","time":86400,"@extra":"{}"}}"#,
+        extra.0
+    );
+    driver
+        .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.default_auto_delete_secs, Some(86_400));
+    // Cached: no refetch.
+    assert!(driver.get_default_auto_delete().expect("cached").is_none());
+
+    // 1 hour is not a whole day: refused before it leaves.
+    let sent = recorder.snapshot().len();
+    assert!(driver.set_default_auto_delete(3600).is_err());
+    assert_eq!(recorder.snapshot().len(), sent);
+
+    let extra = driver.set_default_auto_delete(604_800).expect("send");
+    assert!(
+        recorder
+            .snapshot()
+            .last()
+            .unwrap()
+            .contains("\"@type\":\"setDefaultMessageAutoDeleteTime\"")
+    );
+    // One write at a time.
+    assert!(driver.set_default_auto_delete(0).is_err());
+    let ok = format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0);
+    driver
+        .ingest(copy_and_parse(&ok, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert_eq!(driver.session.default_auto_delete_secs, Some(604_800));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -80,6 +80,23 @@ pub enum RequestPurpose {
     /// all public chats (not just known ones). Sent alongside `searchChats`.
     SearchPublicChats,
     AddRecentlyFoundChat,
+    /// `searchChatsOnServer`: the server's title/username hits, merged
+    /// behind `SearchChats` (never gates the search status).
+    SearchChatsOnServer,
+    /// `searchPublicPosts` (the "Public posts" scope of a plain query).
+    SearchPublicPosts,
+    /// `searchPublicMessagesByTag` (the "Public posts" scope of a hashtag).
+    SearchPublicMessagesByTag,
+    /// `getTopChats(topChatCategoryUsers)`: the "Frequent contacts" strip.
+    GetTopChats,
+    /// `removeTopChat`; response is `ok`, the entry left the strip
+    /// optimistically.
+    RemoveTopChat,
+    /// `removeRecentlyFoundChat`; response is `ok`, the row left the Recent
+    /// list optimistically.
+    RemoveRecentlyFoundChat,
+    /// `setOption(disable_top_chats)`; the truth arrives as `updateOption`.
+    SetTopChatsDisabled,
     SearchChatMessages,
     /// The next older page of the open in-chat search (appended to the
     /// hits; carries the search generation).
@@ -941,6 +958,27 @@ pub enum RequestPurpose {
     /// can be a personal channel (`getSuitablePersonalChats`). Response
     /// is `chats`; ids land in `Session::profile_chat_lists`.
     GetProfileChats(ProfileChatsKind),
+    /// B7: `toggleSupergroupIsForum` (line 15218). Response `ok`; the new
+    /// `is_forum` arrives via `updateSupergroup`.
+    ToggleSupergroupIsForum,
+    /// B7: `toggleSupergroupIsAllHistoryAvailable` (line 15191). Applied
+    /// optimistically; rolled back on error.
+    ToggleSupergroupIsAllHistoryAvailable,
+    /// B7: `toggleSupergroupJoinToSendMessages` (line 15180). Optimistic.
+    ToggleSupergroupJoinToSendMessages,
+    /// B7: `toggleSupergroupHasHiddenMembers` (line 15207). Optimistic.
+    ToggleSupergroupHasHiddenMembers,
+    /// B7: `toggleChatHasProtectedContent` (line 13504). Optimistic.
+    ToggleChatHasProtectedContent,
+    /// B7: `setChatAvailableReactions` (line 13527). Optimistic.
+    SetChatAvailableReactions,
+    /// B7: `setChatDiscussionGroup` (line 13539). Response `ok`; the new
+    /// link arrives via `updateSupergroupFullInfo`.
+    SetChatDiscussionGroup,
+    /// B7: `upgradeBasicGroupChatToSupergroupChat` (line 13343). The
+    /// answer is the new supergroup `chat`; pending `chat_id` is the old
+    /// basic group chat.
+    UpgradeBasicGroup,
     /// B10: `setBirthdate` (schema 1.8.67, line 14841). Response is
     /// `ok`; the new value arrives via `updateUserFullInfo`.
     SetBirthdate,
@@ -1026,6 +1064,17 @@ pub enum RequestPurpose {
     /// Phase 9.5: `getChatsToPostStories`. Response is `chats`;
     /// stored in `Session::story_post_as_chats`.
     GetChatsToPostStories,
+    /// Share box: `searchChats` for the typed query. Response is `chats`;
+    /// stored in `Session::share_search`.
+    SearchShareChats,
+    /// Share box: `searchChatsOnServer` for the typed query.
+    SearchShareChatsOnServer,
+    /// `getChatAvailableMessageSenders`. Response is `chatMessageSenders`;
+    /// stored in `Session::send_as_options[chat_id]`.
+    GetChatAvailableMessageSenders,
+    /// `setChatMessageSender`. Response is `ok`; the choice arrives via
+    /// `updateChatMessageSender`.
+    SetChatMessageSender,
     /// Phase 9.7: `getChatStoryAlbums`. Response is `storyAlbums`;
     /// replaces `Session::story_albums[chat_id]`.
     GetChatStoryAlbums,
@@ -1325,6 +1374,14 @@ pub enum RequestPurpose {
     /// new timer arrives as `updateChatMessageAutoDeleteTime` (plus a
     /// `messageChatSetMessageAutoDeleteTime` service message in history).
     SetChatMessageAutoDeleteTime,
+    /// `getDefaultMessageAutoDeleteTime`. Response is `messageAutoDeleteTime`,
+    /// stored in `Session::default_auto_delete_secs`.
+    GetDefaultAutoDelete,
+    /// `setDefaultMessageAutoDeleteTime`. Response is `ok`; the confirmed
+    /// `seconds` are stored (the server accepted exactly this value).
+    SetDefaultAutoDelete {
+        seconds: i32,
+    },
     /// Phase S2: `getStorageStatistics`. Response is `storageStatistics`;
     /// aggregated by file type into `Session::storage_stats` (TGX
     /// `SettingsCacheController` / `TGStorageStats` style, including the
@@ -1419,6 +1476,22 @@ pub enum RequestPurpose {
     /// 15289). Response is `ok`; same no-local-state treatment as
     /// `DeleteSavedOrderInfo`.
     DeleteSavedCredentials,
+    /// `getMessage` for `chat.reply_markup_message_id` when that message is
+    /// not in the loaded history; the `message` answer feeds the chat's
+    /// reply keyboard.
+    GetChatReplyMarkupMessage,
+    /// `shareUsersWithBot` / `shareChatWithBot` / `sharePhoneNumber`
+    /// (schema 1.8.67, lines 13001 / 13010 / 14584). Response is `ok`.
+    ShareWithBot,
+    /// `getRecentInlineBots` (schema 1.8.67, line 14776). Response is
+    /// `users`.
+    GetRecentInlineBots,
+    /// `toggleChatIsTranslatable` (schema 1.8.67, line 13516). Response is
+    /// `ok`; `updateChatIsTranslatable` carries the new flag.
+    ToggleChatIsTranslatable,
+    /// `toggleSupergroupHasAutomaticTranslation` (schema 1.8.67, line
+    /// 15202). Response is `ok`; `updateSupergroup` carries the flag.
+    ToggleSupergroupAutoTranslate,
     /// `translateText` / `translateMessageText` (schema 1.8.67). Response
     /// is `formattedText`; `job` indexes `Session::translate.jobs`.
     TranslateJob {

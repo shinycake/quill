@@ -64,6 +64,11 @@ impl Session {
             self.sessions_mutating = false;
             self.sessions_error = None;
         }
+        if let Some(RequestPurpose::SetDefaultAutoDelete { seconds }) = pending.map(|p| p.purpose) {
+            self.default_auto_delete_secs = Some(seconds);
+            self.default_auto_delete_busy = false;
+            self.default_auto_delete_error = None;
+        }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
         // is stored directly (not an optimistic guess). A

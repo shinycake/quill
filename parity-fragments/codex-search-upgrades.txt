@@ -1,0 +1,7 @@
+# B6 search upgrades (tdesktop dialogs_suggestions, top_peers_strip, search tabs)
+parity:chatlist-frequent-contacts
+parity:chatlist-remove-recent-search
+parity:chatlist-search-filters
+parity:chatlist-search-server
+parity:chatlist-hashtag-search
+parity:chatlist-inchat-search-from

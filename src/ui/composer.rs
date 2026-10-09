@@ -65,6 +65,11 @@ impl QuillApp {
                     self.submit_edit(text, window, cx);
                     return;
                 }
+                // B4: the forward bar sends the comment, then the forward.
+                if self.forward_bar_here() {
+                    self.submit_forward_bar(text, window, cx);
+                    return;
+                }
                 self.remember_sent_hashtags(&text);
                 // M2: the rich editor sends blocks, not text.
                 if self.rich_editor_open {
@@ -1666,20 +1671,32 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return Vec::new();
         };
-        let Some(search) = session
+        // A lone "@" in an empty message offers the recent inline bots
+        // first (tdesktop `FieldAutocomplete`, `getRecentInlineBots`).
+        let mut items: Vec<(i64, String, String)> = Vec::new();
+        if text.trim() == "@" {
+            items.extend(
+                session
+                    .recent_inline_bots()
+                    .iter()
+                    .filter_map(|id| session.user(*id))
+                    .filter(|user| !user.username.is_empty())
+                    .map(|user| (user.id, user.display_name(), user.username.clone())),
+            );
+        }
+        if let Some(search) = session
             .mention_search
             .as_ref()
             .filter(|search| Some(search.chat_id) == session.open_chat)
-        else {
-            return Vec::new();
-        };
-        search
-            .user_ids
-            .iter()
-            .filter_map(|id| session.user(*id))
-            .take(8)
-            .map(|user| (user.id, user.display_name(), user.username.clone()))
-            .collect()
+        {
+            for user in search.user_ids.iter().filter_map(|id| session.user(*id)) {
+                if !items.iter().any(|(id, _, _)| *id == user.id) {
+                    items.push((user.id, user.display_name(), user.username.clone()));
+                }
+            }
+        }
+        items.truncate(8);
+        items
     }
 
     /// Track the `@query` at the composer's end: search the open group's
@@ -1697,6 +1714,9 @@ impl QuillApp {
             .as_ref()
             .map(|s| s.query.clone());
         let _ = live.driver.search_mentions(query.as_deref());
+        if text.trim() == "@" {
+            let _ = live.driver.maybe_fetch_recent_inline_bots();
+        }
         if before != query {
             self.mention_selected = 0;
             cx.notify();

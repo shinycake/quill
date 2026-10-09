@@ -23,7 +23,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::*;
 use quill::force_reply::active_force_reply;
 use quill::ids::{ChatId, MessageId};
-use quill::state::{ForceReplyTarget, active_custom_keyboard};
+use quill::state::ForceReplyTarget;
 use quill::telegram::envelope::{ReplyKeyboard, ReplyMarkup};
 impl QuillApp {
     /// Drain one armed force-reply target: arm the composer reply-to +
@@ -56,9 +56,8 @@ impl QuillApp {
 
     /// The active custom keyboard for one chat (live or demo session).
     fn chat_custom_keyboard(&self, chat_id: ChatId) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
-        let session = self.session()?;
-        let history = session.histories.get(&chat_id.0)?;
-        active_custom_keyboard(&history.messages, &self.dismissed_keyboards)
+        self.session()?
+            .custom_keyboard_for_chat(chat_id, &self.dismissed_keyboards)
     }
 
     /// The force-reply bar target for the open chat, if any: the live
