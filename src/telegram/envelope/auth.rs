@@ -194,7 +194,7 @@ pub(crate) fn parse_auth(value: &Value) -> AuthorizationState {
                 .and_then(|info| info.get("type"))
                 .and_then(|ty| ty.get("length"))
                 .and_then(Value::as_i64)
-                .map(|n| n as i32),
+                .map(|n| n.sat_i32()),
         },
         "authorizationStateWaitOtherDeviceConfirmation" => {
             // The `link` is the QR payload (a tg://login token). It is
@@ -263,7 +263,8 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     let code = value
         .and_then(|v| v.get("code"))
         .and_then(Value::as_i64)
-        .unwrap_or(0) as i32;
+        .unwrap_or(0)
+        .sat_i32();
     // S14: story-posting restriction errors are classified here — the
     // only place the raw message is still available (`TdError` drops it
     // for secret-scrubbing). Anything unrecognized falls back to the

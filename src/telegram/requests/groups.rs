@@ -1057,7 +1057,7 @@ pub fn set_forum_topic_notification_settings(
     let mut value: Value = serde_json::from_str(&super::chats::set_chat_notification_settings(
         extra, chat_id, settings,
     ))
-    .expect("request builders emit valid JSON");
+    .unwrap_or_else(|_| json!({}));
     value["@type"] = json!("setForumTopicNotificationSettings");
     value["forum_topic_id"] = json!(forum_topic_id);
     value.to_string()

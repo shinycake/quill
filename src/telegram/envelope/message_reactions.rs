@@ -206,11 +206,16 @@ pub(crate) fn parse_interaction_info(value: Option<&Value>) -> Option<MessageInt
     }
     match value.get("@type").and_then(Value::as_str) {
         None | Some("messageInteractionInfo") => Some(MessageInteractionInfo {
-            view_count: value.get("view_count").and_then(Value::as_i64).unwrap_or(0) as i32,
+            view_count: value
+                .get("view_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
             forward_count: value
                 .get("forward_count")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             reply_info: parse_reply_info(value.get("reply_info")),
             reactions: parse_message_reactions(value.get("reactions")),
         }),
@@ -225,7 +230,7 @@ pub(crate) fn parse_reply_info(value: Option<&Value>) -> Option<MessageReplyInfo
     }
     let int = |key: &str| value.get(key).and_then(Value::as_i64).unwrap_or(0);
     Some(MessageReplyInfo {
-        reply_count: int("reply_count") as i32,
+        reply_count: int("reply_count").sat_i32(),
         recent_repliers: value
             .get("recent_replier_ids")
             .and_then(Value::as_array)
@@ -276,7 +281,8 @@ pub(crate) fn parse_message_reaction(value: &Value) -> Option<MessageReaction> {
         total_count: value
             .get("total_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         is_chosen: value
             .get("is_chosen")
             .and_then(Value::as_bool)

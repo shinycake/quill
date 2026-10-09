@@ -259,8 +259,8 @@ pub(crate) fn parse_minithumbnail(value: Option<&Value>) -> Option<MiniThumbnail
         return None;
     }
     Some(MiniThumbnail {
-        width: int53_or_zero(value.get("width")) as i32,
-        height: int53_or_zero(value.get("height")) as i32,
+        width: int53_or_zero(value.get("width")).sat_i32(),
+        height: int53_or_zero(value.get("height")).sat_i32(),
         data,
     })
 }
@@ -277,8 +277,8 @@ pub(crate) fn parse_album_cover_thumb(
         return None;
     }
     let cover = AlbumCoverThumb {
-        width: int53_or_zero(value.get("width")) as i32,
-        height: int53_or_zero(value.get("height")) as i32,
+        width: int53_or_zero(value.get("width")).sat_i32(),
+        height: int53_or_zero(value.get("height")).sat_i32(),
         file_id: file.id,
     };
     files.push(file);
@@ -319,8 +319,8 @@ pub(crate) fn parse_photo_sizes(photo: &Value) -> (Vec<PhotoSizeView>, Vec<Parse
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
-                width: int53_or_zero(entry.get("width")) as i32,
-                height: int53_or_zero(entry.get("height")) as i32,
+                width: int53_or_zero(entry.get("width")).sat_i32(),
+                height: int53_or_zero(entry.get("height")).sat_i32(),
                 file_id: file.id,
             });
             files.push(file);

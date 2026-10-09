@@ -298,14 +298,16 @@ pub(crate) fn parse_keyboard_button(value: &Value) -> KeyboardButton {
                 id: t
                     .and_then(|t| t.get("id"))
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 user_is_bot: restricted("restrict_user_is_bot", "user_is_bot"),
                 user_is_premium: restricted("restrict_user_is_premium", "user_is_premium"),
                 max_quantity: t
                     .and_then(|t| t.get("max_quantity"))
                     .and_then(Value::as_i64)
                     .unwrap_or(1)
-                    .max(1) as i32,
+                    .max(1)
+                    .sat_i32(),
             })
         }
         "keyboardButtonTypeRequestChat" => {
@@ -320,7 +322,8 @@ pub(crate) fn parse_keyboard_button(value: &Value) -> KeyboardButton {
                 id: t
                     .and_then(|t| t.get("id"))
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 chat_is_channel: flag("chat_is_channel").unwrap_or(false),
                 chat_is_forum: restricted("restrict_chat_is_forum", "chat_is_forum"),
                 chat_has_username: restricted("restrict_chat_has_username", "chat_has_username"),

@@ -234,6 +234,49 @@ fn driver_edit_snapshot_rejects_overlong_caption() {
 }
 
 #[test]
+fn driver_edit_snapshot_rejects_overlong_text() {
+    // R8: text edits gate on `message_text_length_max` (tdesktop refuses
+    // with `lng_edit_limit_reached`); the count is taken after markup.
+    use crate::telegram::client::copy_and_parse;
+
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    driver.session.message_text_length_max = 5;
+
+    let msg_json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":7,"is_outgoing":true,"date":1700000000,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#;
+    let owned = copy_and_parse(msg_json, &seq, &dyn_sink).expect("parse msg");
+    driver.ingest(owned).expect("ingest msg");
+
+    let edit = crate::composer::ComposerEdit {
+        chat_id: ChatId(7),
+        message_id: crate::ids::MessageId(9),
+        original_text: "hi".to_string(),
+        kind: crate::composer::ComposerEditKind::Text,
+        scheduled: false,
+        caption_above: false,
+        media_edit: Default::default(),
+        link_preview: Default::default(),
+    };
+    let sent_before = recorder.snapshot().len();
+    let err = driver.edit_snapshot(&edit, "toolong").unwrap_err();
+    assert!(matches!(err, ConnectSendError::TextTooLong { limit: 5 }));
+    assert_eq!(recorder.snapshot().len(), sent_before);
+    // Markers do not count: "**ab**" is two units.
+    assert!(!matches!(
+        driver.edit_snapshot(&edit, "**ab**"),
+        Err(ConnectSendError::TextTooLong { .. })
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn driver_edit_snapshot_with_replacement_sends_edit_message_media() {
     // B5: a replacement file turns the caption edit into
     // `editMessageMedia` carrying the new caption and caption position.

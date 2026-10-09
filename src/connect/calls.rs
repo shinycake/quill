@@ -983,7 +983,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }
                     // MED4: caption-length errors can't arise from a
                     // diagnostics upload; categorized as invalid request.
-                    ConnectSendError::CaptionTooLong { .. } => {
+                    ConnectSendError::CaptionTooLong { .. }
+                    | ConnectSendError::TextTooLong { .. } => {
                         "Could not upload diagnostics: invalid request".into()
                     }
                 });

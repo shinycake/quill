@@ -119,11 +119,13 @@ pub(crate) fn parse_poll_option(value: &Value) -> PollOption {
         voter_count: value
             .get("voter_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         vote_percentage: value
             .get("vote_percentage")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         is_chosen: value
             .get("is_chosen")
             .and_then(Value::as_bool)
@@ -142,7 +144,7 @@ pub(crate) fn parse_poll_type(value: Option<&Value>) -> PollType {
                 .map(|ids| {
                     ids.iter()
                         .filter_map(|id| id.as_i64())
-                        .map(|n| n as i32)
+                        .map(|n| n.sat_i32())
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -207,7 +209,8 @@ pub(crate) fn parse_poll(value: Option<&Value>) -> Option<Poll> {
         total_voter_count: value
             .get("total_voter_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         is_anonymous: value
             .get("is_anonymous")
             .and_then(Value::as_bool)
@@ -244,8 +247,13 @@ pub(crate) fn parse_poll(value: Option<&Value>) -> Option<Poll> {
         open_period: value
             .get("open_period")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
-        close_date: value.get("close_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
+        close_date: value
+            .get("close_date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
     })
 }
 
