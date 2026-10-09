@@ -13,6 +13,7 @@ mod groups;
 mod messages;
 mod notifications;
 mod payments;
+mod redraw;
 mod requests;
 mod search;
 mod send_permissions;
