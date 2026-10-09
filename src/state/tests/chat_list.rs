@@ -1371,3 +1371,44 @@ fn searching_a_background_keeps_the_answer_without_installing_it() {
     assert_eq!(session.searched_background.as_ref().map(|b| b.id), Some(8));
     assert!(session.default_backgrounds.is_empty());
 }
+
+#[test]
+fn chat_look_requests_count_acks_and_surface_errors() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for purpose in [
+        RequestPurpose::SetChatTheme,
+        RequestPurpose::SetChatBackground,
+        RequestPurpose::DeleteChatBackground,
+    ] {
+        let extra = session.request(purpose, Some(ChatId(7)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+        );
+    }
+    assert_eq!(session.chat_look_oks, 3);
+    assert!(session.background_error.is_none());
+
+    for purpose in [
+        RequestPurpose::SetChatTheme,
+        RequestPurpose::SetChatBackground,
+        RequestPurpose::DeleteChatBackground,
+    ] {
+        session.background_error = None;
+        let extra = session.request(purpose, Some(ChatId(7)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"BACKGROUND_INVALID"}}"#,
+                extra.0
+            ),
+        );
+        assert!(session.background_error.is_some(), "{purpose:?}");
+    }
+    assert_eq!(session.chat_look_oks, 3, "errors are not acknowledgements");
+}
