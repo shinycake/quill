@@ -31,7 +31,7 @@ on:
         default: false
         type: boolean
 
-run-name: ${{ github.event_name == 'push' && format('release {0}', github.ref_name) || format('release dry run {0} ({1})', inputs.version, github.ref_name) }}
+run-name: ${{ github.ref_type == 'tag' && format('release {0}', github.ref_name) || format('release dry run {0} ({1})', inputs.version, github.ref_name) }}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -54,21 +54,20 @@ jobs:
       - id: v
         name: version, tag and credential mode
         env:
-          EVENT: ${{ github.event_name }}
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_EMBED: ${{ inputs.embed_credentials }}
           # Only "true"/"false" leave this step; the values never do.
           HAVE_SECRETS: ${{ secrets.TELEGRAM_API_ID != '' && secrets.TELEGRAM_API_HASH != '' }}
         run: |
-          if [ "$EVENT" = push ]; then
+          cargo_version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
             version="${GITHUB_REF_NAME#v}"
             embed=true
           else
-            version="$INPUT_VERSION"
-            embed="$INPUT_EMBED"
+            version="${INPUT_VERSION:-$cargo_version}"
+            embed="${INPUT_EMBED:-false}"
           fi
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z, got '$version'"; exit 1; }
-          cargo_version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')"
           if [ "$cargo_version" != "$version" ]; then
             echo "::error::release $version does not match Cargo.toml version $cargo_version; bump Cargo.toml (and Cargo.lock) first"
             exit 1
@@ -84,7 +83,7 @@ jobs:
             echo "embed=$embed"
             echo "credentials=$credentials"
           } >> "$GITHUB_OUTPUT"
-          echo "Quill $version, tag v$version, credentials: $credentials, dry run: $([ "$EVENT" = push ] && echo no || echo yes)"
+          echo "Quill $version, tag v$version, credentials: $credentials, dry run: $([ "$GITHUB_REF_TYPE" = tag ] && echo no || echo yes)"
 
   linux:
     name: linux
@@ -204,7 +203,7 @@ jobs:
           [ -n "$PREV" ] && args+=(--previous-tag "$PREV")
           python3 -I scripts/release-assemble.py "${args[@]}"
           {
-            echo "## Quill $VERSION ($([ "$GITHUB_EVENT_NAME" = push ] && echo 'draft release' || echo 'dry run, no release'))"
+            echo "## Quill $VERSION ($([ "$GITHUB_REF_TYPE" = tag ] && echo 'draft release' || echo 'dry run, no release'))"
             echo
             echo '| Asset | Size | SHA-256 |'
             echo '|---|---|---|'
@@ -219,7 +218,7 @@ jobs:
           if-no-files-found: error
       # Tag pushes only. Always a draft: the owner publishes it by hand.
       - name: create DRAFT release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "::error::a release for $TAG already exists; delete the old draft before re-running"
