@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # macOS compile/package smoke: produce a layout that does not depend on Homebrew.
 set -euo pipefail
+# Say which command failed instead of exiting silently under set -e.
+trap 'echo "error: macos-package-smoke.sh line $LINENO failed: $BASH_COMMAND" >&2' ERR
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist/Quill.app"

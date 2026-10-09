@@ -128,9 +128,20 @@ static int selfTest(void) {
     VNDetectBarcodesRequest *request = [[VNDetectBarcodesRequest alloc] init];
     request.symbologies = @[VNBarcodeSymbologyQR];
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:bitmap options:@{}];
-    BOOL okay = [handler performRequests:@[request] error:nil] && [loginQR(request) isEqualToString:fixture];
+    NSError *error = nil;
+    BOOL ran = [handler performRequests:@[request] error:&error];
+    NSString *decoded = ran ? loginQR(request) : nil;
     CGImageRelease(bitmap);
-    if (!okay) return 1;
+    if (!ran) {
+        fprintf(stderr, "FAIL: Vision barcode request failed: %s\n",
+                error.localizedDescription.UTF8String ?: "unknown error");
+        return 1;
+    }
+    if (![decoded isEqualToString:fixture]) {
+        fprintf(stderr, "FAIL: Vision decoded %s instead of the fixture\n",
+                decoded ? "a different payload" : "no QR code");
+        return 1;
+    }
     puts("PASS: native QR generation and Vision decoding; camera and account unused");
     return 0;
 }

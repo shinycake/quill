@@ -91,6 +91,10 @@ jobs:
           QUILL_BUILD_TELEGRAM_API_HASH: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_HASH || '' }}
         run: cargo build --release --features ui --locked
       - name: package Quill.app (ad-hoc signed)
+        env:
+          # The hosted VM's Vision framework may not decode QR codes; the
+          # self-test stays a hard failure on real Macs (quill-ui-build.yml).
+          QUILL_QR_SELF_TEST: warn
         run: |
           QUILL_BIN="$PWD/target/release/quill" QUILL_TDJSON_PATH="$PWD/native/prefix/lib/libtdjson.dylib" \
             bash scripts/macos-package-smoke.sh
