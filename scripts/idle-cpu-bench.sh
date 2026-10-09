@@ -10,7 +10,10 @@
 # launched from a terminal never comes to the front, so "active" runs set
 # QUILL_ASSUME_ACTIVE=1; "inactive" runs hand key status to a second
 # window (QUILL_DEMO_DEACTIVATE=1). QUILL_DEMO_UPDATE_STREAM=10 feeds ten
-# synthetic TDLib updates a second (src/ui/demo_stream.rs).
+# synthetic TDLib updates a second (src/ui/demo_stream.rs). The window must
+# stay at least partly uncovered (macOS stops frames for an occluded window);
+# QUILL_DEMO_WINDOW_ORIGIN=x,y moves it. Run nothing else heavy meanwhile,
+# and compare builds in alternating runs.
 set -u
 BIN=$1
 SETTLE=${2:-20}

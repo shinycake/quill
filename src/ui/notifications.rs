@@ -197,7 +197,12 @@ impl QuillApp {
     /// arrived, so held-back redraws still land.
     /// `deliver`: something only a render hands out is queued (see
     /// [`PolledRedraw::drawn`]); redraw at once even behind another app.
-    pub(super) fn redraw_polled(&mut self, need: RedrawNeed, deliver: bool, cx: &mut Context<Self>) {
+    pub(super) fn redraw_polled(
+        &mut self,
+        need: RedrawNeed,
+        deliver: bool,
+        cx: &mut Context<Self>,
+    ) {
         let active = self.window_active.get();
         let now = std::time::Instant::now();
         let action = if deliver {
@@ -212,10 +217,23 @@ impl QuillApp {
         }
     }
 
+    /// The app state `poll_live` itself sets, outside the session, that
+    /// the window draws: compared before and after a poll.
+    fn polled_chrome(&self) -> (String, bool, Option<i32>) {
+        (
+            self.status_note.clone(),
+            self.login_prevented.is_some(),
+            self.folder_tab,
+        )
+    }
+
     /// Drain and apply everything TDLib has queued. Returns whether
     /// anything arrived, so the poll loop can stay fast during bursts and
     /// back off while idle.
     pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) -> bool {
+        // What this poll may change outside the session (the status line,
+        // the login-review box, the folder tab): any change redraws at once.
+        let shown_before = self.polled_chrome();
         self.poll_device_qr(cx);
         self.sync_presence();
         self.drain_account_notices();
@@ -553,7 +571,7 @@ impl QuillApp {
             progressed = true;
         }
         self.finish_successful_sends(cx);
-        if progressed || send_failed {
+        if progressed || send_failed || self.polled_chrome() != shown_before {
             need = RedrawNeed::Now;
         }
         progressed |= ingested;
@@ -902,5 +920,127 @@ mod tests {
             &AuthorizationState::LoggingOut
         ));
         assert!(!logout_restart_trigger(false, &AuthorizationState::Ready));
+    }
+
+    #[test]
+    fn a_pending_full_redraw_does_not_hold_the_chat_list_back() {
+        let start = Instant::now();
+        let mut redraw = PolledRedraw::new(start);
+        assert_eq!(
+            redraw.decide(RedrawNeed::Later, true, start + ms(100)),
+            PolledAction::Wait
+        );
+        assert_eq!(
+            redraw.decide(RedrawNeed::ChatList, true, start + ms(200)),
+            PolledAction::Wait
+        );
+        // The chat list goes out on its own interval...
+        assert_eq!(
+            redraw.decide(RedrawNeed::Nothing, true, start + ms(400)),
+            PolledAction::ChatList
+        );
+        // ...and the full redraw still lands on its own.
+        assert_eq!(
+            redraw.decide(RedrawNeed::Nothing, true, start + ms(1000)),
+            PolledAction::Full
+        );
+    }
+
+    #[test]
+    fn delivering_draws_at_once_even_behind_another_app() {
+        let start = Instant::now();
+        let mut redraw = PolledRedraw::new(start);
+        assert_eq!(
+            redraw.decide(RedrawNeed::Now, false, start + ms(600)),
+            PolledAction::Full
+        );
+        // A notification queued 10 ms later does not wait out the
+        // inactive interval, and takes everything pending with it.
+        assert_eq!(
+            redraw.decide(RedrawNeed::ChatList, false, start + ms(605)),
+            PolledAction::Wait
+        );
+        assert_eq!(redraw.drawn(start + ms(610)), PolledAction::Full);
+        assert_eq!(
+            redraw.decide(RedrawNeed::Nothing, false, start + ms(5000)),
+            PolledAction::Wait
+        );
+    }
+
+    /// Feeds `PolledRedraw` a pseudo-random stream of needs, polled the
+    /// way the poll loop does (10–120 ms apart, with the window going to
+    /// the background and back), and checks that every need is covered
+    /// by a redraw no later than its interval allows: held back, never
+    /// dropped.
+    #[test]
+    fn every_need_is_drawn_within_its_interval() {
+        let start = Instant::now();
+        let mut redraw = PolledRedraw::new(start);
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let mut at = start;
+        // The oldest need not covered yet: (when, need, active then).
+        let mut owed_list: Option<Instant> = None;
+        let mut owed_full: Option<(Instant, RedrawNeed)> = None;
+        let mut active = true;
+        for _ in 0..20_000 {
+            at += ms(10 + next(111));
+            if next(200) == 0 {
+                active = !active;
+            }
+            let need = match next(10) {
+                0..=4 => RedrawNeed::Nothing,
+                5..=7 => RedrawNeed::ChatList,
+                8 => RedrawNeed::Later,
+                _ => RedrawNeed::Now,
+            };
+            match need {
+                RedrawNeed::ChatList => {
+                    owed_list.get_or_insert(at);
+                }
+                RedrawNeed::Later | RedrawNeed::Now => {
+                    let owed = owed_full.get_or_insert((at, need));
+                    owed.1 = owed.1.max(need);
+                }
+                RedrawNeed::Nothing => {}
+            }
+            match redraw.decide(need, active, at) {
+                PolledAction::Full => {
+                    owed_list = None;
+                    owed_full = None;
+                }
+                PolledAction::ChatList => owed_list = None,
+                PolledAction::Wait => {}
+            }
+            // The longest an owed redraw may wait, plus one poll gap.
+            let slack = ms(121);
+            if let Some(since) = owed_list {
+                let (on, off) = super::CHAT_LIST_REDRAW;
+                let limit = if active { on } else { off };
+                assert!(
+                    at - since <= limit + slack,
+                    "chat list held {:?}",
+                    at - since
+                );
+            }
+            if let Some((since, need)) = owed_full {
+                let limit = match (need, active) {
+                    (RedrawNeed::Now, true) => Duration::ZERO,
+                    (RedrawNeed::Now, false) => super::INACTIVE_REDRAW,
+                    (_, true) => super::LATER_REDRAW.0,
+                    (_, false) => super::LATER_REDRAW.1,
+                };
+                assert!(
+                    at - since <= limit + slack,
+                    "{need:?} held {:?} (active: {active})",
+                    at - since
+                );
+            }
+        }
     }
 }

@@ -6,8 +6,7 @@
 //! chats, unread totals (the tray reads those), messages in chats that
 //! are not open. A full Quill redraw costs a few milliseconds (the whole
 //! window is laid out and painted again), so redrawing for each of them
-//! kept an idle window at 6–8% CPU where Telegram Desktop, which repaints
-//! only the affected row, sits under 1%.
+//! kept an idle window at 6–8% CPU.
 //!
 //! [`redraw_need`] grades an envelope before it is applied; the poll loop
 //! keeps the most urgent grade of a batch and redraws accordingly (see
@@ -60,7 +59,12 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
         // Unread totals feed the tray and the dock badge, which sync on
         // their own timer; no pane draws them.
         P::UpdateUnreadMessageCount { .. } | P::UpdateUnreadChatCount { .. } => RedrawNeed::Nothing,
-        // Limits and flags, mostly read when the user acts.
+        // Our own id (which chat is Saved Messages) and Premium change
+        // what is drawn; other options are limits and flags read when the
+        // user acts.
+        P::UpdateOption { name, .. } if matches!(name.as_str(), "my_id" | "is_premium") => {
+            RedrawNeed::Now
+        }
         P::UpdateOption { .. } => RedrawNeed::Later,
         P::UpdateUserStatus { user_id, status } => {
             let Some(user) = session.user(user_id.0) else {
@@ -118,12 +122,14 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
         }
         // The open group's header (member count) and composer (our
         // rights) read its record.
-        P::UpdateSupergroup { supergroup_id, .. } => {
-            group_need(session, |kind| matches!(kind, ChatKind::Supergroup { supergroup_id: id, .. } if id == supergroup_id))
-        }
-        P::UpdateBasicGroup { basic_group_id, .. } => {
-            group_need(session, |kind| matches!(kind, ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id))
-        }
+        P::UpdateSupergroup { supergroup_id, .. } => group_need(
+            session,
+            |kind| matches!(kind, ChatKind::Supergroup { supergroup_id: id, .. } if id == supergroup_id),
+        ),
+        P::UpdateBasicGroup { basic_group_id, .. } => group_need(
+            session,
+            |kind| matches!(kind, ChatKind::BasicGroup { basic_group_id: id } if id == basic_group_id),
+        ),
         _ => RedrawNeed::Now,
     }
 }
