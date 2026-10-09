@@ -376,13 +376,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Server-side chat and contact search <!-- parity:chatlist-search-server -->
 - [x] Tapping a hashtag searches this chat, my messages or public posts <!-- parity:chatlist-hashtag-search -->
 - [x] In-chat search: filter by sender, calendar, and "N of M" result counter <!-- parity:chatlist-inchat-search-from -->
-- [ ] Shareable folders: invite links, add folder by link, "N new chats" bar <!-- parity:chatlist-folder-share -->
+- [x] Shareable folders: invite links, add folder by link, "N new chats" bar <!-- parity:chatlist-folder-share -->
 - [x] Recommended folders <!-- parity:chatlist-folder-recommended -->
 - [x] Folder icon picker and tab display (text, icons, or both) <!-- parity:chatlist-folder-icons -->
 - [x] Folders sidebar layout (tabs on the left) <!-- parity:chatlist-folder-sidebar -->
-- [ ] Folder tag color picker <!-- parity:chatlist-folder-tag-color -->
-- [ ] Folder context menu: Edit, Remove, Mark all as read, Share <!-- parity:chatlist-folder-context-menu -->
-- [ ] Folder limit boxes with a Premium upsell <!-- parity:chatlist-folder-limits -->
+- [x] Folder tag color picker <!-- parity:chatlist-folder-tag-color -->
+- [x] Folder context menu: Edit, Remove, Mark all as read, Share <!-- parity:chatlist-folder-context-menu -->
+- [x] Folder limit boxes with a Premium upsell <!-- parity:chatlist-folder-limits -->
 - [ ] Folder editor shows an "N chats" counter and include/exclude chat pickers with search <!-- parity:chatlist-folder-chat-picker -->
 - [ ] Toast "{chat} added to {folder}" <!-- parity:chatlist-folder-toast -->
 - [ ] Chat row menu extras: view profile, open in new window, mark mentions or reactions or poll votes read, export chat, report with reasons <!-- parity:chatlist-row-menu-extras -->
