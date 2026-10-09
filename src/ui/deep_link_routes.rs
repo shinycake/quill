@@ -61,6 +61,7 @@ impl QuillApp {
                 }
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
+            DeepLinkUi::Background { name } => self.open_background_link(name, cx),
             DeepLinkUi::Settings(target) => {
                 match settings_action(target) {
                     Some(action) => self.navigate(action, window, cx),

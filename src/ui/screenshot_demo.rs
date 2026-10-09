@@ -581,6 +581,12 @@ pub enum ScreenshotDemo {
     ReadyAppearance,
     /// Appearance slice: Appearance with Telegram wallpapers and interface scale.
     ReadyAppearanceWallpapers,
+    /// Per-chat theme and wallpaper picker open over a private chat.
+    ReadyChatLook,
+    /// A private chat wearing an emoji theme and its own pattern wallpaper.
+    ReadyChatTheme,
+    /// A `bg/` link preview (pattern wallpaper).
+    ReadyBackgroundLink,
     /// Ready chat draft with typos underlined (red wavy).
     ReadySpellcheck,
     /// Multi-line draft: typos underlined; link, mention, hashtag, command and code skipped.

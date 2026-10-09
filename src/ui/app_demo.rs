@@ -475,6 +475,24 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sponsored / recommended channel rows".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyChatLook => (
+            Some(super::chat_look_demo::seed_chat_look_picker as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat theme and wallpaper picker".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyChatTheme => (
+            Some(super::chat_look_demo::seed_chat_look_themed as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — chat theme and wallpaper".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyBackgroundLink => (
+            Some(super::chat_look_demo::seed_chat_look_link as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — wallpaper link preview".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyEmojiPacks | ScreenshotDemo::ReadyCustomEmoji => (
             Some(seed_ready_custom_emoji_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2309,6 +2327,7 @@ impl QuillApp {
             folder_delete_confirm: None,
             folder_share: None,
             folder_invite: None,
+            chat_look_dialog: None,
             folder_menu_open: false,
             folder_tab_menu: None,
             folder_new_chats_dialog: None,

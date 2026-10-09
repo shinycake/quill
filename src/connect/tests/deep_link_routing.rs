@@ -325,6 +325,18 @@ fn typed_links_route_through_get_internal_link_type() {
             &mut driver,
             &seq,
             &sink,
+            "tg://bg?slug=sky",
+            json!({"@type":"internalLinkTypeBackground","background_name":"sky"}),
+        ),
+        Some(DeepLinkState::Ui(DeepLinkUi::Background {
+            name: "sky".into()
+        }))
+    );
+    assert_eq!(
+        open_with(
+            &mut driver,
+            &seq,
+            &sink,
             "tg://addlist?slug=x",
             json!({"@type":"internalLinkTypeChatFolderInvite","invite_link":"https://t.me/addlist/x"}),
         ),
@@ -352,8 +364,8 @@ fn typed_links_route_through_get_internal_link_type() {
             json!({"@type":"internalLinkTypeInvoice","invoice_name":"x"}),
         ),
         (
-            "tg://bg?slug=x",
-            json!({"@type":"internalLinkTypeBackground","background_name":"x"}),
+            "tg://settings/themes",
+            json!({"@type":"internalLinkTypeTheme","theme_name":"x"}),
         ),
         (
             "https://t.me/bot?startgroup=x",

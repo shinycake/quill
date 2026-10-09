@@ -1279,6 +1279,19 @@ pub enum RequestPurpose {
     /// `removeInstalledBackground`. Response is `ok`; the entry leaves the
     /// list optimistically at send time.
     RemoveInstalledBackground,
+    /// `setDefaultBackground` with a local image (`inputBackgroundLocal`).
+    /// Response is `background`, stored like `SetDefaultBackground`.
+    SetDefaultBackgroundLocal,
+    /// `searchBackground` for a `bg/` link. Response is `background`
+    /// (`Session::searched_background`).
+    SearchBackground,
+    /// `setChatBackground`. Response is `ok`; `updateChatBackground`
+    /// carries the new wallpaper.
+    SetChatBackground,
+    /// `deleteChatBackground`. Response is `ok`.
+    DeleteChatBackground,
+    /// `setChatTheme`. Response is `ok`; `updateChatTheme` carries it.
+    SetChatTheme,
     /// `getRecommendedChatFolders`. Response is `recommendedChatFolders`,
     /// cached in `Session::recommended_folders`.
     GetRecommendedChatFolders,

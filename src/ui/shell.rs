@@ -136,6 +136,7 @@ pub enum DialogKind {
     FolderManage,
     FolderShare,
     FolderInvite,
+    ChatLook,
     /// The shared folder's "N new chats" join dialog.
     FolderNewChats,
     /// A folder limit box / the folder tag Premium notice.
@@ -257,6 +258,7 @@ impl QuillShell {
             DialogKind::FolderManage => app.folder_manage_open,
             DialogKind::FolderShare => app.folder_share.is_some(),
             DialogKind::FolderInvite => app.folder_invite.is_some(),
+            DialogKind::ChatLook => app.chat_look_dialog.is_some(),
             DialogKind::FolderNewChats => app.folder_new_chats_dialog.is_some(),
             DialogKind::FolderLimit => app.folder_limit_box.is_some(),
             DialogKind::CallConfirm => app.call_confirm.is_some(),
@@ -328,6 +330,7 @@ impl QuillShell {
             DialogKind::FolderManage => QuillApp::build_folder_manage_dialog,
             DialogKind::FolderShare => QuillApp::build_folder_share_dialog,
             DialogKind::FolderInvite => QuillApp::build_folder_invite_dialog,
+            DialogKind::ChatLook => QuillApp::build_chat_look_dialog,
             DialogKind::FolderNewChats => QuillApp::build_folder_new_chats_dialog,
             DialogKind::FolderLimit => QuillApp::build_folder_limit_dialog,
             DialogKind::CallConfirm => QuillApp::build_call_confirm_dialog,
@@ -387,6 +390,7 @@ impl QuillShell {
         DialogKind::FolderDelete,
         DialogKind::FolderShare,
         DialogKind::FolderInvite,
+        DialogKind::ChatLook,
         DialogKind::FolderNewChats,
         DialogKind::FolderManage,
         DialogKind::CallbackPassword,

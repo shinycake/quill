@@ -63,7 +63,9 @@ pub enum InternalLink {
     ChatFolderInvite {
         invite_link: String,
     },
-    Background,
+    Background {
+        name: String,
+    },
     Theme,
     UserPhoneNumber {
         phone: String,
@@ -117,6 +119,10 @@ pub enum DeepLinkUi {
     /// `addlist`: the "Add folder" box for a shared folder (invite link).
     FolderInvite {
         link: String,
+    },
+    /// `bg`: the wallpaper preview for a background name (`searchBackground`).
+    Background {
+        name: String,
     },
 }
 
@@ -234,7 +240,9 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
         "ChatFolderInvite" => InternalLink::ChatFolderInvite {
             invite_link: text(value, "invite_link"),
         },
-        "Background" => InternalLink::Background,
+        "Background" => InternalLink::Background {
+            name: text(value, "background_name"),
+        },
         "Theme" => InternalLink::Theme,
         "UserPhoneNumber" => InternalLink::UserPhoneNumber {
             phone: text(value, "phone_number"),
@@ -361,10 +369,18 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
                 })
             }
         }
-        InternalLink::Background => {
-            LinkRoute::Message(format!("Chat background links {NOT_SUPPORTED}"))
+        InternalLink::Background { name } => {
+            if name.is_empty() {
+                LinkRoute::Message("This wallpaper link is broken.".into())
+            } else {
+                LinkRoute::Ui(DeepLinkUi::Background { name: name.clone() })
+            }
         }
-        InternalLink::Theme => LinkRoute::Message(format!("Theme links {NOT_SUPPORTED}")),
+        // `addtheme` links install a desktop theme file (`.tdesktop-theme`),
+        // which Quill's own light and dark themes do not use.
+        InternalLink::Theme => LinkRoute::Message(
+            "Desktop theme links install Telegram Desktop theme files, which Quill doesn't use. Pick colors in Appearance instead.".into(),
+        ),
         InternalLink::UserPhoneNumber { phone, draft_text } => {
             let phone: String = phone.chars().filter(char::is_ascii_digit).collect();
             if phone.is_empty() {
@@ -643,6 +659,18 @@ mod tests {
     }
 
     #[test]
+    fn background_links_open_the_wallpaper_preview() {
+        assert_eq!(
+            route_of(json!({"@type":"internalLinkTypeBackground","background_name":"sky"})),
+            LinkRoute::Ui(DeepLinkUi::Background { name: "sky".into() })
+        );
+        assert!(matches!(
+            route_of(json!({"@type":"internalLinkTypeBackground","background_name":""})),
+            LinkRoute::Message(_)
+        ));
+    }
+
+    #[test]
     fn folder_invite_links_open_the_add_folder_box() {
         assert_eq!(
             route_of(json!({
@@ -667,7 +695,6 @@ mod tests {
             "internalLinkTypePremiumGiftCode",
             "internalLinkTypeVideoChat",
             "internalLinkTypeGroupCall",
-            "internalLinkTypeBackground",
             "internalLinkTypeTheme",
             "internalLinkTypeBotStartInGroup",
             "internalLinkTypeBotAddToChannel",

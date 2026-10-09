@@ -90,6 +90,15 @@ impl Background {
     pub fn needs_image(&self) -> bool {
         matches!(self.kind, BackgroundType::Wallpaper { .. })
     }
+
+    /// Whether painting needs the downloaded file: the photo, or a
+    /// pattern's PNG / TGV.
+    pub fn needs_file(&self) -> bool {
+        matches!(
+            self.kind,
+            BackgroundType::Wallpaper { .. } | BackgroundType::Pattern { .. }
+        )
+    }
 }
 
 fn color(value: Option<&Value>) -> u32 {

@@ -1449,6 +1449,28 @@ impl QuillApp {
             self.appearance_open = true;
             self.status_note = "screenshot demo — appearance: scale and wallpapers".into();
         }
+        // Per-chat theme and wallpaper: the picker, the themed chat, and the
+        // `bg/` link preview over the ReadyChats fixture.
+        if matches!(demo, Some(ScreenshotDemo::ReadyChatLook)) {
+            self.chat_look_dialog = Some(super::chat_look_ui::ChatLookDialog {
+                target: super::chat_look_ui::LookTarget::Chat(11),
+                theme: Some("🌷".into()),
+                background: Some(6),
+                remove_wallpaper: false,
+                both: false,
+            });
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyBackgroundLink)) {
+            self.chat_look_dialog = Some(super::chat_look_ui::ChatLookDialog {
+                target: super::chat_look_ui::LookTarget::Link {
+                    name: "doodles".into(),
+                },
+                theme: None,
+                background: None,
+                remove_wallpaper: false,
+                both: false,
+            });
+        }
         // Slice parity:auth-multi-account (UI): the Accounts dialog open
         // over the ReadyChats fixture (injected, no live Telegram). The
         // list reads the real local registry, read-only — nothing is

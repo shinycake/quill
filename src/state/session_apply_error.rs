@@ -79,7 +79,12 @@ impl Session {
                 RequestPurpose::GetInstalledBackgrounds
                 | RequestPurpose::SetDefaultBackground
                 | RequestPurpose::DeleteDefaultBackground
-                | RequestPurpose::RemoveInstalledBackground,
+                | RequestPurpose::RemoveInstalledBackground
+                | RequestPurpose::SetDefaultBackgroundLocal
+                | RequestPurpose::SearchBackground
+                | RequestPurpose::SetChatBackground
+                | RequestPurpose::DeleteChatBackground
+                | RequestPurpose::SetChatTheme,
             ) => {
                 self.background_error = Some(error_reason(&err));
             }

@@ -1301,3 +1301,73 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     );
     assert!(session.background_error.is_some());
 }
+
+#[test]
+fn chat_wallpaper_prefers_the_chats_own_over_the_theme() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let fill = |id: i64, color: i64| {
+        format!(
+            r#"{{"@type":"background","id":{id},"name":"n","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":{color}}}}}}}"#
+        )
+    };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateEmojiChatThemes","chat_themes":[{{"@type":"emojiChatTheme","name":"T","light_settings":{{"@type":"themeSettings","accent_color":255,"background":{}}},"dark_settings":{{"@type":"themeSettings","accent_color":255}}}}]}}"#,
+            fill(1, 1)
+        ),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatTheme","chat_id":5,"theme":{"@type":"chatThemeEmoji","name":"T"}}"#,
+    );
+    assert_eq!(session.chat_wallpaper(5, false).unwrap().0.id, 1);
+    assert!(session.chat_wallpaper(5, true).is_none());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateChatBackground","chat_id":5,"background":{{"@type":"chatBackground","dark_theme_dimming":30,"background":{}}}}}"#,
+            fill(2, 2)
+        ),
+    );
+    let (own, dimming) = session.chat_wallpaper(5, false).unwrap();
+    assert_eq!((own.id, dimming), (2, 30));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatBackground","chat_id":5}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatTheme","chat_id":5}"#,
+    );
+    assert!(session.chat_wallpaper(5, false).is_none());
+}
+
+#[test]
+fn searching_a_background_keeps_the_answer_without_installing_it() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::SearchBackground, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"background","@extra":"{}","id":8,"name":"found","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":3}}}}}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.searched_background.as_ref().map(|b| b.id), Some(8));
+    assert!(session.default_backgrounds.is_empty());
+}

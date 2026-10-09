@@ -280,6 +280,9 @@ impl QuillApp {
                 cx.theme().foreground
             },
             joined_above: false,
+            out_fill: self
+                .chat_look(self.open_chat_id().map(|c| c.0), cx)
+                .outgoing_fill,
         }
     }
 
@@ -403,7 +406,7 @@ impl QuillApp {
     }
 
     /// A labeled section: title + control row + hint line.
-    fn appearance_section(
+    pub(super) fn appearance_section(
         &self,
         cx: &mut Context<Self>,
         title: &str,
@@ -662,7 +665,6 @@ impl QuillApp {
     /// fills paint exactly, photos show once downloaded, patterns show their
     /// fill (the pattern layer, blur and motion are not drawn).
     fn appearance_telegram_wallpapers_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        use super::wallpaper::{Wallpaper, background_wallpaper};
         let dark = cx.theme().is_dark();
         let session = self.session();
         let list = session.and_then(|s| s.installed_backgrounds.clone());
@@ -694,62 +696,16 @@ impl QuillApp {
                 for background in list {
                     let id = background.id;
                     let selected = default_id == Some(id);
-                    let path = background
-                        .file
-                        .as_ref()
-                        .and_then(|f| session.and_then(|s| s.files.get(&f.id.0)))
-                        .and_then(|f| f.usable_path().map(str::to_string));
-                    let paint = background_wallpaper(background, path.as_deref());
-                    let mut tile = div()
-                        .id(("appearance-tg-wallpaper", id as u64))
-                        .relative()
-                        .size(px(56.))
-                        .rounded_md()
-                        .overflow_hidden()
-                        .border_2()
-                        .border_color(if selected {
-                            cx.theme().primary
-                        } else {
-                            cx.theme().border
-                        })
-                        .role(gpui_kit::Role::Button)
-                        .aria_label(format!("Wallpaper {}", background.name))
-                        .tab_index(0)
-                        .cursor_pointer()
-                        .bg(cx.theme().muted)
+                    let mut tile = self
+                        .wallpaper_tile(
+                            ("appearance-tg-wallpaper", id as u64),
+                            background,
+                            selected,
+                            cx,
+                        )
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.choose_telegram_wallpaper(id, cx)
                         }));
-                    tile = match paint {
-                        Some(Wallpaper::Solid(color)) => tile.bg(rgb(color)),
-                        Some(Wallpaper::Gradient { top, bottom, angle }) => {
-                            tile.bg(linear_gradient(
-                                angle as f32,
-                                linear_color_stop(rgb(top), 0.),
-                                linear_color_stop(rgb(bottom), 1.),
-                            ))
-                        }
-                        Some(Wallpaper::Image { path, .. }) => tile.child(
-                            img(path)
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .size_full()
-                                .object_fit(ObjectFit::Cover),
-                        ),
-                        None => tile.child(
-                            div()
-                                .size_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    Icon::new(gpui_kit::assets::IconName::Image)
-                                        .size(px(18.))
-                                        .text_color(muted),
-                                ),
-                        ),
-                    };
                     tile = tile.child(
                         div().absolute().top_0().right_0().child(
                             Button::new(("appearance-tg-wallpaper-remove", id as u64))
@@ -767,7 +723,15 @@ impl QuillApp {
                 }
             }
         }
-        let mut body = div().flex().flex_col().gap_2().child(grid);
+        let mut body = div().flex().flex_col().gap_2().child(grid).child(
+            div().flex().child(
+                Button::new("appearance-tg-wallpaper-file")
+                    .label("From file…")
+                    .small()
+                    .tooltip("Use a JPEG, PNG or WebP image as your wallpaper")
+                    .on_click(cx.listener(|this, _, _, cx| this.choose_wallpaper_file(cx))),
+            ),
+        );
         if let Some(error) = error {
             body = body.child(
                 div()
@@ -780,7 +744,7 @@ impl QuillApp {
         self.appearance_section(
             cx,
             "Telegram wallpapers",
-            "Your installed wallpapers. Colors, gradients and photos are drawn; pattern overlays, blur and motion are not.",
+            "Your installed wallpapers: colors, gradients, patterns and photos. Chat wallpapers and themes are set per chat from its info panel. Blur and motion are not drawn.",
             body.into_any_element(),
         )
     }

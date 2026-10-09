@@ -6060,6 +6060,7 @@ dependencies = [
  "qrcode",
  "rand 0.8.8",
  "raw-window-handle",
+ "resvg 0.46.0",
  "rodio",
  "rusty-opus",
  "security-framework",
