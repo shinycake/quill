@@ -47,7 +47,7 @@ by design except the dock/menu-bar specifics.
 
 - `src/passcode.rs`: `os_idle_ms()` on Linux asks GNOME's
   `org.gnome.Mutter.IdleMonitor.GetIdletime` through `gdbus` (no new crate).
-  Queried at most every two seconds, extrapolated in between; a failure
+  Sampled by a lazily started background thread every two seconds (reads never block, `os_idle_known()` is render-safe), extrapolated in between; a failure
   (no `gdbus`, KDE, wlroots) is cached forever and callers fall back to
   in-window input. `parse_gdbus_idletime` is pure and unit-tested.
 - `src/main.rs`: `os_prefers_reduced_motion()` on Windows reads
