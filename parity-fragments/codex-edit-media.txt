@@ -1,4 +1,0 @@
-# B5 edit media, caption move, link-preview options (see docs/decisions/codex-edit-media.md)
-parity:menu-edit-message-media
-parity:composer-link-options
-parity:composer-caption-move

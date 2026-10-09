@@ -259,7 +259,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
 - [ ] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
 - [ ] Edit Image, Edit Video and Edit Cover on your own media <!-- parity:menu-edit-media-items -->
-- [ ] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
+- [x] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
 - [ ] Go To Message from search, pinned and saved lists <!-- parity:menu-go-to-message -->
 - [ ] Add or edit a fact check as a channel admin <!-- parity:menu-fact-check-edit -->
 - [ ] Save an audio message as a notification tone <!-- parity:menu-save-notification-tone -->
@@ -292,8 +292,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
 - [ ] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
 - [ ] Send box options: HD photo toggle, GIF with caption, paid media price, video cover <!-- parity:composer-send-options -->
-- [ ] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
-- [ ] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
+- [x] Link preview options popover: choose link, move up or down, shrink or enlarge <!-- parity:composer-link-options -->
+- [x] Move caption above or below media from the send box <!-- parity:composer-caption-move -->
 - [ ] Clear placeholders when text or a media type is not allowed <!-- parity:composer-restricted-placeholder -->
 - [ ] Premium-only and paid-message gates ("charges N per message", "only accepts messages from contacts") <!-- parity:composer-paid-gates -->
 - [x] Show and hide button for bot reply keyboards <!-- parity:composer-bot-keyboard-toggle -->
