@@ -320,9 +320,10 @@ fn ui_main(args: &[String]) {
     let pending_deep_link = quill::connect::detect_deep_link_arg(args);
 
     let credentials = quill::credentials::load();
-    let start_in_tray = args.iter().any(|arg| arg == "--start-minimized")
-        || ui::QuillApp::load_appearance().start_in_tray;
-    let application = gpui_kit::application().with_assets(QuillAssets);
+    let appearance = ui::QuillApp::load_appearance();
+    let start_in_tray =
+        args.iter().any(|arg| arg == "--start-minimized") || appearance.start_in_tray;
+    let application = quill_application(appearance.interface_scale_pct).with_assets(QuillAssets);
     // macOS delivers `tg:` / `t.me` URLs (Info.plist CFBundleURLTypes) here,
     // both on cold launch and to the running app; Linux/Windows pass them
     // as argv instead (handled above and via the single-instance socket).
@@ -597,6 +598,17 @@ fn install_main_window_tray(
     view.update(cx, |this, _| quill::tray::sync_tray_startup(this.session()));
 }
 
+/// The GPUI application on the OS platform wrapped in the interface-scale
+/// decorator (`ui::interface_zoom`), so every window draws at
+/// `interface_scale_pct` from its first frame.
+#[cfg(feature = "ui")]
+fn quill_application(interface_scale_pct: u16) -> gpui_kit::Application {
+    use ui::interface_zoom::{ZoomPlatform, set_initial_zoom, zoom_for_percent};
+    set_initial_zoom(zoom_for_percent(interface_scale_pct));
+    let platform = gpui_kit::platform::current_platform(false);
+    gpui_kit::Application::with_platform(std::rc::Rc::new(ZoomPlatform::new(platform)))
+}
+
 /// kit Phase 7: window options compatible with kit's `TitleBar` — the title
 /// bar owns dragging (double-click zoom included), so the platform must not
 /// also treat it as a system move region.
@@ -717,6 +729,8 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-game-card", ReadyGameCard),
         ("ready-gif-playback", ReadyGifPlayback),
         ("ready-gifs", ReadyGifs),
+        ("ready-gift-cards", ReadyGiftCards),
+        ("ready-gifts", ReadyGifts),
         ("ready-group-admin-settings", ReadyGroupAdminSettings),
         ("ready-group-call", ReadyGroupCall),
         ("ready-group-call-invitation", ReadyGroupCallInvitation),
@@ -761,6 +775,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-pin-drag", ReadyPinDrag),
         ("ready-player-bar", ReadyPlayerBar),
         ("ready-poll", ReadyPoll),
+        ("ready-premium", ReadyPremium),
         ("ready-preview-cards", ReadyPreviewCards),
         ("ready-privacy", ReadyPrivacy),
         ("ready-privacy-gifts", ReadyPrivacyGifts),
@@ -812,6 +827,7 @@ const DEMO_TABLE: &[(&str, ui::ScreenshotDemo)] = {
         ("ready-spellcheck-panel", ReadySpellcheckPanel),
         ("ready-spellcheck-toggle", ReadySpellcheckToggle),
         ("ready-sponsored", ReadySponsored),
+        ("ready-stars", ReadyStars),
         ("ready-sticker-playback", ReadyStickerPlayback),
         ("ready-stickers", ReadyStickers),
         ("ready-storage-usage", ReadyStorageUsage),
@@ -1161,6 +1177,10 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         ScreenshotDemo::ReadySecretChat => ".quill-ready-ready-secret-chat",
         ScreenshotDemo::ReadyPayments => ".quill-ready-ready-payments",
         ScreenshotDemo::ReadySubscriptions => ".quill-ready-ready-subscriptions",
+        ScreenshotDemo::ReadyStars => ".quill-ready-ready-stars",
+        ScreenshotDemo::ReadyGifts => ".quill-ready-ready-gifts",
+        ScreenshotDemo::ReadyPremium => ".quill-ready-ready-premium",
+        ScreenshotDemo::ReadyGiftCards => ".quill-ready-ready-gift-cards",
         ScreenshotDemo::ReadyMarketplaceGift => ".quill-ready-ready-marketplace-gift",
         ScreenshotDemo::ReadySecretPicker => ".quill-ready-ready-secret-picker",
         ScreenshotDemo::ReadySecretBotAlert => ".quill-ready-ready-secret-bot-alert",
@@ -1266,7 +1286,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
         })
         .unwrap_or((20.0, 20.0));
 
-    gpui_kit::application()
+    quill_application(ui::interface_zoom::demo_interface_scale().unwrap_or(100))
         .with_assets(QuillAssets)
         .run(move |cx| {
             cx.set_app_identity("org.shinycake.quill", "Quill");

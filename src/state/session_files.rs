@@ -161,6 +161,15 @@ impl Session {
                     {
                         ids.push(size.file_id);
                     }
+                    // A gift / giveaway card shows its sticker.
+                    if let crate::telegram::envelope::ServiceAction::WithCard { card, .. } =
+                        action.as_ref()
+                        && let Some(file_id) =
+                            card.sticker.as_ref().and_then(|s| s.display_file_id())
+                        && self.should_download(file_id)
+                    {
+                        ids.push(file_id);
+                    }
                 }
                 MessageContent::Text(text) => {
                     if let Some(preview) = &text.link_preview
@@ -246,6 +255,20 @@ impl Session {
                     }
                 }
                 _ => {}
+            }
+        }
+        // The received-gifts dialog shows each gift's sticker.
+        if self.hub.gifts_open {
+            for gift in &self.hub.gifts {
+                if let Some(file_id) = gift
+                    .gift
+                    .sticker
+                    .as_ref()
+                    .and_then(|sticker| sticker.display_file_id())
+                    && self.should_download(file_id)
+                {
+                    ids.push(file_id);
+                }
             }
         }
         if self.gifs.open {

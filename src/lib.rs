@@ -57,6 +57,7 @@ pub mod platform;
 pub mod playback;
 pub mod playlist;
 pub mod poll;
+pub mod premium_hub;
 pub mod presence;
 pub mod privacy;
 pub mod profile_forms;

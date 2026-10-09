@@ -222,7 +222,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Forwarded story messages and story mentions <!-- parity:render-story-message -->
 - [ ] Paid media shows a blurred locked preview with an unlock button <!-- parity:render-paid-media -->
 - [x] Checklist messages render with tasks and done marks <!-- parity:render-checklist -->
-- [ ] Gift and giveaway messages render as cards (regular, unique, refunded, prize, winners, gift code) <!-- parity:render-gift-cards -->
+- [x] Gift and giveaway messages render as cards (regular, unique, refunded, prize, winners, gift code) <!-- parity:render-gift-cards -->
 - [x] Contact cards show an avatar with Message, Add contact and View buttons <!-- parity:render-contact-card-actions -->
 - [x] Location and venue messages show a map thumbnail <!-- parity:render-map-thumbnail -->
 - [ ] Live location shows remaining time, live updates and a stop-sharing action <!-- parity:render-live-location -->
@@ -1060,7 +1060,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [ ] Wallpapers: gallery, patterns, from file, blur, motion, tile, remove <!-- parity:appearance-wallpapers -->
 - [ ] Built-in themes (Day, Classic, Tinted, Night), custom and cloud themes, theme editor <!-- parity:appearance-themes -->
 - [ ] System accent color option <!-- parity:appearance-system-accent -->
-- [ ] Interface scale <!-- parity:appearance-scale -->
+- [x] Interface scale <!-- parity:appearance-scale -->
 - [ ] Font family choice <!-- parity:appearance-font -->
 - [ ] Interface language packs (English only today) <!-- parity:appearance-localization -->
 - [ ] Adaptive layout for wide screens (centered column) <!-- parity:appearance-wide-layout -->
