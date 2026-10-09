@@ -61,7 +61,11 @@ impl std::fmt::Debug for ParsedSecretChat {
 pub(crate) fn parse_secret_chat(value: Option<&Value>) -> Option<ParsedSecretChat> {
     let value = value?;
     Some(ParsedSecretChat {
-        id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        id: value
+            .get("id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         user_id: int53(value.get("user_id")).ok()?,
         state: SecretChatState::from_type_name(
             value
@@ -79,6 +83,10 @@ pub(crate) fn parse_secret_chat(value: Option<&Value>) -> Option<ParsedSecretCha
             .and_then(Value::as_str)
             .and_then(|s| STANDARD.decode(s).ok())
             .unwrap_or_default(),
-        layer: value.get("layer").and_then(Value::as_i64).unwrap_or(0) as i32,
+        layer: value
+            .get("layer")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
     })
 }

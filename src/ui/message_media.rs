@@ -2763,11 +2763,12 @@ pub(super) fn spoiler_cover(
 
 /// The minithumbnail scaled up and Gaussian-blurred, cached per message.
 fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
+    use super::lru::Lru;
     use std::cell::RefCell;
     thread_local! {
-        static CACHE: RefCell<HashMap<u64, Arc<RenderImage>>> = RefCell::new(HashMap::new());
+        static CACHE: RefCell<Lru<u64, Arc<RenderImage>>> = RefCell::new(Lru::new(256));
     }
-    if let Some(hit) = CACHE.with(|cache| cache.borrow().get(&row_id).cloned()) {
+    if let Some(hit) = CACHE.with(|cache| cache.borrow_mut().get(&row_id)) {
         return Some(hit);
     }
     let small = image::load_from_memory(jpeg).ok()?.to_rgba8();
@@ -2787,11 +2788,9 @@ fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
         image::Frame::new(blurred),
     ])));
     CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache.len() > 256 {
-            super::image_budget::retire_all(cache.drain().map(|(_, image)| image));
+        if let Some(old) = cache.borrow_mut().insert(row_id, render.clone()) {
+            super::image_budget::retire_all([old]);
         }
-        cache.insert(row_id, render.clone());
     });
     Some(render)
 }

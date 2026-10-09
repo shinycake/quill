@@ -108,6 +108,14 @@ impl Session {
                 {
                     self.message_caption_length_max = limit.max(0).min(i64::from(i32::MAX)) as i32;
                 }
+                // R8: plain-text limit (tdesktop `messageLengthCurrent`).
+                // A zero or negative value would make every send look
+                // oversized, so floor it at 1.
+                if name == "message_text_length_max"
+                    && let OptionValue::Integer(limit) = value
+                {
+                    self.message_text_length_max = limit.clamp(1, i64::from(i32::MAX)) as i32;
+                }
                 // Slice CL1: pin-limit options (schema:13674) for the
                 // client-side pin pre-check.
                 if (name == "pinned_chat_count_max" || name == "pinned_archived_chat_count_max")
@@ -781,11 +789,7 @@ impl Session {
                         (0, _) => events,
                         (_, Some(ChatEventLogFetch::Loaded(page))) => {
                             let mut merged = page.events.clone();
-                            for event in events {
-                                if !merged.iter().any(|old| old.id == event.id) {
-                                    merged.push(event);
-                                }
-                            }
+                            super::paging::append_new_by_id(&mut merged, events, |event| event.id);
                             merged
                         }
                         _ => events,

@@ -239,6 +239,8 @@ impl Session {
         } else if let Some(history) = self.histories.get_mut(&chat_id.0) {
             history.has_newer = false;
         }
+        // R6: reading forward through a long window — drop the oldest end.
+        self.trim_history_window(chat_id, WindowEnd::Oldest);
     }
 
     /// A newer-page request failed: stop auto-paging this window.

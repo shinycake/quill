@@ -973,6 +973,43 @@ impl QuillApp {
         )
     }
 
+    /// R8: tdesktop `CharactersLimitLabel` — only shown once the text is
+    /// over `message_text_length_max`, as a red "−N" (units to remove) while
+    /// editing. A new message over the limit is not an error (it is sent as
+    /// several messages), so the label says how many.
+    pub(super) fn text_limit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.pending_attachments.is_empty() {
+            return None;
+        }
+        let editing = self.pending_edit.as_ref();
+        if editing.is_some_and(|edit| !matches!(edit.kind, quill::composer::ComposerEditKind::Text))
+        {
+            return None;
+        }
+        let limit = self.text_length_limit();
+        let value = self.composer.read(cx).value().to_string();
+        let over = quill::text_split::units_over_limit(value.trim(), limit);
+        if over == 0 {
+            return None;
+        }
+        let (label, color) = if editing.is_some() {
+            (format!("\u{2212}{}", over.min(999)), danger_bright())
+        } else {
+            let parts = quill::text_split::split_markup_text(value.trim(), limit).len();
+            (format!("Will be sent as {parts} messages"), text_muted())
+        };
+        Some(
+            div()
+                .id("composer-text-limit")
+                .flex()
+                .justify_end()
+                .px_3()
+                .py_1()
+                .child(div().text_xs().text_color(color).child(label))
+                .into_any_element(),
+        )
+    }
+
     pub(super) fn delete_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let confirm = self.pending_delete.clone();
         let can_revoke = confirm.as_ref().is_some_and(|c| c.can_revoke);

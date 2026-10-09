@@ -59,12 +59,14 @@ mod call_types;
 mod chat_activity;
 mod chat_types;
 mod history_calendar;
+mod history_trim;
 mod history_types;
 mod info_types;
 mod map_thumbs;
 mod media_library;
 mod member_list;
 mod ownership_types;
+mod paging;
 mod redraw;
 mod request_purpose;
 mod requests;
@@ -118,6 +120,9 @@ pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;
 pub use history_calendar::*;
+pub use history_trim::{
+    HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, RowWindowShift, WindowEnd, row_window_shift,
+};
 pub use history_types::*;
 pub use info_types::*;
 pub use map_thumbs::{

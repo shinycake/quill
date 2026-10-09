@@ -91,7 +91,7 @@ pub(crate) fn parse_saved_messages_tags(value: &Value) -> Vec<SavedMessagesTag> 
             Some(SavedMessagesTag {
                 tag: parse_reaction_type(tag.get("tag"))?,
                 label: json_field_str(tag, "label"),
-                count: int53_or_zero(tag.get("count")) as i32,
+                count: int53_or_zero(tag.get("count")).sat_i32(),
             })
         })
         .collect()

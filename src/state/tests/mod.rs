@@ -12,6 +12,7 @@ mod downloads;
 mod forum_saved;
 mod group_admin;
 mod groups;
+mod history_window_cap;
 mod messages;
 mod notifications;
 mod payments;

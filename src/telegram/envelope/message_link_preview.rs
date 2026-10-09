@@ -86,7 +86,7 @@ pub(crate) fn parse_link_preview(value: Option<&Value>) -> (Option<LinkPreview>,
             show_above_text: json_bool(value.get("show_above_text"), false),
             // MED4: `linkPreview.instant_view_version` (schema:4570) — the
             // IV reader opens when this is > 0.
-            instant_view_version: int53_or_zero(value.get("instant_view_version")) as i32,
+            instant_view_version: int53_or_zero(value.get("instant_view_version")).sat_i32(),
             photo,
             kind,
         }),
@@ -111,7 +111,7 @@ pub(crate) fn parse_link_preview_kind(
         "linkPreviewTypeEmbeddedVideoPlayer" | "linkPreviewTypeEmbeddedAnimationPlayer" => (
             LinkPreviewKind::EmbeddedPlayer {
                 url: json_field_str(preview_type, "url"),
-                duration_secs: int53_or_zero(preview_type.get("duration")) as i32,
+                duration_secs: int53_or_zero(preview_type.get("duration")).sat_i32(),
                 audio: false,
             },
             Vec::new(),
@@ -119,7 +119,7 @@ pub(crate) fn parse_link_preview_kind(
         "linkPreviewTypeEmbeddedAudioPlayer" => (
             LinkPreviewKind::EmbeddedPlayer {
                 url: json_field_str(preview_type, "url"),
-                duration_secs: int53_or_zero(preview_type.get("duration")) as i32,
+                duration_secs: int53_or_zero(preview_type.get("duration")).sat_i32(),
                 audio: true,
             },
             Vec::new(),
@@ -167,8 +167,8 @@ pub(crate) fn parse_link_preview_kind(
                                 show_caption_above_media: false,
                                 sizes: vec![PhotoSizeView {
                                     type_name: "t".to_string(),
-                                    width: int53_or_zero(thumb.get("width")) as i32,
-                                    height: int53_or_zero(thumb.get("height")) as i32,
+                                    width: int53_or_zero(thumb.get("width")).sat_i32(),
+                                    height: int53_or_zero(thumb.get("height")).sat_i32(),
                                     file_id: id,
                                 }],
                                 is_secret: false,

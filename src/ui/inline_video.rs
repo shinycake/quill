@@ -479,10 +479,11 @@ impl QuillApp {
 /// it: laid over a square video it rounds the video, which GPUI's surface
 /// can't clip itself. Cached per size and color.
 pub(super) fn circle_mask(edge: u32, color: Hsla) -> std::sync::Arc<RenderImage> {
+    use super::lru::Lru;
     use std::cell::RefCell;
     use std::sync::Arc;
     thread_local! {
-        static MASKS: RefCell<HashMap<(u32, [u8; 4]), Arc<RenderImage>>> = RefCell::new(HashMap::new());
+        static MASKS: RefCell<Lru<(u32, [u8; 4]), Arc<RenderImage>>> = RefCell::new(Lru::new(32));
     }
     let rgba = Rgba::from(color);
     let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -492,27 +493,32 @@ pub(super) fn circle_mask(edge: u32, color: Hsla) -> std::sync::Arc<RenderImage>
         channel(rgba.r),
         channel(rgba.a),
     ];
+    let key = (edge, bgra);
+    if let Some(hit) = MASKS.with(|masks| masks.borrow_mut().get(&key)) {
+        return hit;
+    }
+    let build = || {
+        let radius = edge as f32 / 2.0;
+        let mut image = image::RgbaImage::new(edge, edge);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            let dx = x as f32 + 0.5 - radius;
+            let dy = y as f32 + 0.5 - radius;
+            // 0 inside the circle, 1 outside, a pixel's ramp between.
+            let cover = ((dx * dx + dy * dy).sqrt() - radius + 0.5).clamp(0.0, 1.0);
+            let alpha = (f32::from(bgra[3]) * cover).round() as u8;
+            *pixel = image::Rgba([bgra[0], bgra[1], bgra[2], alpha]);
+        }
+        Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+            image::Frame::new(image),
+        ])))
+    };
+    let image = build();
     MASKS.with(|masks| {
-        masks
-            .borrow_mut()
-            .entry((edge, bgra))
-            .or_insert_with(|| {
-                let radius = edge as f32 / 2.0;
-                let mut image = image::RgbaImage::new(edge, edge);
-                for (x, y, pixel) in image.enumerate_pixels_mut() {
-                    let dx = x as f32 + 0.5 - radius;
-                    let dy = y as f32 + 0.5 - radius;
-                    // 0 inside the circle, 1 outside, a pixel's ramp between.
-                    let cover = ((dx * dx + dy * dy).sqrt() - radius + 0.5).clamp(0.0, 1.0);
-                    let alpha = (f32::from(bgra[3]) * cover).round() as u8;
-                    *pixel = image::Rgba([bgra[0], bgra[1], bgra[2], alpha]);
-                }
-                Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-                    image::Frame::new(image),
-                ])))
-            })
-            .clone()
-    })
+        if let Some(old) = masks.borrow_mut().insert(key, image.clone()) {
+            super::image_budget::retire_all([old]);
+        }
+    });
+    image
 }
 
 /// An image of `color` the size of a `width` x `height` tile with each
@@ -527,11 +533,12 @@ pub(super) fn corner_mask(
     radii: [u32; 4],
     colors: [Hsla; 4],
 ) -> std::sync::Arc<RenderImage> {
+    use super::lru::Lru;
     use std::cell::RefCell;
     use std::sync::Arc;
     type Key = (u32, u32, [u32; 4], [[u8; 4]; 4]);
     thread_local! {
-        static MASKS: RefCell<HashMap<Key, Arc<RenderImage>>> = RefCell::new(HashMap::new());
+        static MASKS: RefCell<Lru<Key, Arc<RenderImage>>> = RefCell::new(Lru::new(32));
     }
     let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
     let bgra = colors.map(|color| {
@@ -543,45 +550,50 @@ pub(super) fn corner_mask(
             channel(rgba.a),
         ]
     });
+    let key = (width, height, radii, bgra);
+    if let Some(hit) = MASKS.with(|masks| masks.borrow_mut().get(&key)) {
+        return hit;
+    }
+    let build = || {
+        let (w, h) = (width * 2, height * 2);
+        let mut image = image::RgbaImage::new(w.max(1), h.max(1));
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let left = px < w as f32 / 2.0;
+            let top = py < h as f32 / 2.0;
+            let corner = match (top, left) {
+                (true, true) => 0,
+                (true, false) => 1,
+                (false, false) => 2,
+                (false, true) => 3,
+            };
+            let radius = radii[corner] as f32 * 2.0;
+            let color = bgra[corner];
+            // Distance from this corner's edges.
+            let dx = if left { px } else { w as f32 - px };
+            let dy = if top { py } else { h as f32 - py };
+            let cover = if dx >= radius || dy >= radius {
+                0.0
+            } else {
+                let ox = radius - dx;
+                let oy = radius - dy;
+                ((ox * ox + oy * oy).sqrt() - radius + 0.5).clamp(0.0, 1.0)
+            };
+            let alpha = (f32::from(color[3]) * cover).round() as u8;
+            *pixel = image::Rgba([color[0], color[1], color[2], alpha]);
+        }
+        Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+            image::Frame::new(image),
+        ])))
+    };
+    let image = build();
     MASKS.with(|masks| {
-        masks
-            .borrow_mut()
-            .entry((width, height, radii, bgra))
-            .or_insert_with(|| {
-                let (w, h) = (width * 2, height * 2);
-                let mut image = image::RgbaImage::new(w.max(1), h.max(1));
-                for (x, y, pixel) in image.enumerate_pixels_mut() {
-                    let px = x as f32 + 0.5;
-                    let py = y as f32 + 0.5;
-                    let left = px < w as f32 / 2.0;
-                    let top = py < h as f32 / 2.0;
-                    let corner = match (top, left) {
-                        (true, true) => 0,
-                        (true, false) => 1,
-                        (false, false) => 2,
-                        (false, true) => 3,
-                    };
-                    let radius = radii[corner] as f32 * 2.0;
-                    let color = bgra[corner];
-                    // Distance from this corner's edges.
-                    let dx = if left { px } else { w as f32 - px };
-                    let dy = if top { py } else { h as f32 - py };
-                    let cover = if dx >= radius || dy >= radius {
-                        0.0
-                    } else {
-                        let ox = radius - dx;
-                        let oy = radius - dy;
-                        ((ox * ox + oy * oy).sqrt() - radius + 0.5).clamp(0.0, 1.0)
-                    };
-                    let alpha = (f32::from(color[3]) * cover).round() as u8;
-                    *pixel = image::Rgba([color[0], color[1], color[2], alpha]);
-                }
-                Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-                    image::Frame::new(image),
-                ])))
-            })
-            .clone()
-    })
+        if let Some(old) = masks.borrow_mut().insert(key, image.clone()) {
+            super::image_budget::retire_all([old]);
+        }
+    });
+    image
 }
 
 #[cfg(test)]

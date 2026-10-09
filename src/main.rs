@@ -884,7 +884,25 @@ fn os_prefers_reduced_motion() -> bool {
             .output()
             .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "false")
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
+    {
+        // Settings > Accessibility > Visual effects > Animation effects.
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SPI_GETCLIENTAREAANIMATION, SystemParametersInfoW,
+        };
+        let mut animations: i32 = 1;
+        // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL to the pointer.
+        let ok = unsafe {
+            SystemParametersInfoW(
+                SPI_GETCLIENTAREAANIMATION,
+                0,
+                (&mut animations as *mut i32).cast(),
+                0,
+            )
+        };
+        ok != 0 && animations == 0
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         false
     }

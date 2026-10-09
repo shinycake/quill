@@ -92,7 +92,8 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
         unread_count: chat
             .get("unread_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         last_read_inbox_message_id: MessageId(int53_or_zero(
             chat.get("last_read_inbox_message_id"),
         )),
@@ -167,7 +168,8 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
         message_auto_delete_time: chat
             .get("message_auto_delete_time")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         // Phase C3a: `chat.video_chat` (`videoChat`, schema
         // 1.8.67, lines 3576 / 3579). `group_call_id` 0 → None
         // (no active video chat).
@@ -184,15 +186,18 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
         unread_mention_count: chat
             .get("unread_mention_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         unread_reaction_count: chat
             .get("unread_reaction_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         unread_poll_vote_count: chat
             .get("unread_poll_vote_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         // Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines
         // 3606/3627) gates the row-menu Report item.
         can_be_reported: chat
@@ -234,7 +239,8 @@ pub(crate) fn parse_chat_kind(value: Option<&Value>) -> ChatKind {
             secret_chat_id: value
                 .get("secret_chat_id")
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
             user_id: UserId(int53(value.get("user_id")).unwrap_or(0)),
         },
         _ => ChatKind::Unknown,

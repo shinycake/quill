@@ -33,7 +33,8 @@ pub(crate) fn parse_message_thread_info(
         unread_message_count: value
             .get("unread_message_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         messages: value
             .get("messages")
             .and_then(Value::as_array)

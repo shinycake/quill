@@ -39,11 +39,9 @@ impl Session {
                         }),
                     ) => {
                         let mut results = old.clone();
-                        for result in page.results {
-                            if !results.iter().any(|r| r.id == result.id) {
-                                results.push(result);
-                            }
-                        }
+                        super::paging::append_new_by_id(&mut results, page.results, |r| {
+                            r.id.clone()
+                        });
                         InlineQueryFetch::Loaded {
                             inline_query_id: page.inline_query_id,
                             button: page.button,
