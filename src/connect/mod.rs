@@ -12,6 +12,7 @@ mod core;
 mod deep_links;
 mod emoji_sets;
 mod flood_retry;
+mod folder_links;
 mod forum_saved;
 mod gifs;
 mod group_admin;

@@ -37,6 +37,7 @@ use super::find_demo::{
     apply_ready_jump_date, apply_ready_search_filters, apply_ready_search_frequent,
     apply_ready_search_from, apply_ready_search_from_hits, apply_ready_search_public,
 };
+use super::folder_demo::{apply_ready_folder_invite, apply_ready_folders_share};
 use super::folders::apply_ready_folders;
 use super::forward::apply_ready_forward;
 use super::group_calls::demo_group_video_frames;
@@ -1111,11 +1112,59 @@ impl QuillApp {
             self.folder_tab = Some(2);
             self.status_note = "screenshot demo — folder tabs · News folder".into();
         }
+        // Shareable folders slice: the Share Folder dialog over four folders.
+        if matches!(demo, Some(ScreenshotDemo::ReadyFoldersShare)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.open_folder_share(1, window, cx);
+            self.status_note = "screenshot demo — Share Folder".into();
+        }
+        // Shareable folders slice: the folders in a left column with icons.
+        if matches!(demo, Some(ScreenshotDemo::ReadyFoldersSidebar)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.appearance.folder_tabs_view = quill::folder_icons::FolderTabsView::Left;
+            self.folder_tab = Some(2);
+            self.status_note = "screenshot demo — folders on the left".into();
+        }
+        // Shareable folders slice: "Add folder" for an addlist link.
+        if matches!(demo, Some(ScreenshotDemo::ReadyFoldersAddLink)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+                apply_ready_folder_invite(session, "https://t.me/addlist/Xk3pQ9aBn2");
+            }
+            let mut dialog = FolderInviteDialog::new("https://t.me/addlist/Xk3pQ9aBn2".into());
+            dialog.selected = [13, 16].into_iter().collect();
+            dialog.seeded = true;
+            self.folder_invite = Some(dialog);
+            self.status_note = "screenshot demo — Add folder by link".into();
+        }
+        // Shareable folders slice: the folder editor with the icon picker.
+        if matches!(demo, Some(ScreenshotDemo::ReadyFoldersIcons)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
+            }
+            let mut dialog = FolderEditorDialog::new(window, cx, None);
+            dialog.editor.name = "Family".into();
+            dialog.editor.icon_name = Some("Home".into());
+            dialog.editor.included = [11, 12].into_iter().collect();
+            dialog
+                .name_input
+                .update(cx, |input, cx| input.set_value("Family", window, cx));
+            self.folder_editor = Some(dialog);
+            self.status_note = "screenshot demo — folder icon picker".into();
+        }
         // Parity slice: manage dialog over the same folder fixture.
         if matches!(demo, Some(ScreenshotDemo::ReadyFoldersManage)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                apply_ready_folders(session, &self.demo_sink, &self.demo_seq);
+                apply_ready_folders_share(session, &self.demo_sink, &self.demo_seq);
             }
             // Open the manage dialog over the folder fixture.
             self.folder_manage_open = true;

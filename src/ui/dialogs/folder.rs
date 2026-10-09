@@ -3,6 +3,7 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::folders::FolderEditor;
 use quill::telegram::envelope::ChatFolderSpec;
+use std::collections::HashSet;
 /// Parity slice: create/edit chat-folder dialog. The editable folder model
 /// is [`FolderEditor`]; on save it freezes to a [`ChatFolderSpec`] sent via
 /// `createChatFolder` / `editChatFolder`.
@@ -55,6 +56,76 @@ impl FolderEditorDialog {
 
     pub(crate) fn name(&self, cx: &App) -> String {
         self.name_input.read(cx).value().to_string()
+    }
+}
+
+/// What the Share Folder dialog shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FolderShareView {
+    /// The folder's invite links.
+    List,
+    /// Naming a link and choosing its chats; `None` creates a new link.
+    Edit { link: Option<String> },
+}
+
+/// Share Folder (tdesktop `boxes/filters/edit_filter_links.cpp`): the
+/// folder's invite links, and the create / edit form.
+pub struct FolderShareDialog {
+    pub(crate) folder_id: i32,
+    pub(crate) view: FolderShareView,
+    pub(crate) name_input: Entity<TextareaState>,
+    /// Chats ticked in the create / edit form.
+    pub(crate) selected: HashSet<i64>,
+    /// A create / edit / delete request is in flight.
+    pub(crate) busy: bool,
+    /// The link whose delete is waiting for confirmation.
+    pub(crate) confirm_delete: Option<String>,
+    /// The link last copied to the clipboard.
+    pub(crate) copied: Option<String>,
+    pub(crate) error: Option<String>,
+}
+
+impl FolderShareDialog {
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>, folder_id: i32) -> Self {
+        let name_input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Link name (optional)")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        Self {
+            folder_id,
+            view: FolderShareView::List,
+            name_input,
+            selected: HashSet::new(),
+            busy: false,
+            confirm_delete: None,
+            copied: None,
+            error: None,
+        }
+    }
+}
+
+/// "Add folder" for a shared-folder (`addlist`) link (tdesktop
+/// `ui/chatlist_box`'s `ShowImportToast` / `ToggleChatsBox`).
+pub struct FolderInviteDialog {
+    pub(crate) link: String,
+    /// Chats of the link left ticked; seeded with every missing chat once
+    /// the link has been checked.
+    pub(crate) selected: HashSet<i64>,
+    pub(crate) seeded: bool,
+    /// `addChatFolderByInviteLink` is in flight.
+    pub(crate) adding: bool,
+}
+
+impl FolderInviteDialog {
+    pub(crate) fn new(link: String) -> Self {
+        Self {
+            link,
+            selected: HashSet::new(),
+            seeded: false,
+            adding: false,
+        }
     }
 }
 

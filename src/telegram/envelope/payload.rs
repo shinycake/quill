@@ -1141,6 +1141,18 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         "chatFolder" => parse_chat_folder(&value)
             .map(|spec| EnvelopePayload::ChatFolder { spec })
             .ok_or(ParseError::MissingField),
+        "chatFolderInviteLink" => parse_chat_folder_invite_link(&value)
+            .map(EnvelopePayload::ChatFolderInviteLink)
+            .ok_or(ParseError::MissingField),
+        "chatFolderInviteLinks" => parse_chat_folder_invite_links(&value)
+            .map(EnvelopePayload::ChatFolderInviteLinks)
+            .ok_or(ParseError::MissingField),
+        "recommendedChatFolders" => parse_recommended_chat_folders(&value)
+            .map(EnvelopePayload::RecommendedChatFolders)
+            .ok_or(ParseError::MissingField),
+        "chatFolderInviteLinkInfo" => parse_chat_folder_invite_link_info(&value)
+            .map(EnvelopePayload::ChatFolderInviteLinkInfo)
+            .ok_or(ParseError::MissingField),
         // Parity slice: `getChatListsToAddChat` response (TDLib 1.8.67,
         // `schema/td_api.tl:13347`) — the chat lists a chat may be added
         // to via `addChatToList`.

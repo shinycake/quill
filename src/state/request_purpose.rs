@@ -1262,6 +1262,31 @@ pub enum RequestPurpose {
     /// cached in `Session::folder_chats_to_leave` (keyed by
     /// `PendingRequest::folder_id`) for the delete-confirm dialog.
     GetChatFolderChatsToLeave,
+    /// `getRecommendedChatFolders`. Response is `recommendedChatFolders`,
+    /// cached in `Session::recommended_folders`.
+    GetRecommendedChatFolders,
+    /// `getChatsForChatFolderInviteLink`. Response is `chats` — the folder
+    /// chats a link can grant (`Session::folder_link_chats`, keyed by
+    /// `PendingRequest::folder_id`).
+    GetChatsForFolderInviteLink,
+    /// `getChatFolderInviteLinks`. Response is `chatFolderInviteLinks`
+    /// (`Session::folder_invite_links`, keyed by folder id).
+    GetChatFolderInviteLinks,
+    /// `createChatFolderInviteLink`. Response is `chatFolderInviteLink`.
+    CreateChatFolderInviteLink,
+    /// `editChatFolderInviteLink`. Response is `chatFolderInviteLink`.
+    EditChatFolderInviteLink,
+    /// `deleteChatFolderInviteLink`. Response is `ok`; the link leaves the
+    /// cache optimistically at send time.
+    DeleteChatFolderInviteLink,
+    /// `checkChatFolderInviteLink` (an `addlist` link). Response is
+    /// `chatFolderInviteLinkInfo` (`Session::folder_invite_info`).
+    CheckChatFolderInviteLink,
+    /// `addChatFolderByInviteLink`. Response is `ok`.
+    AddChatFolderByInviteLink,
+    /// `getChat` for a chat an `addlist` link offers that is not loaded
+    /// yet (its title shows in the "Add folder" dialog).
+    GetFolderInviteChat,
     /// Phase B1: `createNewSecretChat`. Response is `chat` (the new
     /// secret chat); the canonical state arrives as `updateNewChat` /
     /// `updateSecretChat`.

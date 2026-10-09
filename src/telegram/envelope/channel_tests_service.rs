@@ -346,6 +346,8 @@ fn update_chat_folders_parsed() {
                     name: "Work".into(),
                     icon_name: "Work".into(),
                     color_id: 2,
+                    is_shareable: false,
+                    has_my_invite_links: false,
                 }
             );
             assert_eq!(
@@ -355,6 +357,8 @@ fn update_chat_folders_parsed() {
                     name: "News".into(),
                     icon_name: String::new(),
                     color_id: -1,
+                    is_shareable: false,
+                    has_my_invite_links: false,
                 }
             );
         }

@@ -1649,8 +1649,10 @@ impl QuillApp {
                 session.chat_folders.push(ChatFolderInfo {
                     id,
                     name: spec.name.clone(),
-                    icon_name: String::new(),
+                    icon_name: spec.icon_name.clone().unwrap_or_default(),
                     color_id: -1,
+                    is_shareable: false,
+                    has_my_invite_links: false,
                 });
                 session.folder_specs.insert(id, spec);
             }

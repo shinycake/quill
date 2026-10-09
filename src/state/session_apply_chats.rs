@@ -573,6 +573,12 @@ impl Session {
             self.folder_chats_to_leave
                 .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsForFolderInviteLink)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+        {
+            self.folder_link_chats
+                .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+        }
         // B10: profile panel lists (groups in common, similar channels,
         // personal channel candidates).
         if let Some(pending) = pending
