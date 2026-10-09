@@ -508,15 +508,60 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                     .unwrap_or(0) as i32,
             })
         }
-        "updateChatUnreadReactionCount" | "updateMessageUnreadReactions" => {
-            Ok(EnvelopePayload::UpdateChatUnreadReactionCount {
-                chat_id: ChatId(int53(value.get("chat_id"))?),
-                unread_reaction_count: value
-                    .get("unread_reaction_count")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
-            })
-        }
+        "updateMessageUnreadReactions" => Ok(EnvelopePayload::UpdateMessageUnreadReactions {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            message_id: MessageId(int53_or_zero(value.get("message_id"))),
+            unread_reaction_count: value
+                .get("unread_reaction_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            newest: value
+                .get("unread_reactions")
+                .and_then(Value::as_array)
+                .and_then(|list| list.last())
+                .and_then(parse_unread_reaction),
+        }),
+        "updateNotificationGroup" => Ok(EnvelopePayload::UpdateNotificationGroup {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            total_count: value
+                .get("total_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+            added_count: value
+                .get("added_notifications")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len),
+            removed_count: value
+                .get("removed_notification_ids")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len),
+        }),
+        "updateActiveNotifications" => Ok(EnvelopePayload::UpdateActiveNotifications {
+            chat_ids: value
+                .get("groups")
+                .and_then(Value::as_array)
+                .map(|groups| {
+                    groups
+                        .iter()
+                        .filter(|group| {
+                            group
+                                .get("total_count")
+                                .and_then(Value::as_i64)
+                                .unwrap_or(0)
+                                > 0
+                        })
+                        .filter_map(|group| int53(group.get("chat_id")).ok().map(ChatId))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        "updateChatUnreadReactionCount" => Ok(EnvelopePayload::UpdateChatUnreadReactionCount {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            unread_reaction_count: value
+                .get("unread_reaction_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0) as i32,
+        }),
         // Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594).
         "updateChatBlockList" => Ok(EnvelopePayload::UpdateChatBlockList {
             chat_id: ChatId(int53(value.get("chat_id"))?),
@@ -1658,6 +1703,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
         // 1.8.67, line 9053). A missing/invalid `days` degrades to 0
         // rather than failing the parse; the authoritative refetch
         // decides.
+        "messageAutoDeleteTime" => Ok(EnvelopePayload::MessageAutoDeleteTime {
+            seconds: value
+                .get("time")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .clamp(0, i32::MAX as i64) as i32,
+        }),
         "accountTtl" => {
             let days = value
                 .get("days")

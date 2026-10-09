@@ -470,12 +470,14 @@ impl QuillApp {
 
     pub(super) fn close_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.mute_menu_open = false;
+        self.mute_custom_open = false;
         self.notif_sound_picker_open = false;
         cx.notify();
     }
 
     pub(super) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.mute_menu_open = true;
+        self.mute_custom_open = false;
         self.status_note = "mute for…".into();
         cx.notify();
     }
@@ -576,6 +578,9 @@ impl QuillApp {
             ("2 days", MUTE_FOR_2_DAYS),
             ("Forever", MUTE_FOREVER),
         ];
+        let sound_disabled = !chat_settings.use_default_sound && chat_settings.sound_id == 0;
+        let custom_open = self.mute_custom_open;
+        let custom = self.mute_custom;
         let mut preset_row = div().id("mute-presets").flex().flex_wrap().gap_1();
         for (label, seconds) in presets {
             preset_row = preset_row.child(
@@ -590,6 +595,92 @@ impl QuillApp {
                     })),
             );
         }
+
+        // tdesktop `menu_mute.cpp`: after the presets come "Custom...",
+        // and "Unmute" while the chat is muted.
+        preset_row = preset_row.child(
+            Button::new("mute-custom-toggle")
+                .small()
+                .label("Custom\u{2026}")
+                .outline()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.mute_custom_open = !this.mute_custom_open;
+                    cx.notify();
+                })),
+        );
+        if muted {
+            preset_row = preset_row.child(
+                Button::new("mute-unmute")
+                    .small()
+                    .label("Unmute")
+                    .outline()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(chat_id) = open_chat {
+                            this.apply_chat_mute(chat_id, 0, cx);
+                        }
+                    })),
+            );
+        }
+        let custom_row = custom_open.then(|| {
+            let stepper = |id: &'static str, label: String, minus: bool, hours: bool| {
+                let delta = if minus { -1 } else { 1 };
+                Button::new(id)
+                    .small()
+                    .ghost()
+                    .label(label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.mute_custom = if hours {
+                            this.mute_custom.step_hours(delta)
+                        } else {
+                            this.mute_custom.step_days(delta)
+                        };
+                        cx.notify();
+                    }))
+            };
+            div()
+                .id("mute-custom")
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_1()
+                .child(stepper(
+                    "mute-days-minus",
+                    "\u{2212} day".into(),
+                    true,
+                    false,
+                ))
+                .child(stepper("mute-days-plus", "+ day".into(), false, false))
+                .child(stepper(
+                    "mute-hours-minus",
+                    "\u{2212} hour".into(),
+                    true,
+                    true,
+                ))
+                .child(stepper("mute-hours-plus", "+ hour".into(), false, true))
+                .child(
+                    Button::new("mute-custom-apply")
+                        .small()
+                        .label(format!("Mute for {}", custom.label()))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(chat_id) = open_chat {
+                                let mute_for = this.mute_custom.mute_for();
+                                this.mute_custom_open = false;
+                                this.apply_chat_mute(chat_id, mute_for, cx);
+                            }
+                        })),
+                )
+        });
+        let sound_toggle = Button::new("mute-sound-toggle")
+            .small()
+            .label(quill::mute_menu::sound_toggle_label(sound_disabled))
+            .outline()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if let Some(chat_id) = open_chat {
+                    let (use_default, sound_id) =
+                        quill::mute_menu::sound_toggle_target(sound_disabled);
+                    this.apply_chat_sound(chat_id, use_default, sound_id, cx);
+                }
+            }));
 
         let mut panel = div()
             .id("mute-menu")
@@ -637,6 +728,8 @@ impl QuillApp {
                     .child("Mute for"),
             )
             .child(preset_row)
+            .children(custom_row)
+            .child(sound_toggle)
             .child(
                 div()
                     .flex()
@@ -848,7 +941,14 @@ impl QuillApp {
                 ("1w", 604800),
             ]
         } else {
-            &[("Off", 0), ("1d", 86400), ("1w", 604800), ("30d", 2592000)]
+            // tdesktop `lng_manage_messages_ttl_after1..3`; a longer or
+            // odd period goes through the Custom stepper below.
+            &[
+                ("Off", 0),
+                ("1 day", 86_400),
+                ("1 week", 604_800),
+                ("1 month", 2_678_400),
+            ]
         };
         // Phase 6: kit RadioGroup (was: buttons with a ● prefix on the
         // active preset). Controlled: the chosen index writes the value.
@@ -868,6 +968,72 @@ impl QuillApp {
                     this.apply_chat_ttl(chat_id, secs, cx);
                 }
             }));
+        let custom_row = (!is_secret).then(|| {
+            let secs = self.ttl_custom_secs;
+            let mut row = div()
+                .id("ttl-custom")
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_1()
+                .child(
+                    Button::new("ttl-custom-toggle")
+                        .small()
+                        .label("Custom\u{2026}")
+                        .outline()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.ttl_custom_open = !this.ttl_custom_open;
+                            cx.notify();
+                        })),
+                );
+            if self.ttl_custom_open {
+                row = row
+                    .child(
+                        Button::new("ttl-custom-minus")
+                            .small()
+                            .ghost()
+                            .label("\u{2212}")
+                            .accessibility_label("Shorter")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.ttl_custom_secs =
+                                    quill::auto_delete::step(this.ttl_custom_secs, -1);
+                                cx.notify();
+                            })),
+                    )
+                    .child(div().text_sm().child(quill::auto_delete::format_ttl(secs)))
+                    .child(
+                        Button::new("ttl-custom-plus")
+                            .small()
+                            .ghost()
+                            .label("+")
+                            .accessibility_label("Longer")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.ttl_custom_secs =
+                                    quill::auto_delete::step(this.ttl_custom_secs, 1);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("ttl-custom-apply")
+                            .small()
+                            .label("Enable auto-delete")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(chat_id) = open_chat {
+                                    let secs = this.ttl_custom_secs;
+                                    this.apply_chat_ttl(chat_id, secs, cx);
+                                }
+                            })),
+                    );
+            }
+            row
+        });
+        let about = if is_secret {
+            "Messages auto-delete after the timer; in secret chats the countdown starts once the message is viewed.".to_string()
+        } else {
+            open_chat_summary
+                .map(|chat| quill::auto_delete::about_line(&chat.kind).to_string())
+                .unwrap_or_default()
+        };
         div()
             .id("ttl-picker")
             .flex()
@@ -900,12 +1066,10 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "Current: {current} — messages auto-delete after the timer; \
-                         in secret chats the countdown starts once the message is viewed."
-                    )),
+                    .child(format!("Current: {current} \u{2014} {about}")),
             )
             .child(preset_row)
+            .children(custom_row)
     }
 
     /// Parity slice: current sound choice for a chat, for the notifications

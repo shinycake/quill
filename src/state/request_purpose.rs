@@ -1311,6 +1311,14 @@ pub enum RequestPurpose {
     /// new timer arrives as `updateChatMessageAutoDeleteTime` (plus a
     /// `messageChatSetMessageAutoDeleteTime` service message in history).
     SetChatMessageAutoDeleteTime,
+    /// `getDefaultMessageAutoDeleteTime`. Response is `messageAutoDeleteTime`,
+    /// stored in `Session::default_auto_delete_secs`.
+    GetDefaultAutoDelete,
+    /// `setDefaultMessageAutoDeleteTime`. Response is `ok`; the confirmed
+    /// `seconds` are stored (the server accepted exactly this value).
+    SetDefaultAutoDelete {
+        seconds: i32,
+    },
     /// Phase S2: `getStorageStatistics`. Response is `storageStatistics`;
     /// aggregated by file type into `Session::storage_stats` (TGX
     /// `SettingsCacheController` / `TGStorageStats` style, including the

@@ -355,6 +355,7 @@ impl QuillApp {
     /// fixture shows the new timer immediately.
     pub(super) fn apply_chat_ttl(&mut self, chat_id: ChatId, secs: i32, cx: &mut Context<Self>) {
         self.ttl_picker_open = false;
+        self.ttl_custom_open = false;
         if self.live.is_some() {
             let result = self
                 .live

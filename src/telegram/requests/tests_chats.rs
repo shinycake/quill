@@ -105,6 +105,24 @@ fn set_chat_message_auto_delete_time_shape_matches_1_8_67() {
 }
 
 #[test]
+fn default_message_auto_delete_time_shapes_match_1_8_67() {
+    // `getDefaultMessageAutoDeleteTime` / `setDefaultMessageAutoDeleteTime`
+    // (schema 1.8.67, lines 15682 / 15679).
+    let get: serde_json::Value =
+        serde_json::from_str(&get_default_message_auto_delete_time(RequestId(5))).unwrap();
+    assert_eq!(get["@type"], "getDefaultMessageAutoDeleteTime");
+    assert_eq!(get["@extra"], "5");
+    let set: serde_json::Value =
+        serde_json::from_str(&set_default_message_auto_delete_time(RequestId(6), 604_800)).unwrap();
+    assert_eq!(set["@type"], "setDefaultMessageAutoDeleteTime");
+    assert_eq!(
+        set["message_auto_delete_time"]["@type"],
+        "messageAutoDeleteTime"
+    );
+    assert_eq!(set["message_auto_delete_time"]["time"], 604_800);
+}
+
+#[test]
 fn get_commands_shape_matches_1_8_67() {
     // `getCommands scope:BotCommandScope language_code:string =
     // BotCommands` (schema 1.8.67 line 14953); a null scope selects the
