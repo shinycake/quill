@@ -2948,6 +2948,43 @@ impl Session {
                     }
                 }
             }
+            EnvelopePayload::StarTransactions(page) => {
+                if let Some(p) = pending
+                    && let RequestPurpose::GetStarTransactions { append } = p.purpose
+                    && p.id.0 == self.hub.tx_request
+                {
+                    self.hub.apply_transactions(page, append);
+                }
+            }
+            EnvelopePayload::ReceivedGifts(page) => {
+                if let Some(p) = pending
+                    && let RequestPurpose::GetReceivedGifts { append } = p.purpose
+                    && p.id.0 == self.hub.gifts_request
+                {
+                    let files: Vec<ParsedFile> = page
+                        .gifts
+                        .iter()
+                        .flat_map(|gift| gift.gift.files.iter().cloned())
+                        .collect();
+                    self.remember_files(&files);
+                    self.hub.apply_gifts(page, append);
+                }
+            }
+            EnvelopePayload::PremiumFeatures(info) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumFeatures) {
+                    self.hub.premium_loading = false;
+                    self.hub.premium_error = None;
+                    self.hub.premium = Some(info);
+                }
+            }
+            EnvelopePayload::PremiumState(info) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumState) {
+                    self.hub.premium_state = Some(info);
+                }
+            }
+            EnvelopePayload::UpdateOwnedStarCount(amount) => {
+                self.hub.balance = Some(amount);
+            }
             EnvelopePayload::UpdateSavedAnimations { .. } => {
                 self.gifs.stale = true;
             }

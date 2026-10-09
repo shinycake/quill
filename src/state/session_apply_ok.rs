@@ -219,6 +219,25 @@ impl Session {
             self.star_subscriptions_mutating = false;
             self.star_subscriptions_error = None;
         }
+        // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
+        // the server (the connect driver does it on the same ingest) and,
+        // after a conversion, the Stars balance.
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::ToggleGiftSaved { .. }) => {
+                self.hub.gift_mutating = false;
+                self.hub.gifts_error = None;
+                self.hub.gifts_stale = true;
+            }
+            Some(RequestPurpose::SellGift) => {
+                self.hub.gift_mutating = false;
+                self.hub.gifts_error = None;
+                self.hub.gift_convert_confirm = None;
+                self.hub.gift_selected = None;
+                self.hub.gifts_stale = true;
+                self.hub.tx_loaded = false;
+            }
+            _ => {}
+        }
         // Slice S8: a sticker-set mutation succeeded — invalidate
         // the affected cache so the next fetch shows the
         // server-confirmed list instead of a stale one.

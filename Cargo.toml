@@ -82,6 +82,9 @@ tray-icon = { version = "0.21", optional = true, default-features = false }
 ksni = { version = "0.3", optional = true, default-features = false, features = ["async-io", "blocking"] }
 # MPRIS (org.mpris.MediaPlayer2) on the session bus; same zbus GPUI and ksni already link.
 zbus = { version = "5", optional = true }
+# System-wide push-to-talk (docs/decisions/codex-ptt-global.md): the X11 RECORD
+# extension. Same x11rb 0.13 GPUI already links; only the `record` feature is new.
+x11rb = { version = "0.13", default-features = false, features = ["record"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
@@ -134,7 +137,7 @@ embed-resource = "3"
 
 [target.'cfg(windows)'.dependencies]
 # Local time zone offsets; secret chats kept out of screen capture.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Registry", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Registry", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Media", "Media_Playback", "Foundation"] }
 

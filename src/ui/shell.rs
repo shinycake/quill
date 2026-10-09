@@ -100,6 +100,12 @@ pub enum DialogKind {
     // Slice `parity:bots-payment-recurring`: the `starSubscriptions`
     // management dialog.
     Subscriptions,
+    /// Stars balance and transaction history.
+    Stars,
+    /// Received gifts of a user or channel.
+    ReceivedGifts,
+    /// Read-only Premium features explainer.
+    PremiumFeatures,
     Marketplace,
     CallbackPassword,
     LoginUrlConfirm,
@@ -231,6 +237,9 @@ impl QuillShell {
             }
             DialogKind::PaymentReceipt => app.session().is_some_and(|s| s.payment_receipt_open),
             DialogKind::Subscriptions => app.session().is_some_and(|s| s.subscriptions_open),
+            DialogKind::Stars => app.session().is_some_and(|s| s.hub.stars_open),
+            DialogKind::ReceivedGifts => app.session().is_some_and(|s| s.hub.gifts_open),
+            DialogKind::PremiumFeatures => app.session().is_some_and(|s| s.hub.premium_open),
             DialogKind::Marketplace => app.marketplace_open,
             DialogKind::CallbackPassword => app.callback_password_dialog.is_some(),
             DialogKind::LoginUrlConfirm => app.login_url_confirm.is_some(),
@@ -303,6 +312,9 @@ impl QuillShell {
             DialogKind::PaymentForm => QuillApp::build_payment_dialog,
             DialogKind::PaymentReceipt => QuillApp::build_payment_receipt_dialog,
             DialogKind::Subscriptions => QuillApp::build_subscriptions_dialog,
+            DialogKind::Stars => QuillApp::build_stars_dialog,
+            DialogKind::ReceivedGifts => QuillApp::build_gifts_dialog,
+            DialogKind::PremiumFeatures => QuillApp::build_premium_dialog,
             DialogKind::Marketplace => QuillApp::build_marketplace_dialog,
             DialogKind::CallbackPassword => QuillApp::build_callback_password_dialog,
             DialogKind::LoginUrlConfirm => QuillApp::build_login_url_confirm_dialog,
@@ -410,6 +422,9 @@ impl QuillShell {
         DialogKind::PaymentForm,
         DialogKind::PaymentReceipt,
         DialogKind::Subscriptions,
+        DialogKind::Stars,
+        DialogKind::ReceivedGifts,
+        DialogKind::PremiumFeatures,
         DialogKind::Marketplace,
         DialogKind::CreateChat,
         DialogKind::Member,

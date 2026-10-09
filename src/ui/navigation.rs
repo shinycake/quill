@@ -24,6 +24,10 @@ pub(super) enum NavigationAction {
     Storage,
     Proxy,
     Subscriptions,
+    Stars,
+    Premium,
+    MyGifts,
+    ChatGifts,
     Gift,
     ChatMute,
     ChatArchive,
@@ -141,6 +145,30 @@ impl QuillApp {
             NavigationAction::Proxy => self.open_proxy_list(cx),
             NavigationAction::Subscriptions => {
                 self.open_subscriptions(cx);
+            }
+            NavigationAction::Stars => self.open_stars(cx),
+            NavigationAction::Premium => self.open_premium(cx),
+            NavigationAction::MyGifts => self.open_my_gifts(cx),
+            NavigationAction::ChatGifts => {
+                let owner = self.session().and_then(|s| {
+                    let chat = s.chats.get(&s.open_chat?.0)?;
+                    match chat.kind {
+                        ChatKind::Private { user_id } if user_id.0 > 0 => {
+                            Some(quill::telegram::envelope::MessageSender::User {
+                                user_id: user_id.0,
+                            })
+                        }
+                        ChatKind::Supergroup {
+                            is_channel: true, ..
+                        } => Some(quill::telegram::envelope::MessageSender::Chat {
+                            chat_id: chat.id.0,
+                        }),
+                        _ => None,
+                    }
+                });
+                if let Some(owner) = owner {
+                    self.open_gifts(owner, cx);
+                }
             }
             NavigationAction::Gift => {
                 if self.session().and_then(|s| s.open_chat).is_some() {
@@ -301,6 +329,17 @@ impl QuillApp {
             && chat.is_some_and(|c| c.is_forum_chat())
             && chat_id
                 .is_some_and(|id| self.session().is_some_and(|s| s.chat_can_manage_topics(id)));
+        let gifts_ok = live
+            && chat.is_some_and(|c| {
+                matches!(c.kind, ChatKind::Private { user_id } if user_id.0 > 0)
+                    || matches!(
+                        c.kind,
+                        ChatKind::Supergroup {
+                            is_channel: true,
+                            ..
+                        }
+                    )
+            });
         Button::new("chat-more-menu")
             .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
@@ -340,6 +379,7 @@ impl QuillApp {
                         NavigationAction::ExportChat,
                         exportable,
                     ),
+                    ("Received gifts", NavigationAction::ChatGifts, gifts_ok),
                     ("Send collectible gift", NavigationAction::Gift, true),
                 ] {
                     if !visible {
@@ -531,6 +571,9 @@ impl QuillApp {
                         ("Devices", NavigationAction::Sessions),
                         ("Data and storage", NavigationAction::Storage),
                         ("Proxy", NavigationAction::Proxy),
+                        ("Stars", NavigationAction::Stars),
+                        ("My gifts", NavigationAction::MyGifts),
+                        ("Telegram Premium", NavigationAction::Premium),
                         ("Star subscriptions", NavigationAction::Subscriptions),
                         ("Contacts", NavigationAction::ContactsSettings),
                         ("Calls", NavigationAction::CallSettings),
