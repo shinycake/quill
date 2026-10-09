@@ -874,6 +874,8 @@ impl QuillApp {
         {
             self.status_note = format!("folder load failed: {err:?}");
         }
+        // A shared folder: has its owner added chats?
+        self.poll_folder_new_chats();
         cx.notify();
     }
 
@@ -902,18 +904,20 @@ impl QuillApp {
                 return;
             };
             let ids = session.pinned_chat_ids(drag.archived);
-            let names: Vec<(i32, String)> = session
+            let names: Vec<(i32, String, i32)> = session
                 .chat_folders
                 .iter()
-                .map(|f| (f.id, f.name.clone()))
+                .map(|f| (f.id, f.name.clone(), f.color_id))
                 .collect();
             let tags = session.are_folder_tags_enabled;
+            let viewing = self.folder_tab;
             let lines = self.appearance.preview_lines;
             let heights = ids
                 .iter()
                 .filter_map(|id| {
                     let chat = session.chats.get(id)?;
-                    let height = chat_row_height(&chat_row_tags(chat, &names, tags), lines);
+                    let height =
+                        chat_row_height(&chat_row_tags(chat, &names, tags, viewing), lines);
                     Some((*id, f32::from(height)))
                 })
                 .collect();
@@ -1297,6 +1301,8 @@ impl QuillApp {
                     // Searching spans every chat: the folder tabs step aside.
                     if !self.search_is_open() {
                         list = list.child(self.folder_tabs_with_community_banner(cx));
+                        // A shared folder whose owner added chats.
+                        list = list.children(self.folder_new_chats_bar(cx));
                     }
                     // Stories strip: its tiles, and the collapsed stack
                     // that takes its place beside the search field once
@@ -1318,18 +1324,7 @@ impl QuillApp {
                         let filter = self.chat_filter;
                         // Parity slice: folder names + tags flag for chat-row
                         // chips.
-                        let (folder_names, show_folder_tags) = self
-                            .session()
-                            .map(|s| {
-                                (
-                                    s.chat_folders
-                                        .iter()
-                                        .map(|f| (f.id, f.name.clone()))
-                                        .collect::<Vec<_>>(),
-                                    s.are_folder_tags_enabled,
-                                )
-                            })
-                            .unwrap_or_default();
+                        let (folder_names, show_folder_tags) = self.folder_tag_context();
                         // Borrowed, never cloned: the list can hold thousands
                         // of chats and this runs every render.
                         let mut chats: Vec<&ChatSummary> = self
@@ -1521,7 +1516,7 @@ impl QuillApp {
                         // Rebuilt every render; the list below only reads it.
                         let row_height = |chat: &ChatSummary| {
                             chat_row_height(
-                                &chat_row_tags(chat, &folder_names, show_folder_tags),
+                                &chat_row_tags(chat, &folder_names, show_folder_tags, folder),
                                 self.appearance.preview_lines,
                             )
                         };

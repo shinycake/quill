@@ -1161,6 +1161,7 @@ impl QuillApp {
             self.folder_editor = Some(dialog);
             self.status_note = "screenshot demo — folder icon picker".into();
         }
+        self.demo_setup_folder_followups(demo, window, cx);
         // Parity slice: manage dialog over the same folder fixture.
         if matches!(demo, Some(ScreenshotDemo::ReadyFoldersManage)) {
             if let Some(session) = self.demo_session.as_mut() {

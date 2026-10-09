@@ -12,6 +12,10 @@ pub struct TdError {
     /// the raw message is still available). The message text itself is
     /// still dropped; only the numeric wait survives.
     pub flood_wait_secs: Option<u64>,
+    /// A folder request failed on a limit (`FILTER_INCLUDE_TOO_MUCH`,
+    /// `CHATLISTS_TOO_MUCH`, ...): which one the message named. Only this
+    /// classification survives, never the text.
+    pub limit_hint: Option<crate::folder_limits::LimitHint>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +75,7 @@ impl TdError {
             code,
             class,
             flood_wait_secs: None,
+            limit_hint: None,
         }
     }
 
@@ -393,6 +398,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             code,
             class,
             flood_wait_secs,
+            limit_hint: None,
         };
     }
     // Slice msg-richtext-ai-tools: the documented AI flood error
@@ -407,6 +413,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             code,
             class: ErrorClass::AiComposeFloodPremium,
             flood_wait_secs,
+            limit_hint: None,
         };
     }
     let permission = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
@@ -423,6 +430,10 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         err.class = class;
     }
     err.flood_wait_secs = flood_wait_secs;
+    err.limit_hint = value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .and_then(crate::folder_limits::limit_hint);
     err
 }
 
@@ -446,6 +457,21 @@ mod tests {
             err.flood_line("too many requests — wait and try again"),
             "try again in 30 seconds"
         );
+    }
+
+    #[test]
+    fn parse_error_keeps_only_the_limit_hint() {
+        use crate::folder_limits::LimitHint;
+        let value: Value = serde_json::from_str(
+            r#"{"@type":"error","code":400,"message":"FILTER_INCLUDE_TOO_MUCH"}"#,
+        )
+        .unwrap();
+        let err = parse_error(Some(&value));
+        assert_eq!(err.limit_hint, Some(LimitHint::Include));
+        let value: Value =
+            serde_json::from_str(r#"{"@type":"error","code":400,"message":"PHONE_CODE_EMPTY"}"#)
+                .unwrap();
+        assert_eq!(parse_error(Some(&value)).limit_hint, None);
     }
 
     #[test]

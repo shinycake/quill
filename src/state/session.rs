@@ -89,6 +89,17 @@ pub struct Session {
     pub folder_invite_error: Option<String>,
     /// `addChatFolderByInviteLink` confirmed.
     pub folder_invite_done: bool,
+    /// `getChatFolderNewChats` answers per shared folder: chats its owner
+    /// added since the user last looked (the "N new chats" bar).
+    pub folder_new_chats: HashMap<i32, Vec<i64>>,
+    /// When each folder's new chats were last asked for (TDLib wants one
+    /// call per `chat_folder_new_chats_update_period`).
+    pub folder_new_chats_asked: HashMap<i32, std::time::Instant>,
+    /// Folder limits from TDLib options and `getPremiumLimit`.
+    pub folder_limits: crate::folder_limits::FolderLimits,
+    /// One-shot: a folder request failed on a limit; the UI shows the box.
+    /// Drained by the UI.
+    pub folder_limit_hit: Option<crate::folder_limits::FolderLimitKind>,
     /// `getInstalledBackgrounds` answer for the current theme; `None` until
     /// fetched.
     pub installed_backgrounds: Option<Vec<Background>>,
@@ -1218,6 +1229,10 @@ impl Session {
             folder_invite_info: None,
             folder_invite_error: None,
             folder_invite_done: false,
+            folder_new_chats: HashMap::new(),
+            folder_new_chats_asked: HashMap::new(),
+            folder_limits: crate::folder_limits::FolderLimits::default(),
+            folder_limit_hit: None,
             installed_backgrounds: None,
             default_backgrounds: HashMap::new(),
             background_set_for_dark: false,

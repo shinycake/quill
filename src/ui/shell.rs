@@ -136,6 +136,10 @@ pub enum DialogKind {
     FolderManage,
     FolderShare,
     FolderInvite,
+    /// The shared folder's "N new chats" join dialog.
+    FolderNewChats,
+    /// A folder limit box / the folder tag Premium notice.
+    FolderLimit,
     CallConfirm,
     /// Swap prompt: incoming call while another call is active.
     CallSwap,
@@ -253,6 +257,8 @@ impl QuillShell {
             DialogKind::FolderManage => app.folder_manage_open,
             DialogKind::FolderShare => app.folder_share.is_some(),
             DialogKind::FolderInvite => app.folder_invite.is_some(),
+            DialogKind::FolderNewChats => app.folder_new_chats_dialog.is_some(),
+            DialogKind::FolderLimit => app.folder_limit_box.is_some(),
             DialogKind::CallConfirm => app.call_confirm.is_some(),
             DialogKind::CallSwap => app.session().is_some_and(|s| s.call_swap_pending.is_some()),
             DialogKind::NotificationDefaults => app.notification_defaults_open,
@@ -322,6 +328,8 @@ impl QuillShell {
             DialogKind::FolderManage => QuillApp::build_folder_manage_dialog,
             DialogKind::FolderShare => QuillApp::build_folder_share_dialog,
             DialogKind::FolderInvite => QuillApp::build_folder_invite_dialog,
+            DialogKind::FolderNewChats => QuillApp::build_folder_new_chats_dialog,
+            DialogKind::FolderLimit => QuillApp::build_folder_limit_dialog,
             DialogKind::CallConfirm => QuillApp::build_call_confirm_dialog,
             DialogKind::CallSwap => QuillApp::build_call_swap_dialog,
             DialogKind::NotificationDefaults => QuillApp::build_notification_defaults_dialog,
@@ -374,10 +382,12 @@ impl QuillShell {
         DialogKind::CallConfirm,
         // Swap prompt is call-urgent: same priority band as CallConfirm.
         DialogKind::CallSwap,
+        DialogKind::FolderLimit,
         DialogKind::FolderEditor,
         DialogKind::FolderDelete,
         DialogKind::FolderShare,
         DialogKind::FolderInvite,
+        DialogKind::FolderNewChats,
         DialogKind::FolderManage,
         DialogKind::CallbackPassword,
         DialogKind::LoginUrlConfirm,

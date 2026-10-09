@@ -573,6 +573,18 @@ impl Session {
             self.folder_chats_to_leave
                 .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
         }
+        // `getChatFolderNewChats` answer: the "N new chats" bar.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+        {
+            let ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
+            if ids.is_empty() {
+                self.folder_new_chats.remove(&folder_id);
+            } else {
+                self.folder_new_chats.insert(folder_id, ids);
+            }
+            return;
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsForFolderInviteLink)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {

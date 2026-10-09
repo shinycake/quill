@@ -1,0 +1,5 @@
+# folders follow-ups
+parity:chatlist-folder-share
+parity:chatlist-folder-tag-color
+parity:chatlist-folder-context-menu
+parity:chatlist-folder-limits

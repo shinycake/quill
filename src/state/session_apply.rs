@@ -56,6 +56,7 @@ impl Session {
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
                 self.storage_limits.apply_option(&name, &value);
+                self.folder_limits.apply_option(&name, &value);
                 self.apply_privacy_option(&name, &value);
                 if name == "disable_top_chats"
                     && let OptionValue::Boolean(off) = &value
@@ -1397,6 +1398,14 @@ impl Session {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
                     self.folder_invite_links.insert(folder_id, links);
                 }
+            }
+            EnvelopePayload::PremiumLimit {
+                type_name,
+                default_value,
+                premium_value,
+            } => {
+                self.folder_limits
+                    .apply_premium_limit(&type_name, default_value, premium_value);
             }
             EnvelopePayload::RecommendedChatFolders(folders) => {
                 self.recommended_folders = Some(folders);

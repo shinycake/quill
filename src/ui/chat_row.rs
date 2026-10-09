@@ -12,6 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::chatlist_style::ChatListRowStyle;
+use quill::folder_limits::FolderTag;
 use quill::ids::ChatId;
 use quill::local_path::sandboxed_display_path;
 use quill::peer_badge::TitleBadge;
@@ -257,27 +258,27 @@ pub(super) fn compact_count(count: i32) -> String {
 
 /// kit Phase 3: folder-tag chip names for a chat row — shared by the row
 /// renderer and the virtual-list height computation so they agree.
+/// The folder tag chips of a row: coloured folders the chat is in, except
+/// the one being viewed (tdesktop `Entry::hasChatsFilterTags`).
 pub(super) fn chat_row_tags(
     chat: &ChatSummary,
-    folders: &[(i32, String)],
+    folders: &[(i32, String, i32)],
     show_tags: bool,
-) -> Vec<String> {
-    if show_tags {
-        folders
-            .iter()
-            .filter(|(folder_id, _)| chat.folder_positions.contains_key(folder_id))
-            .map(|(_, name)| name.clone())
-            .collect()
-    } else {
-        Vec::new()
-    }
+    viewing: Option<i32>,
+) -> Vec<FolderTag> {
+    quill::folder_limits::row_tags(
+        |folder_id| chat.folder_positions.contains_key(&folder_id),
+        folders,
+        show_tags,
+        viewing,
+    )
 }
 
 /// kit Phase 3: chat rows render at a fixed height so the kit
 /// `VirtualList` can position them from declared sizes — 56px base
 /// (avatar 40 + the old py_2), 80px when the folder-tag strip is present.
 /// `session_chat_row` enforces the same height on the element.
-pub(super) fn chat_row_height(tags: &[String], preview_lines: u8) -> Pixels {
+pub(super) fn chat_row_height(tags: &[FolderTag], preview_lines: u8) -> Pixels {
     px(quill::chatlist_style::chat_row_height_px(
         !tags.is_empty(),
         preview_lines,
@@ -285,6 +286,21 @@ pub(super) fn chat_row_height(tags: &[String], preview_lines: u8) -> Pixels {
 }
 
 impl QuillApp {
+    /// `(id, name, colour)` of the folders plus whether tags are on.
+    pub(super) fn folder_tag_context(&self) -> (Vec<(i32, String, i32)>, bool) {
+        self.session()
+            .map(|s| {
+                (
+                    s.chat_folders
+                        .iter()
+                        .map(|f| (f.id, f.name.clone(), f.color_id))
+                        .collect::<Vec<_>>(),
+                    s.are_folder_tags_enabled,
+                )
+            })
+            .unwrap_or_default()
+    }
+
     /// kit Phase 3: resolve one virtualized chat-list item to its element.
     /// Only visible indices are built, once per frame — selection, badges,
     /// pin-drag, multi-select and context-menu behavior are unchanged.
@@ -309,18 +325,7 @@ impl QuillApp {
                 let open = self.session().and_then(|s| s.open_chat);
                 let selected = open == Some(chat.id);
                 // Parity slice: folder names + tags flag for chat-row chips.
-                let (folder_names, show_folder_tags) = self
-                    .session()
-                    .map(|s| {
-                        (
-                            s.chat_folders
-                                .iter()
-                                .map(|f| (f.id, f.name.clone()))
-                                .collect::<Vec<_>>(),
-                            s.are_folder_tags_enabled,
-                        )
-                    })
-                    .unwrap_or_default();
+                let (folder_names, show_folder_tags) = self.folder_tag_context();
                 // Parity slice: chat photos resolve per visible row and are
                 // sandboxed before display.
                 let media_roots = self.media_display_roots();
@@ -409,6 +414,7 @@ impl QuillApp {
                     chat,
                     selected,
                     &folder_names,
+                    self.folder_tab,
                     show_folder_tags,
                     photo.as_deref(),
                     draggable,
@@ -475,8 +481,10 @@ impl QuillApp {
 pub(super) fn session_chat_row(
     chat: &ChatSummary,
     selected: bool,
-    // Parity slice: `(folder id, name)` for folder-tag chips.
-    folders: &[(i32, String)],
+    // Parity slice: `(folder id, name, colour)` for folder-tag chips.
+    folders: &[(i32, String, i32)],
+    // The folder being viewed (its own chip is not repeated).
+    viewing_folder: Option<i32>,
     // Parity slice: show folder-tag chips (`are_folder_tags_enabled`).
     show_tags: bool,
     // Parity slice: sandboxed display path for the downloaded chat photo
@@ -589,7 +597,7 @@ pub(super) fn session_chat_row(
     };
     // kit Phase 3: tag chips via the shared helper — the row height
     // (declared to the `VirtualList`) is derived from the same list.
-    let tags = chat_row_tags(chat, folders, show_tags);
+    let tags = chat_row_tags(chat, folders, show_tags, viewing_folder);
     div()
         .id(("chat-row", id.0 as u64))
         .w_full()
@@ -942,14 +950,10 @@ pub(super) fn session_chat_row(
                         .gap_1()
                         .h(px(20.))
                         .overflow_hidden()
-                        .children(tags.into_iter().map(|name| {
-                            div()
-                                .px_1()
-                                .rounded_sm()
-                                .bg(cx.theme().accent.opacity(0.12))
-                                .text_xs()
-                                .child(name)
-                        })),
+                        .children(
+                            tags.into_iter()
+                                .map(|tag| super::folder_extras::tag_chip(tag.text, tag.color_id)),
+                        ),
                 ),
             )
         })

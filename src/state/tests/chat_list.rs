@@ -1144,7 +1144,7 @@ fn folder_invite_links_list_create_edit_and_errors() {
     );
     assert_eq!(session.folder_invite_links[&3].len(), 2);
     assert_eq!(session.folder_invite_links[&3][1].name, "Renamed");
-    // A refusal surfaces for the dialog.
+    // Too many links opens the limit box rather than an error line.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
         &mut session,
@@ -1152,6 +1152,22 @@ fn folder_invite_links_list_create_edit_and_errors() {
         &sink,
         &format!(
             r#"{{"@type":"error","@extra":"{}","code":400,"message":"INVITES_TOO_MUCH"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(
+        session.folder_limit_hit.take(),
+        Some(crate::folder_limits::FolderLimitKind::InviteLinks)
+    );
+    assert!(session.folder_share_error.is_none());
+    // Any other refusal surfaces for the dialog.
+    let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
             extra.0
         ),
     );
@@ -1208,7 +1224,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
         &seq,
         &sink,
         &format!(
-            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHATLISTS_TOO_MUCH"}}"#,
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"INVITE_SLUG_EXPIRED"}}"#,
             extra.0
         ),
     );

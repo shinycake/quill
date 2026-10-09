@@ -225,6 +225,57 @@ pub fn add_chat_folder_by_invite_link(
     .to_string()
 }
 
+/// `getChatFolderNewChats` (`schema/td_api.tl:13809`): chats the owner of a
+/// shared folder added since the user last looked. Response is `chats`.
+pub fn get_chat_folder_new_chats(extra: RequestId, folder_id: i32) -> String {
+    json!({
+        "@type": "getChatFolderNewChats",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+    })
+    .to_string()
+}
+
+/// `processChatFolderNewChats` (`schema/td_api.tl:13812`): join the chosen
+/// new chats of a shared folder. An empty list dismisses the offer.
+/// Response is `ok`.
+pub fn process_chat_folder_new_chats(
+    extra: RequestId,
+    folder_id: i32,
+    added_chat_ids: &[i64],
+) -> String {
+    json!({
+        "@type": "processChatFolderNewChats",
+        "@extra": extra.as_extra(),
+        "chat_folder_id": folder_id,
+        "added_chat_ids": added_chat_ids,
+    })
+    .to_string()
+}
+
+/// `readChatList` (`schema/td_api.tl:14078`) for one folder: marks every
+/// chat of the folder as read (tdesktop's folder "Mark as read"). Response
+/// is `ok`.
+pub fn read_chat_folder(extra: RequestId, folder_id: i32) -> String {
+    json!({
+        "@type": "readChatList",
+        "@extra": extra.as_extra(),
+        "chat_list": { "@type": "chatListFolder", "chat_folder_id": folder_id },
+    })
+    .to_string()
+}
+
+/// `getPremiumLimit` (`schema/td_api.tl:16594`) for a `premiumLimitType*`
+/// constructor name. Response is `premiumLimit`.
+pub fn get_premium_limit(extra: RequestId, limit_type: &str) -> String {
+    json!({
+        "@type": "getPremiumLimit",
+        "@extra": extra.as_extra(),
+        "limit_type": { "@type": limit_type },
+    })
+    .to_string()
+}
+
 /// `unpinChatMessage` (TDLib 1.8.67). Removes one pinned message.
 pub fn unpin_chat_message(extra: RequestId, chat_id: ChatId, message_id: MessageId) -> String {
     json!({
