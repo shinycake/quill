@@ -50,7 +50,7 @@ fn apply_viewer_shared(session: &mut Session, sink: &Arc<MemorySink>, seq: &Atom
     let messages: Vec<String> = (0..9)
         .map(|i| {
             let id = 320 - i * 10;
-            let file = demo_file_json(400 + i as i32, &thumb, true);
+            let file = demo_file_json(400 + i, &thumb, true);
             let caption = if i == 3 {
                 // The custom emoji sits at UTF-16 offset 6.
                 r#"{"@type":"formattedText","text":"Photo 😀 with a custom emoji","entities":[{"@type":"textEntity","offset":6,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"4242"}}]}"#.to_string()

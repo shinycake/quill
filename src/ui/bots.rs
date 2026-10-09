@@ -672,20 +672,22 @@ impl QuillApp {
         // Slice B2: bot menu button (`botMenuButton`, schema line 834).
         // The URL opens in the OS browser — the honest fallback used for
         // B1 web-app buttons (no in-app web view).
-        if let Some(menu) = &info.menu_button {
-            if !menu.url.is_empty() {
-                let text = if menu.text.is_empty() {
-                    "Menu".to_string()
-                } else {
-                    menu.text.clone()
-                };
-                let url = menu.url.clone();
-                panel = panel.child(Button::new("bot-menu-button").label(text).on_click(
-                    cx.listener(move |this, _, _, cx| {
+        if let Some(menu) = &info.menu_button
+            && !menu.url.is_empty()
+        {
+            let text = if menu.text.is_empty() {
+                "Menu".to_string()
+            } else {
+                menu.text.clone()
+            };
+            let url = menu.url.clone();
+            panel = panel.child(
+                Button::new("bot-menu-button")
+                    .label(text)
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_message_url(&url, cx);
-                    }),
-                ));
-            }
+                    })),
+            );
         }
         // Slice bots-games: games seen in this bot's chat (`messageGame`,
         // schema 1.8.67 line 5234). Each offers Send → `inputMessageGame`
@@ -939,8 +941,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.composer.update(cx, |input, cx| {
-            let next =
-                quill::composer::insert_bot_command_text(&input.value().to_string(), command);
+            let next = quill::composer::insert_bot_command_text(input.value().as_ref(), command);
             input.set_value(next, window, cx);
         });
         self.sync_command_menu(cx);

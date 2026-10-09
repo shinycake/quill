@@ -88,7 +88,7 @@ impl QuillApp {
             }
             (PlaybackKind::Voice, Some((session, m))) => TrackMeta {
                 title: session
-                    .sender_name_and_accent(m.sender.clone())
+                    .sender_name_and_accent(m.sender)
                     .0
                     .unwrap_or_else(|| "Voice message".into()),
                 subtitle: "Voice message".into(),

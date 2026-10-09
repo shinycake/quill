@@ -194,7 +194,6 @@ impl QuillApp {
     /// `members`, `chat_is_owner`, `chat_can_add_members`,
     /// `can_be_deleted_for_all_users`); the UI mirrors the gates so
     /// buttons only appear when the action can succeed.
-
     /// Slice G1: open the restrict/ban dialog. Restrict starts from the
     /// chat's current default permissions block (that's what a new
     /// restricted status loosens/tightens); ban needs no permissions.
@@ -208,7 +207,7 @@ impl QuillApp {
         let current = self
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
-            .and_then(|chat| chat.permissions.clone())
+            .and_then(|chat| chat.permissions)
             .unwrap_or_else(ChatPermissions::all);
         self.restrict_dialog = Some(RestrictDialog::new(chat_id, user_id, ban, current));
         cx.notify();
@@ -309,7 +308,7 @@ impl QuillApp {
         let current = self
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
-            .and_then(|chat| chat.permissions.clone())
+            .and_then(|chat| chat.permissions)
             .unwrap_or_else(ChatPermissions::all);
         self.permissions_dialog = Some(PermissionsDialog {
             chat_id,

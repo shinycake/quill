@@ -851,42 +851,42 @@ impl QuillApp {
                 );
             }
         }
-        if demo == Some(ScreenshotDemo::ReadyEmojiPacks) {
-            if let Some(session) = self.demo_session.as_mut() {
-                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                apply_ready_gifs(session, &self.demo_sink, &self.demo_seq);
-                session.gifs.open = false;
-                session.emoji.open = true;
-                session.emoji.installed_sets = [
-                    "Downloaded pack",
-                    "Downloading pack",
-                    "Updated pack",
-                    "Installing pack",
-                ]
-                .iter()
-                .enumerate()
-                .map(|(index, title)| quill::telegram::envelope::StickerSetInfo {
-                    id: index as i64 + 1,
-                    title: (*title).into(),
-                    name: (*title).into(),
-                    size: 1,
-                    is_installed: true,
-                    is_official: false,
-                })
-                .collect();
-                session
-                    .emoji
-                    .pack_files
-                    .insert(1, vec![quill::ids::FileId(63)]);
-                session
-                    .emoji
-                    .pack_files
-                    .insert(2, vec![quill::ids::FileId(62)]);
-                session.downloading.insert(62);
-                session.emoji.outdated_packs.insert(3);
-                session.emoji.mutating_set = Some((4, true));
-                session.media_prefs.recent_emoji_packs = vec![2, 1];
-            }
+        if demo == Some(ScreenshotDemo::ReadyEmojiPacks)
+            && let Some(session) = self.demo_session.as_mut()
+        {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_gifs(session, &self.demo_sink, &self.demo_seq);
+            session.gifs.open = false;
+            session.emoji.open = true;
+            session.emoji.installed_sets = [
+                "Downloaded pack",
+                "Downloading pack",
+                "Updated pack",
+                "Installing pack",
+            ]
+            .iter()
+            .enumerate()
+            .map(|(index, title)| quill::telegram::envelope::StickerSetInfo {
+                id: index as i64 + 1,
+                title: (*title).into(),
+                name: (*title).into(),
+                size: 1,
+                is_installed: true,
+                is_official: false,
+            })
+            .collect();
+            session
+                .emoji
+                .pack_files
+                .insert(1, vec![quill::ids::FileId(63)]);
+            session
+                .emoji
+                .pack_files
+                .insert(2, vec![quill::ids::FileId(62)]);
+            session.downloading.insert(62);
+            session.emoji.outdated_packs.insert(3);
+            session.emoji.mutating_set = Some((4, true));
+            session.media_prefs.recent_emoji_packs = vec![2, 1];
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyVideo)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -1096,42 +1096,42 @@ impl QuillApp {
     ) {
         // Batch 4: new-login alert fixture — an unconfirmed Android login
         // resolved from the sessions list (injected, no live Telegram).
-        if matches!(demo, Some(ScreenshotDemo::ReadyNewLogin)) {
-            if let Some(session) = self.demo_session.as_mut() {
-                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                session.notices.unconfirmed_count = 1;
-                session.notices.unconfirmed_entries = vec![quill::state::UnconfirmedEntry {
-                    id: 77,
-                    device: "Pixel 9".into(),
-                    location: "Berlin, Germany".into(),
-                }];
-            }
+        if matches!(demo, Some(ScreenshotDemo::ReadyNewLogin))
+            && let Some(session) = self.demo_session.as_mut()
+        {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            session.notices.unconfirmed_count = 1;
+            session.notices.unconfirmed_entries = vec![quill::state::UnconfirmedEntry {
+                id: 77,
+                device: "Pixel 9".into(),
+                location: "Berlin, Germany".into(),
+            }];
         }
         // Batch 4: "New Login Prevented" box (injected, no live Telegram).
         if matches!(demo, Some(ScreenshotDemo::ReadyLoginPrevented)) {
             self.login_prevented = Some(vec!["Berlin, Germany (Pixel 9)".into()]);
         }
         // Batch 4: server service notification popup (injected).
-        if matches!(demo, Some(ScreenshotDemo::ReadyServiceNotice)) {
-            if let Some(session) = self.demo_session.as_mut() {
-                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                session.notices.service.push_back(quill::state::ServiceNotice {
+        if matches!(demo, Some(ScreenshotDemo::ReadyServiceNotice))
+            && let Some(session) = self.demo_session.as_mut()
+        {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            session.notices.service.push_back(quill::state::ServiceNotice {
                     kind: String::new(),
                     text: "Your Telegram Premium subscription ends in 3 days. Renew it to keep your extra features.".into(),
                 });
-            }
         }
         // Batch 4: terms of service prompt with the age check (injected).
-        if matches!(demo, Some(ScreenshotDemo::ReadyTerms)) {
-            if let Some(session) = self.demo_session.as_mut() {
-                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                session.notices.terms = Some(quill::telegram::envelope::TermsOfService {
+        if matches!(demo, Some(ScreenshotDemo::ReadyTerms))
+            && let Some(session) = self.demo_session.as_mut()
+        {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            session.notices.terms = Some(quill::telegram::envelope::TermsOfService {
                     id: "tos-2026".into(),
                     text: "1. Telegram is a cloud service. Your messages, media and files are stored on our servers so you can reach them from any device.\n\n2. Do not use Telegram to spam, scam or harm others, and do not promote violence or sell illegal goods.\n\n3. We do not use your data for ad targeting. You can adjust how your data is used in Privacy & Security settings.\n\nBy continuing you accept these updated terms.".into(),
                     min_user_age: 16,
                     show_popup: true,
                 });
-            }
         }
         // Batch 6: local storage fixture — two ticked types with the clear
         // confirmation open, limits applied (injected, no live Telegram).
@@ -1897,23 +1897,23 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — caption position".into();
         }
-        if matches!(demo, Some(ScreenshotDemo::ReadyUnsupportedMessage)) {
-            if let Some(session) = self.demo_session.as_mut() {
-                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
-                let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
-                    self.demo_sink.clone();
-                for json in [
-                    r#"{"@type":"updateNewMessage","message":{"id":110,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageFutureFeature"}}}"#,
-                    r#"{"@type":"updateNewMessage","message":{"id":111,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageExpiredPhoto"}}}"#,
-                ] {
-                    if let Some(message) =
-                        quill::telegram::client::copy_and_parse(json, &self.demo_seq, &sink)
-                    {
-                        session.apply(message);
-                    }
+        if matches!(demo, Some(ScreenshotDemo::ReadyUnsupportedMessage))
+            && let Some(session) = self.demo_session.as_mut()
+        {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                self.demo_sink.clone();
+            for json in [
+                r#"{"@type":"updateNewMessage","message":{"id":110,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageFutureFeature"}}}"#,
+                r#"{"@type":"updateNewMessage","message":{"id":111,"chat_id":11,"is_outgoing":false,"content":{"@type":"messageExpiredPhoto"}}}"#,
+            ] {
+                if let Some(message) =
+                    quill::telegram::client::copy_and_parse(json, &self.demo_seq, &sink)
+                {
+                    session.apply(message);
                 }
-                session.open_chat(ChatId(11));
             }
+            session.open_chat(ChatId(11));
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyTextEntities)) {
             if let Some(session) = self.demo_session.as_mut() {
@@ -2323,7 +2323,7 @@ impl QuillApp {
                     Some(quill::telegram::envelope::CanPostStoryResult::Ok { story_count: 0 });
             }
             self.story_composer_path.update(cx, |input, cx| {
-                input.set_value(&demo_thumb_png_path(), window, cx);
+                input.set_value(demo_thumb_png_path(), window, cx);
             });
             self.story_composer_caption.update(cx, |input, cx| {
                 input.set_value("Posting my first story **from Quill**!", window, cx);

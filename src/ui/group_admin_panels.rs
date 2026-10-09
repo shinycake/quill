@@ -41,11 +41,10 @@ impl QuillApp {
                 .ghost()
                 .disabled(loading)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        if live.driver.load_group_sticker_choices(chat_id).is_err() {
-                            this.status_note =
-                                "Could not load group packs. Retry the action.".into();
-                        }
+                    if let Some(live) = this.live.as_mut()
+                        && live.driver.load_group_sticker_choices(chat_id).is_err()
+                    {
+                        this.status_note = "Could not load group packs. Retry the action.".into();
                     }
                     cx.notify();
                 })),

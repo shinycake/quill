@@ -760,14 +760,16 @@ pub(super) fn session_history_row(
             let count = chip.total_count;
             let chosen = chip.is_chosen;
             let reactors: Vec<(String, Option<PathBuf>)> =
-                (!in_channel && count <= 3 && chip.recent_senders.len() == count as usize)
-                    .then(|| {
+                if !in_channel && count <= 3 && chip.recent_senders.len() == count as usize {
+                    {
                         chip.recent_senders
                             .iter()
                             .map(|sender| reactor_avatar(sender, session, media_roots))
                             .collect()
-                    })
-                    .unwrap_or_default();
+                    }
+                } else {
+                    Default::default()
+                };
             let glyph: AnyElement = match &choice {
                 quill::state::ReactionChoice::Emoji(emoji) => div()
                     .child(super::reactions::emoji_presentation(emoji))
@@ -1315,6 +1317,7 @@ pub(super) fn session_history_row(
     });
     let extra_is_empty =
         extra_media.is_none() && caption_below_el.is_none() && tail_empty && keyboard.is_none();
+    #[allow(clippy::some_filter)]
     let extra = Some(
         div()
             .id(("bubble-extra", message.id.0 as u64))

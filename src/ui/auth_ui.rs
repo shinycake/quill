@@ -168,10 +168,10 @@ impl QuillApp {
         if link.is_empty() {
             return None;
         }
-        if let Some((cached_link, image)) = &self.qr_login_cache {
-            if cached_link == link {
-                return Some(image.clone());
-            }
+        if let Some((cached_link, image)) = &self.qr_login_cache
+            && cached_link == link
+        {
+            return Some(image.clone());
         }
         let code = qrcode::QrCode::new(link.as_bytes()).ok()?;
         // Grayscale is unchanged by the R<->B swap `video_render_image`

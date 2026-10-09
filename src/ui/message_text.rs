@@ -1998,6 +1998,7 @@ pub(super) fn format_unix_date_time(unix: i64) -> String {
     quill::local_time::full_stamp(&quill::local_time::civil_local(unix))
 }
 
+#[allow(dead_code)]
 pub(super) fn reply_quote_strip(
     row_id: MessageId,
     target_id: MessageId,

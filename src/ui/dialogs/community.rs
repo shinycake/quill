@@ -252,7 +252,7 @@ pub fn build_community_hub_dialog(
                     .values()
                     .map(|community| (community.id, community.name.clone()))
                     .collect();
-                rows.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+                rows.sort_by_key(|a| a.1.to_lowercase());
                 rows
             })
             .unwrap_or_default();

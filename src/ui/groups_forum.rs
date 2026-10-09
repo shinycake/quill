@@ -299,14 +299,13 @@ impl QuillApp {
             chat_id,
             message_id,
         });
-        if let Some(live) = self.live.as_mut() {
-            if live
+        if let Some(live) = self.live.as_mut()
+            && live
                 .driver
                 .fetch_message_thread_history(chat_id, message_id)
                 .is_err()
-            {
-                self.status_note = "could not load comments".into();
-            }
+        {
+            self.status_note = "could not load comments".into();
         }
         cx.notify();
     }
@@ -867,10 +866,10 @@ impl QuillApp {
                 Ok(_) => "topic selected".into(),
                 Err(_) => "could not open topic".into(),
             };
-        } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(chat_id) = session.open_chat {
-                session.select_topic(chat_id, forum_topic_id);
-            }
+        } else if let Some(session) = self.demo_session.as_mut()
+            && let Some(chat_id) = session.open_chat
+        {
+            session.select_topic(chat_id, forum_topic_id);
         }
         cx.notify();
     }

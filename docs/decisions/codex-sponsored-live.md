@@ -27,3 +27,7 @@ Telegram API Terms 3.3 require third-party clients to show sponsored messages in
 - Tests: `tests/replay_sponsored_live.rs` (fetch, store, tail selection, view once, retry after failed send, refetch window, report and hide), `src/connect/tests/sponsored.rs` (driver sends one `viewMessages` with `[9001]`, one `clickChatSponsoredMessage`, no refetch inside five minutes).
 - Visual: `QUILL_DEMO_CAPTURE=... quill --screenshot-demo ready-sponsored <dir>` shows three channel posts and the ad card (Ad chip, title, text, sponsor lines, Shop now button, ellipsis menu) under them.
 - Not verified: against a live account (no live actions taken); the `-1` hide option against real TDLib; the dropdown menu and click paths (static capture only).
+
+## Clippy under --features ui
+
+`cargo clippy --features ui --all-targets -- -D warnings` failed on main (`src/tray.rs` clone on a Copy type, `src/tray_mac.rs` indexed loop) and, once those compiled, on about 170 further UI-binary lints. Separate commit: machine-applicable `cargo clippy --fix` changes, the two named spots, hand fixes for the rest, and a UI-wide allow for `too_many_arguments`, `type_complexity` and `unnecessary_unwrap` (GPUI builders; `live` checks) in `src/ui/mod.rs`. Behavior is unchanged; the gate (core and UI tests) passes and the UI clippy command finishes clean.

@@ -474,7 +474,7 @@ impl QuillApp {
             && message.id.0 > 0
             && !message.is_outgoing
             && !saved
-            && actions.map_or(true, |a| a.can_report_chat);
+            && actions.is_none_or(|a| a.can_report_chat);
         if reportable {
             let report = menu_row(
                 order::REPORT,

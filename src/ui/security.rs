@@ -141,12 +141,12 @@ impl QuillApp {
                 .iter()
                 .filter(|s| !s.is_current && s.is_password_pending)
                 .collect();
-            incomplete.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+            incomplete.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
             let mut others: Vec<&ParsedSession> = sessions
                 .iter()
                 .filter(|s| !s.is_current && !s.is_password_pending)
                 .collect();
-            others.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+            others.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
 
             let mut body = div().flex().flex_col().gap_2();
             if let Some(notice) = this.device_link_notice {
@@ -332,7 +332,7 @@ impl QuillApp {
                 .as_ref()
                 .and_then(|s| s.connected_websites.clone())
                 .unwrap_or_default();
-            websites.sort_by(|a, b| b.last_active_date.cmp(&a.last_active_date));
+            websites.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
             let loading = session.is_some_and(|s| s.connected_websites_loading);
             let mutating = session.is_some_and(|s| s.websites_mutating);
             let stale = session.is_some_and(|s| s.websites_stale);

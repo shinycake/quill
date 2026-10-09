@@ -524,6 +524,7 @@ impl Asset for SizedAsset {
     type Source = SizedKey;
     type Output = Result<Arc<RenderImage>, ImageCacheError>;
 
+    #[allow(clippy::manual_async_fn)]
     fn load(
         source: Self::Source,
         _: &mut App,
