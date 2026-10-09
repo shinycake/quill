@@ -201,19 +201,21 @@ jobs:
         with:
           name: quill-lgpl-sources
           path: in/sources
-      - name: collect assets
+      # The release files go in release-out/, never the repo's own assets/
+      # folder (icons, emoji, the .desktop file), which the checkout contains.
+      - name: collect release files
         run: |
-          mkdir -p assets
+          mkdir -p release-out
           # Check each package against the checksum its build job wrote.
           for f in in/macos/quill-macos-aarch64.zip in/linux/linux/quill-linux-x86_64-bundle.tar.gz in/windows/quill-windows-x86_64.zip; do
             # The Windows .sha256 file has CRLF line endings.
             (cd "$(dirname "$f")" && tr -d '\r' < "$(basename "$f").sha256" | sha256sum -c -)
-            cp "$f" assets/
+            cp "$f" release-out/
           done
-          cp in/linux/update/quill-linux-x86_64 assets/
-          chmod 755 assets/quill-linux-x86_64
-          cp in/sources/* assets/
-          ls -l assets
+          cp in/linux/update/quill-linux-x86_64 release-out/
+          chmod 755 release-out/quill-linux-x86_64
+          cp in/sources/* release-out/
+          ls -l release-out
       - name: previous release tag
         id: prev
         run: |
@@ -233,7 +235,7 @@ jobs:
         env:
           PREV: ${{ steps.prev.outputs.tag }}
         run: |
-          args=(--assets assets --version "$VERSION" --repo "$GITHUB_REPOSITORY" --changes changes.md
+          args=(--assets release-out --version "$VERSION" --repo "$GITHUB_REPOSITORY" --changes changes.md
                 --credentials "$CREDENTIALS" --notes-out release-notes.md)
           [ -f "release-notes/$TAG.md" ] && args+=(--curated "release-notes/$TAG.md")
           [ -n "$PREV" ] && args+=(--previous-tag "$PREV")
@@ -243,13 +245,37 @@ jobs:
             echo
             echo '| Asset | Size | SHA-256 |'
             echo '|---|---|---|'
-            for f in assets/*; do echo "| $(basename "$f") | $(stat -c %s "$f") | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"; done
+            for f in release-out/*; do echo "| $(basename "$f") | $(stat -c %s "$f") | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"; done
           } >> "$GITHUB_STEP_SUMMARY"
+      # Exactly the expected files, all regular files: anything missing or
+      # extra stops the release before anything is uploaded.
+      - name: check the release file list
+        run: |
+          expected=(LGPL-SOURCES.txt SHA256SUMS.txt latest.json quill-linux-x86_64
+                    quill-linux-x86_64-bundle.tar.gz quill-macos-aarch64.zip quill-windows-x86_64.zip)
+          for f in "${expected[@]}"; do
+            [ -f "release-out/$f" ] || { echo "::error::missing release file $f"; exit 1; }
+          done
+          sources=0
+          extra=()
+          for entry in release-out/*; do
+            name="$(basename "$entry")"
+            if [ -d "$entry" ] || [ ! -f "$entry" ]; then
+              extra+=("$name/")
+            elif [[ "$name" == quill-source-*.tar.xz ]]; then
+              sources=$((sources + 1))
+            elif ! printf '%s\n' "${expected[@]}" | grep -qxF "$name"; then
+              extra+=("$name")
+            fi
+          done
+          [ "$sources" -ge 1 ] || { echo "::error::no LGPL source archives"; exit 1; }
+          [ "${#extra[@]}" -eq 0 ] || { echo "::error::unexpected entries in release-out: ${extra[*]}"; exit 1; }
+          echo "release files OK: ${#expected[@]} + $sources source archives"
       - uses: actions/upload-artifact@v4
         with:
           name: quill-release-${{ needs.prepare.outputs.tag }}
           path: |
-            assets/
+            release-out/
             release-notes.md
           if-no-files-found: error
       # Releases only (release=true, or a pushed tag). Always a draft: the
@@ -264,5 +290,15 @@ jobs:
           verify=()
           [ "$GITHUB_REF_TYPE" = tag ] && verify=(--verify-tag)
           gh release create "$TAG" --draft "${verify[@]}" --target "$GITHUB_SHA" \
-            --title "Quill $VERSION" --notes-file release-notes.md assets/*
+            --title "Quill $VERSION" --notes-file release-notes.md release-out/*
           gh release view "$TAG" --json isDraft,url --jq '"draft=\(.isDraft) \(.url)"'
+      # A release step that fails part-way must not leave a half-uploaded draft.
+      - name: remove a partial draft
+        if: failure() && needs.prepare.outputs.publish == 'true'
+        run: |
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+                --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" | head -n 1)"
+          if [ -n "$id" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+            echo "removed the partial draft for $TAG"
+          fi
