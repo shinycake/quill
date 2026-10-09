@@ -933,6 +933,7 @@ impl QuillApp {
             .and_then(|s| s.active_group_call.as_ref())
             .map(|call| call.id)
             .filter(|id| self.group_call_window_closed_by_user != Some(*id));
+        self.prune_group_video_images(wanted);
         match (wanted, self.group_call_window) {
             (Some(_), None) => self.open_group_call_window(cx),
             (None, Some(handle)) => {
