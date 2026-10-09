@@ -197,7 +197,11 @@ pub(crate) fn build_gift_card(
             card.subtitle = match prize_type {
                 "giveawayPrizeStars" => format!(
                     "{} to {}",
-                    plural(prize.map_or(0, |p| int_of(p, "star_count")), "Star", "Stars"),
+                    plural(
+                        prize.map_or(0, |p| int_of(p, "star_count")),
+                        "Star",
+                        "Stars"
+                    ),
                     plural(winners, "winner", "winners")
                 ),
                 _ => format!(
@@ -221,6 +225,25 @@ pub(crate) fn build_gift_card(
             if unclaimed > 0 {
                 card.facts.push(("Unclaimed".into(), unclaimed.to_string()));
             }
+        }
+        "messageGiveawayPrizeStars" => {
+            card.kind = GiftCardKind::Stars;
+            card.title = "Giveaway prize".into();
+            card.subtitle = plural(int_of(value, "star_count"), "Star", "Stars");
+            if value
+                .get("is_unclaimed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                card.facts.push(("Status".into(), "Unclaimed".into()));
+            }
+            card.sticker = sticker_of(value.get("sticker"), files);
+        }
+        "messageRefundedUpgradedGift" => {
+            let gift = value.get("gift")?;
+            card.title = "Gift refunded".into();
+            card.subtitle = "Downgraded after a refund".into();
+            card.sticker = sticker_of(gift.get("sticker"), files);
         }
         _ => return None,
     }
@@ -327,6 +350,23 @@ mod tests {
             winners.unwrap().facts,
             vec![("Unclaimed".to_string(), "2".to_string())]
         );
+    }
+
+    #[test]
+    fn prize_and_refunded_cards() {
+        let (prize, _) = build(
+            "messageGiveawayPrizeStars",
+            json!({"star_count": 100, "is_unclaimed": true, "sticker": sticker_json()}),
+        );
+        let prize = prize.unwrap();
+        assert_eq!(prize.subtitle, "100 Stars");
+        assert_eq!(prize.facts[0].1, "Unclaimed");
+        assert!(prize.sticker.is_some());
+        let (refunded, _) = build(
+            "messageRefundedUpgradedGift",
+            json!({"gift": {"star_count": 5, "sticker": sticker_json()}}),
+        );
+        assert_eq!(refunded.unwrap().title, "Gift refunded");
     }
 
     #[test]

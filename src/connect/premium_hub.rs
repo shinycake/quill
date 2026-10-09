@@ -7,8 +7,8 @@ use crate::premium_hub::TxFilter;
 use crate::state::RequestPurpose;
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests_premium::{
-    get_premium_features, get_premium_state, get_received_gifts, get_star_transactions,
-    sell_gift, toggle_gift_is_saved,
+    get_premium_features, get_premium_state, get_received_gifts, get_star_transactions, sell_gift,
+    toggle_gift_is_saved,
 };
 
 /// Rows per `getStarTransactions` page.
@@ -150,7 +150,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Refetch the open gifts list after a mutation marked it stale (never
     /// optimistic: the toggle/convert shows once the server list returns).
-    pub fn refresh_received_gifts_if_stale(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+    pub fn refresh_received_gifts_if_stale(
+        &mut self,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.session.hub.gifts_stale || self.session.hub.gifts_owner.is_none() {
             return Ok(None);
         }
@@ -227,7 +229,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.hub.premium.is_some() || self.session.hub.premium_loading {
             return Ok(None);
         }
-        let extra = self.session.request(RequestPurpose::GetPremiumFeatures, None);
+        let extra = self
+            .session
+            .request(RequestPurpose::GetPremiumFeatures, None);
         self.session.hub.premium_loading = true;
         self.session.hub.premium_error = None;
         if let Err(err) = self.send_json_request(extra, &get_premium_features(extra)) {

@@ -115,16 +115,40 @@ mod tests {
 
     #[test]
     fn transactions_request_shape() {
-        let all = v(&get_star_transactions(RequestId(1), 7, TxFilter::All, "", 30));
+        let all = v(&get_star_transactions(
+            RequestId(1),
+            7,
+            TxFilter::All,
+            "",
+            30,
+        ));
         assert_eq!(all["@type"], "getStarTransactions");
         assert_eq!(all["owner_id"]["user_id"], 7);
         assert_eq!(all["limit"], 30);
         assert!(all.get("direction").is_none());
-        let incoming = v(&get_star_transactions(RequestId(1), 7, TxFilter::Incoming, "x", 30));
-        assert_eq!(incoming["direction"]["@type"], "transactionDirectionIncoming");
+        let incoming = v(&get_star_transactions(
+            RequestId(1),
+            7,
+            TxFilter::Incoming,
+            "x",
+            30,
+        ));
+        assert_eq!(
+            incoming["direction"]["@type"],
+            "transactionDirectionIncoming"
+        );
         assert_eq!(incoming["offset"], "x");
-        let outgoing = v(&get_star_transactions(RequestId(1), 7, TxFilter::Outgoing, "", 30));
-        assert_eq!(outgoing["direction"]["@type"], "transactionDirectionOutgoing");
+        let outgoing = v(&get_star_transactions(
+            RequestId(1),
+            7,
+            TxFilter::Outgoing,
+            "",
+            30,
+        ));
+        assert_eq!(
+            outgoing["direction"]["@type"],
+            "transactionDirectionOutgoing"
+        );
     }
 
     #[test]

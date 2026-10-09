@@ -321,8 +321,7 @@ impl Session {
             }
             Some(RequestPurpose::GetReceivedGifts { .. }) => {
                 self.hub.gifts_loading = false;
-                self.hub.gifts_error =
-                    Some(format!("Couldn't load gifts: {}", error_reason(&err)));
+                self.hub.gifts_error = Some(format!("Couldn't load gifts: {}", error_reason(&err)));
             }
             Some(RequestPurpose::ToggleGiftSaved { .. } | RequestPurpose::SellGift) => {
                 self.hub.gift_mutating = false;

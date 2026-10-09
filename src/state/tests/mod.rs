@@ -17,6 +17,7 @@ mod history_window_cap;
 mod messages;
 mod notifications;
 mod payments;
+mod premium_hub;
 mod profile_panels;
 mod redraw;
 mod requests;

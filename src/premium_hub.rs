@@ -314,11 +314,9 @@ pub fn describe_tx_type(ty: &Value) -> (String, String, Option<MessageSender>) {
             gift_name(ty),
             sender_of(ty.get("owner_id")),
         ),
-        "starTransactionTypeGiftPurchase" => (
-            "Gift".into(),
-            gift_name(ty),
-            sender_of(ty.get("owner_id")),
-        ),
+        "starTransactionTypeGiftPurchase" => {
+            ("Gift".into(), gift_name(ty), sender_of(ty.get("owner_id")))
+        }
         "starTransactionTypeGiftPurchaseOffer" => ("Gift offer".into(), gift_name(ty), None),
         "starTransactionTypeGiftTransfer" => (
             "Gift transfer".into(),
@@ -464,7 +462,12 @@ pub struct GiftInfo {
     pub files: Vec<crate::telegram::envelope::ParsedFile>,
 }
 
-fn sticker_content(value: Option<&Value>) -> (Option<StickerContent>, Vec<crate::telegram::envelope::ParsedFile>) {
+fn sticker_content(
+    value: Option<&Value>,
+) -> (
+    Option<StickerContent>,
+    Vec<crate::telegram::envelope::ParsedFile>,
+) {
     let (item, mut files) = parse_sticker_value(value);
     files.retain(|file| file.id.0 != 0);
     let sticker = item.map(|item| StickerContent {
@@ -486,7 +489,10 @@ fn sticker_content(value: Option<&Value>) -> (Option<StickerContent>, Vec<crate:
 /// Parse the sticker JSON of a gift (public so chat cards reuse it).
 pub fn parse_gift_sticker(
     value: Option<&Value>,
-) -> (Option<StickerContent>, Vec<crate::telegram::envelope::ParsedFile>) {
+) -> (
+    Option<StickerContent>,
+    Vec<crate::telegram::envelope::ParsedFile>,
+) {
     sticker_content(value)
 }
 
@@ -500,9 +506,10 @@ pub fn parse_gift_info(gift: &Value) -> GiftInfo {
         let number = int(gift.get("number")) as i32;
         let title = text_of(gift, "title");
         let (sticker, files) = sticker_content(gift.get("model").and_then(|m| m.get("sticker")));
-        let backdrop = gift.get("backdrop").and_then(|b| b.get("colors")).map(|c| {
-            (rgb(c, "center_color"), rgb(c, "edge_color"))
-        });
+        let backdrop = gift
+            .get("backdrop")
+            .and_then(|b| b.get("colors"))
+            .map(|c| (rgb(c, "center_color"), rgb(c, "edge_color")));
         return GiftInfo {
             title: if number > 0 {
                 format!("{title} #{}", group_digits(number as i64))
@@ -694,10 +701,7 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "Tags for Saved Messages",
             "Organize saved messages with tags.",
         ),
-        "premiumFeatureMessagePrivacy" => (
-            "Message privacy",
-            "Choose who can send you messages.",
-        ),
+        "premiumFeatureMessagePrivacy" => ("Message privacy", "Choose who can send you messages."),
         "premiumFeatureLastSeenTimes" => (
             "Last seen times",
             "See the last seen time of people who hid it.",
@@ -710,10 +714,7 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "Message effects",
             "Add animated effects to private messages.",
         ),
-        "premiumFeatureChecklists" => (
-            "Checklists",
-            "Create checklists in chats.",
-        ),
+        "premiumFeatureChecklists" => ("Checklists", "Create checklists in chats."),
         "premiumFeaturePaidMessages" => (
             "Paid messages",
             "Charge Stars for messages from people outside your contacts.",
@@ -726,10 +727,9 @@ pub fn feature_row(constructor: &str) -> Option<PremiumFeatureRow> {
             "AI text tools",
             "Rewrite, translate and fix your messages while typing.",
         ),
-        "premiumFeatureRichMessages" => (
-            "Rich messages",
-            "Send messages with extended formatting.",
-        ),
+        "premiumFeatureRichMessages" => {
+            ("Rich messages", "Send messages with extended formatting.")
+        }
         _ => return None,
     };
     Some(PremiumFeatureRow { title, about })
@@ -925,15 +925,44 @@ mod tests {
 
     #[test]
     fn star_amount_formats_whole_and_fraction() {
-        let a = StarAmount { stars: 1234567, nanos: 0 };
+        let a = StarAmount {
+            stars: 1234567,
+            nanos: 0,
+        };
         assert_eq!(a.label(), "1,234,567");
-        let b = StarAmount { stars: 12, nanos: 500_000_000 };
+        let b = StarAmount {
+            stars: 12,
+            nanos: 500_000_000,
+        };
         assert_eq!(b.label(), "12.5");
-        let out = StarAmount { stars: -50, nanos: 0 };
+        let out = StarAmount {
+            stars: -50,
+            nanos: 0,
+        };
         assert_eq!(out.signed_label(), "-50");
-        assert_eq!(StarAmount { stars: 100, nanos: 0 }.signed_label(), "+100");
-        assert!(StarAmount { stars: 0, nanos: -1 }.is_negative());
-        assert_eq!(StarAmount { stars: 0, nanos: -250_000_000 }.label(), "-0.25");
+        assert_eq!(
+            StarAmount {
+                stars: 100,
+                nanos: 0
+            }
+            .signed_label(),
+            "+100"
+        );
+        assert!(
+            StarAmount {
+                stars: 0,
+                nanos: -1
+            }
+            .is_negative()
+        );
+        assert_eq!(
+            StarAmount {
+                stars: 0,
+                nanos: -250_000_000
+            }
+            .label(),
+            "-0.25"
+        );
     }
 
     #[test]
@@ -964,7 +993,10 @@ mod tests {
         assert!(page.transactions[0].is_incoming());
         assert_eq!(page.transactions[1].title, "Gift");
         assert_eq!(page.transactions[1].detail, "100 Stars");
-        assert_eq!(page.transactions[1].peer, Some(MessageSender::User { user_id: 7 }));
+        assert_eq!(
+            page.transactions[1].peer,
+            Some(MessageSender::User { user_id: 7 })
+        );
         assert!(!page.transactions[1].is_incoming());
         assert_eq!(page.transactions[2].title, "Pro plan");
         assert!(page.transactions[2].is_refund);
@@ -1057,11 +1089,19 @@ mod tests {
             kind: String::new(),
         };
         hub.apply_transactions(
-            StarTxPage { balance: StarAmount { stars: 9, nanos: 0 }, transactions: vec![tx("a")], next_offset: "n".into() },
+            StarTxPage {
+                balance: StarAmount { stars: 9, nanos: 0 },
+                transactions: vec![tx("a")],
+                next_offset: "n".into(),
+            },
             false,
         );
         hub.apply_transactions(
-            StarTxPage { balance: StarAmount { stars: 9, nanos: 0 }, transactions: vec![tx("b")], next_offset: String::new() },
+            StarTxPage {
+                balance: StarAmount { stars: 9, nanos: 0 },
+                transactions: vec![tx("b")],
+                next_offset: String::new(),
+            },
             true,
         );
         assert_eq!(hub.transactions.len(), 2);
@@ -1074,8 +1114,10 @@ mod tests {
 
     #[test]
     fn only_own_gifts_are_mine() {
-        let mut hub = PremiumHub::default();
-        hub.gifts_owner = Some(MessageSender::User { user_id: 4 });
+        let mut hub = PremiumHub {
+            gifts_owner: Some(MessageSender::User { user_id: 4 }),
+            ..Default::default()
+        };
         assert!(hub.gifts_are_mine(Some(4)));
         assert!(!hub.gifts_are_mine(Some(5)));
         assert!(!hub.gifts_are_mine(None));
@@ -1086,7 +1128,13 @@ mod tests {
     #[test]
     fn filters_map_to_td_directions() {
         assert_eq!(TxFilter::All.direction_type(), None);
-        assert_eq!(TxFilter::Incoming.direction_type(), Some("transactionDirectionIncoming"));
-        assert_eq!(TxFilter::Outgoing.direction_type(), Some("transactionDirectionOutgoing"));
+        assert_eq!(
+            TxFilter::Incoming.direction_type(),
+            Some("transactionDirectionIncoming")
+        );
+        assert_eq!(
+            TxFilter::Outgoing.direction_type(),
+            Some("transactionDirectionOutgoing")
+        );
     }
 }

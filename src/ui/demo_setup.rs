@@ -2156,6 +2156,33 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — expandable block quotes".into();
         }
+        if matches!(
+            demo,
+            Some(
+                ScreenshotDemo::ReadyStars
+                    | ScreenshotDemo::ReadyGifts
+                    | ScreenshotDemo::ReadyPremium
+                    | ScreenshotDemo::ReadyGiftCards
+            )
+        ) && let Some(session) = self.demo_session.as_mut()
+        {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            let (sink, seq) = (&self.demo_sink, &self.demo_seq);
+            match demo {
+                Some(ScreenshotDemo::ReadyStars) => {
+                    super::premium_demo::apply_ready_stars(session, sink, seq)
+                }
+                Some(ScreenshotDemo::ReadyGifts) => {
+                    let select = std::env::var("QUILL_DEMO_GIFT_DETAILS").is_ok();
+                    super::premium_demo::apply_ready_gifts(session, select, sink, seq)
+                }
+                Some(ScreenshotDemo::ReadyPremium) => {
+                    super::premium_demo::apply_ready_premium(session)
+                }
+                _ => super::premium_demo::apply_ready_gift_cards(session, sink, seq),
+            }
+            self.status_note = "screenshot demo \u{2014} Stars, gifts and Premium (fixture)".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyServiceMessages)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
