@@ -853,7 +853,7 @@ impl QuillApp {
                             Button::new("story-page-back")
                                 .label("← Albums")
                                 .ghost()
-                                .text_color(rgb(0xffffff))
+                                .text_color(cx.theme().foreground)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.back_to_story_albums(cx);
                                 })),
@@ -861,7 +861,7 @@ impl QuillApp {
                         .child(
                             div()
                                 .font_semibold()
-                                .text_color(rgb(0xffffff))
+                                .text_color(cx.theme().foreground)
                                 .child(name.clone()),
                         ),
                 )
@@ -903,8 +903,13 @@ impl QuillApp {
                         .px_2()
                         .py_1()
                         .rounded_md()
-                        .bg(rgb(0x21262d))
-                        .child(div().text_sm().text_color(rgb(0xffffff)).child(label))
+                        .bg(cx.theme().secondary)
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().foreground)
+                                .child(label),
+                        )
                         .child(
                             div()
                                 .flex()
@@ -914,7 +919,7 @@ impl QuillApp {
                                     Button::new(("story-page-album-top", story_id as u64))
                                         .label("↑ Top")
                                         .ghost()
-                                        .text_color(rgb(0xffffff))
+                                        .text_color(cx.theme().foreground)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.move_story_to_album_top(album_id, story_id, cx);
                                         })),
@@ -923,7 +928,7 @@ impl QuillApp {
                                     Button::new(("story-page-album-remove", story_id as u64))
                                         .label("Remove")
                                         .ghost()
-                                        .text_color(rgb(0xffffff))
+                                        .text_color(cx.theme().foreground)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.remove_story_from_album(album_id, story_id, cx);
                                         })),
@@ -959,7 +964,7 @@ impl QuillApp {
             let mut list = div().flex().flex_col().gap_2().child(
                 div()
                     .font_semibold()
-                    .text_color(rgb(0xffffff))
+                    .text_color(cx.theme().foreground)
                     .child("Albums"),
             );
             for (index, (album_id, name)) in albums.iter().enumerate() {
@@ -974,11 +979,11 @@ impl QuillApp {
                         .px_2()
                         .py_1()
                         .rounded_md()
-                        .bg(rgb(0x21262d))
+                        .bg(cx.theme().secondary)
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(rgb(0xffffff))
+                                .text_color(cx.theme().foreground)
                                 .child(name.clone()),
                         )
                         .child(
@@ -990,7 +995,7 @@ impl QuillApp {
                                     Button::new(("story-page-open", album_id as u64))
                                         .label("Open")
                                         .ghost()
-                                        .text_color(rgb(0xffffff))
+                                        .text_color(cx.theme().foreground)
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.open_story_album(album_id, window, cx);
                                         })),
@@ -999,7 +1004,7 @@ impl QuillApp {
                                     Button::new(("story-page-up", album_id as u64))
                                         .label("↑")
                                         .ghost()
-                                        .text_color(rgb(0xffffff))
+                                        .text_color(cx.theme().foreground)
                                         .disabled(at_top)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.move_story_album(album_id, true, cx);
@@ -1009,7 +1014,7 @@ impl QuillApp {
                                     Button::new(("story-page-down", album_id as u64))
                                         .label("↓")
                                         .ghost()
-                                        .text_color(rgb(0xffffff))
+                                        .text_color(cx.theme().foreground)
                                         .disabled(at_bottom)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.move_story_album(album_id, false, cx);
@@ -1023,7 +1028,12 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(div().text_sm().text_color(rgb(0x9aa0a6)).child("New album"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("New album"),
+                    )
                     .child(
                         Textarea::new(&new_album_name)
                             .aria_label("New story album name")
@@ -1051,7 +1061,7 @@ impl QuillApp {
             let mut chat_page = div().flex().flex_col().gap_2().child(
                 div()
                     .font_semibold()
-                    .text_color(rgb(0xffffff))
+                    .text_color(cx.theme().foreground)
                     .child("Chat page stories"),
             );
             for story_id in &chat_page_ids {
@@ -1066,13 +1076,18 @@ impl QuillApp {
                         .px_2()
                         .py_1()
                         .rounded_md()
-                        .bg(rgb(0x21262d))
-                        .child(div().text_sm().text_color(rgb(0xffffff)).child(label))
+                        .bg(cx.theme().secondary)
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().foreground)
+                                .child(label),
+                        )
                         .child(
                             Button::new(("story-page-pin", story_id as u64))
                                 .label(if is_pinned { "Unpin" } else { "Pin" })
                                 .ghost()
-                                .text_color(rgb(0xffffff))
+                                .text_color(cx.theme().foreground)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.toggle_story_pin(story_id, cx);
                                 })),
@@ -1083,7 +1098,7 @@ impl QuillApp {
                 Button::new("story-page-load-chat-page")
                     .label("Load more")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(cx.theme().foreground)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.load_more_chat_page_stories(cx);
                     })),
@@ -1097,7 +1112,7 @@ impl QuillApp {
             let mut archive = div().flex().flex_col().gap_2().child(
                 div()
                     .font_semibold()
-                    .text_color(rgb(0xffffff))
+                    .text_color(cx.theme().foreground)
                     .child("Archive"),
             );
             for story_id in &archived_ids {
@@ -1107,15 +1122,20 @@ impl QuillApp {
                         .px_2()
                         .py_1()
                         .rounded_md()
-                        .bg(rgb(0x21262d))
-                        .child(div().text_sm().text_color(rgb(0xffffff)).child(label)),
+                        .bg(cx.theme().secondary)
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().foreground)
+                                .child(label),
+                        ),
                 );
             }
             archive = archive.child(
                 Button::new("story-page-load-archive")
                     .label("Load more")
                     .ghost()
-                    .text_color(rgb(0xffffff))
+                    .text_color(cx.theme().foreground)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.load_more_archived_stories(cx);
                     })),
@@ -1159,7 +1179,7 @@ impl QuillApp {
                     .max_h_full()
                     .overflow_y_scroll()
                     .rounded_lg()
-                    .bg(rgb(0x161b22))
+                    .bg(cx.theme().popover)
                     .child(
                         div()
                             .flex()
@@ -1168,7 +1188,7 @@ impl QuillApp {
                             .child(
                                 div()
                                     .font_semibold()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(cx.theme().foreground)
                                     .child(format!("{title} — Stories")),
                             )
                             .child(
@@ -1177,14 +1197,19 @@ impl QuillApp {
                                     .tooltip("Close")
                                     .accessibility_label("Close")
                                     .ghost()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(cx.theme().foreground)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.close_story_page(cx);
                                     })),
                             ),
                     )
                     .when_some(op_status, |this, status| {
-                        this.child(div().text_sm().text_color(rgb(0x9aa0a6)).child(status))
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(status),
+                        )
                     })
                     .child(body),
             )
