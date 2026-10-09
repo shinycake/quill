@@ -4,6 +4,7 @@ use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
 use crate::state::{RequestPurpose, SAVED_PAGE, SAVED_TOPICS_PAGE};
 use crate::telegram::envelope::ReactionType;
+use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
 use crate::telegram::requests::{
     create_forum_topic_with_icon, delete_saved_messages_topic_history, edit_forum_topic_with_icon,
     get_forum_topic, get_forum_topic_default_icons, get_forum_topic_link, get_saved_messages_tags,
@@ -12,7 +13,6 @@ use crate::telegram::requests::{
     set_saved_messages_tag_label, toggle_chat_view_as_topics, toggle_saved_messages_topic_pinned,
     unpin_all_forum_topic_messages,
 };
-use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
 
 type Sent = Result<Option<RequestId>, ConnectSendError>;
 
@@ -109,10 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chat_can_manage_topics(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(order) = self
-            .session
-            .moved_pinned_order(chat_id, forum_topic_id, up)
-        else {
+        let Some(order) = self.session.moved_pinned_order(chat_id, forum_topic_id, up) else {
             return Ok(None);
         };
         let sent = self.send_purpose(
@@ -145,11 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// "Unpin all messages" in one topic.
-    pub fn unpin_all_forum_topic_messages(
-        &mut self,
-        chat_id: ChatId,
-        forum_topic_id: i32,
-    ) -> Sent {
+    pub fn unpin_all_forum_topic_messages(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Sent {
         let purpose = RequestPurpose::UnpinAllForumTopicMessages { forum_topic_id };
         self.send_purpose(purpose, Some(chat_id), |extra| {
             unpin_all_forum_topic_messages(extra, chat_id, forum_topic_id)
@@ -178,7 +171,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if name.trim().is_empty() || !valid_topic_icon_color(color) || custom_emoji_id < 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.chat_can_manage_topics(chat_id) && self.session.bot_topics(chat_id).is_none()
+        if !self.session.chat_can_manage_topics(chat_id)
+            && self.session.bot_topics(chat_id).is_none()
         {
             return Ok(None);
         }

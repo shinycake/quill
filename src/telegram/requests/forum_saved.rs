@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 
 /// The six topic icon colors tdesktop offers (`ForumTopicIcons`,
 /// `data_forum_topic.cpp`): blue, yellow, violet, green, rose, red.
-pub const TOPIC_ICON_COLORS: [i32; 6] = [0x6FB9F0, 0xFFD67E, 0xCB86DB, 0x8EEE98, 0xFF93B2, 0xFB6F5F];
+pub const TOPIC_ICON_COLORS: [i32; 6] =
+    [0x6FB9F0, 0xFFD67E, 0xCB86DB, 0x8EEE98, 0xFF93B2, 0xFB6F5F];
 
 /// Whether `color` is one of [`TOPIC_ICON_COLORS`].
 pub fn valid_topic_icon_color(color: i32) -> bool {
@@ -188,7 +189,10 @@ pub fn get_saved_messages_topic_history(
 }
 
 /// `deleteSavedMessagesTopicHistory saved_messages_topic_id:int53 = Ok;`
-pub fn delete_saved_messages_topic_history(extra: RequestId, saved_messages_topic_id: i64) -> String {
+pub fn delete_saved_messages_topic_history(
+    extra: RequestId,
+    saved_messages_topic_id: i64,
+) -> String {
     json!({
         "@type": "deleteSavedMessagesTopicHistory",
         "@extra": extra.as_extra(),

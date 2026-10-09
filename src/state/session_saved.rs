@@ -11,7 +11,7 @@ pub const SAVED_TOPICS_PAGE: i32 = 50;
 
 impl Session {
     /// `chat.view_as_topics` / `updateChatViewAsTopics`.
-    pub(crate) fn set_chat_view_as_topics(&mut self, chat_id: i64, view_as_topics: bool) {
+    pub fn set_chat_view_as_topics(&mut self, chat_id: i64, view_as_topics: bool) {
         self.chat_view_as_topics.insert(chat_id, view_as_topics);
         self.view_generation.bump();
     }
@@ -83,11 +83,11 @@ impl Session {
         forum_topic_id: i32,
         mentions: bool,
     ) {
-        if let Some(topic) = self
-            .forum_topics
-            .get_mut(&chat_id.0)
-            .and_then(|topics| topics.iter_mut().find(|t| t.forum_topic_id == forum_topic_id))
-        {
+        if let Some(topic) = self.forum_topics.get_mut(&chat_id.0).and_then(|topics| {
+            topics
+                .iter_mut()
+                .find(|t| t.forum_topic_id == forum_topic_id)
+        }) {
             if mentions {
                 topic.unread_mention_count = 0;
             } else {

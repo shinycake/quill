@@ -389,8 +389,10 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.chat_can_manage_topics(chat_id));
         let owner = cx.entity().downgrade();
+        let extras = self.topic_extras(chat_id, topic);
         element
             .context_menu(move |menu, _, _| {
+                let extras_owner = owner.clone();
                 let act = |action: TopicMenuAction| {
                     let owner = owner.clone();
                     move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
@@ -448,6 +450,16 @@ impl QuillApp {
                         } else {
                             TopicMenuAction::Close
                         })),
+                    );
+                }
+                if extras.any() {
+                    menu = menu.separator();
+                    menu = super::forum_extras::add_topic_extras(
+                        menu,
+                        extras,
+                        extras_owner,
+                        chat_id,
+                        topic_id,
                     );
                 }
                 if can_delete {

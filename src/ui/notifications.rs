@@ -447,6 +447,8 @@ impl QuillApp {
             self.status_note = err;
             progressed = true;
         }
+        // Saved Messages: load the sublists and tags while it is open.
+        self.pump_saved_messages();
         // B10: open a profile photo gallery that was waiting for its list.
         if self.pump_profile_gallery(cx) {
             progressed = true;

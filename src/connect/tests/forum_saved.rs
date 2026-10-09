@@ -109,7 +109,12 @@ fn view_as_topics_toggle_sends_and_applies_the_update() {
     assert_eq!(sent[0]["chat_id"], 16);
     assert_eq!(sent[0]["view_as_topics"], false);
     // A second tap while one is in flight is deduped.
-    assert!(f.driver.toggle_view_as_topics(ChatId(16), false).unwrap().is_none());
+    assert!(
+        f.driver
+            .toggle_view_as_topics(ChatId(16), false)
+            .unwrap()
+            .is_none()
+    );
     // Nothing changes until TDLib confirms with the update.
     assert!(f.driver.session.chat_views_as_topics(ChatId(16)));
     f.ingest(r#"{"@type":"updateChatViewAsTopics","chat_id":16,"view_as_topics":false}"#);
@@ -138,10 +143,10 @@ fn topic_link_answer_reaches_the_clipboard_slot() {
 fn moving_a_pinned_topic_sends_the_new_order_and_reorders_locally() {
     let mut f = Fixture::new();
     f.forum(true);
-    let extra = f
-        .driver
-        .session
-        .request(crate::state::RequestPurpose::GetForumTopics, Some(ChatId(16)));
+    let extra = f.driver.session.request(
+        crate::state::RequestPurpose::GetForumTopics,
+        Some(ChatId(16)),
+    );
     let topic = |id: i32, order: i64| {
         format!(
             r#"{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":{id},"name":"T{id}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":null,"order":"{order}","is_pinned":true,"unread_count":0,"last_read_inbox_message_id":0,"notification_settings":{{"@type":"chatNotificationSettings"}}}}"#
@@ -153,7 +158,9 @@ fn moving_a_pinned_topic_sends_the_new_order_and_reorders_locally() {
         topic(1, 900),
         topic(2, 800)
     ));
-    f.driver.move_pinned_forum_topic(ChatId(16), 2, true).unwrap();
+    f.driver
+        .move_pinned_forum_topic(ChatId(16), 2, true)
+        .unwrap();
     let sent = f.sent("setPinnedForumTopics");
     assert_eq!(sent[0]["forum_topic_ids"], serde_json::json!([2, 1]));
     assert_eq!(
@@ -177,9 +184,15 @@ fn reading_marks_and_unpinning_in_a_topic_send_their_requests() {
     f.ingest(
         r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#,
     );
-    f.driver.read_all_forum_topic_mentions(ChatId(16), 3).unwrap();
-    f.driver.read_all_forum_topic_reactions(ChatId(16), 3).unwrap();
-    f.driver.unpin_all_forum_topic_messages(ChatId(16), 3).unwrap();
+    f.driver
+        .read_all_forum_topic_mentions(ChatId(16), 3)
+        .unwrap();
+    f.driver
+        .read_all_forum_topic_reactions(ChatId(16), 3)
+        .unwrap();
+    f.driver
+        .unpin_all_forum_topic_messages(ChatId(16), 3)
+        .unwrap();
     for ty in [
         "readAllForumTopicMentions",
         "readAllForumTopicReactions",
@@ -235,7 +248,10 @@ fn saved_sublists_load_open_page_pin_and_delete() {
     f.driver.load_saved_topics().unwrap();
     assert_eq!(f.sent("loadSavedMessagesTopics").len(), 1);
     assert!(f.driver.load_saved_topics().unwrap().is_none(), "deduped");
-    f.answer("loadSavedMessagesTopics", r#"{"@type":"ok","@extra":"EXTRA"}"#);
+    f.answer(
+        "loadSavedMessagesTopics",
+        r#"{"@type":"ok","@extra":"EXTRA"}"#,
+    );
     f.ingest(
         r#"{"@type":"updateSavedMessagesTopic","topic":{"@type":"savedMessagesTopic","id":"77","type":{"@type":"savedMessagesTopicTypeSavedFromChat","chat_id":77},"is_pinned":false,"order":"5"}}"#,
     );
@@ -267,7 +283,10 @@ fn saved_sublists_load_open_page_pin_and_delete() {
     );
 
     f.driver.toggle_saved_topic_pinned(77, true).unwrap();
-    assert_eq!(f.sent("toggleSavedMessagesTopicIsPinned")[0]["is_pinned"], true);
+    assert_eq!(
+        f.sent("toggleSavedMessagesTopicIsPinned")[0]["is_pinned"],
+        true
+    );
     f.driver.delete_saved_topic_history(77).unwrap();
     f.answer(
         "deleteSavedMessagesTopicHistory",
@@ -323,5 +342,8 @@ fn tag_label_needs_premium_and_filter_searches_saved_messages() {
     f.driver.clear_saved_tag_filter();
     f.driver.open_saved_sublist(77).unwrap();
     f.driver.filter_saved_by_tag(tag).unwrap();
-    assert_eq!(f.sent("searchSavedMessages")[1]["saved_messages_topic_id"], 77);
+    assert_eq!(
+        f.sent("searchSavedMessages")[1]["saved_messages_topic_id"],
+        77
+    );
 }

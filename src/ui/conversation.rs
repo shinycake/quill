@@ -133,7 +133,12 @@ impl QuillApp {
             self.session()
                 .and_then(|s| s.subsection_topic_header(chat_id))
         });
+        // Saved Messages: a sublist titles the header with its source chat,
+        // a tag filter with the tag.
+        let saved_header = self.saved_header();
         let title_text = if let Some((name, _, _)) = &thread_header {
+            name.clone()
+        } else if let Some((name, _)) = &saved_header {
             name.clone()
         } else if saved {
             "Saved Messages".to_string()
@@ -221,6 +226,8 @@ impl QuillApp {
             )
         } else if let Some((_, line, _)) = thread_header.clone() {
             (Some(line), false)
+        } else if let Some((_, line)) = saved_header.clone() {
+            (Some(line), false)
         } else if let Some((_, line)) = topic_header.filter(|(_, line)| !line.is_empty()) {
             (Some(line), false)
         } else if let Some(line) = secret_line {
@@ -306,6 +313,9 @@ impl QuillApp {
                     .min_w_0()
                     .when(thread_header.is_some(), |this| {
                         this.child(self.thread_back_button(cx))
+                    })
+                    .when(saved_header.is_some(), |this| {
+                        this.child(self.saved_back_button(cx))
                     })
                     .child(identity),
             )
@@ -501,6 +511,8 @@ impl QuillApp {
                 let in_topic = session.is_some_and(|s| s.open_topic.is_some());
                 let can_post = match (chat, topic) {
                     (Some(c), Some(t)) => c.can_post() && !t.is_closed && c.can_send_basic_messages,
+                    // Saved sublists and tag filters are read-only views.
+                    (Some(_), None) if self.saved_readonly() => false,
                     (Some(c), None) if !in_topic => c.can_post(),
                     // In a topic whose info hasn't loaded yet: hide the
                     // composer until it arrives (the note says "Loading
@@ -520,8 +532,9 @@ impl QuillApp {
                         .and_then(|s| s.chats.get(&id.0).map(|c| c.is_channel()))
                         .unwrap_or(false)
                 });
-                if is_channel {
-                    // The join/leave footer replaces the plain note for channels.
+                if is_channel || self.saved_readonly() {
+                    // The join/leave footer replaces the plain note for
+                    // channels; Saved sublists and tag filters need none.
                     None
                 } else if in_topic {
                     // Parity slice 4: closed topics and a missing send
@@ -941,6 +954,9 @@ impl QuillApp {
         let thread_messages: Option<Vec<HistoryMessage>> =
             thread_open.map(|thread| thread.ordered().into_iter().cloned().collect());
         let thread_pending = session.is_some_and(Session::thread_unavailable);
+        // Saved Messages: the sublist list, one sublist or a tag filter.
+        let saved_mode = self.saved_mode();
+        let saved_rows = self.saved_rows();
         // Rebuild the history rows only when something that feeds them
         // changed; otherwise skip snapshotting the messages altogether.
         let ui_hash = self.history_rows_ui_hash();
@@ -992,6 +1008,7 @@ impl QuillApp {
                 this.child(self.forum_topic_strip(&info, cx))
             })
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
+            .children(self.saved_tags_bar(cx))
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
             .when(self.mute_menu_open, |this| {
                 this.child(self.mute_menu_panel(cx))
@@ -1039,6 +1056,22 @@ impl QuillApp {
                         cx,
                     )
                     .into_any_element()
+                } else if saved_mode == Some(super::saved_sublists::SavedMode::Sublists) {
+                    self.saved_sublists_pane(cx)
+                } else if let Some(rows) = saved_rows {
+                    let list = self.history_message_list(
+                        "saved-history",
+                        Some(rows),
+                        chat.as_ref(),
+                        &sender_name,
+                        highlight_id,
+                        media_roots,
+                        cx,
+                    );
+                    // Saved sublist and tag views rebuild their rows every
+                    // frame, like topics and threads.
+                    self.history_rows_key = None;
+                    list
                 } else if thread_pending {
                     self.thread_status_pane(cx)
                 } else if let Some(rows) = thread_messages {
@@ -1062,7 +1095,11 @@ impl QuillApp {
                         .children(self.thread_root_bar(cx))
                         .child(list)
                         .into_any_element()
-                } else if is_forum && open_topic.is_none() && !tabs_used {
+                } else if is_forum
+                    && open_topic.is_none()
+                    && !tabs_used
+                    && open.is_some_and(|id| session.is_some_and(|s| s.chat_views_as_topics(id)))
+                {
                     // Phase 5.1: opening a forum supergroup shows its topics.
                     self.forum_topics_pane(open, cx).into_any_element()
                 } else if has_topics && open_topic.is_some() {
@@ -2078,6 +2115,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.session.open_topic.is_none()
             && live.driver.session.thread.is_none()
+            && live.driver.session.saved.sublist.is_none()
+            && live.driver.session.saved.tag_search.is_none()
             && live.driver.fetch_history_newer().ok().flatten().is_some()
         {
             cx.notify();
@@ -2114,7 +2153,11 @@ impl QuillApp {
     pub(super) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.
-            let sent = if live.driver.session.thread.is_some() {
+            let sent = if live.driver.session.saved.tag_search.is_some() {
+                live.driver.fetch_saved_tag_page()
+            } else if live.driver.session.saved.sublist.is_some() {
+                live.driver.fetch_saved_sublist_history()
+            } else if live.driver.session.thread.is_some() {
                 live.driver.fetch_thread_history()
             } else if live.driver.session.open_topic.is_some() {
                 live.driver.fetch_topic_history()

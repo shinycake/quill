@@ -91,8 +91,18 @@ fn saved_sublists_sort_by_order_and_name_themselves() {
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":-1001,"title":"Rust News","type":{"@type":"chatTypeSupergroup","supergroup_id":1001,"is_channel":true},"unread_count":0}}"#,
     );
-    apply_json(&mut session, &seq, &sink, &topic_json(-1001, -1001, false, 10, "post"));
-    apply_json(&mut session, &seq, &sink, &topic_json(77, 77, true, 50, "pinned"));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topic_json(-1001, -1001, false, 10, "post"),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topic_json(77, 77, true, 50, "pinned"),
+    );
     apply_json(
         &mut session,
         &seq,
@@ -106,7 +116,12 @@ fn saved_sublists_sort_by_order_and_name_themselves() {
     assert_eq!(ordered[1].kind, SavedTopicKind::FromChat(-1001));
     assert_eq!(session.saved_topic_title(ordered[1]), "Rust News");
     // An update replaces the row in place (unpinned, lower order).
-    apply_json(&mut session, &seq, &sink, &topic_json(77, 77, false, 5, "later"));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topic_json(77, 77, false, 5, "later"),
+    );
     assert_eq!(session.saved.ordered_topics()[0].id, -1001);
     assert_eq!(session.saved.topics.len(), 2);
 }
@@ -162,9 +177,20 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
         &mut session,
         &seq,
         &sink,
-        &format!(r#"{{"@type":"messages","@extra":"{}","total_count":0,"messages":[]}}"#, extra.0),
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":0,"messages":[]}}"#,
+            extra.0
+        ),
     );
-    assert!(session.saved.sublist.as_ref().unwrap().history.loaded_complete);
+    assert!(
+        session
+            .saved
+            .sublist
+            .as_ref()
+            .unwrap()
+            .history
+            .loaded_complete
+    );
     // A page answered for another sublist is dropped.
     session.open_saved_sublist(5);
     let extra = session.request(purpose, None);
@@ -178,7 +204,16 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
             message_json(40, "stale")
         ),
     );
-    assert!(session.saved.sublist.as_ref().unwrap().history.messages.is_empty());
+    assert!(
+        session
+            .saved
+            .sublist
+            .as_ref()
+            .unwrap()
+            .history
+            .messages
+            .is_empty()
+    );
     // Deleting a message reaches the open sublist.
     session.open_saved_sublist(77);
     let extra = session.request(
@@ -203,7 +238,16 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
             r#"{{"@type":"updateDeleteMessages","chat_id":{ME},"message_ids":[30],"is_permanent":true,"from_cache":false}}"#
         ),
     );
-    assert!(session.saved.sublist.as_ref().unwrap().history.messages.is_empty());
+    assert!(
+        session
+            .saved
+            .sublist
+            .as_ref()
+            .unwrap()
+            .history
+            .messages
+            .is_empty()
+    );
 }
 
 #[test]
@@ -292,7 +336,12 @@ fn load_topics_404_marks_the_list_complete() {
 #[test]
 fn delete_sublist_history_removes_the_row_and_leaves_the_sublist() {
     let (mut session, sink, seq) = saved_session();
-    apply_json(&mut session, &seq, &sink, &topic_json(77, 77, false, 5, "x"));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topic_json(77, 77, false, 5, "x"),
+    );
     session.open_saved_sublist(77);
     let extra = session.request(
         RequestPurpose::DeleteSavedMessagesTopicHistory { topic_id: 77 },

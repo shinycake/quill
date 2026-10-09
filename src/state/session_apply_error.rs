@@ -1183,8 +1183,10 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetForumTopicLink) => {
-                self.message_link_error =
-                    Some(call_request_error_line(&err, "Could not get the topic link"));
+                self.message_link_error = Some(call_request_error_line(
+                    &err,
+                    "Could not get the topic link",
+                ));
             }
             Some(
                 RequestPurpose::ToggleChatViewAsTopics
@@ -1199,8 +1201,10 @@ impl Session {
                 | RequestPurpose::GetSavedMessagesTopicHistory { .. }
                 | RequestPurpose::SearchSavedMessages { .. },
             ) => {
-                self.chat_action_error =
-                    Some(call_request_error_line(&err, "Could not complete that action"));
+                self.chat_action_error = Some(call_request_error_line(
+                    &err,
+                    "Could not complete that action",
+                ));
             }
             // M1 fix-up: a failed "Share link" surfaces in the
             // status note instead of silently doing nothing.
