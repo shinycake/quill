@@ -1,2 +1,0 @@
-# per-chat wallpaper and emoji chat themes, complete for private chats
-parity:chrome-chat-wallpaper

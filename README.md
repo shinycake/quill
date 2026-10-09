@@ -322,7 +322,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
 - [x] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
 - [x] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
-- [ ] Per-chat wallpaper and chat themes <!-- parity:chrome-chat-wallpaper -->
+- [x] Per-chat wallpaper and chat themes <!-- parity:chrome-chat-wallpaper -->
 - [ ] "What can this bot do?" intro in an empty bot chat <!-- parity:chrome-bot-intro -->
 - [ ] Composer state buttons: Unblock, Start, Join, Apply to join, Mute and Unmute (partial: Join and Mute exist; Unblock and Apply to join unverified) <!-- parity:chrome-composer-states -->
 - [ ] "Discuss" and "Direct messages" buttons in the channel bottom bar <!-- parity:chrome-discuss-buttons -->
