@@ -9,6 +9,7 @@ use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -26,6 +27,13 @@ pub struct BlockBarDialog {
     pub(crate) user_id: i64,
     pub(crate) report: bool,
     pub(crate) delete_chat: bool,
+}
+
+/// The join-requests box: the chat plus its request-search input (B8).
+pub struct JoinRequestsDialog {
+    pub(crate) chat_id: ChatId,
+    pub(crate) search: Entity<TextareaState>,
+    pub(crate) _search_subscription: Subscription,
 }
 
 /// Cap of requester avatars on the requests bar (tdesktop shows three).
@@ -531,8 +539,8 @@ impl QuillApp {
                 .aria_label(text.clone())
                 .tab_index(0)
                 .hover(|s| s.bg(cx.theme().accent.opacity(0.08)))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_join_requests_dialog(chat_id, cx);
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_join_requests_dialog(chat_id, window, cx);
                 }))
                 .child(div().flex().items_center().children(avatars))
                 .child(
@@ -552,10 +560,125 @@ impl QuillApp {
         )
     }
 
-    fn open_join_requests_dialog(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.join_requests_dialog = Some(chat_id);
+    pub(super) fn open_join_requests_dialog(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let search = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
+        // tdesktop's requests box searches server-side as you type.
+        let subscription = cx.subscribe_in(
+            &search,
+            window,
+            move |this, state, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let query = state.read(cx).value().trim().to_string();
+                    this.search_join_requests(chat_id, &query, cx);
+                }
+            },
+        );
+        self.join_requests_dialog = Some(JoinRequestsDialog {
+            chat_id,
+            search,
+            _search_subscription: subscription,
+        });
         if let Some(live) = self.live.as_mut() {
+            live.driver.session.join_request_queries.remove(&chat_id.0);
             let _ = live.driver.refresh_chat_join_requests(chat_id);
+        }
+        cx.notify();
+    }
+
+    /// B8: re-run `getChatJoinRequests` with a search query (skipped when
+    /// the query is unchanged).
+    fn search_join_requests(&mut self, chat_id: ChatId, query: &str, cx: &mut Context<Self>) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let current = live
+            .driver
+            .session
+            .join_request_queries
+            .get(&chat_id.0)
+            .map(String::as_str)
+            .unwrap_or("");
+        if current == query {
+            return;
+        }
+        let _ = live.driver.search_chat_join_requests(chat_id, query);
+        cx.notify();
+    }
+
+    /// B8: confirm, then approve (`true`) or dismiss (`false`) every
+    /// pending request via `processChatJoinRequests`.
+    fn confirm_process_all_join_requests(
+        &mut self,
+        chat_id: ChatId,
+        approve: bool,
+        count: i32,
+        is_channel: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let place = if is_channel { "channel" } else { "group" };
+        let (title, text, ok) = if approve {
+            (
+                "Add all",
+                format!("Do you want to add {count} requested people to the {place}?"),
+                "Add all",
+            )
+        } else {
+            (
+                "Dismiss all",
+                format!("Do you want to dismiss {count} join requests?"),
+                "Dismiss all",
+            )
+        };
+        let app = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let app = app.clone();
+            alert
+                .title(title)
+                .description(text.clone())
+                .ok_text(ok)
+                .cancel_text("Cancel")
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    let _ = app.update(cx, |this, cx| {
+                        this.process_all_join_requests(chat_id, approve, cx);
+                    });
+                    true
+                })
+        });
+    }
+
+    /// B8: `processChatJoinRequests` for all pending requests.
+    pub(super) fn process_all_join_requests(
+        &mut self,
+        chat_id: ChatId,
+        approve: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.status_note = match self.live.as_mut() {
+            Some(live) => match live.driver.process_all_chat_join_requests(chat_id, approve) {
+                Ok(_) => "processing join requests".into(),
+                Err(_) => "could not process join requests".into(),
+            },
+            None => "join requests need a live connection (demo)".into(),
+        };
+        cx.notify();
+    }
+
+    /// B8: next page of the join-request list.
+    fn load_more_join_requests(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_more_chat_join_requests(chat_id);
         }
         cx.notify();
     }
@@ -578,7 +701,11 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
-            let Some(chat_id) = this.join_requests_dialog else {
+            let Some((chat_id, search)) = this
+                .join_requests_dialog
+                .as_ref()
+                .map(|d| (d.chat_id, d.search.clone()))
+            else {
                 return dialog
                     .title(crate::ui::shell::dialog_title("Join requests"))
                     .on_close(on_close);
@@ -598,6 +725,47 @@ impl QuillApp {
                 .cloned();
             let mut title = "Join requests".to_string();
             let mut body = div().flex().flex_col().gap_2();
+            let searching = this
+                .session()
+                .and_then(|s| s.join_request_queries.get(&chat_id.0))
+                .is_some_and(|q| !q.is_empty());
+            body = body.child(
+                Textarea::new(&search)
+                    .aria_label("Search join requests")
+                    .h(px(40.)),
+            );
+            if let Some(JoinRequestFetch::Loaded(list)) = &fetch
+                && !searching
+                && list.total_count > 1
+            {
+                let count = list.total_count;
+                body = body.child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("join-requests-add-all")
+                                .label("Add all")
+                                .small()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.confirm_process_all_join_requests(
+                                        chat_id, true, count, is_channel, window, cx,
+                                    );
+                                })),
+                        )
+                        .child(
+                            Button::new("join-requests-dismiss-all")
+                                .label("Dismiss all")
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.confirm_process_all_join_requests(
+                                        chat_id, false, count, is_channel, window, cx,
+                                    );
+                                })),
+                        ),
+                );
+            }
             match fetch {
                 None | Some(JoinRequestFetch::Loading) => {
                     body = body.child(
@@ -621,7 +789,11 @@ impl QuillApp {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("There are no pending join requests."),
+                                .child(if searching {
+                                    "No matching join requests."
+                                } else {
+                                    "There are no pending join requests."
+                                }),
                         );
                     } else {
                         title = if list.total_count == 1 {
@@ -630,6 +802,7 @@ impl QuillApp {
                             format!("{} join requests", list.total_count.max(1))
                         };
                     }
+                    let has_more = (list.requests.len() as i32) < list.total_count;
                     for request in list.requests {
                         let uid = request.user_id;
                         let name = this.contact_display_name(uid);
@@ -676,6 +849,17 @@ impl QuillApp {
                                             this.process_join_request(chat_id, uid, false, cx);
                                         })),
                                 ),
+                        );
+                    }
+                    if has_more {
+                        body = body.child(
+                            Button::new("join-requests-more")
+                                .label("Show more")
+                                .ghost()
+                                .small()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.load_more_join_requests(chat_id, cx);
+                                })),
                         );
                     }
                 }

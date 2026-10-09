@@ -256,7 +256,12 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .min_w_0()
-                    .child(div().font_semibold().truncate().child(title_text))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(title_text)),
+                    )
                     .when_some(status_line, |this, line| {
                         this.child(
                             div()
@@ -276,7 +281,12 @@ impl QuillApp {
                                         "header-activity".into(),
                                     ))
                                 })
-                                .child(div().min_w_0().truncate().child(line)),
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .child(super::bidi_line::one_line_plain(line)),
+                                ),
                         )
                     }),
             )
@@ -799,6 +809,9 @@ impl QuillApp {
                         // control) and caption bar ("Add a caption…",
                         // above/below toggle, n / max counter).
                         .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
+                        .when_some(self.edit_replacement_chip(cx), |this, chip| {
+                            this.child(chip)
+                        })
                         .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
                         // kit Phase 5: the composer input row — attach and
                         // emoji/sticker pickers, the borderless growing

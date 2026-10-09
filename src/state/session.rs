@@ -785,6 +785,8 @@ pub struct Session {
     /// (schema 1.8.67, line 10964) — full `profileAccentColor` entries
     /// for swatch rendering.
     pub profile_accent_colors: Vec<ProfileAccentColor>,
+    /// Name-color palette from `updateAccentColors` (sender names).
+    pub name_accent_colors: Vec<crate::telegram::NameAccentColor>,
     /// Slice A12: ids `setProfileAccentColor` accepts, in server order —
     /// the edit-profile accent picker rows.
     pub available_accent_color_ids: Vec<i32>,
@@ -826,6 +828,21 @@ pub struct Session {
     pub invite_links: HashMap<i64, InviteLinkFetch>,
     /// Phase D3a: `getChatJoinRequests` fetch state, keyed by chat id.
     pub join_requests: HashMap<i64, JoinRequestFetch>,
+    /// B8: the search query the cached `join_requests` list was fetched
+    /// with (absent = no query), keyed by chat id.
+    pub join_request_queries: HashMap<i64, String>,
+    /// B8: newest join-request page request per chat; replies with any
+    /// other id are stale (an older search) and dropped.
+    pub join_request_latest: HashMap<i64, RequestId>,
+    /// B8: `getChatInviteLinks` with `is_revoked = true`, keyed by chat id.
+    pub revoked_invite_links: HashMap<i64, InviteLinkFetch>,
+    /// B8: `getChatInviteLinkCounts` (owner only), keyed by chat id.
+    pub invite_link_counts: HashMap<i64, InviteLinkCountsFetch>,
+    /// B8: members of the invite link whose details are open, by chat id.
+    pub invite_link_members: HashMap<i64, InviteLinkMembersState>,
+    /// B8: in-flight `deleteRevokedChatInviteLink` requests, request id to
+    /// `(chat id, link)`; a purpose is `Copy` so the link rides here.
+    pub revoked_link_deletions: HashMap<RequestId, (i64, String)>,
     /// Phase D3a: latest `updateChatPendingJoinRequests` total per chat
     /// (schema 1.8.67, line 10555). The full request list still needs
     /// `getChatJoinRequests`; this is only the badge count.
@@ -1386,6 +1403,7 @@ impl Session {
             archive_settings_open: false,
             users: HashMap::new(),
             profile_accent_colors: Vec::new(),
+            name_accent_colors: Vec::new(),
             available_accent_color_ids: Vec::new(),
             contacts: None,
             contacts_error: false,
@@ -1398,6 +1416,12 @@ impl Session {
             chat_statistics: HashMap::new(),
             invite_links: HashMap::new(),
             join_requests: HashMap::new(),
+            join_request_queries: HashMap::new(),
+            join_request_latest: HashMap::new(),
+            revoked_invite_links: HashMap::new(),
+            invite_link_counts: HashMap::new(),
+            invite_link_members: HashMap::new(),
+            revoked_link_deletions: HashMap::new(),
             pending_join_request_counts: HashMap::new(),
             pending_join_request_users: HashMap::new(),
             chat_action_bars: HashMap::new(),

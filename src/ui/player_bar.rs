@@ -387,7 +387,7 @@ impl QuillApp {
                     .font_medium()
                     .truncate()
                     .text_color(text_primary())
-                    .child(meta.title),
+                    .child(super::bidi_line::one_line_plain(meta.title)),
             )
             .when(!meta.subtitle.is_empty(), |this| {
                 this.child(
@@ -395,7 +395,7 @@ impl QuillApp {
                         .text_xs()
                         .truncate()
                         .text_color(text_muted())
-                        .child(meta.subtitle),
+                        .child(super::bidi_line::one_line_plain(meta.subtitle)),
                 )
             });
 

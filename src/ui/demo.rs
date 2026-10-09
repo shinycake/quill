@@ -1380,7 +1380,10 @@ impl QuillApp {
                     .and_then(|history| history.messages.get_mut(&edit.message_id.0))
                 {
                     match &mut message.content {
-                        MessageContent::Photo(photo) => photo.caption = text.to_string(),
+                        MessageContent::Photo(photo) => {
+                            photo.caption = text.to_string();
+                            photo.show_caption_above_media = edit.caption_above;
+                        }
                         MessageContent::Document(doc) => doc.caption = text.to_string(),
                         MessageContent::Text(body) => {
                             body.text = text.to_string();
@@ -1389,9 +1392,13 @@ impl QuillApp {
                         }
                         MessageContent::VoiceNote(note) => note.caption = text.to_string(),
                         MessageContent::Animation(animation) => {
-                            animation.caption = text.to_string()
+                            animation.caption = text.to_string();
+                            animation.show_caption_above_media = edit.caption_above;
                         }
-                        MessageContent::Video(video) => video.caption = text.to_string(),
+                        MessageContent::Video(video) => {
+                            video.caption = text.to_string();
+                            video.show_caption_above_media = edit.caption_above;
+                        }
                         MessageContent::Audio(audio) => audio.caption = text.to_string(),
                         MessageContent::VideoNote(_)
                         | MessageContent::Sticker(_)

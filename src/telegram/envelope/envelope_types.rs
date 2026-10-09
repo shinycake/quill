@@ -4,6 +4,7 @@ use crate::ids::{ChatId, MessageId, RequestId, UserId};
 use crate::privacy::PrivacyRule;
 use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
+use crate::telegram::name_accent::NameAccentColor;
 use crate::telegram::profile_accent::ProfileAccentColor;
 use crate::telegram::requests::ArchiveChatListSettings;
 use crate::text::TextEntity;
@@ -370,6 +371,12 @@ pub enum EnvelopePayload {
     /// edit-profile accent picker.
     UpdateProfileAccentColors {
         colors: Vec<ProfileAccentColor>,
+        available_ids: Vec<i32>,
+    },
+    /// `updateAccentColors`: the name-color palette (ids 7+ and their
+    /// built-in fallbacks). Stored in `Session`.
+    UpdateAccentColors {
+        colors: Vec<NameAccentColor>,
         available_ids: Vec<i32>,
     },
     /// `updateUserStatus` (schema 1.8.67, line 10729) — online / last-seen
@@ -1425,6 +1432,15 @@ pub enum EnvelopePayload {
     ChatJoinRequests {
         total_count: i32,
         requests: Vec<ParsedChatJoinRequest>,
+    },
+    /// B8: `chatInviteLinkCounts` — the `getChatInviteLinkCounts` answer.
+    ChatInviteLinkCounts {
+        counts: Vec<ParsedChatInviteLinkCount>,
+    },
+    /// B8: `chatInviteLinkMembers` — the `getChatInviteLinkMembers` answer.
+    ChatInviteLinkMembers {
+        total_count: i32,
+        members: Vec<ParsedChatInviteLinkMember>,
     },
     /// Phase D3b: `chatAdministrators` (TDLib 1.8.67, line 2485) — the
     /// response of `getChatAdministrators` (line 13632). Carries no chat

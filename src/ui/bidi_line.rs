@@ -57,6 +57,28 @@ pub(crate) fn one_line_plain(text: impl Into<SharedString>) -> AnyElement {
     one_line(text, Vec::new(), Vec::new())
 }
 
+/// Whether a multi-line block of user text rests against the end edge: its first strong
+/// character reads right to left. Telegram Desktop aligns captions, bubbles and poll text
+/// by the text's own direction (`Ui::Text::String` paragraph direction); lists of names
+/// stay start-aligned and use [`one_line_plain`] instead.
+pub(crate) fn aligns_end(text: &str) -> bool {
+    quill::text::is_rtl_text(text)
+}
+
+/// A wrapping block of user text (caption, description, poll question) aligned by the
+/// text's own direction. The text keeps GPUI's per-line bidi shaping, so a mixed-direction
+/// string is ordered correctly within each line.
+pub(crate) fn aligned_block(text: impl Into<SharedString>) -> Div {
+    let text: SharedString = text.into();
+    let end = aligns_end(&text);
+    let block = div().min_w_0();
+    if end {
+        block.w_full().text_right().child(text)
+    } else {
+        block.child(text)
+    }
+}
+
 /// The element behind [`one_line`] for right-to-left text.
 struct BidiLine {
     text: SharedString,
@@ -185,5 +207,25 @@ impl Element for BidiLine {
         if let Some(paragraph) = &self.paragraph {
             paragraph.paint(bounds.origin, bounds.size.width, window, cx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::aligns_end;
+
+    #[test]
+    fn right_to_left_text_rests_at_the_end() {
+        assert!(aligns_end(
+            "\u{645}\u{631}\u{62d}\u{628}\u{627} \u{628}\u{627}\u{644}\u{639}\u{627}\u{644}\u{645}"
+        ));
+        assert!(aligns_end("\u{633}\u{644}\u{627}\u{645} hello"));
+    }
+
+    #[test]
+    fn left_to_right_and_neutral_text_stays_at_the_start() {
+        assert!(!aligns_end("hello \u{633}\u{644}\u{627}\u{645}"));
+        assert!(!aligns_end("12:30 - 4.5"));
+        assert!(!aligns_end(""));
     }
 }

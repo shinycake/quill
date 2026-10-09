@@ -570,6 +570,43 @@ impl Session {
                 }),
             );
         }
+        // B8: bulk join-request processing and revoked-link deletion.
+        match pending.map(|p| (p.purpose, p.id, p.chat_id)) {
+            Some((RequestPurpose::ProcessAllChatJoinRequests { .. }, _, Some(chat_id))) => {
+                self.join_requests.insert(
+                    chat_id.0,
+                    JoinRequestFetch::Loaded(JoinRequestList {
+                        total_count: 0,
+                        requests: Vec::new(),
+                    }),
+                );
+                self.join_request_queries.remove(&chat_id.0);
+                self.pending_join_request_counts.insert(chat_id.0, 0);
+                self.pending_join_request_users.remove(&chat_id.0);
+            }
+            Some((RequestPurpose::DeleteRevokedChatInviteLink, id, Some(chat_id))) => {
+                if let Some((_, link)) = self.revoked_link_deletions.remove(&id)
+                    && let Some(InviteLinkFetch::Loaded(list)) =
+                        self.revoked_invite_links.get_mut(&chat_id.0)
+                {
+                    let before = list.links.len();
+                    list.links.retain(|e| e.invite_link != link);
+                    if list.links.len() < before {
+                        list.total_count = list.total_count.saturating_sub(1);
+                    }
+                }
+            }
+            Some((RequestPurpose::DeleteAllRevokedChatInviteLinks, _, Some(chat_id))) => {
+                self.revoked_invite_links.insert(
+                    chat_id.0,
+                    InviteLinkFetch::Loaded(InviteLinkList {
+                        total_count: 0,
+                        links: Vec::new(),
+                    }),
+                );
+            }
+            _ => {}
+        }
         // B10: the own profile photos changed — refetch the gallery.
         if matches!(
             pending.map(|p| p.purpose),

@@ -275,6 +275,12 @@ pub struct QuillApp {
     /// button only renders when the prefetched preview actually offers
     /// large media.
     pub(super) composer_preview_media: PreviewMediaSize,
+    /// B5: which detected link drives the preview (tdesktop "choose
+    /// link"); an index into the composer text's URLs, clamped.
+    pub(super) composer_preview_link: usize,
+    /// B5: "Send as a document" for the replacement file while editing
+    /// media (tdesktop `EditCaptionBox::_asFile`).
+    pub(super) edit_replace_as_file: bool,
     /// MED4b: debounce token for the `getLinkPreview` prefetch — each
     /// keystroke bumps it so only the latest quiet window fires (schema:
     /// "Do not call this function too often"; TGX rate-limits 400ms).
@@ -714,6 +720,10 @@ pub struct QuillApp {
     pub(super) payment_dialog: Option<PaymentDialog>,
     /// Phase D3a: invite-link create dialog state.
     pub(super) invite_link_dialog: Option<InviteLinkDialog>,
+    /// B8: the invite link whose "who joined" details are expanded.
+    pub(super) invite_link_details: Option<(ChatId, String)>,
+    /// B8: whether the revoked-links list is expanded.
+    pub(super) revoked_links_open: bool,
     /// Phase D3b: admin-management dialog state (promote picker /
     /// rights editor / demote confirm).
     pub(super) admin_dialog: Option<AdminDialog>,
@@ -1010,7 +1020,7 @@ pub struct QuillApp {
     /// Batch 8: "Block {name}" box opened from the chat action bar.
     pub(super) block_bar_dialog: Option<super::chat_bars::BlockBarDialog>,
     /// Batch 8: the join-requests box of this chat (from the requests bar).
-    pub(super) join_requests_dialog: Option<ChatId>,
+    pub(super) join_requests_dialog: Option<super::chat_bars::JoinRequestsDialog>,
     /// A5: edit-profile dialog (name / bio / username / photo) opened
     /// from the user's own info panel.
     pub(super) edit_profile_dialog: Option<EditProfileDialog>,

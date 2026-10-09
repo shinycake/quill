@@ -386,6 +386,43 @@ impl Session {
             }
         }
     }
+    /// B8: `revokeChatInviteLink` answers with the revoked link and, for a
+    /// primary link, its replacement. Move the revoked link from the active
+    /// list into the revoked list (when loaded) and upsert the rest.
+    pub(crate) fn apply_revoke_answer(&mut self, chat: i64, links: Vec<ParsedChatInviteLink>) {
+        for link in links {
+            if link.is_revoked {
+                if let Some(InviteLinkFetch::Loaded(list)) = self.invite_links.get_mut(&chat) {
+                    let before = list.links.len();
+                    list.links.retain(|e| e.invite_link != link.invite_link);
+                    if list.links.len() < before {
+                        list.total_count = list.total_count.saturating_sub(1);
+                    }
+                }
+                if let Some(InviteLinkFetch::Loaded(list)) =
+                    self.revoked_invite_links.get_mut(&chat)
+                    && !list.links.iter().any(|e| e.invite_link == link.invite_link)
+                {
+                    list.links.insert(0, link);
+                    list.total_count = list.total_count.saturating_add(1);
+                }
+            } else if let Some(InviteLinkFetch::Loaded(list)) = self.invite_links.get_mut(&chat) {
+                if link.is_primary {
+                    list.links.retain(|e| !e.is_primary);
+                }
+                if let Some(existing) = list
+                    .links
+                    .iter_mut()
+                    .find(|e| e.invite_link == link.invite_link)
+                {
+                    *existing = link;
+                } else {
+                    list.links.insert(0, link);
+                    list.total_count = list.total_count.saturating_add(1);
+                }
+            }
+        }
+    }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_supergroup_full_info(
         &mut self,

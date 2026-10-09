@@ -137,7 +137,13 @@ impl QuillApp {
                                     .flex()
                                     .flex_col()
                                     .min_w_0()
-                                    .child(div().font_medium().text_sm().child(name))
+                                    .child(
+                                        div()
+                                            .font_medium()
+                                            .text_sm()
+                                            .truncate()
+                                            .child(super::bidi_line::one_line_plain(name)),
+                                    )
                                     .child(
                                         div()
                                             .text_xs()
@@ -224,6 +230,10 @@ impl QuillApp {
                         for fetch in [
                             live.driver.fetch_chat_invite_links(chat_id).map(|_| ()),
                             live.driver.fetch_chat_join_requests(chat_id).map(|_| ()),
+                            // B8: other admins' link counts (owner only).
+                            live.driver
+                                .fetch_chat_invite_link_counts(chat_id)
+                                .map(|_| ()),
                             live.driver.fetch_chat_administrators(chat_id).map(|_| ()),
                             live.driver.fetch_chat_event_log(chat_id).map(|_| ()),
                         ] {
@@ -618,7 +628,9 @@ impl QuillApp {
                                     cx,
                                 );
                             }))
-                            .child(name.clone()),
+                            .max_w_full()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(name.clone())),
                     )
                     .child(
                         div()
@@ -903,7 +915,14 @@ impl QuillApp {
                     .flex_col()
                     .items_center()
                     .gap_1()
-                    .child(div().text_lg().font_semibold().child(title.clone()))
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_semibold()
+                            .max_w_full()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(title.clone())),
+                    )
                     .child(
                         div()
                             .text_sm()
@@ -1081,7 +1100,14 @@ impl QuillApp {
                     .flex_col()
                     .items_center()
                     .gap_1()
-                    .child(div().text_lg().font_semibold().child(title.clone()))
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_semibold()
+                            .max_w_full()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(title.clone())),
+                    )
                     .child(
                         div()
                             .text_sm()

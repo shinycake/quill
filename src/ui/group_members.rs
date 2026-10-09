@@ -587,7 +587,14 @@ impl QuillApp {
             .flex()
             .items_center()
             .gap_2()
-            .child(div().flex_1().text_sm().child(name))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .child(super::bidi_line::one_line_plain(name)),
+            )
             .child(
                 div()
                     .text_xs()
