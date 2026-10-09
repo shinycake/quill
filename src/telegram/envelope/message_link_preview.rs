@@ -142,6 +142,7 @@ pub(crate) fn parse_link_preview_kind(
                         files.extend(item_files);
                         if !sizes.is_empty() {
                             thumbnails.push(PhotoContent {
+                                has_stickers: false,
                                 caption: String::new(),
                                 caption_entities: Vec::new(),
                                 show_caption_above_media: false,
@@ -160,6 +161,7 @@ pub(crate) fn parse_link_preview_kind(
                             let id = file.id;
                             files.push(file);
                             thumbnails.push(PhotoContent {
+                                has_stickers: false,
                                 caption: String::new(),
                                 caption_entities: Vec::new(),
                                 show_caption_above_media: false,
@@ -202,6 +204,7 @@ pub(crate) fn parse_link_preview_photo(
         }
         return (
             Some(PhotoContent {
+                has_stickers: false,
                 caption: String::new(),
                 caption_entities: Vec::new(),
                 show_caption_above_media: false,

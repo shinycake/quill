@@ -1073,3 +1073,14 @@ pub fn recognize_speech(extra: RequestId, chat_id: ChatId, message_id: MessageId
     })
     .to_string()
 }
+
+/// B11: `setDefaultReactionType reaction_type:ReactionType = Ok` (TDLib
+/// 1.8.67, line 12852): Settings, "Quick reaction".
+pub fn set_default_reaction_type(extra: RequestId, reaction_type: Value) -> String {
+    json!({
+        "@type": "setDefaultReactionType",
+        "@extra": extra.as_extra(),
+        "reaction_type": reaction_type,
+    })
+    .to_string()
+}

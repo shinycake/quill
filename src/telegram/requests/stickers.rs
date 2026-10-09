@@ -302,3 +302,50 @@ pub fn send_animation(extra: RequestId, chat_id: ChatId, animation: AnimationSen
     })
     .to_string()
 }
+
+/// B11: `removeRecentSticker is_attached:Bool sticker:InputFile = Ok`
+/// (TDLib 1.8.67, line 14710): the recent-stickers context menu's
+/// "Remove from recent".
+pub fn remove_recent_sticker(extra: RequestId, file_id: FileId, is_attached: bool) -> String {
+    json!({
+        "@type": "removeRecentSticker",
+        "@extra": extra.as_extra(),
+        "is_attached": is_attached,
+        "sticker": { "@type": "inputFileId", "id": file_id.0 },
+    })
+    .to_string()
+}
+
+/// B11: `getKeywordEmojis text:string input_language_codes:vector<string>
+/// = Emojis` (line 14737): emoji whose keywords match `text` in the
+/// given languages. Response is `emojis`.
+pub fn get_keyword_emojis(extra: RequestId, text: &str, language_codes: &[String]) -> String {
+    json!({
+        "@type": "getKeywordEmojis",
+        "@extra": extra.as_extra(),
+        "text": text,
+        "input_language_codes": language_codes,
+    })
+    .to_string()
+}
+
+/// B11: `getAttachedStickerSets file_id:int32 = StickerSets` (line
+/// 14672): the sets whose stickers were added to a photo or video.
+pub fn get_attached_sticker_sets(extra: RequestId, file_id: FileId) -> String {
+    json!({
+        "@type": "getAttachedStickerSets",
+        "@extra": extra.as_extra(),
+        "file_id": file_id.0,
+    })
+    .to_string()
+}
+
+/// B11: `getGreetingStickers = Stickers` (line 14651): the stickers
+/// offered in an empty private chat.
+pub fn get_greeting_stickers(extra: RequestId) -> String {
+    json!({
+        "@type": "getGreetingStickers",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}

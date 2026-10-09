@@ -38,6 +38,8 @@ pub struct EmojiPanel {
     pub trending_offset: i32,
     pub trending_next_offset: i32,
     pub trending_total: i32,
+    /// `updateTrendingStickerSets` for custom emoji arrived.
+    pub trending_stale: bool,
     pub trending_has_more: bool,
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
     /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.
@@ -67,8 +69,60 @@ pub struct EmojiPanel {
     pub custom_emoji_stickers: Vec<StickerItem>,
     /// Slice S10: `searchEmojis` results for the picker.
     pub keyword_results: Vec<EmojiKeyword>,
+    /// B11: `getKeywordEmojis` answer for the panel's emoji search.
+    pub keyword_emojis: Vec<String>,
     /// Slice S10: `getEmojiCategories` rows for the picker.
     pub categories: Vec<EmojiCategory>,
+}
+
+/// B11: input-language codes for `getKeywordEmojis`: the script of what
+/// was typed (tdesktop searches the keyword packs of every keyboard
+/// language in use), then the system language, then English.
+pub fn keyword_language_codes(query: &str, locale: Option<&str>) -> Vec<String> {
+    fn push(out: &mut Vec<String>, code: &str) {
+        if !code.is_empty() && !out.iter().any(|c| c == code) {
+            out.push(code.to_string());
+        }
+    }
+    let mut out = Vec::new();
+    for c in query.chars() {
+        let codes: &[&str] = match c as u32 {
+            0x0400..=0x052F => &["ru", "uk"],
+            0x0590..=0x05FF => &["he"],
+            0x0600..=0x06FF | 0x0750..=0x077F => &["ar", "fa"],
+            0x0370..=0x03FF => &["el"],
+            0x0E00..=0x0E7F => &["th"],
+            0x0900..=0x097F => &["hi"],
+            0x3040..=0x30FF => &["ja"],
+            0xAC00..=0xD7AF | 0x1100..=0x11FF => &["ko"],
+            0x4E00..=0x9FFF => &["zh", "ja"],
+            _ => &[],
+        };
+        for code in codes {
+            push(&mut out, code);
+        }
+    }
+    if let Some(locale) = locale {
+        let lang = locale
+            .split(['_', '-', '.', '@'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if lang.len() == 2 || lang.len() == 3 {
+            push(&mut out, &lang);
+        }
+    }
+    push(&mut out, "en");
+    out
+}
+
+/// The system language for [`keyword_language_codes`] (`LC_ALL`,
+/// `LC_MESSAGES`, `LANG`; unset on Windows, where English is the fallback).
+pub fn system_locale() -> Option<String> {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.is_empty() && value != "C" && value != "POSIX")
 }
 
 /// Custom emoji ids in the caption of a photo, video or animation: the
@@ -257,6 +311,11 @@ impl Session {
             }
             EnvelopePayload::EmojiKeywords { keywords } => {
                 self.accept_emoji_keywords(purpose, keywords);
+            }
+            EnvelopePayload::Emojis { emojis } => {
+                if purpose == Some(RequestPurpose::GetKeywordEmojis) {
+                    self.emoji.keyword_emojis = emojis;
+                }
             }
             EnvelopePayload::EmojiCategories { categories, files } => {
                 self.accept_emoji_categories(purpose, categories, files);
@@ -591,6 +650,7 @@ mod tests {
             },
         };
         let photo = MessageContent::Photo(PhotoContent {
+            has_stickers: false,
             caption: "x".into(),
             caption_entities: vec![entity.clone()],
             show_caption_above_media: false,
@@ -922,5 +982,34 @@ mod tests {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
         assert!(with_purpose.emoji.installed_sets.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod keyword_language_tests {
+    use super::keyword_language_codes;
+
+    #[test]
+    fn typed_script_then_system_language_then_english() {
+        assert_eq!(keyword_language_codes("fire", None), ["en"]);
+        assert_eq!(
+            keyword_language_codes("fire", Some("de_DE.UTF-8")),
+            ["de", "en"]
+        );
+        assert_eq!(
+            keyword_language_codes("огонь", Some("en_US.UTF-8")),
+            ["ru", "uk", "en"]
+        );
+        assert_eq!(keyword_language_codes("אש", None), ["he", "en"]);
+        assert_eq!(
+            keyword_language_codes("火", Some("zh_CN")),
+            ["zh", "ja", "en"]
+        );
+    }
+
+    #[test]
+    fn mixed_scripts_ask_for_every_language_once() {
+        let codes = keyword_language_codes("fire огонь שלום", Some("ru_RU"));
+        assert_eq!(codes, ["ru", "uk", "he", "en"]);
     }
 }

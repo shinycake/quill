@@ -1273,6 +1273,27 @@ impl QuillApp {
         .detach();
     }
 
+    /// "Attached Stickers": the sticker sets whose stickers were added to
+    /// the photo or video (`getAttachedStickerSets`); the first opens in
+    /// the sticker set dialog.
+    pub(super) fn show_viewer_attached_stickers(&mut self, cx: &mut Context<Self>) {
+        let Some(file_id) = self
+            .media_viewer
+            .current()
+            .map(|item| item.download_file_id)
+        else {
+            return;
+        };
+        self.message_menu_ui.sticker_set_open = true;
+        if let Some(live) = self.live.as_mut()
+            && live.driver.fetch_attached_sticker_sets(file_id).is_err()
+        {
+            self.message_menu_ui.sticker_set_open = false;
+            self.status_note = "could not load the attached stickers".into();
+        }
+        cx.notify();
+    }
+
     /// MED1: "Show in chat" — close the viewer and jump to the source
     /// message (the reply-jump machinery, reused).
     pub(super) fn show_viewer_in_chat(&mut self, cx: &mut Context<Self>) {
@@ -2163,6 +2184,17 @@ impl QuillApp {
             let menu_can_delete = can_delete;
             let menu_profile = profile_view;
             let menu_set_main = can_set_main;
+            // `photo.has_stickers` / `video.has_stickers`: stickers were
+            // added to the media (tdesktop "Attached Stickers").
+            let menu_attached = self
+                .session()
+                .and_then(|s| s.histories.get(&item.chat_id.0))
+                .and_then(|h| h.messages.get(&item.message_id.0))
+                .is_some_and(|m| match &m.content {
+                    quill::telegram::envelope::MessageContent::Photo(p) => p.has_stickers,
+                    quill::telegram::envelope::MessageContent::Video(v) => v.has_stickers,
+                    _ => false,
+                });
             div()
                 .id(("media-viewer-visual", row_id))
                 .relative()
@@ -2264,6 +2296,11 @@ impl QuillApp {
                             menu =
                                 menu.item(item("Copy", |this, _, cx| this.copy_viewer_photo(cx)));
                         }
+                    }
+                    if menu_attached {
+                        menu = menu.item(item("Attached Stickers", |this, _, cx| {
+                            this.show_viewer_attached_stickers(cx)
+                        }));
                     }
                     if !menu_profile {
                         menu = menu.item(item("Show in Chat", |this, _, cx| {

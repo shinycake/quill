@@ -286,6 +286,38 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// B11: the panel's emoji search also asks `getKeywordEmojis`, in the
+    /// language of what was typed, the system language and English; the
+    /// matches join the catalog's. A newer query replaces the pending one.
+    pub fn search_keyword_emojis(&mut self, query: &str) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        drop(
+            self.session
+                .requests
+                .take_purpose(RequestPurpose::GetKeywordEmojis),
+        );
+        self.session.emoji.keyword_emojis.clear();
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(());
+        }
+        let codes =
+            crate::emoji::keyword_language_codes(query, crate::emoji::system_locale().as_deref());
+        let extra = self.session.request(RequestPurpose::GetKeywordEmojis, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&crate::telegram::requests::get_keyword_emojis(
+                extra, query, &codes,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(())
+    }
+
     pub fn search_emoji_packs(
         &mut self,
         query: &str,

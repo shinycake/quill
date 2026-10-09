@@ -1679,6 +1679,7 @@ impl QuillApp {
             history_media_signature: (0, 0),
             last_highlight: None,
             highlight_fade: None,
+            reaction_fly: None,
             scroll_date: Default::default(),
             scroll_probe: Default::default(),
             scroll_top_probe: Default::default(),

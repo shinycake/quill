@@ -289,6 +289,10 @@ pub enum RequestPurpose {
     GetMessageAddedReactions {
         chat_id: ChatId,
         message_id: MessageId,
+        /// `reaction_filter_key` of the tab (0 = every reaction).
+        filter: u64,
+        /// A later page: appended to the tab.
+        append: bool,
     },
     /// "View Sticker Set" / "Add Stickers" on a sticker message:
     /// `getStickerSet`, answered into `Session::sticker_set_view`.
@@ -501,6 +505,18 @@ pub enum RequestPurpose {
     GetCustomEmojiStickers,
     /// Slice S10: `searchEmojis` (td_api.tl:14732). Response is `emojiKeywords`.
     SearchEmojis,
+    /// B11: `setDefaultReactionType` (td_api.tl:12852). Response is `ok`.
+    SetDefaultReactionType,
+    /// B11: `removeRecentSticker` (td_api.tl:14710). Response is `ok`.
+    RemoveRecentSticker,
+    /// B11: `getKeywordEmojis` (td_api.tl:14737). Response is `emojis`.
+    GetKeywordEmojis,
+    /// B11: `getAttachedStickerSets` (td_api.tl:14672) for a photo.
+    GetAttachedStickerSets {
+        file_id: i32,
+    },
+    /// B11: `getGreetingStickers` (td_api.tl:14651). Response is `stickers`.
+    GetGreetingStickers,
     /// Slice S10: `getEmojiCategories` (td_api.tl:14738). Response is `emojiCategories`.
     GetEmojiCategories,
     /// Slice S10: `getInstalledStickerSets` with `stickerTypeCustomEmoji` (td_api.tl:14657). Response is `stickerSets`.

@@ -27,6 +27,7 @@ mod payments;
 mod polls_checklists;
 mod profile_panels;
 mod proxy;
+mod reactions_live;
 mod registration;
 mod reply_keyboard;
 mod search;

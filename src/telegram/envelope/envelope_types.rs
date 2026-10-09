@@ -903,6 +903,10 @@ pub enum EnvelopePayload {
         sticker: Option<StickerItem>,
         files: Vec<ParsedFile>,
     },
+    /// `emojis` — `getKeywordEmojis` (schema 1.8.67, line 6435).
+    Emojis {
+        emojis: Vec<String>,
+    },
     /// Slice S10: `emojiKeywords` — `searchEmojis` answers for the picker.
     EmojiKeywords {
         keywords: Vec<EmojiKeyword>,
@@ -960,6 +964,24 @@ pub enum EnvelopePayload {
     UpdateInstalledStickerSets {
         sticker_set_ids: Vec<i64>,
         is_regular: bool,
+    },
+    /// `updateRecentStickers` (schema 1.8.67, line 10938): the recent
+    /// stickers changed (possibly on another device). The ids are not
+    /// used; the cache is refetched.
+    UpdateRecentStickers {
+        is_attached: bool,
+    },
+    /// `updateFavoriteStickers` (line 10941): the favorites changed.
+    UpdateFavoriteStickers,
+    /// `updateTrendingStickerSets` (line 10935): the trending list of a
+    /// sticker type changed. `is_regular` picks the sticker panel; other
+    /// types mark the emoji panel's trending stale.
+    UpdateTrendingStickerSets {
+        is_regular: bool,
+    },
+    /// `updateDefaultReactionType` (line 11007): the quick reaction.
+    UpdateDefaultReactionType {
+        reaction_type: ReactionType,
     },
     /// `notificationSounds` — `getSavedNotificationSounds` response.
     NotificationSounds {

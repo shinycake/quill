@@ -129,7 +129,7 @@ pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;
 pub use session_message_menu::{
     Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
-    StickerSetViewStage,
+    StickerSetViewStage, reaction_filter_key,
 };
 pub use session_proxy::LINK_PING_ID;
 pub use session_reply::{

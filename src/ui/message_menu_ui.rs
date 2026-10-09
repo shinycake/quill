@@ -46,6 +46,8 @@ pub(super) struct MessageMenuUi {
     pub report_open: bool,
     /// The sticker set dialog (`DialogKind::StickerSet`) is open.
     pub sticker_set_open: bool,
+    /// The "who reacted" tab (`None` = All).
+    pub audience_tab: Option<quill::telegram::envelope::ReactionType>,
     /// Details of a report (`reportChatResultTextRequired`).
     pub report_text: Entity<TextareaState>,
 }
@@ -56,6 +58,7 @@ impl MessageMenuUi {
             page: MessageMenuPage::Main,
             report_open: false,
             sticker_set_open: false,
+            audience_tab: None,
             report_text: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder("Add Comment")
@@ -885,6 +888,7 @@ impl QuillApp {
                         ))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.message_menu_ui.page = MessageMenuPage::Audience;
+                            this.message_menu_ui.audience_tab = None;
                             cx.notify();
                         }))
                         .into_any_element(),
@@ -910,6 +914,23 @@ impl QuillApp {
             }
         }
         rows
+    }
+
+    /// Switch the "who reacted" tab; a tab loads its first page once.
+    fn select_audience_tab(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        tab: Option<ReactionType>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live
+                .driver
+                .fetch_reactors_tab(chat_id, message_id, tab.as_ref(), false);
+        }
+        self.message_menu_ui.audience_tab = tab;
+        cx.notify();
     }
 
     /// The page behind the "N Seen" row: reactors with their reaction and
@@ -1041,7 +1062,70 @@ impl QuillApp {
         };
         let mut rows = Vec::new();
         let mut ix = 0u64;
-        if let Some(page) = audience.reactions.ready()
+        // Tabs per reaction (tdesktop `Ui::ReactionsList` / the "All" tab
+        // and one tab per reaction when there is more than one).
+        let tab = self.message_menu_ui.audience_tab.clone();
+        let chips: Vec<(ReactionType, i32)> = message
+            .reaction_chips()
+            .into_iter()
+            .map(|chip| (chip.reaction_type.clone(), chip.total_count))
+            .collect();
+        if chips.len() > 1 && audience.reactions.ready().is_some() {
+            let total: i32 = chips.iter().map(|(_, count)| *count).sum();
+            let mut tabs = div()
+                .id("menu-audience-tabs")
+                .flex()
+                .flex_wrap()
+                .gap_1()
+                .px_2()
+                .py_1();
+            let all_selected = tab.is_none();
+            let mut entries: Vec<(Option<ReactionType>, String)> =
+                vec![(None, format!("All {total}"))];
+            for (reaction, count) in &chips {
+                let glyph = match reaction {
+                    ReactionType::Emoji { emoji } => super::reactions::emoji_presentation(emoji),
+                    ReactionType::Paid => "⭐".to_string(),
+                    _ => "✦".to_string(),
+                };
+                entries.push((Some(reaction.clone()), format!("{glyph} {count}")));
+            }
+            for (tab_ix, (reaction, label)) in entries.into_iter().enumerate() {
+                let selected = if tab_ix == 0 {
+                    all_selected
+                } else {
+                    tab == reaction
+                };
+                let accent_bg = cx.theme().accent;
+                tabs = tabs.child(
+                    div()
+                        .id(("menu-audience-tab", tab_ix as u64))
+                        .px_2()
+                        .py_0p5()
+                        .rounded_full()
+                        .text_xs()
+                        .cursor_pointer()
+                        .text_color(text_menu())
+                        .when(selected, |this| this.bg(accent_bg).font_semibold())
+                        .hover(|style| style.bg(accent_bg))
+                        .role(gpui_kit::Role::Button)
+                        .aria_label(label.clone())
+                        .child(label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.select_audience_tab(chat_id, message_id, reaction.clone(), cx);
+                        })),
+                );
+            }
+            rows.push((10, tabs.into_any_element()));
+        }
+        let tab_state = match &tab {
+            None => Some(&audience.reactions),
+            Some(reaction) => audience
+                .filtered
+                .get(&quill::state::reaction_filter_key(reaction)),
+        };
+        let tab_filter = tab.as_ref().map_or(0, quill::state::reaction_filter_key);
+        if let Some(page) = tab_state.and_then(|state| state.ready())
             && !page.reactions.is_empty()
         {
             rows.push(heading(reacted_label(page.total_count.max(0) as usize), 0));
@@ -1061,6 +1145,45 @@ impl QuillApp {
                     cx,
                 ));
             }
+            if !page.next_offset.is_empty() {
+                let loading = audience.more_loading.contains(&tab_filter);
+                let more_tab = tab.clone();
+                let hover = cx.theme().accent;
+                rows.push((
+                    10,
+                    div()
+                        .id("menu-audience-more")
+                        .px_3()
+                        .py_1p5()
+                        .rounded_md()
+                        .text_sm()
+                        .text_color(text_muted())
+                        .when(!loading, |this| {
+                            this.cursor_pointer().hover(|style| style.bg(hover))
+                        })
+                        .role(gpui_kit::Role::Button)
+                        .child(if loading { "Loading..." } else { "Show more" })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.fetch_reactors_tab(
+                                    chat_id,
+                                    message_id,
+                                    more_tab.as_ref(),
+                                    true,
+                                );
+                            }
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                ));
+            }
+        } else if tab_state.is_some_and(|state| state.is_loading()) {
+            rows.push(info_row(
+                10,
+                "menu-audience-tab-loading",
+                None,
+                "Loading...",
+            ));
         }
         if let Some(viewers) = audience.viewers.ready()
             && !viewers.is_empty()
