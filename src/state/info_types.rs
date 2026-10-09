@@ -187,6 +187,32 @@ pub struct JoinRequestList {
     pub requests: Vec<ParsedChatJoinRequest>,
 }
 
+/// B8: `getChatInviteLinkCounts` fetch state (owner only), keyed by chat.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InviteLinkCountsFetch {
+    Loading,
+    Loaded(Vec<crate::telegram::envelope::ParsedChatInviteLinkCount>),
+    Failed(String),
+}
+
+/// B8: members who joined through one invite link
+/// (`getChatInviteLinkMembers`, schema/td_api.tl:14540), keyed by chat.
+/// Only one link's members are held per chat; `request` is the id of the
+/// newest page request, so a late reply for a previously opened link is
+/// ignored.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InviteLinkMembersState {
+    pub invite_link: String,
+    pub total_count: i32,
+    pub members: Vec<crate::telegram::envelope::ParsedChatInviteLinkMember>,
+    pub loading: bool,
+    pub error: Option<String>,
+    pub request: Option<crate::ids::RequestId>,
+}
+
+/// Page size shared by join-request and link-member lists.
+pub const INVITE_ADMIN_PAGE_SIZE: i32 = 50;
+
 /// Phase D3b: fetch state for one administrator's `getChatMember` rights
 /// lookup (schema 1.8.67, line 13622), keyed by (chat_id, user_id).
 /// Drives the edit-rights dialog's loading / error states.

@@ -558,7 +558,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Group and channel appearance: name color, profile color, emoji status, background emoji <!-- parity:admin-appearance -->
 - [ ] Multiple usernames: activate and reorder collectible usernames for groups <!-- parity:admin-multi-usernames -->
 - [ ] Invite links: members joined via a link, other admins' links, delete revoked, QR code, subscription links <!-- parity:admin-invite-link-admin -->
-- [ ] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
+- [x] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
 - [ ] Boosts list, boost link, boost features table and unrestrict-by-boosts setting <!-- parity:admin-boosts-list -->
 - [ ] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
 - [ ] Monetization, revenue and earnings sections (deferred: low impact) <!-- parity:admin-monetization -->
@@ -657,13 +657,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 #### More story features
 
-- [ ] Story video playback (partial: video stories show a thumbnail in some cases) <!-- parity:stories-video-playback -->
-- [ ] Share or forward a story to a chat <!-- parity:stories-share-to-chat -->
-- [ ] Save story media and copy a story link <!-- parity:stories-save-copy-link -->
-- [ ] Post to Profile and Archive actions on your own stories <!-- parity:stories-post-to-profile-archive -->
-- [ ] Mute story audio, pause on hold, arrow keys and Space <!-- parity:stories-keyboard-mute -->
-- [ ] Close friends list editor <!-- parity:stories-close-friends-editor -->
-- [ ] Hide and unhide a contact's stories <!-- parity:stories-hide-peer -->
+- [x] Story video playback (partial: video stories show a thumbnail in some cases) <!-- parity:stories-video-playback -->
+- [x] Share or forward a story to a chat <!-- parity:stories-share-to-chat -->
+- [x] Save story media and copy a story link <!-- parity:stories-save-copy-link -->
+- [x] Post to Profile and Archive actions on your own stories <!-- parity:stories-post-to-profile-archive -->
+- [x] Mute story audio, pause on hold, arrow keys and Space <!-- parity:stories-keyboard-mute -->
+- [x] Close friends list editor <!-- parity:stories-close-friends-editor -->
+- [x] Hide and unhide a contact's stories <!-- parity:stories-hide-peer -->
 - [ ] Story replies with stickers, emoji or voice <!-- parity:stories-reply-media -->
 - [ ] Search stories by hashtag, location or venue <!-- parity:stories-search -->
 - [ ] Story statistics and public forwards <!-- parity:stories-statistics -->

@@ -2443,6 +2443,31 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 })
                 .unwrap_or_default(),
         }),
+        "chatInviteLinkCounts" => Ok(EnvelopePayload::ChatInviteLinkCounts {
+            counts: value
+                .get("invite_link_counts")
+                .and_then(Value::as_array)
+                .map(|counts| {
+                    counts
+                        .iter()
+                        .filter_map(|count| parse_chat_invite_link_count(Some(count)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
+        "chatInviteLinkMembers" => Ok(EnvelopePayload::ChatInviteLinkMembers {
+            total_count: int53(value.get("total_count")).map(|v| v as i32)?,
+            members: value
+                .get("members")
+                .and_then(Value::as_array)
+                .map(|members| {
+                    members
+                        .iter()
+                        .filter_map(|member| parse_chat_invite_link_member(Some(member)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }),
         "chatJoinRequests" => Ok(EnvelopePayload::ChatJoinRequests {
             total_count: int53(value.get("total_count")).map(|v| v as i32)?,
             requests: value
