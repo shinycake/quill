@@ -287,7 +287,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Share box: several destinations, comment, silent or scheduled, server search, copy link <!-- parity:composer-share-box -->
 - [ ] Repeating scheduled messages (Premium) <!-- parity:composer-repeat-schedule -->
 - [ ] Send a dice, dart, basketball, football, bowling or slot machine by sending its emoji alone <!-- parity:composer-send-dice -->
-- [ ] Share a contact card from a profile <!-- parity:composer-share-contact -->
+- [x] Share a contact card from a profile <!-- parity:composer-share-contact -->
 - [ ] Create checklists <!-- parity:composer-checklist -->
 - [ ] Attachment-menu bots in the attach menu <!-- parity:composer-attach-bots -->
 - [ ] Drop zones: send quickly versus as documents; dropped folder becomes an archive <!-- parity:composer-drop-modes -->
@@ -399,13 +399,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Profiles & shared media
 
 - [ ] Profile photo gallery with Set as Main, report and "photo set by you" <!-- parity:profile-photo-gallery -->
-- [ ] Edit contact and Share contact from a profile <!-- parity:profile-contact-actions -->
-- [ ] Copy phone, name, username and link from profile rows <!-- parity:profile-copy-rows -->
+- [x] Edit contact and Share contact from a profile <!-- parity:profile-contact-actions -->
+- [x] Copy phone, name, username and link from profile rows <!-- parity:profile-copy-rows -->
 - [ ] Set or suggest a personal photo for a contact <!-- parity:profile-personal-photo -->
-- [ ] Private notes about a user <!-- parity:profile-private-note -->
-- [ ] Groups in common list <!-- parity:profile-groups-in-common -->
-- [ ] Similar channels and bots list on a profile <!-- parity:profile-similar-channels -->
-- [ ] Personal channel on a profile <!-- parity:profile-personal-channel -->
+- [x] Private notes about a user <!-- parity:profile-private-note -->
+- [x] Groups in common list <!-- parity:profile-groups-in-common -->
+- [x] Similar channels and bots list on a profile <!-- parity:profile-similar-channels -->
+- [x] Personal channel on a profile <!-- parity:profile-personal-channel -->
 - [ ] Business hours and location rows <!-- parity:profile-business-hours -->
 - [ ] Shared media tabs: separate Photos and Videos, round videos, Polls, Stories, Gifts, Saved Music <!-- parity:profile-media-tabs -->
 - [ ] Shared media calendar and jump by month <!-- parity:profile-media-calendar -->
