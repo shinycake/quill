@@ -259,7 +259,9 @@ pub(super) fn album_history_row(
     let has_caption = caption.is_some();
     let avatar_link = avatar_link(&sender_avatar, first, cx);
     let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending);
-    if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link) {
+    if let Some(link) = avatar_link
+        && let Some(avatar) = chrome.avatar.take()
+    {
         chrome.avatar = Some(link.wrap(avatar));
     }
     chrome.media_led = true;
@@ -1467,7 +1469,10 @@ pub(super) fn session_history_row(
             message.date,
             message.pending,
         );
-        if let (Some(avatar), Some(link)) = (chrome.avatar.take(), avatar_link.take()) {
+        // A spacer (no link) keeps its slot: taking it would drop the gutter.
+        if let Some(link) = avatar_link.take()
+            && let Some(avatar) = chrome.avatar.take()
+        {
             chrome.avatar = Some(link.wrap(avatar));
         }
         chrome.footer = message_footer_meta(&footer_meta);
