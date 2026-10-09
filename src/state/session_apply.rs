@@ -3095,7 +3095,20 @@ impl Session {
             // the driver pump (`ntg_connect`).
             // `startGroupCallScreenSharing` returns `text` — the
             // presentation answer, consumed by the driver pump.
+            EnvelopePayload::Countries { countries } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCountries)
+                    && !countries.is_empty()
+                {
+                    self.countries = Some(countries);
+                }
+            }
             EnvelopePayload::Text { text } => match pending.map(|p| p.purpose) {
+                Some(RequestPurpose::GetCountryCode) => {
+                    let iso = text.trim().to_ascii_uppercase();
+                    if iso.len() == 2 && iso.chars().all(|c| c.is_ascii_alphabetic()) {
+                        self.guessed_country_iso = Some(iso);
+                    }
+                }
                 Some(RequestPurpose::JoinVideoChat { group_call_id }) => {
                     self.set_group_call_join_payload(group_call_id, text);
                 }

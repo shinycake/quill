@@ -559,7 +559,8 @@ fn driver_submits_code_and_password_only_in_matching_states() {
     assert!(matches!(
         driver.session.auth,
         AuthorizationState::WaitCode {
-            code_length: Some(5)
+            code_length: Some(5),
+            ..
         }
     ));
     assert_eq!(
@@ -690,9 +691,11 @@ fn qr_recovery_accepts_supported_states_and_waits_for_pending_auth() {
         AuthorizationState::WaitEmailCode {
             email_pattern: "u***@example.com".into(),
             code_length: Some(6),
+            reset: Default::default(),
         },
         AuthorizationState::WaitCode {
             code_length: Some(5),
+            delivery: Default::default(),
         },
         AuthorizationState::WaitPassword {
             has_recovery_email: false,

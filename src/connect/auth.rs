@@ -2,17 +2,18 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::state::{PasswordOp, RequestPurpose};
-use crate::telegram::envelope::AuthorizationState;
+use crate::telegram::envelope::{AuthorizationState, EmailResetState};
 use crate::telegram::requests::{
     cancel_password_reset, cancel_recovery_email_address_verification, check_authentication_code,
     check_authentication_email_code, check_authentication_password, check_login_email_address_code,
-    check_phone_number_code, check_recovery_email_address_code, get_password_state,
-    recover_authentication_password, recover_password, request_authentication_password_recovery,
-    request_password_recovery, request_qr_code_authentication, resend_authentication_code,
-    resend_login_email_address_code, resend_phone_number_code, resend_recovery_email_address_code,
-    reset_password, send_phone_number_code, set_authentication_email_address,
-    set_authentication_phone_number, set_login_email_address, set_password,
-    set_recovery_email_address,
+    check_phone_number_code, check_recovery_email_address_code, get_countries, get_country_code,
+    get_password_state, recover_authentication_password, recover_password,
+    request_authentication_password_recovery, request_password_recovery,
+    request_qr_code_authentication, resend_authentication_code, resend_login_email_address_code,
+    resend_phone_number_code, resend_recovery_email_address_code,
+    reset_authentication_email_address, reset_password, send_phone_number_code,
+    set_authentication_email_address, set_authentication_phone_number, set_login_email_address,
+    set_password, set_recovery_email_address,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -110,10 +111,69 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Send `setAuthenticationPhoneNumber` when auth is WaitPhoneNumber.
+    /// Fetch the sign-in country list once (works before authorization).
+    pub fn fetch_countries(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.countries.is_some()
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetCountries)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request(RequestPurpose::GetCountries, None);
+        if let Err(err) = self.sender.send_json(&get_countries(extra)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// Fetch the IP-based default country once.
+    pub fn fetch_country_code(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.guessed_country_iso.is_some()
+            || self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetCountryCode)
+        {
+            return Ok(None);
+        }
+        let extra = self.session.request(RequestPurpose::GetCountryCode, None);
+        if let Err(err) = self.sender.send_json(&get_country_code(extra)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+
+    /// `resetAuthenticationEmailAddress`, only where TDLib offers it.
+    pub fn reset_login_email(&mut self) -> Result<RequestId, ConnectSendError> {
+        if !matches!(
+            self.session.auth,
+            AuthorizationState::WaitEmailCode {
+                reset: EmailResetState::Available { .. },
+                ..
+            }
+        ) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.login_request(
+            RequestPurpose::ResetAuthenticationEmail,
+            reset_authentication_email_address,
+        )
+    }
+
+    /// Send `setAuthenticationPhoneNumber`. TDLib accepts it on the phone
+    /// screen and, with no query in flight, on the later login steps — that
+    /// is how "Wrong number?" re-enters a number from the code screen.
     /// Phone value is never stored on the session or diagnostics.
     pub fn submit_phone(&mut self, phone: &str) -> Result<RequestId, ConnectSendError> {
-        if !matches!(self.session.auth, AuthorizationState::WaitPhoneNumber) {
+        if !matches!(
+            self.session.auth,
+            AuthorizationState::WaitPhoneNumber | AuthorizationState::WaitCode { .. }
+        ) || self.session.requests.has_auth_submit()
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         let phone = phone.trim();

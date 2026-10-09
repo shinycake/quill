@@ -189,6 +189,7 @@ pub fn is_auth_submit(purpose: RequestPurpose) -> bool {
             | RequestPurpose::RequestAuthenticationPasswordRecovery
             | RequestPurpose::RecoverAuthenticationPassword
             | RequestPurpose::RequestQrCodeAuthentication
+            | RequestPurpose::ResetAuthenticationEmail
     )
 }
 
@@ -249,7 +250,12 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
     let detail = match err.class {
         ErrorClass::Flood => flood_detail.as_str(),
         ErrorClass::Unauthorized => "session is no longer authorized",
-        ErrorClass::Invalid => "Telegram refused the request",
+        // The sign-in classes are 400s: same wording the plain code gave.
+        ErrorClass::Invalid
+        | ErrorClass::PhoneBanned
+        | ErrorClass::PhoneInvalid
+        | ErrorClass::PhoneFlood
+        | ErrorClass::TaskAlreadyExists => "Telegram refused the request",
         ErrorClass::NotFound => "no longer exists",
         // S14: mirror the Invalid / Other arms — the code-based class
         // these errors had before classification.
@@ -278,7 +284,11 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         ErrorClass::NotFound => "not found".to_string(),
         ErrorClass::Unauthorized => "not authorized".to_string(),
         ErrorClass::Flood => err.flood_line("too many requests — try again later"),
-        ErrorClass::Invalid => "invalid request".to_string(),
+        ErrorClass::Invalid
+        | ErrorClass::PhoneBanned
+        | ErrorClass::PhoneInvalid
+        | ErrorClass::PhoneFlood
+        | ErrorClass::TaskAlreadyExists => "invalid request".to_string(),
         // S14: classified story-restriction errors keep the exact text
         // the code-based class produced before (400 → Invalid,
         // 403 → Other), so non-story flows render byte-identical text.
@@ -324,6 +334,17 @@ impl AuthRequestError {
 
     fn base_message(self) -> &'static str {
         match (self.purpose, self.class) {
+            // tdesktop `phoneSubmitFail` / `lng_bad_phone`,
+            // `lng_error_phone_flood`; the banned number gets its own box.
+            (_, ErrorClass::PhoneInvalid) => "Invalid phone number. Please try again.",
+            (_, ErrorClass::PhoneBanned) => "This phone number is banned.",
+            (_, ErrorClass::PhoneFlood) => {
+                "You have deleted and re-created your account too many times recently. Please wait for a few days before signing up again."
+            }
+            (RequestPurpose::ResetAuthenticationEmail, ErrorClass::TaskAlreadyExists) => {
+                "an email reset is already pending"
+            }
+            (RequestPurpose::ResetAuthenticationEmail, _) => "couldn't start the email reset",
             (RequestPurpose::RegisterUser, ErrorClass::Invalid) => {
                 "registration not accepted — check your name"
             }

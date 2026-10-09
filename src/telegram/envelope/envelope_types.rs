@@ -1128,6 +1128,10 @@ pub enum EnvelopePayload {
         phone_number: String,
         timeout: i32,
     },
+    /// `countries` (`getCountries` answer), stored in `Session::countries`.
+    Countries {
+        countries: Vec<crate::phone::Country>,
+    },
     /// Slice A4: `connectedWebsites` — `getConnectedWebsites` response
     /// (schema 1.8.67, lines 9171/15124). Stored in
     /// `Session::connected_websites` when the pending purpose is
