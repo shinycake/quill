@@ -1,8 +1,0 @@
-# B10 profile and contact panels
-parity:profile-contact-actions
-parity:profile-copy-rows
-parity:profile-private-note
-parity:profile-groups-in-common
-parity:profile-similar-channels
-parity:profile-personal-channel
-parity:composer-share-contact

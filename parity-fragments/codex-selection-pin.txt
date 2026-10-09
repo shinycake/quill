@@ -1,3 +1,0 @@
-parity:selection-copy-text
-parity:pin-confirm-options
-parity:pin-unpin-all-confirm

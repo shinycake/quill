@@ -601,6 +601,12 @@ pub enum EnvelopePayload {
         messages: Vec<ParsedMessage>,
         next_offset: String,
     },
+    /// `foundPublicPosts` — `searchPublicPosts` (schema 1.8.67, line 3182).
+    FoundPublicPosts {
+        messages: Vec<ParsedMessage>,
+        next_offset: String,
+        are_limits_exceeded: bool,
+    },
     /// Phase C2i: `userPrivacySettingRules` — `getUserPrivacySettingRules`.
     /// Slice S3: now carries the parsed rule details (exception user ids),
     /// not just constructor names.

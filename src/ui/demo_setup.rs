@@ -34,8 +34,8 @@ use super::demo::{
 };
 use super::drafts::apply_ready_drafts;
 use super::find_demo::{
-    apply_ready_jump_date, apply_ready_search_filters, apply_ready_search_from,
-    apply_ready_search_from_hits,
+    apply_ready_jump_date, apply_ready_search_filters, apply_ready_search_frequent,
+    apply_ready_search_from, apply_ready_search_from_hits, apply_ready_search_public,
 };
 use super::folders::apply_ready_folders;
 use super::forward::apply_ready_forward;
@@ -298,6 +298,24 @@ impl QuillApp {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_search(session, &self.demo_sink, &self.demo_seq);
                 apply_ready_search_filters(session);
+            }
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySearchFrequent)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_search_frequent(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.search_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadySearchPublic)) {
+            self.search_input.update(cx, |input, cx| {
+                input.set_value("#dune", window, cx);
+                input.focus(window, cx);
+            });
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_search_public(session, &self.demo_sink, &self.demo_seq);
             }
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyReply)) {
