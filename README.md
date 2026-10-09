@@ -320,8 +320,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Emoji status and premium badge beside the chat title <!-- parity:chrome-header-status -->
 - [ ] Restricted, Scam and Fake chips in the chat header <!-- parity:chrome-header-chips -->
 - [ ] Complete chat header menu: boosts, statistics, create poll, set auto-delete, gift, set wallpaper, view as topics, open in new window <!-- parity:chrome-header-menu -->
-- [ ] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
-- [ ] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
+- [x] Mute submenu with custom duration, Disable sound and Select tone <!-- parity:chrome-mute-menu -->
+- [x] Auto-delete timer (1 day, 1 week, 1 month, custom) for regular chats and groups <!-- parity:chrome-autodelete-regular -->
 - [ ] Per-chat wallpaper and chat themes <!-- parity:chrome-chat-wallpaper -->
 - [ ] "What can this bot do?" intro in an empty bot chat <!-- parity:chrome-bot-intro -->
 - [ ] Composer state buttons: Unblock, Start, Join, Apply to join, Mute and Unmute (partial: Join and Mute exist; Unblock and Apply to join unverified) <!-- parity:chrome-composer-states -->
@@ -369,13 +369,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] App badge counter settings: include muted chats, include archived chats, count messages vs chats (BadgePrefs in src/settings.rs persisted to badge_prefs.json; tray badge_count honors prefs; section in notification defaults dialog) <!-- parity:chatlist-badge-settings -->
 - [x] Chat list style settings: two/three lines, media icons, text formatting (Settings → Appearance → Chat list rows; src/chatlist_style.rs, src/ui/chatlist_style.rs, ui/appearance.rs) <!-- parity:chatlist-list-style --> (parity: chat-list style settings (two/three lines, media icons, formatted preview))
 - [x] Unread / Archived filter category chips beside the folder tabs (the folder/Main selection itself is the All view); Archived forces the archive section open (src/ui/mod.rs: ChatListFilter) <!-- parity:chatlist-category-filters -->
-- [ ] "Frequent contacts" row in search, with a setting to hide it <!-- parity:chatlist-frequent-contacts -->
-- [ ] Remove a single recent search entry <!-- parity:chatlist-remove-recent-search -->
-- [ ] Global search filters: private, groups, channels, archived, date range <!-- parity:chatlist-search-filters -->
+- [x] "Frequent contacts" row in search, with a setting to hide it <!-- parity:chatlist-frequent-contacts -->
+- [x] Remove a single recent search entry <!-- parity:chatlist-remove-recent-search -->
+- [x] Global search filters: private, groups, channels, archived, date range <!-- parity:chatlist-search-filters -->
 - [ ] Global search tabs: channels, apps, public posts, media, links, files, music, voice <!-- parity:chatlist-search-tabs -->
-- [ ] Server-side chat and contact search <!-- parity:chatlist-search-server -->
-- [ ] Tapping a hashtag searches this chat, my messages or public posts <!-- parity:chatlist-hashtag-search -->
-- [ ] In-chat search: filter by sender, calendar, and "N of M" result counter <!-- parity:chatlist-inchat-search-from -->
+- [x] Server-side chat and contact search <!-- parity:chatlist-search-server -->
+- [x] Tapping a hashtag searches this chat, my messages or public posts <!-- parity:chatlist-hashtag-search -->
+- [x] In-chat search: filter by sender, calendar, and "N of M" result counter <!-- parity:chatlist-inchat-search-from -->
 - [ ] Shareable folders: invite links, add folder by link, "N new chats" bar <!-- parity:chatlist-folder-share -->
 - [ ] Recommended folders <!-- parity:chatlist-folder-recommended -->
 - [ ] Folder icon picker and tab display (text, icons, or both) <!-- parity:chatlist-folder-icons -->
@@ -1012,7 +1012,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Terminate old sessions if inactive for a chosen time <!-- parity:settings-inactive-sessions -->
 - [x] New login alert ("Was this you?") with confirm or terminate <!-- parity:settings-new-login-alert -->
 - [ ] Session details box and rename this device <!-- parity:settings-session-details -->
-- [ ] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
+- [x] Default auto-delete timer for new chats <!-- parity:settings-autodelete-default -->
 - [ ] Bots and websites: mini-app permissions and delete cloud drafts <!-- parity:settings-bots-websites -->
 - [ ] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [ ] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
@@ -1022,8 +1022,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Settings: notifications
 
 - [ ] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
-- [ ] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
-- [ ] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
+- [x] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
+- [x] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
 - [ ] Desktop notification options: position, count, display, volume <!-- parity:notify-desktop-options -->
 - [ ] Flash the taskbar or bounce the Dock for new messages <!-- parity:notify-alert-attention -->
 - [ ] Show notifications from all accounts <!-- parity:notify-all-accounts -->

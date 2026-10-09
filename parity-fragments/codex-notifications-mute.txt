@@ -1,6 +1,0 @@
-# B3: mute menu, auto-delete, reaction notifications, clearing read toasts
-parity:chrome-mute-menu
-parity:chrome-autodelete-regular
-parity:settings-autodelete-default
-parity:notify-reactions-dispatch
-parity:notify-clear-read-elsewhere
