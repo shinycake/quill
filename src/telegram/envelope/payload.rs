@@ -1046,6 +1046,24 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .map(ChatId)
                 .collect(),
         }),
+        "foundPublicPosts" => Ok(EnvelopePayload::FoundPublicPosts {
+            messages: value
+                .get("messages")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|m| parse_message(m).ok())
+                .collect(),
+            next_offset: value
+                .get("next_offset")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            are_limits_exceeded: value
+                .get("are_limits_exceeded")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         "chatPhotos" => Ok(EnvelopePayload::ChatPhotos {
             total_count: value
                 .get("total_count")

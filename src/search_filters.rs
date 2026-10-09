@@ -100,10 +100,12 @@ pub enum SearchDateRange {
     Week,
     Month,
     Year,
+    /// Older than a year (`max_date` only).
+    Older,
 }
 
 impl SearchDateRange {
-    pub const ALL: [Self; 4] = [Self::Any, Self::Week, Self::Month, Self::Year];
+    pub const ALL: [Self; 5] = [Self::Any, Self::Week, Self::Month, Self::Year, Self::Older];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -111,18 +113,28 @@ impl SearchDateRange {
             Self::Week => "Past week",
             Self::Month => "Past month",
             Self::Year => "Past year",
+            Self::Older => "Older",
         }
     }
 
     /// `min_date` for `searchMessages` at `now` (0 = no lower bound).
     pub fn min_date(self, now: i64) -> i32 {
         let days = match self {
-            Self::Any => return 0,
+            Self::Any | Self::Older => return 0,
             Self::Week => 7,
             Self::Month => 30,
             Self::Year => 365,
         };
         (now - days * 86_400).clamp(0, i64::from(i32::MAX)) as i32
+    }
+
+    /// `max_date` for `searchMessages` at `now` (0 = no upper bound): only
+    /// "Older" closes the window, a year back.
+    pub fn max_date(self, now: i64) -> i32 {
+        match self {
+            Self::Older => (now - 365 * 86_400).clamp(0, i64::from(i32::MAX)) as i32,
+            _ => 0,
+        }
     }
 }
 
@@ -132,6 +144,39 @@ pub struct GlobalSearchFilters {
     pub chat_type: SearchChatType,
     pub media: SearchMediaKind,
     pub date: SearchDateRange,
+    /// Search the archive only (`chatListArchive`).
+    pub archived: bool,
+    /// Where the query is looked up (My messages / Public posts).
+    pub scope: SearchScope,
+}
+
+/// The tabs of tdesktop's search (`lng_search_tab_my_messages`,
+/// `lng_search_tab_public_posts`): the user's own chats, or public channel
+/// posts (`searchPublicPosts`, or `searchPublicMessagesByTag` for a tag).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchScope {
+    #[default]
+    MyMessages,
+    PublicPosts,
+}
+
+impl SearchScope {
+    pub const ALL: [Self; 2] = [Self::MyMessages, Self::PublicPosts];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MyMessages => "My messages",
+            Self::PublicPosts => "Public posts",
+        }
+    }
+}
+
+/// A single hashtag or cashtag query (`#tag` / `$TAG`), the case where the
+/// tag-specific scopes apply; the full query including the sigil.
+pub fn tag_query(query: &str) -> Option<&str> {
+    let query = query.trim();
+    let rest = query.strip_prefix(['#', '$'])?;
+    (!rest.is_empty() && !rest.chars().any(char::is_whitespace)).then_some(query)
 }
 
 impl GlobalSearchFilters {
@@ -337,5 +382,26 @@ mod tests {
         assert_eq!(local_day_number(midnight), dn);
         assert_eq!(local_day_number(midnight - 1), dn - 1);
         assert_eq!(local_day_number(before_day_date(dn).into()), dn - 1);
+    }
+
+    #[test]
+    fn tag_query_needs_a_single_tag() {
+        assert_eq!(tag_query(" #dune "), Some("#dune"));
+        assert_eq!(tag_query("$TON"), Some("$TON"));
+        assert_eq!(tag_query("#"), None);
+        assert_eq!(tag_query("#two words"), None);
+        assert_eq!(tag_query("dune"), None);
+    }
+
+    #[test]
+    fn only_older_closes_the_upper_bound() {
+        let now = 1_800_000_000;
+        assert_eq!(SearchDateRange::Older.min_date(now), 0);
+        assert_eq!(
+            i64::from(SearchDateRange::Older.max_date(now)),
+            now - 365 * 86_400
+        );
+        assert_eq!(SearchDateRange::Week.max_date(now), 0);
+        assert_eq!(SearchDateRange::Any.max_date(now), 0);
     }
 }

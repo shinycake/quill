@@ -80,6 +80,23 @@ pub enum RequestPurpose {
     /// all public chats (not just known ones). Sent alongside `searchChats`.
     SearchPublicChats,
     AddRecentlyFoundChat,
+    /// `searchChatsOnServer`: the server's title/username hits, merged
+    /// behind `SearchChats` (never gates the search status).
+    SearchChatsOnServer,
+    /// `searchPublicPosts` (the "Public posts" scope of a plain query).
+    SearchPublicPosts,
+    /// `searchPublicMessagesByTag` (the "Public posts" scope of a hashtag).
+    SearchPublicMessagesByTag,
+    /// `getTopChats(topChatCategoryUsers)`: the "Frequent contacts" strip.
+    GetTopChats,
+    /// `removeTopChat`; response is `ok`, the entry left the strip
+    /// optimistically.
+    RemoveTopChat,
+    /// `removeRecentlyFoundChat`; response is `ok`, the row left the Recent
+    /// list optimistically.
+    RemoveRecentlyFoundChat,
+    /// `setOption(disable_top_chats)`; the truth arrives as `updateOption`.
+    SetTopChatsDisabled,
     SearchChatMessages,
     /// The next older page of the open in-chat search (appended to the
     /// hits; carries the search generation).
