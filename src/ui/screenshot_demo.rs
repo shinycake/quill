@@ -698,6 +698,10 @@ pub enum ScreenshotDemo {
     ReadySearchFromHits,
     /// Find in history: global search narrowed by the filter bar.
     ReadySearchFilters,
+    /// Search upgrades: the empty search with Frequent contacts + Recent.
+    ReadySearchFrequent,
+    /// Search upgrades: a hashtag in the Public posts scope.
+    ReadySearchPublic,
     /// Local passcode: the settings dialog with a passcode set (auto-lock,
     /// Touch ID rows).
     ReadyPasscodeSettings,

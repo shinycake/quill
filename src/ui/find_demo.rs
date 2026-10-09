@@ -165,5 +165,100 @@ pub(super) fn apply_ready_search_filters(session: &mut Session) {
         chat_type: SearchChatType::Groups,
         media: SearchMediaKind::Files,
         date: SearchDateRange::Month,
+        ..GlobalSearchFilters::default()
     };
+}
+
+fn apply_all(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64, jsons: &[String]) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+}
+
+fn private_chat_json(id: i64, title: &str) -> [String; 2] {
+    [
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypePrivate","user_id":{id}}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{id}","is_pinned":false}}}}"#
+        ),
+    ]
+}
+
+/// Empty search: the "Frequent contacts" strip (right-click row open on
+/// the second person) above two Recent entries.
+pub(super) fn apply_ready_search_frequent(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let people = [
+        (41, "Maya Cohen"),
+        (42, "Noam Levi"),
+        (43, "Tal Shapiro"),
+        (44, "Yael Barak"),
+        (45, "Omer Katz"),
+    ];
+    let jsons: Vec<String> = people
+        .iter()
+        .flat_map(|(id, title)| private_chat_json(*id, title))
+        .collect();
+    apply_all(session, sink, seq, &jsons);
+    session.open_search();
+    session.search.recents = true;
+    session.search.chat_ids = vec![ChatId(43), ChatId(41)];
+    session.search.top_chats = people.iter().map(|(id, _)| ChatId(*id)).collect();
+    session.search.top_menu = Some(ChatId(42));
+    session.search.status = quill::state::SearchStatus::Ready;
+}
+
+/// Hashtag search in the "Public posts" scope, answered through the real
+/// `foundMessages` reducer.
+pub(super) fn apply_ready_search_public(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+) {
+    let channels = [(-1001, "Dune Weekly"), (-1002, "Sci-fi Shelf")];
+    let chats: Vec<String> = channels
+        .iter()
+        .map(|(id, title)| {
+            format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{{"@type":"chatTypeSupergroup","supergroup_id":{},"is_channel":true}},"unread_count":0}}}}"#,
+                -id
+            )
+        })
+        .collect();
+    apply_all(session, sink, seq, &chats);
+    session.open_search();
+    let generation = session.search.begin_query("#dune");
+    session.search.filters.scope = quill::search_filters::SearchScope::PublicPosts;
+    session.search.begin_public_scope();
+    let extra = session.request_search(RequestPurpose::SearchPublicMessagesByTag, generation);
+    let post = |id: i64, chat: i64, date: i64, body: &str| {
+        format!(
+            r#"{{"id":{id},"chat_id":{chat},"date":{date},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{body}","entities":[]}}}}}}"#
+        )
+    };
+    let found = vec![format!(
+        r#"{{"@type":"foundMessages","@extra":"{}","total_count":2,"next_offset":"","messages":[{},{}]}}"#,
+        extra.0,
+        post(
+            12,
+            -1001,
+            1_790_300_000,
+            "#dune part two: why the desert power still works on screen."
+        ),
+        post(
+            7,
+            -1002,
+            1_790_000_000,
+            "Reading order for #dune and everything after the first book."
+        ),
+    )];
+    apply_all(session, sink, seq, &found);
 }

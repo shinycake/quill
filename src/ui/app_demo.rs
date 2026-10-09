@@ -584,7 +584,9 @@ pub(super) fn demo_seed_for(
         ScreenshotDemo::ReadyJumpDate
         | ScreenshotDemo::ReadySearchFrom
         | ScreenshotDemo::ReadySearchFromHits
-        | ScreenshotDemo::ReadySearchFilters => (
+        | ScreenshotDemo::ReadySearchFilters
+        | ScreenshotDemo::ReadySearchFrequent
+        | ScreenshotDemo::ReadySearchPublic => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — find in history (injected, no live Telegram)".into(),

@@ -15,6 +15,7 @@ mod notifications;
 mod payments;
 mod requests;
 mod search;
+mod search_upgrades;
 mod send_permissions;
 mod service_preview;
 mod sessions;

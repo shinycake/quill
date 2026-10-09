@@ -551,6 +551,18 @@ impl Session {
                     err.code
                 ));
             }
+            Some(RequestPurpose::RemoveRecentlyFoundChat) => {
+                self.chat_action_error = Some(format!(
+                    "could not remove the recent search (error {})",
+                    err.code
+                ));
+            }
+            Some(RequestPurpose::RemoveTopChat | RequestPurpose::SetTopChatsDisabled) => {
+                self.chat_action_error = Some(format!(
+                    "could not update frequent contacts (error {})",
+                    err.code
+                ));
+            }
             Some(RequestPurpose::ClearRecentlyFoundChats) => {
                 self.chat_action_error = Some(format!(
                     "could not clear recent searches (error {})",
@@ -1245,9 +1257,15 @@ impl Session {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
                     self.search.accept_chats(Vec::new(), true);
                 }
-                Some(RequestPurpose::SearchMessages) => {
+                Some(
+                    RequestPurpose::SearchMessages
+                    | RequestPurpose::SearchPublicPosts
+                    | RequestPurpose::SearchPublicMessagesByTag,
+                ) => {
                     self.search.accept_messages(Vec::new(), true);
                 }
+                // The supplement failing changes nothing the user sees.
+                Some(RequestPurpose::SearchChatsOnServer) => {}
                 Some(RequestPurpose::SearchPublicChats) => {
                     self.search.accept_public_chats(Vec::new(), true);
                 }

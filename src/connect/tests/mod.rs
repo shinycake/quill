@@ -24,6 +24,7 @@ mod payments;
 mod proxy;
 mod registration;
 mod search;
+mod search_upgrades;
 mod settings;
 mod sponsored;
 mod sticker_tabs;

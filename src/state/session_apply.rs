@@ -56,6 +56,15 @@ impl Session {
             // ignored, never an error.
             EnvelopePayload::UpdateOption { name, value } => {
                 self.storage_limits.apply_option(&name, &value);
+                if name == "disable_top_chats"
+                    && let OptionValue::Boolean(off) = &value
+                {
+                    self.search.top_chats_disabled = *off;
+                    if *off {
+                        self.search.top_chats.clear();
+                        self.search.top_menu = None;
+                    }
+                }
                 if name == "my_id"
                     && let OptionValue::Integer(id) = &value
                     && *id > 0
@@ -1512,7 +1521,13 @@ impl Session {
                 ..
             } => {
                 if self.search.matches_generation(pending)
-                    && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchMessages)
+                    && matches!(
+                        pending.map(|p| p.purpose),
+                        Some(
+                            RequestPurpose::SearchMessages
+                                | RequestPurpose::SearchPublicMessagesByTag
+                        )
+                    )
                 {
                     for message in &messages {
                         self.remember_files(&message.files);
@@ -1531,6 +1546,24 @@ impl Session {
                     self.recent_calls_offset = next_offset;
                     self.recent_calls_loading = false;
                     self.recent_calls_error = false;
+                }
+            }
+            // `searchPublicPosts` answer: posts of public channels; an
+            // exhausted free quota is flagged, never paid for.
+            EnvelopePayload::FoundPublicPosts {
+                messages,
+                are_limits_exceeded,
+                ..
+            } => {
+                if self.search.matches_generation(pending)
+                    && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchPublicPosts)
+                {
+                    for message in &messages {
+                        self.remember_files(&message.files);
+                    }
+                    let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
+                    self.search.public_limits_exceeded = are_limits_exceeded;
+                    self.search.accept_messages(hits, false);
                 }
             }
             // Phase C2i: `getUserPrivacySettingRules` answer — map the

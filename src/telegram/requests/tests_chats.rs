@@ -765,6 +765,8 @@ fn global_search_filters_shape_matches_1_8_67() {
             chat_type: SearchChatType::Groups,
             media: SearchMediaKind::Music,
             min_date: 1_700_000_000,
+            max_date: 0,
+            archived: false,
         },
     ))
     .unwrap();
@@ -787,4 +789,66 @@ fn global_search_filters_shape_matches_1_8_67() {
     ))
     .unwrap();
     assert_eq!(v["chat_type_filter"]["community_id"], 3);
+}
+
+#[test]
+fn archived_and_max_date_reach_search_messages() {
+    let v: Value = serde_json::from_str(&search_messages_filtered(
+        RequestId(68),
+        "dune",
+        20,
+        &SearchMessagesFilters {
+            archived: true,
+            max_date: 1_600_000_000,
+            ..SearchMessagesFilters::default()
+        },
+    ))
+    .unwrap();
+    assert_eq!(v["chat_list"], json!({"@type":"chatListArchive"}));
+    assert_eq!(v["max_date"], 1_600_000_000);
+    assert_eq!(v["min_date"], 0);
+}
+
+#[test]
+fn search_upgrade_request_shapes_match_1_8_67() {
+    let v: Value =
+        serde_json::from_str(&search_chats_on_server(RequestId(70), "alice", 20)).unwrap();
+    assert_eq!(v["@type"], "searchChatsOnServer");
+    assert_eq!(v["query"], "alice");
+    assert_eq!(v["type_filter"], Value::Null);
+    assert_eq!(v["limit"], 20);
+
+    let v: Value =
+        serde_json::from_str(&search_public_posts(RequestId(71), "dune", "", 20)).unwrap();
+    assert_eq!(v["@type"], "searchPublicPosts");
+    assert_eq!(v["query"], "dune");
+    assert_eq!(v["offset"], "");
+    assert_eq!(v["limit"], 20);
+    // Never pays: only free searches.
+    assert_eq!(v["star_count"], 0);
+
+    let v: Value = serde_json::from_str(&search_public_messages_by_tag(
+        RequestId(72),
+        "#dune",
+        "",
+        20,
+    ))
+    .unwrap();
+    assert_eq!(v["@type"], "searchPublicMessagesByTag");
+    assert_eq!(v["tag"], "#dune");
+
+    let v: Value = serde_json::from_str(&get_top_chats_users(RequestId(73), 20)).unwrap();
+    assert_eq!(v["@type"], "getTopChats");
+    assert_eq!(v["category"], json!({"@type":"topChatCategoryUsers"}));
+    assert_eq!(v["limit"], 20);
+
+    let v: Value = serde_json::from_str(&remove_top_chat_users(RequestId(74), ChatId(11))).unwrap();
+    assert_eq!(v["@type"], "removeTopChat");
+    assert_eq!(v["category"], json!({"@type":"topChatCategoryUsers"}));
+    assert_eq!(v["chat_id"], 11);
+
+    let v: Value =
+        serde_json::from_str(&remove_recently_found_chat(RequestId(75), ChatId(11))).unwrap();
+    assert_eq!(v["@type"], "removeRecentlyFoundChat");
+    assert_eq!(v["chat_id"], 11);
 }
