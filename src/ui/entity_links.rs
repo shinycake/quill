@@ -106,7 +106,7 @@ impl QuillApp {
                 let username = name.trim_start_matches('@');
                 if self.live.is_some() {
                     self.pending_deep_link = Some(format!("https://t.me/{username}"));
-                    self.status_note = format!("opening @{username}…").into();
+                    self.status_note = format!("opening @{username}…");
                 } else {
                     self.status_note = "can't open @mentions without a Telegram connection".into();
                 }

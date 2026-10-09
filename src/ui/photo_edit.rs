@@ -272,7 +272,7 @@ mod tests {
             center: (0.5, 0.5),
             width: 0.2,
         };
-        let out = render(&photo, CropRect::FULL, &[], &[dot.clone()]);
+        let out = render(&photo, CropRect::FULL, &[], std::slice::from_ref(&dot));
         assert_eq!(out.get_pixel(50, 25)[1], 255);
         assert_eq!(out.get_pixel(5, 5)[1], 0);
         // A 20 px wide square on a 100×50 photo stays 20 px wide when the

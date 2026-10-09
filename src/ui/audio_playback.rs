@@ -488,7 +488,7 @@ impl QuillApp {
             offset,
             cx,
         );
-        self.playback_path = Some(safe.clone().into());
+        self.playback_path = Some(safe.clone());
         if !listened {
             self.mark_voice_opened(chat_id, message_id);
         }
@@ -562,7 +562,7 @@ impl QuillApp {
             offset,
             cx,
         );
-        self.playback_path = Some(safe.clone().into());
+        self.playback_path = Some(safe.clone());
         let playing = self.start_player(&safe, offset);
         self.status_note = if playing {
             "playing audio".into()

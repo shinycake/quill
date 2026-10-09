@@ -430,14 +430,13 @@ impl QuillApp {
                 self.inline_results_open = false;
                 self.inline_results_selected = 0;
                 self.inline_query_armed = None;
-                if let Some(live) = self.live.as_mut() {
-                    if live
+                if let Some(live) = self.live.as_mut()
+                    && live
                         .driver
                         .send_inline_query_result(chat_id, query_id, &result_id)
                         .is_err()
-                    {
-                        self.status_note = "could not send the inline result".into();
-                    }
+                {
+                    self.status_note = "could not send the inline result".into();
                 }
                 cx.notify();
             }

@@ -186,7 +186,7 @@ impl QuillApp {
             self.status_note = "failed to send TDLib request".into();
         } else if progressed {
             if let Some(err) = err {
-                self.status_note = err.user_message().into();
+                self.status_note = err.user_message();
             } else if new_auth != prev_auth {
                 self.status_note = live_status_for(&new_auth);
             }
@@ -360,7 +360,7 @@ impl QuillApp {
         let stale_chats: Vec<i64> = self
             .live
             .as_mut()
-            .map(|live| live.driver.session.member_list_stale.drain(..).collect())
+            .map(|live| std::mem::take(&mut live.driver.session.member_list_stale))
             .unwrap_or_default();
         if self
             .member_dialog

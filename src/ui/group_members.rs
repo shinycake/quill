@@ -611,24 +611,22 @@ impl QuillApp {
             quill::telegram::envelope::ChannelMemberStatus::Administrator
                 | quill::telegram::envelope::ChannelMemberStatus::Creator
         );
-        if is_adminish {
-            if let Some(user_id) = user_id {
-                let me = self.session().and_then(|s| s.my_user_id);
-                let can_title = Some(user_id) == me
-                    || self
-                        .session()
-                        .is_some_and(|s| s.chat_can_manage_tags(chat_id));
-                if can_title {
-                    let tag = member.tag.clone();
-                    row = row.child(
-                        Button::new(format!("g1-member-title-{user_id}"))
-                            .label("Custom title")
-                            .ghost()
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.open_custom_title_dialog(chat_id, user_id, &tag, window, cx);
-                            })),
-                    );
-                }
+        if is_adminish && let Some(user_id) = user_id {
+            let me = self.session().and_then(|s| s.my_user_id);
+            let can_title = Some(user_id) == me
+                || self
+                    .session()
+                    .is_some_and(|s| s.chat_can_manage_tags(chat_id));
+            if can_title {
+                let tag = member.tag.clone();
+                row = row.child(
+                    Button::new(format!("g1-member-title-{user_id}"))
+                        .label("Custom title")
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_custom_title_dialog(chat_id, user_id, &tag, window, cx);
+                        })),
+                );
             }
         }
         if can_restrict {

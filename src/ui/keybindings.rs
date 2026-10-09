@@ -1255,7 +1255,7 @@ mod tests {
             reported(".", true, platform),
         ];
         for form in forms {
-            let (found, _) = keymap().bindings_for_input(&[form.clone()], &stack);
+            let (found, _) = keymap().bindings_for_input(std::slice::from_ref(&form), &stack);
             assert_eq!(
                 found.first().map(|b| b.action().name()),
                 Some("quill_ui::FormatBlockQuote"),

@@ -278,6 +278,26 @@ pub fn scrim() -> Rgba {
     pick_a(0x000000e6, 0x000000e6, None)
 }
 
+/// Telegram's seven built-in name colors (red, orange, violet, green,
+/// cyan, blue, pink) for a user's `accent_color_id`, tuned per mode for
+/// legibility on the bubble/background. Server palette ids (7+) fold onto
+/// the built-ins.
+pub fn peer_name_color(accent_color_id: i32) -> gpui_kit::Hsla {
+    const LIGHT: [u32; 7] = [
+        0xcc5049, 0xd67722, 0x955cdb, 0x40a920, 0x309eba, 0x368ad1, 0xc7508b,
+    ];
+    const DARK: [u32; 7] = [
+        0xff8a80, 0xffab5e, 0xc29bff, 0x7ad46d, 0x5cd0e8, 0x6fb7ff, 0xff86c2,
+    ];
+    let index = accent_color_id.rem_euclid(7) as usize;
+    let rgb = if dark() || high_contrast() {
+        DARK[index]
+    } else {
+        LIGHT[index]
+    };
+    hex(rgb).into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,24 +328,4 @@ mod tests {
         assert_eq!(text_primary(), hex(0xc9d1d9));
         assert_eq!(accent(), hex(0x58a6ff));
     }
-}
-
-/// Telegram's seven built-in name colors (red, orange, violet, green,
-/// cyan, blue, pink) for a user's `accent_color_id`, tuned per mode for
-/// legibility on the bubble/background. Server palette ids (7+) fold onto
-/// the built-ins.
-pub fn peer_name_color(accent_color_id: i32) -> gpui_kit::Hsla {
-    const LIGHT: [u32; 7] = [
-        0xcc5049, 0xd67722, 0x955cdb, 0x40a920, 0x309eba, 0x368ad1, 0xc7508b,
-    ];
-    const DARK: [u32; 7] = [
-        0xff8a80, 0xffab5e, 0xc29bff, 0x7ad46d, 0x5cd0e8, 0x6fb7ff, 0xff86c2,
-    ];
-    let index = accent_color_id.rem_euclid(7) as usize;
-    let rgb = if dark() || high_contrast() {
-        DARK[index]
-    } else {
-        LIGHT[index]
-    };
-    hex(rgb).into()
 }

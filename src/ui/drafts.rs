@@ -238,7 +238,7 @@ impl QuillApp {
                         .histories
                         .get(&chat_id.0)
                         .and_then(|history| history.messages.get(&id.0))
-                        .map(|message| effective_preview(message))
+                        .map(effective_preview)
                         .filter(|text| !text.is_empty())
                         .unwrap_or_else(|| "message".into());
                     (id, text)

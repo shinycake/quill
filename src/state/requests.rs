@@ -422,7 +422,19 @@ pub struct ChatSponsoredMessages {
     /// Schema `messages_between`: minimum number of ordinary messages between
     /// shown sponsored rows (0 = after all ordinary messages).
     pub messages_between: i32,
+    /// Ids already reported to TDLib as viewed (`viewMessages`): an ad is
+    /// counted once per fetched list, however often it scrolls into view.
+    pub viewed: std::collections::HashSet<i64>,
+    /// Ids the user reported or hid; never shown again for this list.
+    pub dismissed: std::collections::HashSet<i64>,
+    /// When the response arrived (tdesktop `lastReceived`): refetches inside
+    /// `SPONSORED_REFETCH_AFTER` are skipped.
+    pub fetched_at: Option<std::time::Instant>,
 }
+
+/// tdesktop `kRequestTimeLimit`: a chat's sponsored messages are not
+/// requested again for five minutes.
+pub const SPONSORED_REFETCH_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 impl ChatSponsoredMessages {
     /// Rows in TDLib's response order. The schema does not promise an order,

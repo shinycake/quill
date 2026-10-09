@@ -99,11 +99,11 @@ impl QuillApp {
             if let Err(err) = live.driver.set_archive_chat_list_settings(settings) {
                 self.status_note = format!("archive setting failed: {err:?}");
             }
-        } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(mut settings) = session.archive_chat_list_settings {
-                archive_setting_set(&mut settings, index, on);
-                session.archive_chat_list_settings = Some(settings);
-            }
+        } else if let Some(session) = self.demo_session.as_mut()
+            && let Some(mut settings) = session.archive_chat_list_settings
+        {
+            archive_setting_set(&mut settings, index, on);
+            session.archive_chat_list_settings = Some(settings);
         }
         cx.notify();
     }

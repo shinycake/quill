@@ -397,3 +397,11 @@ fn b6_option_and_optimize_storage_shapes_match_1_8_67() {
     assert_eq!(v["return_deleted_file_statistics"], true);
     assert_eq!(v["chat_limit"], 50);
 }
+
+#[test]
+fn toggle_has_sponsored_messages_enabled_matches_1_8_67() {
+    let v: serde_json::Value =
+        serde_json::from_str(&toggle_has_sponsored_messages_enabled(RequestId(60), false)).unwrap();
+    assert_eq!(v["@type"], "toggleHasSponsoredMessagesEnabled");
+    assert_eq!(v["has_sponsored_messages_enabled"], false);
+}

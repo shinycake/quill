@@ -19,7 +19,6 @@ use zeroize::Zeroize;
 /// `checkAuthenticationPasswordRecoveryCode` is deliberately not called:
 /// `recoverAuthenticationPassword` validates the code itself, so the extra
 /// round-trip adds nothing.
-
 /// Slice A10: wire Enter in the recovery-code field to submit. Called
 /// from `QuillApp::new_with_demo` next to the other auth-input
 /// subscriptions.

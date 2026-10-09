@@ -694,6 +694,9 @@ pub struct Session {
     pub draft_clears: Vec<ChatId>,
     /// Sponsored messages per chat (`getChatSponsoredMessages`).
     pub sponsored: HashMap<i64, ChatSponsoredMessages>,
+    /// Set once Telegram confirmed `reportSponsoredResultAdsHidden`: no ads
+    /// are fetched or shown for the rest of this session.
+    pub sponsored_hidden: bool,
     /// In-flight sponsored-message report waiting on an option choice.
     pub sponsored_report: Option<SponsoredReportFlight>,
     /// Report target chosen by the user (chat + sponsored message id); cleared
@@ -1249,6 +1252,7 @@ impl Session {
             draft_dirty: HashSet::new(),
             draft_clears: Vec::new(),
             sponsored: HashMap::new(),
+            sponsored_hidden: false,
             sponsored_report: None,
             sponsored_report_target: None,
             last_sponsored_report: None,
