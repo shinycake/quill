@@ -12,6 +12,7 @@ mod core;
 mod deep_links;
 mod emoji_sets;
 mod gifs;
+mod group_admin;
 mod group_calls;
 mod groups;
 mod live;

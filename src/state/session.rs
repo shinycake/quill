@@ -916,6 +916,25 @@ pub struct Session {
     /// 2733/2746), keyed by supergroup id. Drives the "Approve new
     /// members" toggle.
     pub supergroup_join_by_request: HashMap<i64, bool>,
+    /// B7: `supergroup.join_to_send_messages` (schema 1.8.67, line 2746),
+    /// keyed by supergroup id.
+    pub supergroup_join_to_send: HashMap<i64, bool>,
+    /// B7: the viewer's own `basicGroup.status`, keyed by basic group id.
+    pub basic_group_status: HashMap<i64, ChannelMemberStatus>,
+    /// B7: `can_change_info` of the viewer's administrator status in a
+    /// basic group.
+    pub basic_group_change_info_right: HashMap<i64, bool>,
+    /// B7: `basicGroup.is_active` (false after the upgrade).
+    pub basic_group_active: HashMap<i64, bool>,
+    /// B7: `chat.available_reactions` / `updateChatAvailableReactions`,
+    /// keyed by chat id.
+    pub chat_available_reactions: HashMap<i64, crate::telegram::envelope::ChatAvailableReactions>,
+    /// B7: `updateActiveEmojiReactions` — the emoji usable as reactions.
+    pub active_emoji_reactions: Vec<String>,
+    /// B7: steps waiting for a group-admin request to succeed.
+    pub admin_followups: Vec<(RequestId, AdminFollowup)>,
+    /// B7: finished basic group upgrades, `(old chat id, new chat id)`.
+    pub chat_upgrades: Vec<(i64, i64)>,
     /// Slice G1: `supergroup.is_broadcast_group` (schema 1.8.67, lines
     /// 2736/2746), keyed by supergroup id. Set by
     /// `toggleSupergroupIsBroadcastGroup` (one-way upgrade).
@@ -1335,6 +1354,14 @@ impl Session {
             deep_link_original: String::new(),
             proxy: Default::default(),
             supergroup_join_by_request: HashMap::new(),
+            supergroup_join_to_send: HashMap::new(),
+            basic_group_status: HashMap::new(),
+            basic_group_change_info_right: HashMap::new(),
+            basic_group_active: HashMap::new(),
+            chat_available_reactions: HashMap::new(),
+            active_emoji_reactions: Vec::new(),
+            admin_followups: Vec::new(),
+            chat_upgrades: Vec::new(),
             supergroup_is_broadcast: HashMap::new(),
             add_members_failed: HashMap::new(),
             member_list_stale: Vec::new(),

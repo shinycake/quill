@@ -927,6 +927,27 @@ pub enum RequestPurpose {
     /// can be a personal channel (`getSuitablePersonalChats`). Response
     /// is `chats`; ids land in `Session::profile_chat_lists`.
     GetProfileChats(ProfileChatsKind),
+    /// B7: `toggleSupergroupIsForum` (line 15218). Response `ok`; the new
+    /// `is_forum` arrives via `updateSupergroup`.
+    ToggleSupergroupIsForum,
+    /// B7: `toggleSupergroupIsAllHistoryAvailable` (line 15191). Applied
+    /// optimistically; rolled back on error.
+    ToggleSupergroupIsAllHistoryAvailable,
+    /// B7: `toggleSupergroupJoinToSendMessages` (line 15180). Optimistic.
+    ToggleSupergroupJoinToSendMessages,
+    /// B7: `toggleSupergroupHasHiddenMembers` (line 15207). Optimistic.
+    ToggleSupergroupHasHiddenMembers,
+    /// B7: `toggleChatHasProtectedContent` (line 13504). Optimistic.
+    ToggleChatHasProtectedContent,
+    /// B7: `setChatAvailableReactions` (line 13527). Optimistic.
+    SetChatAvailableReactions,
+    /// B7: `setChatDiscussionGroup` (line 13539). Response `ok`; the new
+    /// link arrives via `updateSupergroupFullInfo`.
+    SetChatDiscussionGroup,
+    /// B7: `upgradeBasicGroupChatToSupergroupChat` (line 13343). The
+    /// answer is the new supergroup `chat`; pending `chat_id` is the old
+    /// basic group chat.
+    UpgradeBasicGroup,
     /// B10: `setBirthdate` (schema 1.8.67, line 14841). Response is
     /// `ok`; the new value arrives via `updateUserFullInfo`.
     SetBirthdate,

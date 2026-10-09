@@ -131,6 +131,7 @@ impl Session {
                 video_chat,
                 has_welcome_messages,
                 has_protected_content,
+                available_reactions,
                 has_scheduled_messages,
                 is_translatable,
                 unread_mention_count,
@@ -142,6 +143,17 @@ impl Session {
                 last_message,
             } => {
                 self.set_chat_protected(chat_id.0, has_protected_content);
+                if let Some(setting) = available_reactions {
+                    self.chat_available_reactions.insert(chat_id.0, setting);
+                }
+                // B7: the answer to `upgradeBasicGroupChatToSupergroupChat`
+                // is the new supergroup chat; remember `old -> new`.
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::UpgradeBasicGroup
+                    && let Some(old) = pending.chat_id
+                {
+                    self.chat_upgrades.push((old.0, chat_id.0));
+                }
                 self.set_chat_has_scheduled(chat_id.0, has_scheduled_messages);
                 self.set_chat_translatable(chat_id.0, is_translatable);
                 self.set_chat_action_bar(chat_id.0, action_bar);
@@ -309,24 +321,33 @@ impl Session {
                 can_set_sticker_set,
                 sticker_set_id,
                 custom_emoji_sticker_set_id,
-            } => self.apply_supergroup_full_info(
-                description,
-                member_count,
-                linked_chat_id,
-                slow_mode_delay,
-                slow_mode_delay_expires_in,
-                my_boost_count,
-                unrestrict_boost_count,
-                can_get_statistics,
-                has_aggressive_anti_spam_enabled,
-                can_toggle_aggressive_anti_spam,
-                can_set_sticker_set,
-                sticker_set_id,
-                custom_emoji_sticker_set_id,
-                pending,
-                extra,
-                seq,
-            ),
+                admin,
+            } => {
+                let full_info_group = pending
+                    .filter(|p| p.purpose == RequestPurpose::GetSupergroupFullInfo)
+                    .and_then(|p| p.supergroup_id);
+                self.apply_supergroup_full_info(
+                    description,
+                    member_count,
+                    linked_chat_id,
+                    slow_mode_delay,
+                    slow_mode_delay_expires_in,
+                    my_boost_count,
+                    unrestrict_boost_count,
+                    can_get_statistics,
+                    has_aggressive_anti_spam_enabled,
+                    can_toggle_aggressive_anti_spam,
+                    can_set_sticker_set,
+                    sticker_set_id,
+                    custom_emoji_sticker_set_id,
+                    pending,
+                    extra,
+                    seq,
+                );
+                if let Some(supergroup_id) = full_info_group {
+                    self.merge_full_admin(supergroup_id, admin);
+                }
+            }
             // Parity slice: `updateSupergroupFullInfo` — the update carries
             // its own id, so it applies whenever it arrives (no pending
             // correlation).
@@ -345,25 +366,29 @@ impl Session {
                 can_set_sticker_set,
                 sticker_set_id,
                 custom_emoji_sticker_set_id,
-            } => self.apply_update_supergroup_full_info(
-                supergroup_id,
-                description,
-                member_count,
-                linked_chat_id,
-                slow_mode_delay,
-                slow_mode_delay_expires_in,
-                my_boost_count,
-                unrestrict_boost_count,
-                can_get_statistics,
-                has_aggressive_anti_spam_enabled,
-                can_toggle_aggressive_anti_spam,
-                can_set_sticker_set,
-                sticker_set_id,
-                custom_emoji_sticker_set_id,
-                pending,
-                extra,
-                seq,
-            ),
+                admin,
+            } => {
+                self.apply_update_supergroup_full_info(
+                    supergroup_id,
+                    description,
+                    member_count,
+                    linked_chat_id,
+                    slow_mode_delay,
+                    slow_mode_delay_expires_in,
+                    my_boost_count,
+                    unrestrict_boost_count,
+                    can_get_statistics,
+                    has_aggressive_anti_spam_enabled,
+                    can_toggle_aggressive_anti_spam,
+                    can_set_sticker_set,
+                    sticker_set_id,
+                    custom_emoji_sticker_set_id,
+                    pending,
+                    extra,
+                    seq,
+                );
+                self.merge_full_admin(supergroup_id, admin);
+            }
             // Slice (communities backend core): `communityId` (schema 1.8.67,
             // line 2264) is the `createCommunity` response — the driver
             // chains it into `loadCommunityFullInfo`; nothing to reduce.
@@ -405,6 +430,17 @@ impl Session {
                 chat_id,
                 has_protected_content,
             } => self.set_chat_protected(chat_id, has_protected_content),
+            // B7: allowed reactions and the active emoji list.
+            EnvelopePayload::UpdateChatAvailableReactions {
+                chat_id,
+                available_reactions,
+            } => {
+                self.chat_available_reactions
+                    .insert(chat_id, available_reactions);
+            }
+            EnvelopePayload::UpdateActiveEmojiReactions { emojis } => {
+                self.active_emoji_reactions = emojis;
+            }
             EnvelopePayload::UpdateChatHasScheduledMessages {
                 chat_id,
                 has_scheduled_messages,
@@ -1655,9 +1691,16 @@ impl Session {
             EnvelopePayload::UpdateBasicGroup {
                 basic_group_id,
                 member_count,
+                status,
+                can_change_info,
+                is_active,
             } => {
                 self.basic_group_member_counts
                     .insert(basic_group_id, member_count);
+                self.basic_group_status.insert(basic_group_id, status);
+                self.basic_group_change_info_right
+                    .insert(basic_group_id, can_change_info.unwrap_or(false));
+                self.basic_group_active.insert(basic_group_id, is_active);
             }
             EnvelopePayload::UpdateChatOnlineMemberCount {
                 chat_id,
@@ -1684,7 +1727,10 @@ impl Session {
                 is_broadcast_group,
                 sign_messages,
                 show_message_sender,
+                join_to_send_messages,
             } => {
+                self.supergroup_join_to_send
+                    .insert(supergroup_id, join_to_send_messages);
                 if member_count > 0 {
                     self.supergroup_member_counts
                         .insert(supergroup_id, member_count);
@@ -1730,7 +1776,10 @@ impl Session {
                 is_broadcast_group,
                 sign_messages,
                 show_message_sender,
+                join_to_send_messages,
             } => {
+                self.supergroup_join_to_send
+                    .insert(supergroup_id, join_to_send_messages);
                 self.set_supergroup_forum_tabs(supergroup_id, has_forum_tabs);
                 self.apply_supergroup(
                     supergroup_id,

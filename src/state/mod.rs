@@ -83,6 +83,7 @@ mod session_date_jump;
 mod session_files;
 mod session_forum;
 mod session_forward;
+mod session_group_admin;
 mod session_history_window;
 mod session_members;
 mod session_message_menu;
@@ -120,6 +121,7 @@ pub use requests::*;
 pub use search_types::*;
 pub use session::*;
 pub(crate) use session_chat_search::history_message;
+pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;
 pub use session_message_menu::{
     Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,

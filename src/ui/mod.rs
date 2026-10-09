@@ -116,6 +116,8 @@ mod folders;
 mod forward;
 mod gifs_ui;
 mod group_admin_panels;
+mod group_admin_settings;
+mod group_admin_settings_demo;
 mod group_call_panel;
 mod group_call_ui;
 mod group_calls;

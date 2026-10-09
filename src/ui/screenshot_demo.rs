@@ -679,6 +679,10 @@ pub enum ScreenshotDemo {
     /// edit-contact|birthday|channel|share|gallery|similar`; injected data,
     /// no live Telegram).
     ReadyProfilePanels,
+    /// B7: group and channel settings dialog
+    /// (`QUILL_DEMO_GROUP_ADMIN=group|channel|basic|reactions|discussion|
+    /// linked|confirm`; injected data, no live Telegram).
+    ReadyGroupAdminSettings,
     /// Slice A5: like `ReadyProfileEdit`, but the username field holds a
     /// freshly-checked value with a seeded `checkChatUsernameResultOk`
     /// verdict — intended for a taller capture
