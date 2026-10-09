@@ -453,6 +453,16 @@ impl QuillApp {
             }
             return;
         }
+        // Selection mode first: Escape leaves it before a reply or edit
+        // header goes (tdesktop `HistoryWidget::escape`).
+        if self
+            .session()
+            .and_then(|session| session.open_chat)
+            .is_some_and(|chat| self.selecting_in(chat))
+        {
+            self.clear_forward(window, cx);
+            return;
+        }
         if self.pending_reply.is_some() {
             self.clear_reply(cx);
             return;

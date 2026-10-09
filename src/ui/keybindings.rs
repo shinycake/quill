@@ -1,11 +1,14 @@
 use super::actions::{
-    CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
-    ComposerPastePlain, FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear,
-    FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, LoadOlder,
-    LockApp, MinimizeWindow, NextChat, OpenChatSearch, OpenHelp, OpenSearch, OpenSettings,
-    OpenShortcuts, PrevChat, QuitApp, ToggleFullscreen, ToggleTheme, ViewerCopy,
-    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
-    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
+    ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer, FocusSidebar, FormatBlockQuote,
+    FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough,
+    FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat,
+    LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder, OpenArchive,
+    OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages, OpenSearch,
+    OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious,
+    ShowChatMenu, ShowChatPreview, ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
+    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
+    ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -99,7 +102,9 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "focus-sidebar",
         label: "Focus chat list",
-        defaults: &["cmd-1", "ctrl-1"],
+        // Cmd/Ctrl+1..8 open the pinned chats (tdesktop), so focusing the
+        // list moved to the Alt variant.
+        defaults: &["cmd-alt-1", "ctrl-alt-1"],
     },
     RebindableAction {
         id: "focus-composer",
@@ -109,17 +114,18 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "next-chat",
         label: "Next chat",
-        defaults: &["alt-down", "ctrl-tab"],
+        defaults: &["alt-down", "ctrl-tab", primary!("pagedown")],
     },
     RebindableAction {
         id: "prev-chat",
         label: "Previous chat",
-        defaults: &["alt-up", "ctrl-shift-tab"],
+        defaults: &["alt-up", "ctrl-shift-tab", primary!("pageup")],
     },
     RebindableAction {
         id: "load-older",
         label: "Load older messages",
-        defaults: &["cmd-up", "ctrl-up"],
+        // Cmd/Ctrl+Up replies to the previous message (tdesktop).
+        defaults: &["alt-pageup"],
     },
     RebindableAction {
         id: "open-search",
@@ -293,10 +299,12 @@ fn paste_plain_chord() -> &'static str {
 /// (scoped to the composer's key context so it overrides quick switch only
 /// there) and paste-as-plain-text.
 fn composer_bindings() -> Vec<KeyBinding> {
-    vec![
+    let mut bindings = vec![
         KeyBinding::new(link_chord(), ComposerEditLink, Some(COMPOSER_INPUT_CONTEXT)),
         KeyBinding::new(paste_plain_chord(), ComposerPastePlain, None),
-    ]
+    ];
+    bindings.extend(composer_scoped_bindings());
+    bindings
 }
 
 /// Fixed bindings: window chrome and app lifecycle — not rebindable.
@@ -322,7 +330,22 @@ fn fixed_bindings() -> Vec<KeyBinding> {
 }
 
 fn default_bindings() -> Vec<KeyBinding> {
-    shortcut_rows().into_iter().map(|row| row.binding).collect()
+    let mut bindings: Vec<KeyBinding> =
+        shortcut_rows().into_iter().map(|row| row.binding).collect();
+    bindings.extend(composer_scoped_bindings());
+    bindings
+}
+
+/// The shortcut-pack bindings that are not user-rebindable. They are
+/// installed with the fixed chrome and claim their chords first, so no
+/// rebindable action can land on one.
+fn pack_bindings() -> Vec<KeyBinding> {
+    chat_nav_rows()
+        .into_iter()
+        .chain(pinned_chat_rows())
+        .chain(message_rows())
+        .map(|row| row.binding)
+        .collect()
 }
 
 /// The keystrokes reserved by the fixed (window-chrome/app-lifecycle)
@@ -330,6 +353,7 @@ fn default_bindings() -> Vec<KeyBinding> {
 fn fixed_keystrokes() -> Vec<Keystroke> {
     fixed_bindings()
         .iter()
+        .chain(pack_bindings().iter())
         .flat_map(|b| b.keystrokes().iter().map(|k| k.inner().clone()))
         .collect()
 }
@@ -365,9 +389,9 @@ pub fn conflict_message(chord: &str, conflict: &KeybindingConflict) -> String {
         KeybindingConflict::Invalid => {
             format!("{chord} isn't a valid shortcut and was not applied.")
         }
-        KeybindingConflict::FixedChrome => format!(
-            "{chord} is reserved for quit, close, minimize, or fullscreen and was not applied."
-        ),
+        KeybindingConflict::FixedChrome => {
+            format!("{chord} is reserved for a built-in shortcut and was not applied.")
+        }
         KeybindingConflict::Rebindable { other_label } => {
             format!("{chord} is already used by {other_label} and was not applied.")
         }
@@ -623,6 +647,7 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     // cmd-q/cmd-w/cmd-m/f11 — or two rebindable actions on one chord —
     // must never be added. `resolve_keybindings` drops those.
     bindings.extend(fixed_bindings());
+    bindings.extend(pack_bindings());
     for row in resolve_keybindings(customs) {
         for chord in row.live {
             if let Some(kb) = keybinding_for(row.id, &chord) {
@@ -684,8 +709,8 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             ToggleFullscreen,
         ),
         // Navigation.
-        row("cmd-1", "Focus chat list", "Navigation", FocusSidebar),
-        row("ctrl-1", "Focus chat list", "Navigation", FocusSidebar),
+        row("cmd-alt-1", "Focus chat list", "Navigation", FocusSidebar),
+        row("ctrl-alt-1", "Focus chat list", "Navigation", FocusSidebar),
         row(
             "cmd-l",
             "Focus message composer",
@@ -700,10 +725,11 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         ),
         row("alt-down", "Next chat", "Navigation", NextChat),
         row("ctrl-tab", "Next chat", "Navigation", NextChat),
+        row(primary!("pagedown"), "Next chat", "Navigation", NextChat),
         row("alt-up", "Previous chat", "Navigation", PrevChat),
         row("ctrl-shift-tab", "Previous chat", "Navigation", PrevChat),
-        row("cmd-up", "Load older messages", "Navigation", LoadOlder),
-        row("ctrl-up", "Load older messages", "Navigation", LoadOlder),
+        row(primary!("pageup"), "Previous chat", "Navigation", PrevChat),
+        row("alt-pageup", "Load older messages", "Navigation", LoadOlder),
         // Search.
         row("cmd-k", "Quick switch chats", "Search", OpenSearch),
         row("ctrl-k", "Quick switch chats", "Search", OpenSearch),
@@ -786,7 +812,149 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             .iter()
             .map(|chord| row(chord, "Quote", "Composer", FormatBlockQuote)),
     );
+    // The reference dialog prints a heading whenever the section changes,
+    // so each group goes in next to its own section.
+    let at = rows
+        .iter()
+        .position(|r| r.section == "Search")
+        .unwrap_or(rows.len());
+    rows.splice(
+        at..at,
+        chat_nav_rows().into_iter().chain(pinned_chat_rows()),
+    );
+    let at = rows
+        .iter()
+        .position(|r| r.section == "Media viewer")
+        .unwrap_or(rows.len());
+    rows.splice(at..at, message_rows());
     rows
+}
+
+/// Chat-list navigation chords from tdesktop's `fillDefaults`: first/last
+/// chat, folders, Saved Messages, Archive, Contacts, read, menu, preview.
+/// Not user-rebindable (they are claimed like window chrome).
+fn chat_nav_rows() -> Vec<ShortcutRow> {
+    vec![
+        row(primary!("alt-home"), "First chat", "Navigation", FirstChat),
+        row(primary!("alt-end"), "Last chat", "Navigation", LastChat),
+        row("ctrl-shift-up", "Previous folder", "Navigation", PrevFolder),
+        row("ctrl-shift-down", "Next folder", "Navigation", NextFolder),
+        row(
+            primary!("0"),
+            "Open Saved Messages",
+            "Navigation",
+            OpenSavedMessages,
+        ),
+        row(primary!("9"), "Open Archive", "Navigation", OpenArchive),
+        row(primary!("j"), "Open Contacts", "Navigation", OpenContacts),
+        row(
+            primary!("r"),
+            "Mark chat as read",
+            "Navigation",
+            MarkChatRead,
+        ),
+        row(primary!("\\"), "Chat menu", "Navigation", ShowChatMenu),
+        row(primary!("]"), "Chat preview", "Navigation", ShowChatPreview),
+    ]
+}
+
+/// Cmd/Ctrl+1..8: the Nth pinned chat of the list on screen
+/// (`Command::ChatPinned1..8`).
+fn pinned_chat_rows() -> Vec<ShortcutRow> {
+    let chords = [
+        primary!("1"),
+        primary!("2"),
+        primary!("3"),
+        primary!("4"),
+        primary!("5"),
+        primary!("6"),
+        primary!("7"),
+        primary!("8"),
+    ];
+    let labels = [
+        "Open pinned chat 1",
+        "Open pinned chat 2",
+        "Open pinned chat 3",
+        "Open pinned chat 4",
+        "Open pinned chat 5",
+        "Open pinned chat 6",
+        "Open pinned chat 7",
+        "Open pinned chat 8",
+    ];
+    chords
+        .into_iter()
+        .zip(labels)
+        .enumerate()
+        .map(|(index, (chord, label))| row(chord, label, "Navigation", OpenPinnedChat { index }))
+        .collect()
+}
+
+/// The message-history shortcuts: reply navigation, attach, scrolling and
+/// deleting a selection (tdesktop `HistoryWidget::keyPressEvent`,
+/// `HistoryInner::keyPressEvent`).
+fn message_rows() -> Vec<ShortcutRow> {
+    vec![
+        row(
+            primary!("up"),
+            "Reply to previous message",
+            "Messages",
+            ReplyToPrevious,
+        ),
+        row(
+            primary!("down"),
+            "Reply to next message",
+            "Messages",
+            ReplyToNext,
+        ),
+        row(primary!("o"), "Attach file", "Messages", AttachFile),
+        row("pageup", "Scroll up a page", "Messages", HistoryPageUp),
+        row(
+            "pagedown",
+            "Scroll down a page",
+            "Messages",
+            HistoryPageDown,
+        ),
+        row(
+            "home",
+            "Scroll to the first message",
+            "Messages",
+            HistoryToTop,
+        ),
+        row(
+            "end",
+            "Scroll to the latest message",
+            "Messages",
+            HistoryToBottom,
+        ),
+        row(
+            "delete",
+            "Delete selected messages",
+            "Messages",
+            DeleteSelection,
+        ),
+        row(
+            "backspace",
+            "Delete selected messages",
+            "Messages",
+            DeleteSelection,
+        ),
+    ]
+}
+
+/// Chords the composer's own `Input` context binds (page keys, the Cmd/Ctrl
+/// up/down caret jumps on macOS, bracket indent). A binding without a
+/// context loses to those, so these twins sit in the composer's context
+/// and added after the kit's; each handler propagates when the composer
+/// should keep the key, which lets the kit binding run next.
+fn composer_scoped_bindings() -> Vec<KeyBinding> {
+    let ctx = Some(COMPOSER_INPUT_CONTEXT);
+    vec![
+        KeyBinding::new(primary!("up"), ReplyToPrevious, ctx),
+        KeyBinding::new(primary!("down"), ReplyToNext, ctx),
+        KeyBinding::new("pageup", HistoryPageUp, ctx),
+        KeyBinding::new("pagedown", HistoryPageDown, ctx),
+        KeyBinding::new(primary!("]"), ShowChatPreview, ctx),
+    ]
 }
 
 /// kit Phase 7: the application menus — File / Edit / View / Window / Help,
@@ -881,11 +1049,11 @@ mod tests {
     // gpui's `#[test]` proc macro, which would shadow the builtin test
     // attribute and fail macro expansion ("recursion limit reached").
     use super::{
-        Action, KeybindingConflict, Keystroke, Modifiers, QuitApp, REBINDABLE_ACTIONS,
-        canonical_event_chord, capture_active, close_appearance_capture, composer_bindings,
-        conflict_message, context_menu_captures_key, default_bindings, fixed_keystrokes,
-        invalidate_account_keybindings, keybinding_conflict, keybinding_for, resolve_keybindings,
-        same_chord,
+        Action, KeybindingConflict, Keystroke, Modifiers, OpenPinnedChat, QuitApp,
+        REBINDABLE_ACTIONS, canonical_event_chord, capture_active, close_appearance_capture,
+        composer_bindings, composer_scoped_bindings, conflict_message, context_menu_captures_key,
+        default_bindings, fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict,
+        keybinding_for, resolve_keybindings, same_chord,
     };
     use quill::settings::CustomKeybinding;
 
@@ -899,7 +1067,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 51);
+        assert_eq!(defaults.len(), 84);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
@@ -951,9 +1119,9 @@ mod tests {
 
     #[test]
     fn account_overrides_and_empty_prefs_resolve_independently() {
-        let account_a = vec![custom("focus-composer", "ctrl-9")];
+        let account_a = vec![custom("focus-composer", "ctrl-alt-9")];
         let account_b = vec![];
-        let account_c = vec![custom("focus-composer", "ctrl-8")];
+        let account_c = vec![custom("focus-composer", "ctrl-alt-8")];
         // Each apply rebuilds from this resolver, never from the prior keymap.
         for prefs in [&account_a, &account_b, &account_c, &account_b, &account_a] {
             let resolved = resolve_keybindings(prefs);
@@ -966,7 +1134,7 @@ mod tests {
                 assert!(!resolved.iter().any(|row| {
                     row.live
                         .iter()
-                        .any(|chord| chord == "ctrl-9" || chord == "ctrl-8")
+                        .any(|chord| chord == "ctrl-alt-9" || chord == "ctrl-alt-8")
                 }));
             } else {
                 let focus = resolved
@@ -1050,10 +1218,10 @@ mod tests {
             })
         );
         // Moving Focus composer off ctrl-l frees it. The new chord is taken.
-        let moved = vec![custom("focus-composer", "ctrl-9")];
+        let moved = vec![custom("focus-composer", "ctrl-alt-9")];
         assert_eq!(keybinding_conflict("open-search", "ctrl-l", &moved), None);
         assert_eq!(
-            keybinding_conflict("open-search", "ctrl-9", &moved),
+            keybinding_conflict("open-search", "ctrl-alt-9", &moved),
             Some(KeybindingConflict::Rebindable {
                 other_label: "Focus composer",
             })
@@ -1287,6 +1455,109 @@ mod tests {
             resolve(&chord, &[]).as_deref(),
             Some("quill_ui::OpenSearch")
         );
+    }
+
+    #[test]
+    fn shortcut_pack_chords_resolve_to_their_actions() {
+        let cases = [
+            (primary("up"), "ReplyToPrevious"),
+            (primary("down"), "ReplyToNext"),
+            (primary("o"), "AttachFile"),
+            ("pageup".to_string(), "HistoryPageUp"),
+            ("pagedown".to_string(), "HistoryPageDown"),
+            ("home".to_string(), "HistoryToTop"),
+            ("end".to_string(), "HistoryToBottom"),
+            ("delete".to_string(), "DeleteSelection"),
+            ("backspace".to_string(), "DeleteSelection"),
+            (primary("0"), "OpenSavedMessages"),
+            (primary("9"), "OpenArchive"),
+            (primary("j"), "OpenContacts"),
+            (primary("r"), "MarkChatRead"),
+            (primary("\\"), "ShowChatMenu"),
+            (primary("]"), "ShowChatPreview"),
+            (primary("alt-home"), "FirstChat"),
+            (primary("alt-end"), "LastChat"),
+            ("ctrl-shift-up".to_string(), "PrevFolder"),
+            ("ctrl-shift-down".to_string(), "NextFolder"),
+            (primary("pageup"), "PrevChat"),
+            (primary("pagedown"), "NextChat"),
+        ];
+        for (chord, action) in cases {
+            assert_eq!(
+                resolve(&chord, &[]).as_deref(),
+                Some(format!("quill_ui::{action}").as_str()),
+                "{chord}"
+            );
+        }
+    }
+
+    #[test]
+    fn pinned_chord_n_opens_pinned_chat_n() {
+        let keymap = keymap();
+        for n in 1..=8usize {
+            let input = [Keystroke::parse(&primary(&n.to_string())).unwrap()];
+            let (found, _) = keymap.bindings_for_input(&input, &[]);
+            let action = found.first().unwrap().action();
+            assert!(
+                action.partial_eq(&OpenPinnedChat { index: n - 1 }),
+                "{n} opens the wrong pinned chat"
+            );
+        }
+        // Focus chat list moved off Cmd/Ctrl+1 to make room.
+        assert_eq!(
+            resolve("ctrl-alt-1", &[]).as_deref(),
+            Some("quill_ui::FocusSidebar")
+        );
+    }
+
+    #[test]
+    fn composer_keeps_keys_only_its_handlers_release() {
+        // The composer's own `Input` context binds these; the twins in the
+        // composer context are what let the history handlers see them first.
+        let mut bindings = default_bindings();
+        bindings.extend(composer_bindings());
+        let keymap = gpui_kit::Keymap::new(bindings);
+        let stack: Vec<gpui_kit::KeyContext> = ["QuillComposer", "Input"]
+            .iter()
+            .map(|c| gpui_kit::KeyContext::parse(c).unwrap())
+            .collect();
+        for (chord, action) in [
+            (primary("up"), "ReplyToPrevious"),
+            (primary("down"), "ReplyToNext"),
+            ("pageup".to_string(), "HistoryPageUp"),
+            ("pagedown".to_string(), "HistoryPageDown"),
+            (primary("]"), "ShowChatPreview"),
+        ] {
+            let input = [Keystroke::parse(&chord).unwrap()];
+            let (found, _) = keymap.bindings_for_input(&input, &stack);
+            assert_eq!(
+                found[0].action().name(),
+                format!("quill_ui::{action}"),
+                "{chord}"
+            );
+        }
+        // Home and End stay with the text field: no composer twin.
+        assert!(
+            composer_scoped_bindings()
+                .iter()
+                .all(|b| !matches!(b.keystrokes()[0].inner().key.as_str(), "home" | "end"))
+        );
+    }
+
+    #[test]
+    fn pack_chords_cannot_be_rebound_onto() {
+        for chord in [
+            primary("j"),
+            primary("up"),
+            "delete".to_string(),
+            primary("9"),
+        ] {
+            assert_eq!(
+                keybinding_conflict("open-search", &chord, &[]),
+                Some(KeybindingConflict::FixedChrome),
+                "{chord}"
+            );
+        }
     }
 
     #[test]
