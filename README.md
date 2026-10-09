@@ -480,8 +480,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] "Disappears in" countdown on timed photos and videos <!-- parity:viewer-ttl-countdown -->
 - [ ] "View all photos / files" link to shared media <!-- parity:viewer-view-all -->
 - [ ] "Saved to Downloads" toast with a folder link <!-- parity:viewer-saved-toast -->
-- [ ] Video playback in the viewer and inline on Linux and Windows <!-- parity:viewer-video-cross-platform -->
-- [ ] Round video notes autoplay muted inline in history <!-- parity:viewer-round-autoplay -->
+- [x] Video playback in the viewer and inline on Linux and Windows <!-- parity:viewer-video-cross-platform -->
+- [x] Round video notes autoplay muted inline in history <!-- parity:viewer-round-autoplay -->
 - [x] Audio playlist with repeat, shuffle and autoplay of the next voice message <!-- parity:viewer-audio-playlist -->
 - [ ] OS media keys and Now Playing integration <!-- parity:viewer-os-media-keys -->
 - [ ] Voice and round playback speed dial with custom speeds <!-- parity:viewer-speed-dial -->
@@ -730,7 +730,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] In-call chat messages for group calls (`sendGroupCallMessage` + live `updateNewGroupCallMessage` feed with composer, gated on `can_send_messages`/`are_messages_allowed`; no history getter exists in the schema, so live feed only; code + demo only, live unverified) <!-- parity:calls-group-messages -->
 - [ ] Push-to-talk with a shortcut and release delay <!-- parity:calls-push-to-talk -->
 - [ ] Noise suppression toggle in group calls <!-- parity:calls-noise-suppression -->
-- [ ] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
+- [x] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
 - [ ] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
 - [ ] Screen source chooser with window and screen thumbnails <!-- parity:calls-screen-source-chooser -->
 - [ ] Pause screen sharing <!-- parity:calls-screen-share-pause -->

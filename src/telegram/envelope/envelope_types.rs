@@ -686,6 +686,8 @@ pub enum EnvelopePayload {
     BlockedMessageSenders {
         total_count: i32,
         sender_ids: Vec<i64>,
+        /// Every sender, users and chats (video-chat "join as" choices).
+        senders: Vec<MessageSender>,
     },
     /// `count` — the answer to `getChatMessageCount` (schema 1.8.67,
     /// line 10068).

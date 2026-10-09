@@ -237,6 +237,24 @@ fn a_paused_player_decodes_only_its_queue() {
 }
 
 #[test]
+fn a_silent_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken() {
+    use super::{IDLE_POLL, idle_wait};
+    // Sound is drained without the state lock, so it keeps the short poll;
+    // a silent player is woken by every change and only needs a safety net.
+    assert_eq!(idle_wait(true), IDLE_POLL);
+    assert!(idle_wait(false) >= IDLE_POLL * 10);
+    let (mut player, calls) = scripted_player(None, false, 3);
+    assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 3));
+    std::thread::sleep(Duration::from_millis(60));
+    // Taking the first picture frees a slot: the thread refills it at once,
+    // not after its long idle wait.
+    let taken = Instant::now();
+    assert!(player.take_frame().is_some());
+    assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 4));
+    assert!(taken.elapsed() < idle_wait(false) / 2);
+}
+
+#[test]
 fn the_first_picture_shows_at_once_then_follows_the_clock() {
     let (mut player, _) = scripted_player(None, false, 3);
     assert!(wait_until(|| player.info().is_some()));

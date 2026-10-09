@@ -1198,6 +1198,20 @@ pub(super) fn demo_seed_for(
             "screenshot demo — voice chat management (injected, no live Telegram)".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyGroupCallPolish => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — pinned tile and paused streams (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyGroupCallJoinAs => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — join a voice chat as a channel (injected, no live Telegram)"
+                .into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyGroupCallScheduled => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -2153,6 +2167,10 @@ impl QuillApp {
             group_call_window_opening: false,
             group_call_window_closed_by_user: None,
             group_call_chat_shown: false,
+            group_call_ptt: quill::calls::ptt::PushToTalk::new(),
+            ptt_clock: std::time::Instant::now(),
+            ptt_capture: false,
+            group_call_pin: quill::calls::tile_pin::TilePin::default(),
             call_window_opening: false,
             call_window_raised: false,
             call_window_closed_by_user: None,
@@ -2487,6 +2505,22 @@ impl QuillApp {
                 .update(cx, |this, cx| {
                     this.handle_keybinding_capture(&keystroke, cx);
                 })
+                .ok();
+        })
+        .detach();
+        // Settings > Calls > Push-to-talk: the next key becomes the shortcut.
+        let ptt_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, _window, cx| {
+            let armed = ptt_app
+                .update(cx, |this, _| this.ptt_capture)
+                .unwrap_or(false);
+            if !armed || super::keybindings::is_modifier_key(&event.keystroke.key) {
+                return;
+            }
+            cx.stop_propagation();
+            let key = event.keystroke.key.clone();
+            ptt_app
+                .update(cx, |this, cx| this.capture_ptt_key(&key, cx))
                 .ok();
         })
         .detach();

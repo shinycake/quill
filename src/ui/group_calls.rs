@@ -192,6 +192,17 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        // Push-to-talk joins with the microphone closed.
+        let ptt_on = self
+            .session()
+            .is_some_and(|s| s.call_prefs.push_to_talk.enabled);
+        if ptt_on {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.set_group_call_self_muted(true);
+            } else if let Some(session) = self.demo_session.as_mut() {
+                session.set_group_call_self_muted(true);
+            }
+        }
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.join_video_chat(id) {
                 Ok(_) => "Joining voice chat…".into(),

@@ -350,6 +350,21 @@ fn group_call_request_shapes() {
     assert_eq!(v["@type"], "getVideoChatInviteLink");
     assert_eq!(v["can_self_unmute"], true);
 
+    let v: serde_json::Value =
+        serde_json::from_str(&get_video_chat_available_participants(RequestId(19), -100)).unwrap();
+    assert_eq!(v["@type"], "getVideoChatAvailableParticipants");
+    assert_eq!(v["chat_id"], -100);
+
+    let v: serde_json::Value = serde_json::from_str(&set_video_chat_default_participant(
+        RequestId(20),
+        -100,
+        &MessageSenderRef::Chat(-200),
+    ))
+    .unwrap();
+    assert_eq!(v["@type"], "setVideoChatDefaultParticipant");
+    assert_eq!(v["default_participant_id"]["@type"], "messageSenderChat");
+    assert_eq!(v["default_participant_id"]["chat_id"], -200);
+
     // Phase C2h: the video-chat management requests.
     let v: serde_json::Value =
         serde_json::from_str(&revoke_group_call_invite_link(RequestId(21), 555)).unwrap();

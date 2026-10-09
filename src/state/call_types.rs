@@ -199,6 +199,13 @@ pub struct ActiveGroupCall {
     /// (`record_duration` seconds, 0 = not recording).
     pub record_duration: i32,
     pub is_video_recorded: bool,
+    /// "Join as" choices from `getVideoChatAvailableParticipants` (empty
+    /// until loaded, or when the call has no alternatives to offer).
+    pub join_as_options: Vec<MessageSender>,
+    /// The identity the next join uses; `None` joins as yourself.
+    pub join_as: Option<MessageSender>,
+    /// The options request was sent (once per tracked call).
+    pub join_as_requested: bool,
 }
 
 /// stories-live-play: a pending "Join live" from the story viewer — the
@@ -254,6 +261,9 @@ impl ActiveGroupCall {
             messages: Vec::new(),
             record_duration: 0,
             is_video_recorded: false,
+            join_as_options: Vec::new(),
+            join_as: None,
+            join_as_requested: false,
         }
     }
 

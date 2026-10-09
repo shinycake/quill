@@ -896,6 +896,7 @@ impl Session {
                 | RequestPurpose::GetGroupCall { .. }
                 | RequestPurpose::LoadGroupCallParticipants { .. }
                 | RequestPurpose::GetVideoChatInviteLink { .. }
+                | RequestPurpose::SetVideoChatDefaultParticipant { .. }
                 | RequestPurpose::SetVideoChatTitle { .. }
                 | RequestPurpose::RevokeVideoChatInviteLink { .. }
                 | RequestPurpose::StartGroupCallRecording { .. }
@@ -919,6 +920,9 @@ impl Session {
                 self.group_call_error =
                     Some(call_request_error_line(&err, "Voice chat request failed"));
             }
+            // The "join as" list is optional: a failure just leaves the
+            // picker out and the join goes ahead as yourself.
+            Some(RequestPurpose::GetVideoChatAvailableParticipants { .. }) => {}
             // Phase D2: a failed `getChatStatistics` lands in the
             // fetch state so the statistics panel shows an honest
             // error instead of spinning forever.

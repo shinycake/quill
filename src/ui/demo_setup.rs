@@ -10,7 +10,8 @@ use super::calls::apply_ready_call;
 use super::calls::{
     apply_ready_call_swap, apply_ready_call_video, apply_ready_calls_settings,
     apply_ready_group_call, apply_ready_group_call_invitation, apply_ready_group_call_invite,
-    apply_ready_group_call_manage, apply_ready_group_call_scheduled,
+    apply_ready_group_call_join_as, apply_ready_group_call_manage, apply_ready_group_call_polish,
+    apply_ready_group_call_scheduled,
 };
 use super::chat::apply_ready_slow_mode;
 use super::chat_list::{
@@ -1847,6 +1848,31 @@ impl QuillApp {
                 "screenshot demo — group voice chat invite picker (injected, no live Telegram)"
                     .into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallPolish)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_polish(session, &self.demo_sink, &self.demo_seq);
+                self.demo_group_frames = demo_group_video_frames();
+                self.demo_local_frame = Some(demo_video_frame(true));
+            }
+            // Pin Zed's camera: the large tile, the rest in the strip.
+            self.group_call_pin.toggle(quill::calls::tile_pin::TileKey {
+                participant: quill::telegram::envelope::MessageSender::User { user_id: 41 },
+                screen: false,
+            });
+            self.status_note =
+                "screenshot demo — pinned tile and paused streams (injected, no live Telegram)"
+                    .into();
+        }
+        if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallJoinAs)) {
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                apply_ready_group_call_join_as(session, &self.demo_sink, &self.demo_seq);
+            }
+            self.status_note =
+                "screenshot demo — join a voice chat as a channel (injected, no live Telegram)"
+                    .into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadyGroupCallInvitation)) {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
@@ -1881,6 +1907,8 @@ impl QuillApp {
             if let Some(session) = self.demo_session.as_mut() {
                 self.demo_seq.store(session.last_seq, Ordering::SeqCst);
                 apply_ready_calls_settings(session, &self.demo_sink, &self.demo_seq);
+                session.call_prefs.push_to_talk.enabled = true;
+                session.call_prefs.push_to_talk.key = "f13".into();
             }
             self.calls_tab_open = true;
             self.status_note =

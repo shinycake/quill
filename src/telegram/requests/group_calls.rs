@@ -445,6 +445,38 @@ pub fn get_video_chat_invite_link(
     .to_string()
 }
 
+/// `getVideoChatAvailableParticipants` (TDLib 1.8.67,
+/// `schema/td_api.tl:14638`):
+/// `getVideoChatAvailableParticipants chat_id:int53 = MessageSenders;`
+/// "Returns list of participant identifiers, on whose behalf a video chat
+/// in the chat can be joined".
+pub fn get_video_chat_available_participants(extra: RequestId, chat_id: i64) -> String {
+    json!({
+        "@type": "getVideoChatAvailableParticipants",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+    })
+    .to_string()
+}
+
+/// `setVideoChatDefaultParticipant` (TDLib 1.8.67,
+/// `schema/td_api.tl:14643`):
+/// `setVideoChatDefaultParticipant chat_id:int53
+/// default_participant_id:MessageSender = Ok;`
+pub fn set_video_chat_default_participant(
+    extra: RequestId,
+    chat_id: i64,
+    default_participant_id: &MessageSenderRef,
+) -> String {
+    json!({
+        "@type": "setVideoChatDefaultParticipant",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id,
+        "default_participant_id": default_participant_id.to_value(),
+    })
+    .to_string()
+}
+
 /// Phase C2h: `revokeGroupCallInviteLink` (TDLib 1.8.67,
 /// `schema/td_api.tl:14398`):
 /// `revokeGroupCallInviteLink group_call_id:int32 = Ok;`
