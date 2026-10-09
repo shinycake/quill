@@ -215,6 +215,22 @@ pub(crate) struct CallbackShared {
     pub(crate) group_video_ssrc_to_user: Mutex<HashMap<(i64, u32), i64>>,
 }
 
+impl CallbackShared {
+    /// Drop a group call's callback routing: the chat-to-call entry and
+    /// every video ssrc attributed in that chat. Runs when the call ends,
+    /// whatever the native stop returned.
+    pub(crate) fn forget_group(&self, chat_id: i64) {
+        self.group_chat_to_call
+            .lock()
+            .expect("ntgcalls group call map")
+            .remove(&chat_id);
+        self.group_video_ssrc_to_user
+            .lock()
+            .expect("ntgcalls group ssrc map")
+            .retain(|(chat, _), _| *chat != chat_id);
+    }
+}
+
 /// Phase C2e: retained per-call media configuration; the engine re-issues
 /// stream sources from this on camera toggles and device changes.
 #[derive(Clone)]
@@ -312,5 +328,49 @@ impl NativeRtcServers {
             _strings: strings,
             _peer_tags: peer_tags,
         })
+    }
+}
+
+#[cfg(test)]
+mod callback_tests {
+    use super::CallbackShared;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicU64;
+
+    fn shared() -> CallbackShared {
+        CallbackShared {
+            user_to_call: Mutex::new(HashMap::new()),
+            hook: Mutex::new(None),
+            transport_hook: Mutex::new(None),
+            frame_hook: Mutex::new(None),
+            remote_video_hook: Mutex::new(None),
+            remote_screen_hook: Mutex::new(None),
+            frame_seq: AtomicU64::new(0),
+            group_chat_to_call: Mutex::new(HashMap::new()),
+            group_video_ssrc_to_user: Mutex::new(HashMap::new()),
+        }
+    }
+
+    #[test]
+    fn forget_group_clears_only_that_chats_routing() {
+        let shared = shared();
+        shared
+            .group_chat_to_call
+            .lock()
+            .unwrap()
+            .extend([(1, 10), (2, 20)]);
+        shared.group_video_ssrc_to_user.lock().unwrap().extend([
+            ((1, 100), 5),
+            ((1, 101), 6),
+            ((2, 200), 7),
+        ]);
+        shared.forget_group(1);
+        let chats = shared.group_chat_to_call.lock().unwrap();
+        assert_eq!(chats.len(), 1);
+        assert!(chats.contains_key(&2));
+        let ssrcs = shared.group_video_ssrc_to_user.lock().unwrap();
+        assert_eq!(ssrcs.len(), 1);
+        assert_eq!(ssrcs.get(&(2, 200)), Some(&7));
     }
 }

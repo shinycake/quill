@@ -4,6 +4,7 @@ use crate::ids::{ChatId, MessageId, RequestId, UserId};
 use crate::privacy::PrivacyRule;
 use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusItem};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
+use crate::telegram::name_accent::NameAccentColor;
 use crate::telegram::profile_accent::ProfileAccentColor;
 use crate::telegram::requests::ArchiveChatListSettings;
 use crate::text::TextEntity;
@@ -370,6 +371,12 @@ pub enum EnvelopePayload {
     /// edit-profile accent picker.
     UpdateProfileAccentColors {
         colors: Vec<ProfileAccentColor>,
+        available_ids: Vec<i32>,
+    },
+    /// `updateAccentColors`: the name-color palette (ids 7+ and their
+    /// built-in fallbacks). Stored in `Session`.
+    UpdateAccentColors {
+        colors: Vec<NameAccentColor>,
         available_ids: Vec<i32>,
     },
     /// `updateUserStatus` (schema 1.8.67, line 10729) — online / last-seen

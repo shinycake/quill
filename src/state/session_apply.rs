@@ -314,6 +314,15 @@ impl Session {
                 self.profile_accent_colors = colors;
                 self.available_accent_color_ids = available_ids;
             }
+            EnvelopePayload::UpdateAccentColors {
+                colors,
+                available_ids: _,
+            } => {
+                // Server name-color palette (ids 7+); the renderer reads it
+                // through the process-wide table.
+                crate::telegram::name_accent::set_palette(&colors);
+                self.name_accent_colors = colors;
+            }
             EnvelopePayload::Users { user_ids } => {
                 // Phase 6: `getContacts` answer — only answers to our own
                 // fetch are accepted (matched by `@extra`); the user

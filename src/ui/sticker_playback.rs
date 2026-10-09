@@ -393,7 +393,7 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
-        self.animated_image(id, format, PlaybackSize::Sticker, false, cx)
+        self.animated_image(id, format, PlaybackSize::Sticker, false, true, cx)
     }
 
     /// A history row's animated sticker: for the conversation's animation
@@ -435,7 +435,7 @@ impl QuillApp {
             self.layered_clip(id, format, size, looping, cx)
                 .map(AnimatedVisual::Layered)
         } else {
-            self.animated_image(id, format, size, once, cx)
+            self.animated_image(id, format, size, once, true, cx)
                 .map(AnimatedVisual::Image)
         }
     }
@@ -624,7 +624,18 @@ impl QuillApp {
         format: StickerFormat,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
-        self.animated_image(id, format, PlaybackSize::Emoji, false, cx)
+        self.animated_image(id, format, PlaybackSize::Emoji, false, true, cx)
+    }
+
+    /// [`Self::custom_emoji_image`] for a cell that is built but not on
+    /// screen (list overdraw): the first frame, no frame-clock request.
+    pub(super) fn custom_emoji_image_parked(
+        &self,
+        id: FileId,
+        format: StickerFormat,
+        cx: &mut Context<QuillApp>,
+    ) -> Option<Arc<RenderImage>> {
+        self.animated_image(id, format, PlaybackSize::Emoji, false, false, cx)
     }
 
     fn animated_image(
@@ -633,6 +644,7 @@ impl QuillApp {
         format: StickerFormat,
         size: PlaybackSize,
         once: bool,
+        play: bool,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
         if !matches!(format, StickerFormat::Tgs | StickerFormat::Webm) || id.0 == 0 {
@@ -648,7 +660,9 @@ impl QuillApp {
                     .session()
                     .is_none_or(|s| s.media_prefs.loop_animated_stickers);
             let count = clip.frames.len();
-            let index = if !looping && elapsed >= clip.duration {
+            let index = if !play {
+                0
+            } else if !looping && elapsed >= clip.duration {
                 count.saturating_sub(1)
             } else {
                 animating = count > 1;

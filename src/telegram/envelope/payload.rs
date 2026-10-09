@@ -4,6 +4,7 @@ use crate::ids::{ChatId, MessageId, UserId};
 use crate::privacy::PrivacyRule;
 use crate::rich::parse_rich_message;
 use crate::telegram::envelope_story::parse_story_album;
+use crate::telegram::name_accent::parse_name_accent_color;
 use crate::telegram::profile_accent::parse_profile_accent_color;
 use crate::telegram::requests::ArchiveChatListSettings;
 use base64::Engine;
@@ -734,6 +735,28 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 })
                 .unwrap_or_default();
             Ok(EnvelopePayload::UpdateProfileAccentColors {
+                colors,
+                available_ids,
+            })
+        }
+        // Malformed entries are skipped; the palette only recolors names.
+        "updateAccentColors" => {
+            let colors = value
+                .get("colors")
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().filter_map(parse_name_accent_color).collect())
+                .unwrap_or_default();
+            let available_ids = value
+                .get("available_accent_color_ids")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_i64)
+                        .filter_map(|n| i32::try_from(n).ok())
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(EnvelopePayload::UpdateAccentColors {
                 colors,
                 available_ids,
             })
