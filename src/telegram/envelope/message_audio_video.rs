@@ -306,8 +306,8 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
         };
         (
             id.filter(|id| id.0 != 0),
-            int53_or_zero(thumb.get("width")) as i32,
-            int53_or_zero(thumb.get("height")) as i32,
+            int53_or_zero(thumb.get("width")).sat_i32(),
+            int53_or_zero(thumb.get("height")).sat_i32(),
         )
     } else {
         (None, 0, 0)
@@ -315,9 +315,9 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
     files.retain(|file| file.id.0 != 0);
     (
         MessageContent::Video(VideoContent {
-            duration: int53_or_zero(video.get("duration")) as i32,
-            width: int53_or_zero(video.get("width")) as i32,
-            height: int53_or_zero(video.get("height")) as i32,
+            duration: int53_or_zero(video.get("duration")).sat_i32(),
+            width: int53_or_zero(video.get("width")).sat_i32(),
+            height: int53_or_zero(video.get("height")).sat_i32(),
             file_name: video
                 .get("file_name")
                 .and_then(Value::as_str)
@@ -342,7 +342,7 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
                 .get("is_secret")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-            start_timestamp: int53_or_zero(value.get("start_timestamp")) as i32,
+            start_timestamp: int53_or_zero(value.get("start_timestamp")).sat_i32(),
             supports_streaming: video
                 .get("supports_streaming")
                 .and_then(Value::as_bool)
@@ -393,8 +393,8 @@ pub(crate) fn parse_message_video_note(value: &Value) -> (MessageContent, Vec<Pa
         };
         (
             id.filter(|id| id.0 != 0),
-            int53_or_zero(thumb.get("width")) as i32,
-            int53_or_zero(thumb.get("height")) as i32,
+            int53_or_zero(thumb.get("width")).sat_i32(),
+            int53_or_zero(thumb.get("height")).sat_i32(),
         )
     } else {
         (None, 0, 0)
@@ -402,9 +402,9 @@ pub(crate) fn parse_message_video_note(value: &Value) -> (MessageContent, Vec<Pa
     files.retain(|file| file.id.0 != 0);
     (
         MessageContent::VideoNote(VideoNoteContent {
-            duration: int53_or_zero(note.get("duration")) as i32,
+            duration: int53_or_zero(note.get("duration")).sat_i32(),
             waveform: parse_tdlib_bytes(note.get("waveform")),
-            length: int53_or_zero(note.get("length")) as i32,
+            length: int53_or_zero(note.get("length")).sat_i32(),
             is_viewed: value
                 .get("is_viewed")
                 .and_then(Value::as_bool)
@@ -453,17 +453,17 @@ pub(crate) fn parse_animation_value(
         };
         (
             id.filter(|id| id.0 != 0),
-            int53_or_zero(thumb.get("width")) as i32,
-            int53_or_zero(thumb.get("height")) as i32,
+            int53_or_zero(thumb.get("width")).sat_i32(),
+            int53_or_zero(thumb.get("height")).sat_i32(),
         )
     } else {
         (None, 0, 0)
     };
     (
         Some(AnimationItem {
-            duration: int53_or_zero(value.get("duration")) as i32,
-            width: int53_or_zero(value.get("width")) as i32,
-            height: int53_or_zero(value.get("height")) as i32,
+            duration: int53_or_zero(value.get("duration")).sat_i32(),
+            width: int53_or_zero(value.get("width")).sat_i32(),
+            height: int53_or_zero(value.get("height")).sat_i32(),
             file_name: value
                 .get("file_name")
                 .and_then(Value::as_str)
@@ -536,7 +536,7 @@ pub(crate) fn parse_message_audio(value: &Value) -> (MessageContent, Vec<ParsedF
     files.retain(|file| file.id.0 != 0);
     (
         MessageContent::Audio(AudioContent {
-            duration: int53_or_zero(audio.get("duration")) as i32,
+            duration: int53_or_zero(audio.get("duration")).sat_i32(),
             title: json_field_str(audio, "title"),
             performer: json_field_str(audio, "performer"),
             file_name: json_field_str(audio, "file_name"),

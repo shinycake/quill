@@ -171,6 +171,6 @@ fn jumping_back_to_latest_refetches_after_a_trim() {
 
 #[test]
 fn the_cap_constants_leave_headroom_between_trims() {
-    assert!(HISTORY_WINDOW_TRIM_TO + 100 < HISTORY_WINDOW_CAP);
+    const { assert!(HISTORY_WINDOW_TRIM_TO + 100 < HISTORY_WINDOW_CAP) };
     assert_ne!(WindowEnd::Oldest, WindowEnd::Newest);
 }
