@@ -37,8 +37,29 @@ impl SponsoredMessage {
         }
     }
 
+    /// The chip on the ad card: tdesktop's "Ad" (`lng_sponsored_message_title`),
+    /// or "Recommended" when TDLib flags the message so.
+    pub fn badge_label(&self) -> &'static str {
+        if self.is_recommended {
+            "Recommended"
+        } else {
+            "Ad"
+        }
+    }
+
     /// Thumb file ids worth auto-downloading at priority 1 (content + sponsor).
     pub fn thumb_file_ids(&self) -> Vec<FileId> {
+        let mut ids = self.content_file_ids();
+        if let Some(photo) = &self.sponsor.photo
+            && let Some(size) = photo.thumb_size()
+        {
+            ids.push(size.file_id);
+        }
+        ids
+    }
+
+    /// Files the content needs before the ad may be shown.
+    pub fn content_file_ids(&self) -> Vec<FileId> {
         let mut ids = Vec::new();
         match &self.content {
             MessageContent::Photo(photo) => {
@@ -57,11 +78,6 @@ impl SponsoredMessage {
                 }
             }
             _ => {}
-        }
-        if let Some(photo) = &self.sponsor.photo
-            && let Some(size) = photo.thumb_size()
-        {
-            ids.push(size.file_id);
         }
         ids
     }

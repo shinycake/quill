@@ -45,10 +45,10 @@ impl QuillApp {
         cx.notify();
     }
     fn preview_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            if live.driver.preview_emoji_pack(id).is_err() {
-                self.status_note = "could not load emoji pack".into();
-            }
+        if let Some(live) = self.live.as_mut()
+            && live.driver.preview_emoji_pack(id).is_err()
+        {
+            self.status_note = "could not load emoji pack".into();
         }
         cx.notify();
     }
@@ -64,10 +64,10 @@ impl QuillApp {
     }
     fn search_emoji_sets(&mut self, cx: &mut Context<Self>) {
         let query = self.emoji_set_search_input.read(cx).value().to_string();
-        if let Some(live) = self.live.as_mut() {
-            if live.driver.search_emoji_packs(&query).is_err() {
-                self.status_note = "could not search emoji packs".into();
-            }
+        if let Some(live) = self.live.as_mut()
+            && live.driver.search_emoji_packs(&query).is_err()
+        {
+            self.status_note = "could not search emoji packs".into();
         }
         cx.notify();
     }
@@ -105,11 +105,11 @@ impl QuillApp {
                 Button::new("load-emoji-statuses")
                     .label("Load or refresh statuses")
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            if live.driver.load_emoji_status_choices().is_err() {
-                                this.status_note =
-                                    "Could not load emoji statuses. Retry the action.".into();
-                            }
+                        if let Some(live) = this.live.as_mut()
+                            && live.driver.load_emoji_status_choices().is_err()
+                        {
+                            this.status_note =
+                                "Could not load emoji statuses. Retry the action.".into();
                         }
                         cx.notify();
                     })),
@@ -385,10 +385,10 @@ impl QuillApp {
                     .disabled(loading)
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            if live.driver.more_trending_emoji_packs().is_err() {
-                                this.status_note = "could not load more emoji packs".into();
-                            }
+                        if let Some(live) = this.live.as_mut()
+                            && live.driver.more_trending_emoji_packs().is_err()
+                        {
+                            this.status_note = "could not load more emoji packs".into();
                         }
                         cx.notify();
                     })),

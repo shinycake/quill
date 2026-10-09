@@ -103,7 +103,7 @@ fn preview_of(image: &RgbaImage) -> Arc<RenderImage> {
     } else {
         image.clone()
     };
-    for pixel in small.chunks_exact_mut(4) {
+    for pixel in small.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(

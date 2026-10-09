@@ -38,6 +38,7 @@ pub(super) fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>,
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn forward_from_strip(row_id: MessageId, label: String) -> AnyElement {
     div()
         .id(("forward-from", row_id.0 as u64))

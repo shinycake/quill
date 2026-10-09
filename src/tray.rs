@@ -576,7 +576,7 @@ fn badge_all_muted(session: &Session, unread: u32) -> bool {
     }
     let unmuted = BadgePrefs {
         include_muted: false,
-        ..session.badge_prefs.clone()
+        ..session.badge_prefs
     };
     badge_count(session, &unmuted) == 0
 }

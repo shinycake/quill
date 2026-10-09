@@ -80,6 +80,7 @@ impl QuillApp {
 
     /// Slice S3: close the topmost privacy layer (exceptions →
     /// exceptions-picker → editor → main overlay), like TGX's back stack.
+    #[allow(clippy::if_same_then_else)]
     fn close_privacy_top(&mut self, cx: &mut Context<Self>) {
         if self.exception_picker_open || self.block_picker_open {
             self.exception_picker_open = false;
@@ -567,11 +568,11 @@ impl QuillApp {
             if let Err(err) = result {
                 self.status_note = format!("unblock failed: {err:?}");
             }
-        } else if let Some(demo) = self.demo_session.as_mut() {
-            if let Some(list) = demo.blocked_senders.as_mut() {
-                list.retain(|id| *id != user_id);
-                demo.blocked_total = demo.blocked_total.saturating_sub(1);
-            }
+        } else if let Some(demo) = self.demo_session.as_mut()
+            && let Some(list) = demo.blocked_senders.as_mut()
+        {
+            list.retain(|id| *id != user_id);
+            demo.blocked_total = demo.blocked_total.saturating_sub(1);
         }
         cx.notify();
     }

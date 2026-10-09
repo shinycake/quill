@@ -38,6 +38,7 @@ impl Render for QuillApp {
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(window.is_window_active() && !self.passcode_ui.locked, cx);
+        self.report_visible_sponsored(window.is_window_active() && !self.passcode_ui.locked);
         // A conversation replayed from its cache (`app_slice`) still shows
         // its clips: only a conversation that rendered (or a frame without
         // one) and swept no player orphans them.
@@ -651,9 +652,12 @@ impl Render for QuillApp {
                     )
                 },
             )
-            // Screenshot demos keep their caption as a fixed footer line.
+            // Screenshot demos keep their caption as a fixed footer line
+            // (`QUILL_DEMO_HIDE_STATUS=1` hides it, for recordings).
             .when(
-                self.live.is_none() && !self.status_note.is_empty(),
+                self.live.is_none()
+                    && !self.status_note.is_empty()
+                    && std::env::var_os("QUILL_DEMO_HIDE_STATUS").is_none(),
                 |this| {
                     this.child(
                         div()

@@ -33,7 +33,6 @@ use std::sync::atomic::AtomicU64;
 pub(super) const MAX_OS_NOTIFICATION_THREADS: usize = 8;
 
 /// Parity slice: cap for concurrent `quill-sound` player threads.
-
 /// Parity slice: which settings object a sound-picker choice applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SoundPickerTarget {

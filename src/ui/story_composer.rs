@@ -111,9 +111,7 @@ pub(super) fn apply_ready_story_edit(
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
-    let tray = format!(
-        r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":11,"list":{{"@type":"storyListMain"}},"order":"30","can_be_archived":false,"max_read_story_id":4,"stories":[{{"@type":"storyInfo","story_id":5,"date":1700000000,"is_for_close_friends":false,"is_live":false}}]}}}}"#
-    );
+    let tray = r#"{"@type":"updateChatActiveStories","active_stories":{"@type":"chatActiveStories","chat_id":11,"list":{"@type":"storyListMain"},"order":"30","can_be_archived":false,"max_read_story_id":4,"stories":[{"@type":"storyInfo","story_id":5,"date":1700000000,"is_for_close_friends":false,"is_live":false}]}}"#.to_string();
     let story = format!(
         r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"is_edited":true,"can_be_edited":true,"can_be_deleted":true,"can_be_forwarded":true,"can_set_privacy_settings":true,"repost_info":{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":12,"story_id":6}},"is_content_modified":false}},"privacy_settings":{{"@type":"storyPrivacySettingsCloseFriends"}},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"areas":[{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":35.0,"y_percentage":80.0,"width_percentage":30.0,"height_percentage":9.0,"rotation_angle":0.0,"corner_radius_percentage":20.0}},"type":{{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}}}},{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":50.0,"y_percentage":50.0,"width_percentage":20.0,"height_percentage":20.0,"rotation_angle":0.0,"corner_radius_percentage":50.0}},"type":{{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{{"@type":"reactionTypeEmoji","emoji":"🔥"}},"total_count":1,"is_dark":false,"is_flipped":false}}}}],"caption":{{"@type":"formattedText","text":"Phase 9.5: edit posted stories — caption, areas, cover and privacy.","entities":[]}}}}"#,
     );
@@ -256,10 +254,8 @@ impl QuillApp {
             Some("File not found — check the path")
         } else if !is_edit && self.story_composer.needs_users() {
             Some("Pick at least one user for \"Selected users\"")
-        } else if let Some(link_error) = self.story_composer.link_url_error() {
-            Some(link_error)
         } else {
-            None
+            self.story_composer.link_url_error()
         };
         if let Some(error) = error {
             self.story_composer.local_error = Some(error.into());

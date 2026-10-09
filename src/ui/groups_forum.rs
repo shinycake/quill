@@ -704,10 +704,10 @@ impl QuillApp {
                 Ok(_) => "topic selected".into(),
                 Err(_) => "could not open topic".into(),
             };
-        } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(chat_id) = session.open_chat {
-                session.select_topic(chat_id, forum_topic_id);
-            }
+        } else if let Some(session) = self.demo_session.as_mut()
+            && let Some(chat_id) = session.open_chat
+        {
+            session.select_topic(chat_id, forum_topic_id);
         }
         cx.notify();
     }

@@ -39,13 +39,136 @@ impl Session {
         files: &[ParsedFile],
     ) {
         self.remember_files(files);
+        // A refetch keeps what the user already did with an ad that is
+        // still in the list (viewed once, reported/hidden).
+        let previous = self.sponsored.remove(&chat_id.0).unwrap_or_default();
+        let keep = |ids: &std::collections::HashSet<i64>| -> std::collections::HashSet<i64> {
+            ids.iter()
+                .copied()
+                .filter(|id| messages.iter().any(|m| m.message_id == *id))
+                .collect()
+        };
+        let (viewed, dismissed) = (keep(&previous.viewed), keep(&previous.dismissed));
         self.sponsored.insert(
             chat_id.0,
             ChatSponsoredMessages {
                 messages,
                 messages_between,
+                viewed,
+                dismissed,
+                fetched_at: Some(std::time::Instant::now()),
             },
         );
+    }
+
+    /// Whether `getChatSponsoredMessages` should be sent for `chat_id`: not
+    /// after the user hid ads, and not again within five minutes of the last
+    /// response (tdesktop `TooEarlyForRequest`).
+    pub fn sponsored_fetch_due(&self, chat_id: ChatId, now: std::time::Instant) -> bool {
+        if self.sponsored_hidden {
+            return false;
+        }
+        match self
+            .sponsored
+            .get(&chat_id.0)
+            .and_then(|entry| entry.fetched_at)
+        {
+            Some(at) => now.saturating_duration_since(at) >= SPONSORED_REFETCH_AFTER,
+            None => true,
+        }
+    }
+
+    /// The ad shown after the last message of the open chat, as tdesktop
+    /// does: the first not-dismissed message of the fetched list, once its
+    /// media is downloaded (TDLib: content "must be fully downloaded before
+    /// the message is shown"). `None` while the history window stops short of
+    /// the latest message, in topic views, and after ads were hidden. The
+    /// caller adds the "scrolled to the bottom" condition (a UI fact).
+    pub fn open_sponsored_tail(&self) -> Option<&SponsoredMessage> {
+        if self.sponsored_hidden || self.open_topic.is_some() {
+            return None;
+        }
+        let chat_id = self.open_chat?;
+        if self
+            .histories
+            .get(&chat_id.0)
+            .is_some_and(|history| history.has_newer)
+        {
+            return None;
+        }
+        let entry = self.sponsored.get(&chat_id.0)?;
+        entry
+            .messages
+            .iter()
+            .find(|message| !entry.dismissed.contains(&message.message_id))
+            .filter(|message| {
+                message.content_file_ids().iter().all(|id| {
+                    self.files
+                        .get(&id.0)
+                        .is_some_and(|file| file.usable_path().is_some())
+                })
+            })
+    }
+
+    /// The UI shows these ads on screen (the whole text, button excluded).
+    /// Returns the ids not yet counted, marking them viewed so a scroll away
+    /// and back never sends a second `viewMessages`. Ids that are not in the
+    /// fetched list of an open chat are ignored.
+    pub fn take_sponsored_views(&mut self, chat_id: ChatId, shown: &[i64]) -> Vec<i64> {
+        if self.open_chat != Some(chat_id) {
+            return Vec::new();
+        }
+        let Some(entry) = self.sponsored.get_mut(&chat_id.0) else {
+            return Vec::new();
+        };
+        let mut due = Vec::new();
+        for id in shown {
+            if entry.messages.iter().any(|m| m.message_id == *id) && entry.viewed.insert(*id) {
+                due.push(*id);
+            }
+        }
+        due
+    }
+
+    /// A `viewMessages` send failed: let the next frame retry these ids.
+    pub fn untake_sponsored_views(&mut self, chat_id: ChatId, ids: &[i64]) {
+        if let Some(entry) = self.sponsored.get_mut(&chat_id.0) {
+            for id in ids {
+                entry.viewed.remove(id);
+            }
+        }
+    }
+
+    /// The user chose "Hide ads" on a shown ad. Hiding is the Premium
+    /// `toggleHasSponsoredMessagesEnabled(false)` setting (tdesktop's
+    /// `HideSponsoredClickHandler`). `None`: the ad is gone. `Some(true)`:
+    /// Premium, the caller sends the request. `Some(false)`: not Premium,
+    /// the "needs Telegram Premium" notice is recorded and nothing is sent.
+    pub fn begin_sponsored_hide(&mut self, chat_id: ChatId, message_id: i64) -> Option<bool> {
+        self.sponsored_message(chat_id, message_id)?;
+        self.sponsored_report = None;
+        self.sponsored_report_target = None;
+        if self.my_is_premium() {
+            self.last_sponsored_report = None;
+            return Some(true);
+        }
+        self.last_sponsored_report = Some(SponsoredReportOutcome {
+            chat_id,
+            message_id,
+            result: ReportSponsoredResult::PremiumRequired,
+        });
+        Some(false)
+    }
+
+    /// `toggleHasSponsoredMessagesEnabled(false)` answered `ok`: no ads are
+    /// shown or fetched for the rest of the session.
+    pub fn accept_sponsored_hidden(&mut self, chat_id: ChatId) {
+        self.sponsored_hidden = true;
+        self.last_sponsored_report = Some(SponsoredReportOutcome {
+            chat_id,
+            message_id: 0,
+            result: ReportSponsoredResult::AdsHidden,
+        });
     }
 
     /// Sponsored rows for the open chat in TDLib's response order. Empty for
@@ -86,6 +209,7 @@ impl Session {
     }
 
     /// Apply a `ReportSponsoredResult` for a finished `ReportChatSponsoredMessage`.
+    /// Apply a `ReportSponsoredResult` for a finished `ReportChatSponsoredMessage`.
     /// `OptionRequired` arms the option picker; any other result closes it.
     pub fn accept_sponsored_report(
         &mut self,
@@ -119,6 +243,16 @@ impl Session {
             result => {
                 self.sponsored_report = None;
                 self.sponsored_report_target = None;
+                match &result {
+                    // The reported ad leaves the history (tdesktop removes it).
+                    ReportSponsoredResult::Ok => {
+                        if let Some(entry) = self.sponsored.get_mut(&chat_id.0) {
+                            entry.dismissed.insert(message_id);
+                        }
+                    }
+                    ReportSponsoredResult::AdsHidden => self.sponsored_hidden = true,
+                    _ => {}
+                }
                 self.last_sponsored_report = Some(SponsoredReportOutcome {
                     chat_id,
                     message_id,

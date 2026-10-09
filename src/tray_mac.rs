@@ -184,9 +184,9 @@ fn composite(glyph: &mut [u8], counter: &[u8]) {
             }
         }
     }
-    for i in 0..side * side {
+    for (i, &near_px) in near.iter().enumerate().take(side * side) {
         let p = i * 4;
-        if near[i] {
+        if near_px {
             glyph[p + 3] = 0;
         }
         let ca = f64::from(counter[p + 3]) / 255.0;

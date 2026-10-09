@@ -664,9 +664,11 @@ pub struct QuillApp {
     /// Play was tapped before the video was local. Resume when `downloadFile` finishes.
     /// The last field is the chat to mark opened (`openMessageContent`) once playback starts.
     pub(super) pending_video_play: Option<(MessageId, FileId, String, i32, Option<ChatId>)>,
-    /// `ReadySponsored` fixture surface: the demo channel renders sponsored rows
-    /// instead of history. Normal live path unchanged.
-    pub(super) sponsored_demo: bool,
+    /// "About this ad" sheet is open in the sponsored footer.
+    pub(super) sponsored_about_open: bool,
+    /// Sponsored message ids the footer painted last frame; reported to
+    /// TDLib as viewed at the next frame start (`report_visible_sponsored`).
+    pub(super) rendered_sponsored: std::cell::RefCell<Vec<i64>>,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
     /// (chat id, message id, run index, is-caption block). Message ids are
     /// only unique within a chat, so the chat id is part of the key.

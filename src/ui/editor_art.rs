@@ -54,9 +54,10 @@ pub(super) fn sticker_pixels(path: &Path, format: StickerFormat) -> Option<RgbaI
                     .ok()?;
             let mut bytes = frames.frames.into_iter().next()?;
             // rlottie hands out premultiplied BGRA.
-            for pixel in bytes.chunks_exact_mut(4) {
+            for pixel in bytes.as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2);
                 let alpha = u16::from(pixel[3]);
+                #[allow(clippy::manual_checked_ops)]
                 if alpha > 0 {
                     for channel in &mut pixel[..3] {
                         *channel = (u16::from(*channel) * 255 / alpha).min(255) as u8;

@@ -89,10 +89,9 @@ impl QuillApp {
                     && let Some(folder) = paths.first()
                     && let Some(live) = this.live.as_mut()
                     && Some(&live.driver.session.account) == account.as_ref()
+                    && let Err(error) = live.driver.start_account_export(folder, media)
                 {
-                    if let Err(error) = live.driver.start_account_export(folder, media) {
-                        live.driver.session.data_storage_error = Some(error.to_string());
-                    }
+                    live.driver.session.data_storage_error = Some(error.to_string());
                 }
                 cx.notify();
             });
@@ -117,7 +116,7 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let editing = this.data_storage_editor.clone();
+            let editing = this.data_storage_editor;
             let (title, body) = match &editing {
                 Some((network, draft)) => (
                     format!("{} downloads", network.label()),
@@ -150,7 +149,7 @@ impl QuillApp {
                                         // nothing is lost.
                                         if live
                                             .driver
-                                            .set_auto_download_settings(network, draft.clone())
+                                            .set_auto_download_settings(network, draft)
                                             .is_err()
                                         {
                                             this.data_storage_editor = Some((network, draft));
@@ -419,9 +418,7 @@ impl QuillApp {
             )
             .child(Icon::new(IconName::ChevronRight).size_4())
             .on_click(cx.listener(move |this, _, _, cx| {
-                let draft = this
-                    .session()
-                    .map(|s| s.data_storage.for_network(network).clone());
+                let draft = this.session().map(|s| *s.data_storage.for_network(network));
                 if let Some(draft) = draft {
                     this.data_storage_editor = Some((network, draft));
                     cx.notify();

@@ -1,0 +1,46 @@
+name: pages
+
+# Builds the product page in site/ and deploys it to GitHub Pages. The
+# download buttons and "What's new" come from the latest published release,
+# so the page is rebuilt whenever a release is published.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "scripts/site-release-data.py", ".github/workflows/pages.yml"]
+  release:
+    types: [published, edited, deleted]
+  repository_dispatch:
+    types: [site-refresh]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/site-release-data.py site/data/release.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -172,13 +172,9 @@ pub(super) fn apply_ready_call_swap(
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let jsons = [
-        format!(
-            r#"{{"@type":"updateUser","user":{{"id":41,"first_name":"Zed","last_name":"Hopper","usernames":{{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]}},"phone_number":"+15550101041","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
-        ),
+        r#"{"@type":"updateUser","user":{"id":41,"first_name":"Zed","last_name":"Hopper","usernames":{"@type":"usernames","active_usernames":["zedhopper"],"disabled_usernames":[],"editable_username":"zedhopper","collectible_usernames":[]},"phone_number":"+15550101041","status":{"@type":"userStatusOnline","expires":9999999999},"is_contact":false,"type":{"@type":"userTypeRegular"}}}"#.to_string(),
         r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"98","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateExchangingKeys"}}}"#.to_string(),
-        format!(
-            r#"{{"@type":"updateUser","user":{{"id":42,"first_name":"Ada","last_name":"Lovelace","usernames":{{"@type":"usernames","active_usernames":["adalovelace"],"disabled_usernames":[],"editable_username":"adalovelace","collectible_usernames":[]}},"phone_number":"+15550101042","status":{{"@type":"userStatusOnline","expires":9999999999}},"is_contact":false,"type":{{"@type":"userTypeRegular"}}}}}}"#
-        ),
+        r#"{"@type":"updateUser","user":{"id":42,"first_name":"Ada","last_name":"Lovelace","usernames":{"@type":"usernames","active_usernames":["adalovelace"],"disabled_usernames":[],"editable_username":"adalovelace","collectible_usernames":[]},"phone_number":"+15550101042","status":{"@type":"userStatusOnline","expires":9999999999},"is_contact":false,"type":{"@type":"userTypeRegular"}}}"#.to_string(),
         r#"{"@type":"updateCall","call":{"@type":"call","id":78,"unique_id":"97","user_id":42,"is_outgoing":false,"is_video":true,"state":{"@type":"callStatePending","is_created":true,"is_received":false}}}"#.to_string(),
     ];
     for json in jsons {
