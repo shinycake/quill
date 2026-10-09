@@ -1172,6 +1172,36 @@ impl Session {
             Some(RequestPurpose::ResendMessages) => {
                 self.resend_error = Some(call_request_error_line(&err, "Could not retry the send"));
             }
+            // Saved Messages: a 404 from `loadSavedMessagesTopics` says all
+            // sublists were loaded; it is not a failure.
+            Some(RequestPurpose::LoadSavedMessagesTopics) => {
+                if err.code == 404 {
+                    self.saved.topics_exhausted = true;
+                } else {
+                    self.chat_action_error =
+                        Some(call_request_error_line(&err, "Could not load saved chats"));
+                }
+            }
+            Some(RequestPurpose::GetForumTopicLink) => {
+                self.message_link_error =
+                    Some(call_request_error_line(&err, "Could not get the topic link"));
+            }
+            Some(
+                RequestPurpose::ToggleChatViewAsTopics
+                | RequestPurpose::SetPinnedForumTopics
+                | RequestPurpose::ReadAllForumTopicMentions { .. }
+                | RequestPurpose::ReadAllForumTopicReactions { .. }
+                | RequestPurpose::UnpinAllForumTopicMessages { .. }
+                | RequestPurpose::DeleteSavedMessagesTopicHistory { .. }
+                | RequestPurpose::ToggleSavedMessagesTopicPinned { .. }
+                | RequestPurpose::SetSavedMessagesTagLabel
+                | RequestPurpose::GetSavedMessagesTags { .. }
+                | RequestPurpose::GetSavedMessagesTopicHistory { .. }
+                | RequestPurpose::SearchSavedMessages { .. },
+            ) => {
+                self.chat_action_error =
+                    Some(call_request_error_line(&err, "Could not complete that action"));
+            }
             // M1 fix-up: a failed "Share link" surfaces in the
             // status note instead of silently doing nothing.
             Some(

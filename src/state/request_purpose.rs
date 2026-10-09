@@ -840,6 +840,54 @@ pub enum RequestPurpose {
     GetForumTopic {
         forum_topic_id: i32,
     },
+    /// `toggleChatViewAsTopics` (schema 1.8.67, line 13513). Answers `ok`;
+    /// `updateChatViewAsTopics` carries the new value.
+    ToggleChatViewAsTopics,
+    /// `getForumTopicDefaultIcons` (schema 1.8.67, line 12658): `stickers`.
+    GetForumTopicDefaultIcons,
+    /// `getForumTopicLink` (schema 1.8.67, line 12692): `messageLink`,
+    /// copied to the clipboard like a message link.
+    GetForumTopicLink,
+    /// `setPinnedForumTopics` (schema 1.8.67, line 12730): `ok`.
+    SetPinnedForumTopics,
+    /// `readAllForumTopicMentions` (schema 1.8.67, line 12741): `ok`.
+    ReadAllForumTopicMentions {
+        forum_topic_id: i32,
+    },
+    /// `readAllForumTopicReactions` (schema 1.8.67, line 12746): `ok`.
+    ReadAllForumTopicReactions {
+        forum_topic_id: i32,
+    },
+    /// `unpinAllForumTopicMessages` (schema 1.8.67, line 12756): `ok`.
+    UnpinAllForumTopicMessages {
+        forum_topic_id: i32,
+    },
+    /// `loadSavedMessagesTopics` (schema 1.8.67, line 11765): `ok`; the
+    /// sublists arrive as `updateSavedMessagesTopic`, a 404 means all
+    /// of them were loaded.
+    LoadSavedMessagesTopics,
+    /// `getSavedMessagesTopicHistory` (schema 1.8.67, line 11773): `messages`.
+    GetSavedMessagesTopicHistory {
+        topic_id: i64,
+    },
+    /// `deleteSavedMessagesTopicHistory` (schema 1.8.67, line 11781): `ok`.
+    DeleteSavedMessagesTopicHistory {
+        topic_id: i64,
+    },
+    /// `toggleSavedMessagesTopicIsPinned` (schema 1.8.67, line 11792): `ok`.
+    ToggleSavedMessagesTopicPinned {
+        topic_id: i64,
+    },
+    /// `getSavedMessagesTags` (schema 1.8.67, line 12856): `savedMessagesTags`.
+    GetSavedMessagesTags {
+        topic_id: i64,
+    },
+    /// `setSavedMessagesTagLabel` (schema 1.8.67, line 12859): `ok`.
+    SetSavedMessagesTagLabel,
+    /// `searchSavedMessages` (schema 1.8.67, line 11897): `foundChatMessages`.
+    SearchSavedMessages {
+        topic_id: i64,
+    },
     /// `getMessageThread` (schema 1.8.67, line 11566) — resolves the
     /// comment / reply thread of `message_id`. Response is
     /// `messageThreadInfo`; correlated to the origin chat via

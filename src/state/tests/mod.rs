@@ -9,6 +9,7 @@ mod chat_row;
 mod common;
 mod connection_indicator;
 mod downloads;
+mod forum_saved;
 mod groups;
 mod messages;
 mod notifications;

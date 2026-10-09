@@ -142,6 +142,7 @@ impl Session {
                 has_protected_content,
                 has_scheduled_messages,
                 is_translatable,
+                view_as_topics,
                 unread_mention_count,
                 unread_reaction_count,
                 can_be_reported,
@@ -150,6 +151,9 @@ impl Session {
                 positions,
                 last_message,
             } => {
+                if let Some(view_as_topics) = view_as_topics {
+                    self.set_chat_view_as_topics(chat_id.0, view_as_topics);
+                }
                 self.set_chat_protected(chat_id.0, has_protected_content);
                 self.set_chat_has_scheduled(chat_id.0, has_scheduled_messages);
                 self.set_chat_translatable(chat_id.0, is_translatable);
@@ -715,6 +719,25 @@ impl Session {
                     self.notification_exceptions.clear();
                 } else {
                     self.notification_exceptions.remove(&scope);
+                }
+            }
+            EnvelopePayload::UpdateChatViewAsTopics {
+                chat_id,
+                view_as_topics,
+            } => self.set_chat_view_as_topics(chat_id.0, view_as_topics),
+            EnvelopePayload::UpdateSavedMessagesTopic(topic) => self.apply_saved_topic(*topic),
+            EnvelopePayload::UpdateSavedMessagesTopicCount { topic_count } => {
+                self.saved.topic_count = topic_count;
+            }
+            EnvelopePayload::UpdateSavedMessagesTags {
+                saved_messages_topic_id,
+                tags,
+            } => self.apply_saved_tags(saved_messages_topic_id, tags),
+            EnvelopePayload::SavedMessagesTags { tags } => {
+                if let Some(RequestPurpose::GetSavedMessagesTags { topic_id }) =
+                    pending.map(|p| p.purpose)
+                {
+                    self.apply_saved_tags(topic_id, tags);
                 }
             }
             // Slice CL1: `updateChatIsMarkedAsUnread` (schema 1.8.67,
@@ -1511,6 +1534,7 @@ impl Session {
                     }
                 }
                 self.thread_remove(chat_id, &message_ids);
+                self.saved_remove_messages(chat_id, &message_ids);
             }
             EnvelopePayload::Chats { chat_ids, .. } => {
                 self.apply_chats(chat_ids, pending);
@@ -1966,6 +1990,8 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
                     // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
                     self.accept_custom_emoji_stickers(stickers);
+                } else if purpose == Some(RequestPurpose::GetForumTopicDefaultIcons) {
+                    self.accept_topic_default_icons(stickers);
                 } else if purpose == Some(RequestPurpose::GetStoryCustomEmojiStickers) {
                     // Phase 9.2+: story reaction picker visuals — keyed by
                     // sticker id (= custom emoji id).

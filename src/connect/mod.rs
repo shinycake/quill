@@ -11,6 +11,7 @@ mod contacts;
 mod core;
 mod deep_links;
 mod emoji_sets;
+mod forum_saved;
 mod gifs;
 mod group_calls;
 mod groups;

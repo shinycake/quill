@@ -248,6 +248,9 @@ pub enum EnvelopePayload {
         /// translation of the chat's messages must be suggested.
         /// Refreshed by `updateChatIsTranslatable` (line 10585).
         is_translatable: bool,
+        /// `chat.view_as_topics` (schema 1.8.67, line 3627); `None` when the
+        /// field is absent. Refreshed by `updateChatViewAsTopics`.
+        view_as_topics: Option<bool>,
         /// Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67, lines
         /// 3600 / 3627). Refreshed by `updateChatIsMarkedAsUnread`
         /// (schema line 10588).
@@ -332,6 +335,28 @@ pub enum EnvelopePayload {
     UpdateChatNotificationSettings {
         chat_id: ChatId,
         notification_settings: ChatNotificationSettings,
+    },
+    /// `updateChatViewAsTopics` (schema 1.8.67, line 10591).
+    UpdateChatViewAsTopics {
+        chat_id: ChatId,
+        view_as_topics: bool,
+    },
+    /// `updateSavedMessagesTopic` (schema 1.8.67, line 10616): a Saved
+    /// Messages sublist appeared or changed.
+    UpdateSavedMessagesTopic(Box<SavedMessagesTopic>),
+    /// `updateSavedMessagesTopicCount` (schema line 10619).
+    UpdateSavedMessagesTopicCount {
+        topic_count: i32,
+    },
+    /// `updateSavedMessagesTags` (schema line 11015): the tags of all Saved
+    /// Messages (`saved_messages_topic_id` 0) or of one sublist.
+    UpdateSavedMessagesTags {
+        saved_messages_topic_id: i64,
+        tags: Vec<SavedMessagesTag>,
+    },
+    /// `savedMessagesTags` — the `getSavedMessagesTags` answer.
+    SavedMessagesTags {
+        tags: Vec<SavedMessagesTag>,
     },
     /// Slice CL1: `updateChatIsMarkedAsUnread` (schema 1.8.67, line
     /// 10588) — the chat was marked as unread or was read.

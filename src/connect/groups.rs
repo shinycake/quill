@@ -1142,7 +1142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// supergroup.
     /// Subsection tabs: a bot chat with topics passes too — pin / unpin
     /// and delete work there (schema 1.8.67, lines 12725 / 12736).
-    fn forum_topic_gate(&self, chat_id: ChatId) -> bool {
+    pub(crate) fn forum_topic_gate(&self, chat_id: ChatId) -> bool {
         (self.forum_supergroup(chat_id).is_some() && self.session.chat_can_manage_topics(chat_id))
             || self.session.bot_topics(chat_id).is_some()
     }
