@@ -1099,6 +1099,15 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             (w > 0.0 && h > 0.0).then_some((w, h))
         })
         .unwrap_or((1200.0, 740.0));
+    // `QUILL_DEMO_WINDOW_ORIGIN=x,y` moves the demo window (points), e.g. to
+    // record it somewhere other windows don't open.
+    let (demo_x, demo_y) = std::env::var("QUILL_DEMO_WINDOW_ORIGIN")
+        .ok()
+        .and_then(|value| {
+            let (x, y) = value.split_once(',')?;
+            Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?))
+        })
+        .unwrap_or((20.0, 20.0));
 
     gpui_kit::application()
         .with_assets(QuillAssets)
@@ -1124,7 +1133,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     .open_window(
                         WindowOptions {
                             window_bounds: Some(WindowBounds::Windowed(Bounds {
-                                origin: point(px(20.), px(20.)),
+                                origin: point(px(demo_x), px(demo_y)),
                                 size: size(px(demo_w), px(demo_h)),
                             })),
                             app_id: Some("org.shinycake.quill".into()),
@@ -1179,7 +1188,90 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     // root view while the event dispatches, and a handler
                     // reading it (a kit button) panicked.
                     use gpui_kit::gpui::AnyWindowHandle;
+                    // `QUILL_DEMO_CLICK_LOG=path` records when each step ran
+                    // (Unix ms), so a recording can be lined up with it.
+                    let mut step_log = std::env::var_os("QUILL_DEMO_CLICK_LOG").and_then(|path| {
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                            .ok()
+                    });
                     for point in clicks.split(';') {
+                        if let Some(log) = step_log.as_mut() {
+                            use std::io::Write;
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis())
+                                .unwrap_or_default();
+                            let _ = writeln!(log, "{now} {}", point.trim());
+                        }
+                        // `p:ms` waits, to pace a scripted recording.
+                        if let Some(ms) = point.strip_prefix("p:") {
+                            if let Ok(ms) = ms.trim().parse::<u64>() {
+                                cx.background_executor()
+                                    .timer(Duration::from_millis(ms))
+                                    .await;
+                            }
+                            continue;
+                        }
+                        // `m:x,y` moves the pointer without clicking (hover).
+                        if let Some(hover) = point.strip_prefix("m:") {
+                            if let Some((x, y)) = hover.split_once(',')
+                                && let (Ok(x), Ok(y)) =
+                                    (x.trim().parse::<f32>(), y.trim().parse::<f32>())
+                            {
+                                let _ = AnyWindowHandle::from(demo_window).update(
+                                    cx,
+                                    |_, window, cx| {
+                                        use gpui_kit::gpui::{
+                                            Modifiers, MouseMoveEvent, PlatformInput, point, px,
+                                        };
+                                        window.dispatch_event(
+                                            PlatformInput::MouseMove(MouseMoveEvent {
+                                                position: point(px(x), px(y)),
+                                                pressed_button: None,
+                                                modifiers: Modifiers::default(),
+                                            }),
+                                            cx,
+                                        );
+                                    },
+                                );
+                            }
+                            continue;
+                        }
+                        // `k:key` presses one key (GPUI key names, e.g. `escape`).
+                        if let Some(key) = point.strip_prefix("k:") {
+                            let key = key.trim().to_string();
+                            let _ =
+                                AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
+                                    use gpui_kit::gpui::{
+                                        KeyDownEvent, KeyUpEvent, Keystroke, Modifiers,
+                                        PlatformInput,
+                                    };
+                                    let keystroke = Keystroke {
+                                        modifiers: Modifiers::default(),
+                                        key: key.clone(),
+                                        key_char: None,
+                                    };
+                                    window.dispatch_event(
+                                        PlatformInput::KeyDown(KeyDownEvent {
+                                            keystroke: keystroke.clone(),
+                                            is_held: false,
+                                            prefer_character_input: false,
+                                        }),
+                                        cx,
+                                    );
+                                    window.dispatch_event(
+                                        PlatformInput::KeyUp(KeyUpEvent { keystroke }),
+                                        cx,
+                                    );
+                                });
+                            cx.background_executor()
+                                .timer(Duration::from_millis(120))
+                                .await;
+                            continue;
+                        }
                         // `w:x,y,dx,dy,s|m|e` sends one phased trackpad scroll
                         // event (started / moved / ended), to script a swipe.
                         if let Some(wheel) = point.strip_prefix("w:") {
