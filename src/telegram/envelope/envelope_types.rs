@@ -1075,6 +1075,22 @@ pub enum EnvelopePayload {
     },
     Sessions {
         sessions: Vec<ParsedSession>,
+        /// B13: `sessions.inactive_session_ttl_days` (schema 1.8.67,
+        /// :9150) — days of inactivity before sessions are terminated.
+        inactive_session_ttl_days: Option<i32>,
+    },
+    /// B13: `newChatPrivacySettings` — `getNewChatPrivacySettings` answer.
+    NewChatPrivacySettings(crate::privacy::NewChatPrivacy),
+    /// B13: `networkStatistics` — `getNetworkStatistics` answer.
+    NetworkStatistics(crate::network_usage::NetworkUsage),
+    /// B13: `recoveryEmailAddress` — the answer that proves a typed
+    /// password right (`getRecoveryEmailAddress`).
+    RecoveryEmailAddress,
+    /// B13: `updateSuggestedActions` (schema 1.8.67, :11070): constructor
+    /// names of the added and removed actions.
+    UpdateSuggestedActions {
+        added: Vec<String>,
+        removed: Vec<String>,
     },
     /// `parity:proxy-settings`: `addedProxies` — `getProxies` answer.
     AddedProxies {
@@ -1781,6 +1797,8 @@ pub struct UserProfileExtras {
     /// B10: `need_phone_number_privacy_exception` — the edit-contact box
     /// then offers "Share my phone number" (tdesktop `NeedContactsException`).
     pub need_phone_exception: bool,
+    /// B13: `gift_settings` — only the own user's is ever shown.
+    pub gift_settings: Option<crate::privacy::GiftSettings>,
 }
 
 /// B10: one `chatPhoto` (schema 1.8.67, line 1030) from
@@ -1845,6 +1863,7 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             .get("need_phone_number_privacy_exception")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
+        gift_settings: crate::privacy::GiftSettings::from_value(info.get("gift_settings")),
     }
 }
 

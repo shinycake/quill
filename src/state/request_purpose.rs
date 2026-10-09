@@ -1288,6 +1288,30 @@ pub enum RequestPurpose {
     SetPrivacyRules {
         key: PrivacySettingKey,
     },
+    /// B13: `getNewChatPrivacySettings`. Response is
+    /// `newChatPrivacySettings`.
+    GetNewChatPrivacy,
+    /// B13: `setNewChatPrivacySettings`. Response is `ok`; applied
+    /// optimistically at send time.
+    SetNewChatPrivacy {
+        previous_allow: bool,
+    },
+    /// B13: `setGiftSettings`. Response is `ok`; applied optimistically.
+    SetGiftSettings,
+    /// B13: `setInactiveSessionTtl`. Response is `ok`; applied
+    /// optimistically.
+    SetInactiveSessionTtl,
+    /// B13: `setOption(ignore_sensitive_content_restrictions)`. The truth
+    /// arrives as `updateOption`.
+    SetSensitiveContent,
+    /// B13: `getNetworkStatistics`. Response is `networkStatistics`.
+    GetNetworkStatistics,
+    /// B13: `resetNetworkStatistics`. Response is `ok`.
+    ResetNetworkStatistics,
+    /// B13: `getRecoveryEmailAddress` used to verify a typed password.
+    CheckRememberedPassword,
+    /// B13: `hideSuggestedAction(suggestedActionCheckPassword)`.
+    HideCheckPasswordSuggestion,
     /// Slice S3: `getReadDatePrivacySettings`. Response is
     /// `readDatePrivacySettings`.
     GetReadDatePrivacy,

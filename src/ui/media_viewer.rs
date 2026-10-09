@@ -1063,6 +1063,14 @@ impl QuillApp {
                 .and_then(|file| file.usable_path())
                 .map(PathBuf::from),
         };
+        // B13: "Ask where to save each file" opens a save dialog instead of
+        // dropping the copy into the download folder.
+        if let Some(path) = path.as_ref()
+            && quill::file_prefs::current().ask_download_path
+        {
+            self.save_file_asking(path.clone(), cx);
+            return;
+        }
         match path {
             Some(path) => match save_media_to_downloads(&path) {
                 Ok(dest) => {
@@ -1551,12 +1559,13 @@ impl QuillApp {
             .media_viewer
             .current()
             .and_then(|item| self.viewer_clip_path(item));
-        self.status_note = match path {
-            Some(path) if quill::platform::open_local_file(&path) => "opened externally".into(),
-            Some(_) => "couldn't open the file".into(),
-            None => "download the media first to open it".into(),
-        };
-        cx.notify();
+        match path {
+            Some(path) => self.open_file_guarded(path, cx),
+            None => {
+                self.status_note = "download the media first to open it".into();
+                cx.notify();
+            }
+        }
     }
 
     /// MED1: push the viewer clock into the seek slider so the thumb

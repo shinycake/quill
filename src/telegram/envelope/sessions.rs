@@ -14,7 +14,7 @@ use serde_json::Value;
 /// `is_password_pending` marks an incomplete login attempt — TGX
 /// (`Tdlib.java` `SessionsInfo`) treats exactly these as the
 /// "Incomplete Login Attempts" section.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParsedSession {
     pub id: i64,
     pub is_current: bool,
@@ -36,6 +36,10 @@ pub struct ParsedSession {
     pub last_active_date: i32,
     pub ip_address: String,
     pub location: String,
+    /// B13: `log_in_date` (session details box).
+    pub log_in_date: i32,
+    /// B13: `is_official_application` (session details box).
+    pub is_official_application: bool,
 }
 
 /// Slice A4: one `connectedWebsite` from a `getConnectedWebsites` answer
@@ -93,6 +97,8 @@ pub(crate) fn parse_session(value: &Value) -> Option<ParsedSession> {
         last_active_date: json_i32(value.get("last_active_date"), 0),
         ip_address: str_field("ip_address"),
         location: str_field("location"),
+        log_in_date: json_i32(value.get("log_in_date"), 0),
+        is_official_application: bool_field("is_official_application"),
     })
 }
 

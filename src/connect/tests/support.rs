@@ -460,6 +460,7 @@ pub(crate) fn session_fixture(id: i64, current: bool, pending: bool) -> ParsedSe
         last_active_date: 1759000000,
         ip_address: "1.2.3.4".into(),
         location: "Austin".into(),
+        ..Default::default()
     }
 }
 

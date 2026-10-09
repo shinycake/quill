@@ -29,6 +29,7 @@ mod messages;
 mod moderation;
 mod payments;
 mod polls;
+mod privacy_data;
 mod profile;
 mod profile_panels;
 mod proxy;

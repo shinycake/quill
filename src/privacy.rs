@@ -50,6 +50,17 @@ pub struct PrivacyRuleDetail {
     pub who: Option<PrivacyWho>,
     pub always: Vec<i64>,
     pub never: Vec<i64>,
+    /// `userPrivacySettingRuleAllowChatMembers` chat ids (tdesktop adds
+    /// groups to the always-allow list).
+    pub always_chats: Vec<i64>,
+    /// `userPrivacySettingRuleRestrictChatMembers` chat ids.
+    pub never_chats: Vec<i64>,
+    /// `userPrivacySettingRuleAllowPremiumUsers` (tdesktop "Premium users").
+    pub allow_premium: bool,
+    /// `userPrivacySettingRuleAllowBots` (tdesktop "Mini Apps", Always).
+    pub allow_bots: bool,
+    /// `userPrivacySettingRuleRestrictBots` (tdesktop "Mini Apps", Never).
+    pub never_bots: bool,
     pub extra_rules: Vec<PrivacyRule>,
 }
 
@@ -73,6 +84,15 @@ impl PrivacyRuleDetail {
             match rule.name.as_str() {
                 "userPrivacySettingRuleAllowUsers" => detail.always.extend(&rule.user_ids),
                 "userPrivacySettingRuleRestrictUsers" => detail.never.extend(&rule.user_ids),
+                "userPrivacySettingRuleAllowChatMembers" => {
+                    detail.always_chats.extend(&rule.chat_ids)
+                }
+                "userPrivacySettingRuleRestrictChatMembers" => {
+                    detail.never_chats.extend(&rule.chat_ids)
+                }
+                "userPrivacySettingRuleAllowPremiumUsers" => detail.allow_premium = true,
+                "userPrivacySettingRuleAllowBots" => detail.allow_bots = true,
+                "userPrivacySettingRuleRestrictBots" => detail.never_bots = true,
                 "userPrivacySettingRuleAllowAll"
                 | "userPrivacySettingRuleRestrictAll"
                 | "userPrivacySettingRuleAllowContacts"
@@ -94,14 +114,33 @@ impl PrivacyRuleDetail {
     pub fn recompose(&self) -> Vec<serde_json::Value> {
         use serde_json::json;
         let mut rules: Vec<serde_json::Value> = Vec::new();
+        if self.never_bots {
+            rules.push(json!({"@type": "userPrivacySettingRuleRestrictBots"}));
+        }
         if !self.never.is_empty() {
             rules.push(
                 json!({"@type": "userPrivacySettingRuleRestrictUsers", "user_ids": self.never}),
             );
         }
+        if !self.never_chats.is_empty() {
+            rules.push(
+                json!({"@type": "userPrivacySettingRuleRestrictChatMembers", "chat_ids": self.never_chats}),
+            );
+        }
+        if self.allow_premium {
+            rules.push(json!({"@type": "userPrivacySettingRuleAllowPremiumUsers"}));
+        }
+        if self.allow_bots {
+            rules.push(json!({"@type": "userPrivacySettingRuleAllowBots"}));
+        }
         if !self.always.is_empty() {
             rules.push(
                 json!({"@type": "userPrivacySettingRuleAllowUsers", "user_ids": self.always}),
+            );
+        }
+        if !self.always_chats.is_empty() {
+            rules.push(
+                json!({"@type": "userPrivacySettingRuleAllowChatMembers", "chat_ids": self.always_chats}),
             );
         }
         for extra in &self.extra_rules {
@@ -125,7 +164,10 @@ impl PrivacyRuleDetail {
     /// Everybody → never-allow only; Contacts → both; Nobody →
     /// always-allow only.
     pub fn exception_counts(&self) -> (usize, usize) {
-        let (mut always, mut never) = (self.always.len(), self.never.len());
+        let mut always = self.always.len() + self.always_chats.len();
+        let mut never = self.never.len() + self.never_chats.len();
+        always += usize::from(self.allow_premium) + usize::from(self.allow_bots);
+        never += usize::from(self.never_bots);
         match self.who {
             Some(PrivacyWho::Everybody) => always = 0,
             Some(PrivacyWho::Nobody) => never = 0,
@@ -142,6 +184,120 @@ impl PrivacyRuleDetail {
 pub enum PrivacyKeyState {
     Loading,
     Ready(PrivacyRuleDetail),
+    Failed,
+}
+
+/// B13: `giftSettings` (schema 1.8.67, :1445) — whether the gift button
+/// shows in chats and which gift kinds the account accepts
+/// (`acceptedGiftTypes`, :1440). tdesktop shows the same six switches in
+/// Gifts privacy; changing them needs Premium.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GiftSettings {
+    pub show_gift_button: bool,
+    pub unlimited_gifts: bool,
+    pub limited_gifts: bool,
+    pub upgraded_gifts: bool,
+    pub gifts_from_channels: bool,
+    pub premium_subscription: bool,
+}
+
+impl Default for GiftSettings {
+    /// A fresh account accepts everything.
+    fn default() -> Self {
+        Self {
+            show_gift_button: false,
+            unlimited_gifts: true,
+            limited_gifts: true,
+            upgraded_gifts: true,
+            gifts_from_channels: true,
+            premium_subscription: true,
+        }
+    }
+}
+
+impl GiftSettings {
+    /// Parse a `giftSettings` object (`None` for a null/absent field).
+    pub fn from_value(value: Option<&Value>) -> Option<Self> {
+        let value = value.filter(|v| v.is_object())?;
+        let flag = |v: &Value, key: &str| v.get(key).and_then(Value::as_bool).unwrap_or(false);
+        let accepted = value.get("accepted_gift_types").unwrap_or(&Value::Null);
+        Some(Self {
+            show_gift_button: flag(value, "show_gift_button"),
+            unlimited_gifts: flag(accepted, "unlimited_gifts"),
+            limited_gifts: flag(accepted, "limited_gifts"),
+            upgraded_gifts: flag(accepted, "upgraded_gifts"),
+            gifts_from_channels: flag(accepted, "gifts_from_channels"),
+            premium_subscription: flag(accepted, "premium_subscription"),
+        })
+    }
+
+    /// The `giftSettings` object for `setGiftSettings`.
+    pub fn to_value(self) -> Value {
+        serde_json::json!({
+            "@type": "giftSettings",
+            "show_gift_button": self.show_gift_button,
+            "accepted_gift_types": {
+                "@type": "acceptedGiftTypes",
+                "unlimited_gifts": self.unlimited_gifts,
+                "limited_gifts": self.limited_gifts,
+                "upgraded_gifts": self.upgraded_gifts,
+                "gifts_from_channels": self.gifts_from_channels,
+                "premium_subscription": self.premium_subscription,
+            },
+        })
+    }
+}
+
+/// B13: `newChatPrivacySettings` (schema 1.8.67, :9033) — tdesktop's
+/// Messages privacy box: "Everyone" or "Contacts and Premium users"
+/// (`allow_new_chats_from_unknown_users` off), plus the paid-message
+/// price kept as-is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewChatPrivacy {
+    pub allow_from_unknown: bool,
+    pub incoming_paid_message_star_count: i64,
+}
+
+impl NewChatPrivacy {
+    pub fn from_value(value: &Value) -> Self {
+        Self {
+            allow_from_unknown: value
+                .get("allow_new_chats_from_unknown_users")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            incoming_paid_message_star_count: value
+                .get("incoming_paid_message_star_count")
+                .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
+                .unwrap_or(0),
+        }
+    }
+}
+
+/// B13: the inactivity periods tdesktop offers for terminating old
+/// sessions (`SelfDestructionBox` `Type::Sessions`): 1 week, then 1, 3, 6
+/// and 12 months, as days.
+pub const SESSION_TTL_DAYS: [i32; 5] = [7, 30, 90, 180, 365];
+
+/// B13: tdesktop `SelfDestructionBox::DaysLabel` — whole months above 25
+/// days, else whole weeks.
+pub fn session_ttl_label(days: i32) -> String {
+    let (count, unit) = if days > 25 {
+        ((days / 30).max(1), "month")
+    } else {
+        ((days / 7).max(1), "week")
+    };
+    if count == 1 {
+        format!("1 {unit}")
+    } else {
+        format!("{count} {unit}s")
+    }
+}
+
+/// B13: fetch state of the new-chat privacy row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewChatPrivacyState {
+    Loading,
+    Ready(NewChatPrivacy),
     Failed,
 }
 
@@ -347,5 +503,123 @@ mod tests {
             ),
         );
         assert_eq!(session.blocked_senders, Some(vec![61, 62, 63]));
+    }
+}
+
+#[cfg(test)]
+mod b13_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn rules(list: serde_json::Value) -> Vec<PrivacyRule> {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .map(PrivacyRule::parse)
+            .collect()
+    }
+
+    #[test]
+    fn premium_bots_and_chat_member_rules_round_trip() {
+        let parsed = rules(json!([
+            {"@type": "userPrivacySettingRuleRestrictBots"},
+            {"@type": "userPrivacySettingRuleRestrictUsers", "user_ids": [9]},
+            {"@type": "userPrivacySettingRuleRestrictChatMembers", "chat_ids": [-100]},
+            {"@type": "userPrivacySettingRuleAllowPremiumUsers"},
+            {"@type": "userPrivacySettingRuleAllowUsers", "user_ids": [7]},
+            {"@type": "userPrivacySettingRuleAllowChatMembers", "chat_ids": [-200, -201]},
+            {"@type": "userPrivacySettingRuleAllowContacts"},
+        ]));
+        let detail = PrivacyRuleDetail::from_rules(&parsed);
+        assert_eq!(detail.who, Some(PrivacyWho::Contacts));
+        assert!(detail.never_bots && detail.allow_premium && !detail.allow_bots);
+        assert_eq!(detail.never, vec![9]);
+        assert_eq!(detail.always, vec![7]);
+        assert_eq!(detail.never_chats, vec![-100]);
+        assert_eq!(detail.always_chats, vec![-200, -201]);
+        // Nothing was parked in the pass-through list.
+        assert!(detail.extra_rules.is_empty());
+        // Contacts mode counts every exception row.
+        assert_eq!(detail.exception_counts(), (1 + 2 + 1, 1 + 1 + 1));
+        // Recompose keeps restrict rules ahead of allow rules, base last.
+        let again = detail.recompose();
+        let names: Vec<&str> = again.iter().map(|r| r["@type"].as_str().unwrap()).collect();
+        assert_eq!(
+            names,
+            [
+                "userPrivacySettingRuleRestrictBots",
+                "userPrivacySettingRuleRestrictUsers",
+                "userPrivacySettingRuleRestrictChatMembers",
+                "userPrivacySettingRuleAllowPremiumUsers",
+                "userPrivacySettingRuleAllowUsers",
+                "userPrivacySettingRuleAllowChatMembers",
+                "userPrivacySettingRuleAllowContacts",
+            ]
+        );
+        let reparsed: Vec<PrivacyRule> = again.iter().map(PrivacyRule::parse).collect();
+        assert_eq!(PrivacyRuleDetail::from_rules(&reparsed), detail);
+    }
+
+    #[test]
+    fn exception_counts_follow_the_base_choice() {
+        let mut detail = PrivacyRuleDetail {
+            who: Some(PrivacyWho::Everybody),
+            allow_premium: true,
+            always: vec![1],
+            never_chats: vec![5],
+            ..Default::default()
+        };
+        // Everybody: only the never list matters.
+        assert_eq!(detail.exception_counts(), (0, 1));
+        detail.who = Some(PrivacyWho::Nobody);
+        assert_eq!(detail.exception_counts(), (2, 0));
+    }
+
+    #[test]
+    fn gift_settings_parse_and_serialize() {
+        let value = json!({
+            "@type": "giftSettings",
+            "show_gift_button": true,
+            "accepted_gift_types": {
+                "@type": "acceptedGiftTypes",
+                "unlimited_gifts": true, "limited_gifts": false, "upgraded_gifts": true,
+                "gifts_from_channels": false, "premium_subscription": true
+            }
+        });
+        let settings = GiftSettings::from_value(Some(&value)).unwrap();
+        assert!(settings.show_gift_button && settings.unlimited_gifts);
+        assert!(!settings.limited_gifts && !settings.gifts_from_channels);
+        assert_eq!(settings.to_value(), value);
+        assert!(GiftSettings::from_value(Some(&serde_json::Value::Null)).is_none());
+        assert!(GiftSettings::from_value(None).is_none());
+        // A fresh account accepts every kind and hides the gift button.
+        let fresh = GiftSettings::default();
+        assert!(!fresh.show_gift_button && fresh.limited_gifts && fresh.premium_subscription);
+    }
+
+    #[test]
+    fn new_chat_privacy_defaults_to_everybody() {
+        let parsed = NewChatPrivacy::from_value(&json!({
+            "allow_new_chats_from_unknown_users": false,
+            "incoming_paid_message_star_count": "40"
+        }));
+        assert!(!parsed.allow_from_unknown);
+        assert_eq!(parsed.incoming_paid_message_star_count, 40);
+        assert!(NewChatPrivacy::from_value(&json!({})).allow_from_unknown);
+    }
+
+    #[test]
+    fn session_ttl_labels_follow_tdesktop() {
+        let labels: Vec<String> = SESSION_TTL_DAYS
+            .iter()
+            .map(|d| session_ttl_label(*d))
+            .collect();
+        assert_eq!(
+            labels,
+            ["1 week", "1 month", "3 months", "6 months", "12 months"]
+        );
+        assert_eq!(session_ttl_label(14), "2 weeks");
+        assert_eq!(session_ttl_label(1), "1 week");
+        assert_eq!(session_ttl_label(366), "12 months");
     }
 }

@@ -914,6 +914,9 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             last_active_date: now,
             ip_address: "192.168.1.42".into(),
             location: "Austin, United States".into(),
+            log_in_date: now - 40 * 86_400,
+            is_official_application: true,
+            ..Default::default()
         },
         ParsedSession {
             id: 123456789,
@@ -930,6 +933,9 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             last_active_date: now - 3600,
             ip_address: "203.0.113.7".into(),
             location: "Austin, United States".into(),
+            log_in_date: now - 40 * 86_400,
+            is_official_application: true,
+            ..Default::default()
         },
         ParsedSession {
             id: 555111222,
@@ -946,6 +952,9 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             last_active_date: now - 2 * 86400,
             ip_address: "198.51.100.23".into(),
             location: "Dallas, United States".into(),
+            log_in_date: now - 40 * 86_400,
+            is_official_application: true,
+            ..Default::default()
         },
         ParsedSession {
             id: 999888777,
@@ -962,6 +971,9 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             last_active_date: now - 600,
             ip_address: "203.0.113.99".into(),
             location: "Unknown".into(),
+            log_in_date: now - 40 * 86_400,
+            is_official_application: true,
+            ..Default::default()
         },
     ]
 }

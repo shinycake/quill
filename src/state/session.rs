@@ -280,6 +280,9 @@ pub struct Session {
     pub storage_clearing: bool,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
     pub storage_limits: crate::storage_limits::StorageLimits,
+    /// B13: new-chat privacy, inactive-session TTL, 18+ option, network
+    /// usage and the remember-password check.
+    pub privacy_data: PrivacyData,
     /// Batch 4: new-login alert, service popups and terms of service.
     pub notices: AccountNotices,
     /// Batch 6: two-step recovery / reset / login-email flow state.
@@ -1212,6 +1215,7 @@ impl Session {
             storage_freed: None,
             storage_clearing: false,
             storage_limits: Default::default(),
+            privacy_data: Default::default(),
             notices: AccountNotices::default(),
             twofa_flow: TwofaFlow::default(),
             password_state: None,

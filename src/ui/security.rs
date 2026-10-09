@@ -277,6 +277,20 @@ impl QuillApp {
                     ),
                 );
             }
+            // B13: a tapped session opens its details instead of the list.
+            let details = this
+                .privacy_ui
+                .session_details
+                .and_then(|id| sessions.iter().find(|s| s.id == id))
+                .map(|s| this.session_details_body(s, mutating, cx));
+            if details.is_none() {
+                this.privacy_ui.session_details = None;
+                body = body.child(this.sessions_ttl_section(cx));
+            }
+            let body = match details {
+                Some(details) => div().flex().flex_col().gap_2().child(details),
+                None => body,
+            };
             let footer = div().flex().justify_end().gap_2().child(
                 Button::new("sessions-refresh")
                     .label("Refresh")
@@ -563,8 +577,13 @@ impl QuillApp {
     pub(super) fn open_sessions(&mut self, cx: &mut Context<Self>) {
         self.sessions_open = true;
         self.sessions_confirm = None;
+        self.privacy_ui.session_details = None;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_active_sessions();
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.privacy_data
+                .inactive_session_ttl_days
+                .get_or_insert(180);
         }
         cx.notify();
     }
@@ -809,6 +828,15 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("Hint: {}", state.password_hint)),
             );
+        }
+        // B13: the server asked whether the user still remembers the
+        // password (`suggestedActionCheckPassword`).
+        if state.has_password
+            && self
+                .session()
+                .is_some_and(|s| s.privacy_data.check_password_suggested)
+        {
+            body = body.child(self.password_check_card(cx));
         }
         body = body.child(
             div()
@@ -1352,9 +1380,17 @@ impl QuillApp {
                     })),
             );
         }
-        if show_toggles || !s.is_current {
-            row = row.child(actions);
-        }
+        actions = actions.child(
+            Button::new(format!("session-details-{session_id}"))
+                .label("Details")
+                .small()
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.privacy_ui.session_details = Some(session_id);
+                    cx.notify();
+                })),
+        );
+        row = row.child(actions);
         row.into_any_element()
     }
 

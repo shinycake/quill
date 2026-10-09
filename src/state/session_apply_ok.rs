@@ -16,6 +16,7 @@ impl Session {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
         self.apply_proxy_ok(pending);
+        self.apply_privacy_data_ok(pending);
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::EditMessageSchedulingState {
                 message_id,
