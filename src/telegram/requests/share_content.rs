@@ -135,6 +135,31 @@ pub fn send_contact_card(
     )
 }
 
+/// `inputMessageStory story_poster_chat_id:int53 story_id:int32` (schema
+/// `td_api.tl:6539`): shares a story as a message (tdesktop's story share
+/// box sends the story the same way).
+pub fn send_story_card(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic_id: Option<i32>,
+    poster_chat_id: ChatId,
+    story_id: i32,
+    options: &SendOptions,
+) -> String {
+    send_content(
+        extra,
+        chat_id,
+        topic_id,
+        None,
+        options,
+        json!({
+            "@type": "inputMessageStory",
+            "story_poster_chat_id": poster_chat_id.0,
+            "story_id": story_id,
+        }),
+    )
+}
+
 /// `inputMessageLocation location:location live_period heading
 /// proximity_alert_radius` (schema line 6145); a static location sends
 /// `live_period` 0.
@@ -186,6 +211,23 @@ mod tests {
         assert_eq!(dice_emoji("roll \u{1F3B2}"), None);
         assert_eq!(dice_emoji("\u{1F600}"), None);
         assert_eq!(dice_emoji(""), None);
+    }
+
+    #[test]
+    fn send_story_card_shape() {
+        let json = send_story_card(
+            RequestId(5),
+            ChatId(77),
+            None,
+            ChatId(11),
+            4,
+            &SendOptions::default(),
+        );
+        let v = parse(&json);
+        assert_eq!(v["@type"], "sendMessage");
+        assert_eq!(v["input_message_content"]["@type"], "inputMessageStory");
+        assert_eq!(v["input_message_content"]["story_poster_chat_id"], 11);
+        assert_eq!(v["input_message_content"]["story_id"], 4);
     }
 
     #[test]

@@ -9,9 +9,9 @@ use super::actions::{
     OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages, OpenSearch,
     OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious,
     ShowChatMenu, ShowChatPreview, SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn,
-    SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme, ViewerCopy,
-    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
-    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    StoryTogglePause, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen, ToggleTheme,
+    ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave,
+    ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -510,15 +510,26 @@ impl Render for QuillApp {
             // propagates, so the keystroke reaches the focused input (an
             // action handler stops propagation unless told to propagate,
             // which used to eat the composer's arrow keys and "0").
+            .on_action(cx.listener(|this, _: &StoryTogglePause, _, cx| {
+                if this.story_viewer.is_open() && !this.story_text_input_open() {
+                    this.toggle_story_pause(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|this, _: &ViewerPrev, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.story_viewer.is_open() && !this.story_text_input_open() {
+                    this.step_story_viewer(-1, cx);
+                } else if this.media_viewer.is_open() {
                     this.step_media_viewer(-1, cx);
                 } else {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|this, _: &ViewerNext, _, cx| {
-                if this.media_viewer.is_open() {
+                if this.story_viewer.is_open() && !this.story_text_input_open() {
+                    this.step_story_viewer(1, cx);
+                } else if this.media_viewer.is_open() {
                     this.step_media_viewer(1, cx);
                 } else {
                     cx.propagate();

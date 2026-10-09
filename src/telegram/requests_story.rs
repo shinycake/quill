@@ -233,9 +233,95 @@ pub fn set_chat_pinned_stories(extra: RequestId, chat_id: ChatId, story_ids: &[i
     .to_string()
 }
 
+/// B14: `getCloseFriends = Users;` (schema `td_api.tl:14939`, "Returns all
+/// close friends of the current user").
+pub fn get_close_friends(extra: RequestId) -> String {
+    json!({"@type": "getCloseFriends", "@extra": extra.as_extra()}).to_string()
+}
+
+/// B14: `setCloseFriends user_ids:vector<int53> = Ok;` (schema
+/// `td_api.tl:14936`) — replaces the whole list.
+pub fn set_close_friends(extra: RequestId, user_ids: &[i64]) -> String {
+    json!({
+        "@type": "setCloseFriends",
+        "@extra": extra.as_extra(),
+        "user_ids": user_ids
+    })
+    .to_string()
+}
+
+/// B14: `setChatActiveStoriesList chat_id:int53 story_list:StoryList = Ok;`
+/// (schema `td_api.tl:14159`) — `archive` moves the peer's stories to the
+/// hidden list (tdesktop "Hide stories"), otherwise back to the main one.
+pub fn set_chat_active_stories_list(extra: RequestId, chat_id: ChatId, archive: bool) -> String {
+    json!({
+        "@type": "setChatActiveStoriesList",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "story_list": {
+            "@type": if archive { "storyListArchive" } else { "storyListMain" }
+        }
+    })
+    .to_string()
+}
+
+/// B14: `toggleStoryIsPostedToChatPage story_poster_chat_id:int53
+/// story_id:int32 is_posted_to_chat_page:Bool = Ok;` (schema
+/// `td_api.tl:14143`).
+pub fn toggle_story_is_posted_to_chat_page(
+    extra: RequestId,
+    chat_id: ChatId,
+    story_id: i32,
+    posted: bool,
+) -> String {
+    json!({
+        "@type": "toggleStoryIsPostedToChatPage",
+        "@extra": extra.as_extra(),
+        "story_poster_chat_id": chat_id.0,
+        "story_id": story_id,
+        "is_posted_to_chat_page": posted
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn b14_story_request_shapes() {
+        let v: serde_json::Value = serde_json::from_str(&get_close_friends(RequestId(1))).unwrap();
+        assert_eq!(v["@type"], "getCloseFriends");
+        let v: serde_json::Value =
+            serde_json::from_str(&set_close_friends(RequestId(2), &[5, 9])).unwrap();
+        assert_eq!(v["@type"], "setCloseFriends");
+        assert_eq!(v["user_ids"], serde_json::json!([5, 9]));
+        let v: serde_json::Value = serde_json::from_str(&set_chat_active_stories_list(
+            RequestId(3),
+            ChatId(11),
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["story_list"]["@type"], "storyListArchive");
+        let v: serde_json::Value = serde_json::from_str(&set_chat_active_stories_list(
+            RequestId(3),
+            ChatId(11),
+            false,
+        ))
+        .unwrap();
+        assert_eq!(v["story_list"]["@type"], "storyListMain");
+        let v: serde_json::Value = serde_json::from_str(&toggle_story_is_posted_to_chat_page(
+            RequestId(4),
+            ChatId(11),
+            7,
+            true,
+        ))
+        .unwrap();
+        assert_eq!(v["@type"], "toggleStoryIsPostedToChatPage");
+        assert_eq!(v["story_poster_chat_id"], 11);
+        assert_eq!(v["story_id"], 7);
+        assert_eq!(v["is_posted_to_chat_page"], true);
+    }
 
     #[test]
     fn story_album_and_archive_request_shapes() {

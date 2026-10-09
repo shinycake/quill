@@ -817,6 +817,18 @@ pub(super) fn demo_seed_for(
             "screenshot demo — clickable story areas".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyStoryVideo => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — story video playback".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyStoryMore => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — story close friends".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadySeekBars => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -1417,6 +1429,12 @@ impl QuillApp {
         });
         // Phase 9.5: cover-frame seconds input (viewer cover editor) and
         // the privacy editor's contact search.
+        let story_more_search = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Search")
+                .auto_grow(1, 1)
+                .submit_on_enter(false)
+        });
         let story_cover_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Cover frame time in seconds, e.g. 1.5")
@@ -1781,6 +1799,19 @@ impl QuillApp {
             story_cover_sent: false,
             story_privacy_edit: None,
             story_privacy_user_search,
+            story_native: std::cell::RefCell::new(None),
+            story_native_key: None,
+            story_native_failed: None,
+            story_native_play_at: std::time::Instant::now(),
+            story_native_paused_by_us: false,
+            story_video_wait_since: None,
+            story_muted: false,
+            story_pause: Default::default(),
+            close_friends_edit: None,
+            close_friends_saving: false,
+            story_share_open: false,
+            story_more_search,
+            story_notice: None,
             story_privacy_sent: false,
             auth_demo,
             focus_sidebar: cx.focus_handle(),

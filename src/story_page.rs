@@ -67,6 +67,10 @@ pub fn story_page_op_label(purpose: RequestPurpose) -> String {
         RequestPurpose::GetChatArchivedStories => "loading archived stories".to_string(),
         RequestPurpose::GetChatPostedToChatPageStories => "loading chat page stories".to_string(),
         RequestPurpose::SetChatPinnedStories => "pinning stories".to_string(),
+        RequestPurpose::GetCloseFriends => "loading close friends".to_string(),
+        RequestPurpose::SetCloseFriends => "saving close friends".to_string(),
+        RequestPurpose::SetChatActiveStoriesList => "moving stories".to_string(),
+        RequestPurpose::ToggleStoryIsPostedToChatPage => "updating profile stories".to_string(),
         _ => "story request".to_string(),
     }
 }

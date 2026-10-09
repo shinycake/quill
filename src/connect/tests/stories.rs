@@ -840,3 +840,78 @@ fn driver_join_live_story_two_step_and_gates() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn driver_b14_close_friends_hide_profile_and_share() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+    // getCloseFriends is deduped while in flight.
+    assert!(driver.get_close_friends().unwrap().is_some());
+    assert_eq!(driver.get_close_friends(), Ok(None));
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "getCloseFriends");
+
+    // setCloseFriends stages the ids until `ok`.
+    driver.set_close_friends(&[4, 8]).unwrap();
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "setCloseFriends");
+    assert_eq!(v["user_ids"], serde_json::json!([4, 8]));
+    assert_eq!(driver.session.close_friends_pending, Some(vec![4, 8]));
+
+    // Hide / unhide.
+    driver
+        .set_chat_active_stories_list(ChatId(7), true)
+        .unwrap();
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "setChatActiveStoriesList");
+    assert_eq!(v["story_list"]["@type"], "storyListArchive");
+    assert_eq!(
+        driver.set_chat_active_stories_list(ChatId(999), true),
+        Err(ConnectSendError::InvalidRequest)
+    );
+
+    // Post to profile needs the cached flag.
+    seed_story(&mut driver, &seq, &dyn_sink, 7, 5, "storyContentPhoto", "");
+    assert_eq!(
+        driver.toggle_story_is_posted_to_chat_page(ChatId(7), 5, true),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    seed_story(
+        &mut driver,
+        &seq,
+        &dyn_sink,
+        7,
+        6,
+        "storyContentPhoto",
+        r#""can_toggle_is_posted_to_chat_page":true,"can_be_forwarded":true,"#,
+    );
+    driver
+        .toggle_story_is_posted_to_chat_page(ChatId(7), 6, true)
+        .unwrap();
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "toggleStoryIsPostedToChatPage");
+    assert_eq!(v["is_posted_to_chat_page"], true);
+
+    // Share: only forwardable stories go out as `inputMessageStory`.
+    let options = crate::composer::SendOptions::default();
+    assert_eq!(
+        driver.share_story_to_chat(ChatId(7), ChatId(7), 5, &options),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    driver
+        .share_story_to_chat(ChatId(7), ChatId(7), 6, &options)
+        .unwrap();
+    let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(v["@type"], "sendMessage");
+    assert_eq!(v["input_message_content"]["@type"], "inputMessageStory");
+    assert_eq!(v["input_message_content"]["story_id"], 6);
+    let _ = std::fs::remove_dir_all(&dir);
+}

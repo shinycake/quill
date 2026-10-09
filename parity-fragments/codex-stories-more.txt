@@ -1,0 +1,8 @@
+# B14 stories (see docs/decisions/codex-stories-more.md)
+parity:stories-video-playback
+parity:stories-share-to-chat
+parity:stories-save-copy-link
+parity:stories-post-to-profile-archive
+parity:stories-keyboard-mute
+parity:stories-close-friends-editor
+parity:stories-hide-peer

@@ -3,7 +3,9 @@ use super::*;
 use crate::composer::SendOptions;
 use crate::ids::{ChatId, RequestId};
 use crate::state::RequestPurpose;
-use crate::telegram::requests::{ContactShare, SendReply, send_contact_card, send_location};
+use crate::telegram::requests::{
+    ContactShare, SendReply, send_contact_card, send_location, send_story_card,
+};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// The guards every content send shares: chats path active, a chat the
@@ -90,6 +92,28 @@ impl<S: JsonSender> ConnectDriver<S> {
                 reply_to.as_ref(),
                 options,
             )
+        })
+    }
+
+    /// B14: `sendMessage` + `inputMessageStory` — the story viewer's Share.
+    /// Only stories TDLib marks forwardable (`can_be_forwarded`) go out.
+    pub fn share_story_to_chat(
+        &mut self,
+        chat_id: ChatId,
+        poster_chat_id: ChatId,
+        story_id: i32,
+        options: &SendOptions,
+    ) -> Result<RequestId, ConnectSendError> {
+        let forwardable = self
+            .session
+            .stories
+            .get(&(poster_chat_id.0, story_id))
+            .is_some_and(|story| story.can_be_forwarded);
+        if !self.share_target_ok(chat_id) || !forwardable {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.send_built(chat_id, |extra, topic_id| {
+            send_story_card(extra, chat_id, topic_id, poster_chat_id, story_id, options)
         })
     }
 }

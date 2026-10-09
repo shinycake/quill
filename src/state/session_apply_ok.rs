@@ -404,6 +404,23 @@ impl Session {
                 }
                 self.succeed_story_page_op(RequestPurpose::SetChatPinnedStories);
             }
+            // B14: `setCloseFriends` confirmed — the staged ids are the
+            // new list.
+            Some(RequestPurpose::SetCloseFriends) => {
+                if let Some(ids) = self.close_friends_pending.take() {
+                    self.close_friends = Some(ids);
+                }
+                self.succeed_story_page_op(RequestPurpose::SetCloseFriends);
+            }
+            // B14: hide / unhide and post-to-profile ride on TDLib's own
+            // `updateChatActiveStories` / `updateStory`; `ok` only ends the
+            // status line.
+            Some(RequestPurpose::SetChatActiveStoriesList) => {
+                self.succeed_story_page_op(RequestPurpose::SetChatActiveStoriesList);
+            }
+            Some(RequestPurpose::ToggleStoryIsPostedToChatPage) => {
+                self.succeed_story_page_op(RequestPurpose::ToggleStoryIsPostedToChatPage);
+            }
             _ => {}
         }
         // Phase C2i: `sendCallLog` confirmed — the log upload for

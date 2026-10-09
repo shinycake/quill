@@ -314,8 +314,15 @@ impl Session {
                 | RequestPurpose::ReorderStoryAlbumStories
                 | RequestPurpose::GetChatArchivedStories
                 | RequestPurpose::GetChatPostedToChatPageStories
-                | RequestPurpose::SetChatPinnedStories),
+                | RequestPurpose::SetChatPinnedStories
+                | RequestPurpose::GetCloseFriends
+                | RequestPurpose::SetCloseFriends
+                | RequestPurpose::SetChatActiveStoriesList
+                | RequestPurpose::ToggleStoryIsPostedToChatPage),
             ) => {
+                if purpose == RequestPurpose::SetCloseFriends {
+                    self.close_friends_pending = None;
+                }
                 self.fail_story_page_op(purpose, error_reason(&err).to_string());
             }
             // TDLib 1.8.68 community management: surface refusals

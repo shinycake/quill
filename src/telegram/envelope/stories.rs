@@ -275,6 +275,14 @@ pub struct ParsedStory {
     /// schema `td_api.tl:6724` comment: "True, if the story can be added
     /// to an album using createStoryAlbum and addStoryAlbumStories").
     pub can_be_added_to_album: bool,
+    /// B14: `story.is_posted_to_chat_page` — the story is pinned to the
+    /// poster's profile (`toggleStoryIsPostedToChatPage`); false = archive.
+    pub is_posted_to_chat_page: bool,
+    /// B14: `story.can_toggle_is_posted_to_chat_page` — gates the
+    /// "Post to profile" / "Remove from profile" action.
+    pub can_toggle_is_posted_to_chat_page: bool,
+    /// B14: `story.can_get_statistics` (`getStoryStatistics`).
+    pub can_get_statistics: bool,
     /// Phase 9.8: `story.areas` — clickable areas (`storyArea`,
     /// `schema/td_api.tl:6566`).
     pub areas: Vec<StoryAreaView>,
@@ -426,6 +434,12 @@ pub(crate) fn parse_story(value: &Value) -> Option<(ParsedStory, Vec<ParsedFile>
                 .get("can_be_added_to_album")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            is_posted_to_chat_page: json_bool(value.get("is_posted_to_chat_page"), false),
+            can_toggle_is_posted_to_chat_page: json_bool(
+                value.get("can_toggle_is_posted_to_chat_page"),
+                false,
+            ),
+            can_get_statistics: json_bool(value.get("can_get_statistics"), false),
             areas: parse_story_areas(value.get("areas")),
         },
         files,

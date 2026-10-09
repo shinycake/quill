@@ -6,9 +6,9 @@ use super::actions::{
     LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder, OpenArchive,
     OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages, OpenSearch,
     OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious,
-    ShowChatMenu, ShowChatPreview, ToggleFullscreen, ToggleTheme, ViewerCopy, ViewerFlipHorizontal,
-    ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut,
-    ViewerZoomReset, ZoomWindow,
+    ShowChatMenu, ShowChatPreview, StoryTogglePause, ToggleFullscreen, ToggleTheme, ViewerCopy,
+    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
+    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -233,6 +233,11 @@ pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
         defaults: &[primary!("c")],
     },
     RebindableAction {
+        id: "story-pause",
+        label: "Pause or resume story",
+        defaults: &["space"],
+    },
+    RebindableAction {
         id: "viewer-save",
         label: "Save media",
         defaults: &[primary!("s")],
@@ -280,6 +285,7 @@ pub fn keybinding_for(id: &str, keystroke: &str) -> Option<KeyBinding> {
         "viewer-flip-v" => Some(KeyBinding::new(keystroke, ViewerFlipVertical, None)),
         "viewer-copy" => Some(KeyBinding::new(keystroke, ViewerCopy, None)),
         "viewer-save" => Some(KeyBinding::new(keystroke, ViewerSave, None)),
+        "story-pause" => Some(KeyBinding::new(keystroke, StoryTogglePause, None)),
         _ => None,
     }
 }
@@ -752,6 +758,12 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
         row("escape", "Close search / cancel", "Search", CancelSearch),
         // Parity slice 5: the handlers no-op (and let the keystroke reach
         // text inputs) unless the media viewer is open.
+        row(
+            "space",
+            "Pause or resume story",
+            "Media viewer",
+            StoryTogglePause,
+        ),
         row("left", "Previous item", "Media viewer", ViewerPrev),
         row("right", "Next item", "Media viewer", ViewerNext),
         row("0", "Reset zoom", "Media viewer", ViewerZoomReset),
@@ -1067,7 +1079,7 @@ mod tests {
     #[test]
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
-        assert_eq!(defaults.len(), 84);
+        assert_eq!(defaults.len(), 85);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
                 let binding = keybinding_for(row.id, &chord).unwrap();
