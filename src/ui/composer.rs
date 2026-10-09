@@ -185,6 +185,36 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    // R8: tdesktop cuts a text over the length limit into
+                    // several messages (`ApiWrap::sendMessage` + `CutPart`);
+                    // the reply rides the first part only.
+                    if let [only] = snaps.as_slice()
+                        && only.attachment.is_none()
+                        && only.album.is_empty()
+                    {
+                        let limit = self.text_length_limit();
+                        if quill::text_split::units_over_limit(&only.text, limit) > 0 {
+                            let parts = quill::text_split::split_markup_text(&only.text, limit);
+                            if parts.is_empty() {
+                                self.status_note = "message too long to send".into();
+                                cx.notify();
+                                return;
+                            }
+                            let template = only.clone();
+                            snaps = parts
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, part)| {
+                                    let mut snap = template.clone();
+                                    snap.text = part;
+                                    if i > 0 {
+                                        snap.reply_to = None;
+                                    }
+                                    snap
+                                })
+                                .collect();
+                        }
+                    }
                     // Phase A1: slow-mode gate (centralized in
                     // `slow_mode_blocked`).
                     if self.slow_mode_blocked(chat_id, cx) {
@@ -1701,6 +1731,13 @@ impl QuillApp {
                     self.status_note =
                         self.send_started_note(ComposerScheduling::None, "saving edit…");
                 }
+                Err(quill::connect::ConnectSendError::TextTooLong { limit }) => {
+                    // R8: tdesktop `lng_edit_limit_reached` — the edit stays
+                    // open so the text can be shortened.
+                    let over = quill::text_split::units_over_limit(&text, limit);
+                    self.status_note =
+                        format!("message too long (max {limit} characters, remove {over})");
+                }
                 Err(_) => {
                     self.status_note = "could not edit message".into();
                 }
@@ -1714,6 +1751,15 @@ impl QuillApp {
             self.status_note = "demo edit applied locally (no live Telegram)".into();
             cx.notify();
         }
+    }
+
+    /// R8: the runtime `message_text_length_max` (TDLib's compiled default
+    /// before the first `updateOption`, and in demo mode).
+    pub(super) fn text_length_limit(&self) -> i32 {
+        self.live
+            .as_ref()
+            .map(|live| live.driver.session.message_text_length_max)
+            .unwrap_or(4096)
     }
 
     pub(super) fn cancel_delete(&mut self, cx: &mut Context<Self>) {

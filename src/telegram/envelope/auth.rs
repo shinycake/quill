@@ -35,6 +35,14 @@ pub enum ErrorClass {
     AiComposeFloodPremium,
     StickersForbidden,
     GifsForbidden,
+    /// `PHONE_NUMBER_BANNED` while signing in (tdesktop's banned-number box).
+    PhoneBanned,
+    /// `PHONE_NUMBER_INVALID` (tdesktop's `lng_bad_phone`).
+    PhoneInvalid,
+    /// `PHONE_NUMBER_FLOOD`: the account was deleted and re-created too often.
+    PhoneFlood,
+    /// `TASK_ALREADY_EXISTS`: a login-email reset is already pending.
+    TaskAlreadyExists,
     Other,
 }
 
@@ -103,6 +111,44 @@ pub struct RegistrationTerms {
     pub min_user_age: i32,
 }
 
+/// How TDLib delivers (or can next deliver) a login code
+/// (`AuthenticationCodeType`; only the kind matters to the UI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodeKind {
+    /// A code type this build does not name.
+    #[default]
+    Other,
+    /// A message in the user's other Telegram apps.
+    TelegramMessage,
+    Sms,
+    Call,
+    FlashCall,
+    MissedCall,
+    Fragment,
+    Firebase,
+}
+
+/// `authenticationCodeInfo` reduced to what the code screen needs: how the
+/// code was sent, how it can be sent next and after how many seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CodeDelivery {
+    pub kind: CodeKind,
+    pub next: Option<CodeKind>,
+    pub timeout_secs: i32,
+}
+
+/// `EmailAddressResetState` of the email-code step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EmailResetState {
+    /// The email cannot be reset.
+    #[default]
+    Unavailable,
+    /// May be reset after `wait_period` seconds.
+    Available { wait_period: i32 },
+    /// A reset is already scheduled and completes in `reset_in` seconds.
+    Pending { reset_in: i32 },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthorizationState {
     WaitTdlibParameters,
@@ -112,9 +158,11 @@ pub enum AuthorizationState {
     WaitEmailCode {
         email_pattern: String,
         code_length: Option<i32>,
+        reset: EmailResetState,
     },
     WaitCode {
         code_length: Option<i32>,
+        delivery: CodeDelivery,
     },
     WaitOtherDeviceConfirmation {
         link: String,
@@ -169,6 +217,61 @@ pub struct PasswordState {
     pub pending_reset_date: i32,
 }
 
+fn parse_code_kind(value: Option<&Value>) -> Option<CodeKind> {
+    let ty = value.filter(|v| !v.is_null())?.get("@type")?.as_str()?;
+    Some(match ty {
+        "authenticationCodeTypeTelegramMessage" => CodeKind::TelegramMessage,
+        "authenticationCodeTypeSms"
+        | "authenticationCodeTypeSmsWord"
+        | "authenticationCodeTypeSmsPhrase" => CodeKind::Sms,
+        "authenticationCodeTypeCall" => CodeKind::Call,
+        "authenticationCodeTypeFlashCall" => CodeKind::FlashCall,
+        "authenticationCodeTypeMissedCall" => CodeKind::MissedCall,
+        "authenticationCodeTypeFragment" => CodeKind::Fragment,
+        "authenticationCodeTypeFirebaseAndroid" | "authenticationCodeTypeFirebaseIos" => {
+            CodeKind::Firebase
+        }
+        _ => CodeKind::Other,
+    })
+}
+
+pub(crate) fn parse_code_delivery(info: Option<&Value>) -> CodeDelivery {
+    let Some(info) = info else {
+        return CodeDelivery::default();
+    };
+    CodeDelivery {
+        kind: parse_code_kind(info.get("type")).unwrap_or_default(),
+        next: parse_code_kind(info.get("next_type")),
+        timeout_secs: info
+            .get("timeout")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .clamp(0, i64::from(i32::MAX)) as i32,
+    }
+}
+
+fn parse_email_reset(state: Option<&Value>) -> EmailResetState {
+    let Some(state) = state.filter(|v| !v.is_null()) else {
+        return EmailResetState::Unavailable;
+    };
+    let secs = |key: &str| {
+        state
+            .get(key)
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .clamp(0, i64::from(i32::MAX)) as i32
+    };
+    match state.get("@type").and_then(Value::as_str) {
+        Some("emailAddressResetStateAvailable") => EmailResetState::Available {
+            wait_period: secs("wait_period"),
+        },
+        Some("emailAddressResetStatePending") => EmailResetState::Pending {
+            reset_in: secs("reset_in"),
+        },
+        _ => EmailResetState::Unavailable,
+    }
+}
+
 pub(crate) fn parse_auth(value: &Value) -> AuthorizationState {
     let ty = value.get("@type").and_then(Value::as_str).unwrap_or("");
     match ty {
@@ -187,6 +290,7 @@ pub(crate) fn parse_auth(value: &Value) -> AuthorizationState {
                 .and_then(Value::as_i64)
                 .and_then(|n| i32::try_from(n).ok())
                 .filter(|n| *n > 0),
+            reset: parse_email_reset(value.get("email_address_reset_state")),
         },
         "authorizationStateWaitCode" => AuthorizationState::WaitCode {
             code_length: value
@@ -194,7 +298,8 @@ pub(crate) fn parse_auth(value: &Value) -> AuthorizationState {
                 .and_then(|info| info.get("type"))
                 .and_then(|ty| ty.get("length"))
                 .and_then(Value::as_i64)
-                .map(|n| n as i32),
+                .map(|n| n.sat_i32()),
+            delivery: parse_code_delivery(value.get("code_info")),
         },
         "authorizationStateWaitOtherDeviceConfirmation" => {
             // The `link` is the QR payload (a tg://login token). It is
@@ -263,7 +368,8 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     let code = value
         .and_then(|v| v.get("code"))
         .and_then(Value::as_i64)
-        .unwrap_or(0) as i32;
+        .unwrap_or(0)
+        .sat_i32();
     // S14: story-posting restriction errors are classified here — the
     // only place the raw message is still available (`TdError` drops it
     // for secret-scrubbing). Anything unrecognized falls back to the
@@ -278,7 +384,10 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     if let Some(class) = value
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
-        .and_then(crate::story_restriction::classify_server_message)
+        .and_then(|message| {
+            crate::story_restriction::classify_server_message(message)
+                .or_else(|| crate::auth::classify_sign_in_message(message))
+        })
     {
         return TdError {
             code,

@@ -38,6 +38,7 @@ mod search_upgrades;
 mod settings;
 mod share;
 mod share_content;
+mod signin_polish;
 mod sponsored;
 mod sticker_tabs;
 mod stories;

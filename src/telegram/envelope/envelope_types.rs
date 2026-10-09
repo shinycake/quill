@@ -1128,6 +1128,10 @@ pub enum EnvelopePayload {
         phone_number: String,
         timeout: i32,
     },
+    /// `countries` (`getCountries` answer), stored in `Session::countries`.
+    Countries {
+        countries: Vec<crate::phone::Country>,
+    },
     /// Slice A4: `connectedWebsites` — `getConnectedWebsites` response
     /// (schema 1.8.67, lines 9171/15124). Stored in
     /// `Session::connected_websites` when the pending purpose is
@@ -1876,12 +1880,12 @@ pub(crate) fn parse_user_profile_extras(info: Option<&serde_json::Value>) -> Use
             ((1..=31).contains(&day) && (1..=12).contains(&month)).then(|| Birthdate {
                 day: day as u8,
                 month: month as u8,
-                year: (year > 0).then_some(year as i32),
+                year: (year > 0).then_some(year.sat_i32()),
             })
         });
     UserProfileExtras {
         birthdate,
-        groups_in_common: field(info, "group_in_common_count").max(0) as i32,
+        groups_in_common: field(info, "group_in_common_count").max(0).sat_i32(),
         personal_chat_id: info
             .get("personal_chat_id")
             .and_then(|v| super::json_helpers::int53(Some(v)).ok())

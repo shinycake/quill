@@ -27,6 +27,12 @@ pub enum RequestPurpose {
     RecoverAuthenticationPassword,
     /// Slice A1: `requestQrCodeAuthentication` from the phone screen.
     RequestQrCodeAuthentication,
+    /// `resetAuthenticationEmailAddress` on the email-code step.
+    ResetAuthenticationEmail,
+    /// `getCountries` for the sign-in country picker.
+    GetCountries,
+    /// `getCountryCode`: the default country guess for the phone screen.
+    GetCountryCode,
     LoadChats,
     /// Phase 7.1: single-shot `loadChats(chatListFolder(id))` when a folder
     /// tab is selected. Separate from `LoadChats` so the ok-response does

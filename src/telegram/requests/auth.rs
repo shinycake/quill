@@ -562,3 +562,18 @@ pub fn confirm_qr_code_authentication(extra: RequestId, link: &str) -> String {
     json!({"@type":"confirmQrCodeAuthentication", "@extra":extra.as_extra(), "link":link})
         .to_string()
 }
+
+/// `getCountries = Countries;`: the sign-in country list (works before login).
+pub fn get_countries(extra: RequestId) -> String {
+    json!({"@type":"getCountries", "@extra":extra.as_extra()}).to_string()
+}
+
+/// `getCountryCode = Text;`: country code guessed from the IP address.
+pub fn get_country_code(extra: RequestId) -> String {
+    json!({"@type":"getCountryCode", "@extra":extra.as_extra()}).to_string()
+}
+
+/// `resetAuthenticationEmailAddress = Ok;` on `authorizationStateWaitEmailCode`.
+pub fn reset_authentication_email_address(extra: RequestId) -> String {
+    json!({"@type":"resetAuthenticationEmailAddress", "@extra":extra.as_extra()}).to_string()
+}

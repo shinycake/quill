@@ -6,6 +6,14 @@ pub enum ScreenshotDemo {
     NeedTdjson,
     WaitPhone,
     WaitCode,
+    /// Sign-in polish: the country picker open with a search query.
+    WaitPhoneCountry,
+    /// Sign-in polish: a pasted international number, grouped as typed.
+    WaitPhoneFormatted,
+    /// Sign-in polish: code step with the resend countdown and "Wrong number?".
+    WaitCodeResend,
+    /// Sign-in polish: tdesktop's banned-number box (with Help).
+    WaitPhoneBanned,
     WaitPassword,
     WaitPremium,
     /// Slice A1: injected `authorizationStateWaitOtherDeviceConfirmation`

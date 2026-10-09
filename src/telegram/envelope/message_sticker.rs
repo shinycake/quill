@@ -149,8 +149,8 @@ pub(crate) fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>
         };
         (
             id,
-            int53_or_zero(thumb.get("width")) as i32,
-            int53_or_zero(thumb.get("height")) as i32,
+            int53_or_zero(thumb.get("width")).sat_i32(),
+            int53_or_zero(thumb.get("height")).sat_i32(),
         )
     } else {
         (None, 0, 0)
@@ -171,8 +171,8 @@ pub(crate) fn parse_sticker_value(value: Option<&Value>) -> (Option<StickerItem>
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
-            width: int53_or_zero(value.get("width")) as i32,
-            height: int53_or_zero(value.get("height")) as i32,
+            width: int53_or_zero(value.get("width")).sat_i32(),
+            height: int53_or_zero(value.get("height")).sat_i32(),
             format: parse_sticker_format(value.get("format")),
             file_id,
             thumb_file_id,
@@ -205,7 +205,7 @@ pub(crate) fn parse_sticker_set_info(value: &Value) -> Option<StickerSetInfo> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-        size: int53_or_zero(value.get("size")) as i32,
+        size: int53_or_zero(value.get("size")).sat_i32(),
         is_installed: value
             .get("is_installed")
             .and_then(Value::as_bool)
@@ -226,7 +226,7 @@ pub(crate) fn parse_sticker_sets(value: &Value) -> EnvelopePayload {
         .filter_map(parse_sticker_set_info)
         .collect();
     EnvelopePayload::StickerSets {
-        total_count: int53_or_zero(value.get("total_count")) as i32,
+        total_count: int53_or_zero(value.get("total_count")).sat_i32(),
         sets,
     }
 }
@@ -275,7 +275,7 @@ pub(crate) fn parse_trending_sticker_sets(value: &Value) -> EnvelopePayload {
         .filter_map(parse_sticker_set_info)
         .collect();
     EnvelopePayload::TrendingStickerSets {
-        total_count: int53_or_zero(value.get("total_count")) as i32,
+        total_count: int53_or_zero(value.get("total_count")).sat_i32(),
         sets,
         is_premium: value
             .get("is_premium")

@@ -165,7 +165,11 @@ pub(crate) fn parse_user_status(value: Option<&Value>) -> UserStatusKind {
     match value.get("@type").and_then(Value::as_str) {
         Some("userStatusOnline") => UserStatusKind::Online,
         Some("userStatusOffline") => UserStatusKind::Offline {
-            was_online: value.get("was_online").and_then(Value::as_i64).unwrap_or(0) as i32,
+            was_online: value
+                .get("was_online")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
         },
         Some("userStatusRecently") => UserStatusKind::Recently,
         Some("userStatusLastWeek") => UserStatusKind::LastWeek,
@@ -398,7 +402,7 @@ pub(crate) fn parse_profile_photo(photo: &Value) -> Option<ParsedProfilePhoto> {
         .or_else(|| sizes.iter().min_by_key(|size| (size.width, size.height)))?;
     Some(ParsedProfilePhoto {
         id: int53(photo.get("id")).ok()?,
-        added_date: int53_or_zero(photo.get("added_date")) as i32,
+        added_date: int53_or_zero(photo.get("added_date")).sat_i32(),
         thumb_file_id: thumb.file_id,
         full_file_id: full.file_id,
         width: full.width,

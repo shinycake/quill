@@ -539,7 +539,8 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
                 secs: value
                     .get("message_auto_delete_time")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
             },
             Vec::new(),
         ),
@@ -570,7 +571,11 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 discard_reason: CallDiscardReason::from_value(value.get("discard_reason")),
-                duration: value.get("duration").and_then(Value::as_i64).unwrap_or(0) as i32,
+                duration: value
+                    .get("duration")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .sat_i32(),
             },
             Vec::new(),
         ),
@@ -733,8 +738,8 @@ pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<
         if length <= 0 || offset > i32::MAX as i64 || length > i32::MAX as i64 {
             continue;
         }
-        let offset = offset as i32;
-        let length = length as i32;
+        let offset = offset.sat_i32();
+        let length = length.sat_i32();
         let Ok(start) = utf16_to_utf8_offset(text, offset) else {
             continue;
         };
@@ -775,7 +780,7 @@ pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<
                 match int64(type_value.and_then(|t| t.get("media_timestamp"))) {
                     Some(seconds) if (0..=i64::from(i32::MAX)).contains(&seconds) => {
                         TextEntityKind::MediaTimestamp {
-                            seconds: seconds as i32,
+                            seconds: seconds.sat_i32(),
                         }
                     }
                     _ => continue,
@@ -785,7 +790,7 @@ pub(crate) fn parse_text_entities(text: &str, formatted: Option<&Value>) -> Vec<
                 match int64(type_value.and_then(|t| t.get("unix_time"))) {
                     Some(unix_time) if (0..=i64::from(i32::MAX)).contains(&unix_time) => {
                         TextEntityKind::DateTime {
-                            unix_time: unix_time as i32,
+                            unix_time: unix_time.sat_i32(),
                         }
                     }
                     _ => continue,

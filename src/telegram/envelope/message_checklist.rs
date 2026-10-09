@@ -54,13 +54,18 @@ pub(crate) fn parse_checklist(value: &Value) -> Checklist {
             .into_iter()
             .flatten()
             .map(|task| ChecklistTask {
-                id: task.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+                id: task
+                    .get("id")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .sat_i32(),
                 text: parse_formatted_text(task.get("text")),
                 completed_by: parse_message_sender(task.get("completed_by")).ok(),
                 completion_date: task
                     .get("completion_date")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
             })
             .collect(),
         others_can_add_tasks: flag("others_can_add_tasks"),

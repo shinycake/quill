@@ -185,7 +185,8 @@ impl CallState {
                     code: error
                         .and_then(|e| e.get("code"))
                         .and_then(Value::as_i64)
-                        .unwrap_or(0) as i32,
+                        .unwrap_or(0)
+                        .sat_i32(),
                 }
             }
             other => CallState::Unknown(other.to_string()),
@@ -322,7 +323,11 @@ pub(crate) fn parse_call(value: Option<&Value>) -> Option<ParsedCall> {
                 .unwrap_or_default(),
         });
     Some(ParsedCall {
-        id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        id: value
+            .get("id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         unique_id: int53_or_zero(value.get("unique_id")),
         user_id: int53(value.get("user_id")).ok()?,
         is_outgoing: value
@@ -401,7 +406,11 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
         })
         .unwrap_or_default();
     Some(ParsedGroupCall {
-        id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        id: value
+            .get("id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         title: value
             .get("title")
             .and_then(Value::as_str)
@@ -438,7 +447,8 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
         participant_count: value
             .get("participant_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         loaded_all_participants: value
             .get("loaded_all_participants")
             .and_then(Value::as_bool)
@@ -467,7 +477,8 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
         scheduled_start_date: value
             .get("scheduled_start_date")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         enabled_start_notification: value
             .get("enabled_start_notification")
             .and_then(Value::as_bool)
@@ -491,7 +502,8 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
         record_duration: value
             .get("record_duration")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         is_video_recorded: value
             .get("is_video_recorded")
             .and_then(Value::as_bool)
@@ -519,9 +531,13 @@ pub struct ParsedGroupCallMessage {
 pub(crate) fn parse_group_call_message(value: Option<&Value>) -> Option<ParsedGroupCallMessage> {
     let value = value?;
     Some(ParsedGroupCallMessage {
-        message_id: value.get("message_id").and_then(Value::as_i64)? as i32,
+        message_id: value.get("message_id").and_then(Value::as_i64)?.sat_i32(),
         sender_id: parse_message_sender(value.get("sender_id")).ok()?,
-        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        date: value
+            .get("date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         text: parse_formatted_text(value.get("text")),
         is_from_owner: value
             .get("is_from_owner")
@@ -648,7 +664,8 @@ pub(crate) fn parse_group_call_participant(
         audio_source_id: value
             .get("audio_source_id")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         is_current_user: flag("is_current_user"),
         is_speaking: flag("is_speaking"),
         is_hand_raised: flag("is_hand_raised"),
@@ -662,7 +679,8 @@ pub(crate) fn parse_group_call_participant(
         volume_level: value
             .get("volume_level")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         order: value
             .get("order")
             .and_then(Value::as_str)
@@ -696,7 +714,8 @@ pub(crate) fn parse_video_chat(value: Option<&Value>) -> Option<ParsedVideoChat>
         group_call_id: value
             .get("group_call_id")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         has_participants: value
             .get("has_participants")
             .and_then(Value::as_bool)

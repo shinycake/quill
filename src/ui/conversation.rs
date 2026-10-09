@@ -813,6 +813,7 @@ impl QuillApp {
                             this.child(chip)
                         })
                         .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
+                        .when_some(self.text_limit_bar(cx), |this, bar| this.child(bar))
                         // kit Phase 5: the composer input row — attach and
                         // emoji/sticker pickers, the borderless growing
                         // kit Textarea (auto_grow(2, 6) on the state sizes
@@ -1663,7 +1664,56 @@ impl QuillApp {
                 });
             } else if count != self.history_scroller.read(cx).item_count() {
                 let prev_count = self.history_scroller.read(cx).item_count();
+                // R6: a page landed and the window trimmed its far end —
+                // the rows slid. Remove exactly the dropped rows (so the
+                // reader's scroll anchor shifts with them) instead of
+                // splicing the whole list.
+                let slide = (prev_count == self.history_rows.len())
+                    .then(|| {
+                        let ids = |rows: &[HistoryRow]| -> Vec<(i64, i64)> {
+                            rows.iter()
+                                .map(|row| {
+                                    (
+                                        row.first_id().map_or(0, |id| id.0),
+                                        row.last_id().map_or(0, |id| id.0),
+                                    )
+                                })
+                                .collect()
+                        };
+                        quill::state::row_window_shift(&ids(&self.history_rows), &ids(&rows))
+                    })
+                    .flatten()
+                    .filter(|shift| shift.front_removed + shift.tail_removed > 0);
                 match (first, last, self.history_ends) {
+                    _ if slide.is_some() => {
+                        for shift in slide {
+                            let newer_page = self.history_had_newer;
+                            self.history_scroller.update(cx, |state, cx| {
+                                let following = state.is_following_tail();
+                                if shift.tail_removed > 0 {
+                                    state.splice(
+                                        prev_count - shift.tail_removed..prev_count,
+                                        0,
+                                        cx,
+                                    );
+                                }
+                                if shift.front_removed > 0 {
+                                    state.splice(0..shift.front_removed, 0, cx);
+                                }
+                                if shift.front_added > 0 {
+                                    state.prepend(shift.front_added, cx);
+                                }
+                                if shift.tail_added > 0 {
+                                    state.append(shift.tail_added, cx);
+                                    // Keep the old last row in view and read
+                                    // on from there (as for any newer page).
+                                    if newer_page && following {
+                                        state.scroll_to_item(count - shift.tail_added - 1, cx);
+                                    }
+                                }
+                            });
+                        }
+                    }
                     (Some(_), _, Some((prev_first, _)))
                         if first == Some(prev_first) && count > prev_count =>
                     {

@@ -599,6 +599,27 @@ fn cl1_clear_history_error_surfaces() {
 }
 
 #[test]
+fn r8_text_length_option_tracked_and_floored() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    assert_eq!(session.message_text_length_max, 4096);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateOption","name":"message_text_length_max","value":{"@type":"optionValueInteger","value":8192}}"#,
+    );
+    assert_eq!(session.message_text_length_max, 8192);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateOption","name":"message_text_length_max","value":{"@type":"optionValueInteger","value":0}}"#,
+    );
+    assert_eq!(session.message_text_length_max, 1);
+}
+
+#[test]
 fn cl1_pin_limit_options_tracked() {
     // Slice CL1: `updateOption` for the pin limits (schema 1.8.67,
     // line 13674) feeds the client-side pin pre-check.
