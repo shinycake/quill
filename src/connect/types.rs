@@ -47,6 +47,9 @@ pub const USER_DOWNLOAD_PRIORITY: i32 = 32;
 pub const SEARCH_LIMIT: i32 = 20;
 /// `searchRecentlyFoundChats.limit` — schema/Unigram cap is 50.
 pub const RECENT_SEARCH_LIMIT: i32 = 50;
+/// `getTopChats.limit` for the "Frequent contacts" strip (tdesktop shows the
+/// first row and expands on "Show all"; TDLib allows up to 30).
+pub const TOP_CHATS_LIMIT: i32 = 20;
 /// tdesktop `kSearchRequestDelay` / `AutoSearchTimeout` (config.h): 900 ms.
 /// ComposeSearch `requestSearchDelayed` uses the same `AutoSearchTimeout`.
 pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
@@ -79,6 +82,9 @@ pub enum SearchFlight {
     Recents(RequestId),
     /// `searchChats` + `searchMessages` + `searchPublicChats` extras.
     Query(RequestId, RequestId, RequestId),
+    /// The "Public posts" scope: one `searchPublicPosts` /
+    /// `searchPublicMessagesByTag` request.
+    PublicPosts(RequestId),
 }
 
 /// Empty/open recents send immediately; typed queries wait for [`SEARCH_DEBOUNCE`].
