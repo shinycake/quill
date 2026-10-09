@@ -305,7 +305,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::ReadAllUnreadMarkers { kind }, Some(chat_id));
-        let json = read_all_chat_markers(extra, chat_id, kind == UnreadJumpKind::Reaction);
+        let json = match kind {
+            // B15: `readAllChatPollVotes` (schema 1.8.67, line 13308).
+            UnreadJumpKind::PollVote => {
+                crate::telegram::requests::read_all_chat_poll_votes(extra, chat_id)
+            }
+            _ => read_all_chat_markers(extra, chat_id, kind == UnreadJumpKind::Reaction),
+        };
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
             return Err(err);

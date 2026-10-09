@@ -299,9 +299,6 @@ pub enum ServiceAction {
     PaidMedia {
         stars: i64,
     },
-    Checklist {
-        title: String,
-    },
 }
 
 fn i(value: &Value, key: &str) -> i64 {
@@ -790,12 +787,6 @@ impl ServiceAction {
             },
             "messagePaidMedia" => A::PaidMedia {
                 stars: i(value, "star_count"),
-            },
-            "messageChecklist" => A::Checklist {
-                title: value
-                    .get("list")
-                    .map(|l| formatted(l, "title"))
-                    .unwrap_or_default(),
             },
             _ => return None,
         })

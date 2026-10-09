@@ -640,3 +640,214 @@ fn group_chat_actions_name_the_sender_by_first_name() {
     );
     assert_eq!(session.chats.get(&21).unwrap().peer_activity_label(), None);
 }
+
+const GROUP_CHAT: &str = r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Crew","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#;
+const NEW_TEXT: &str = r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hey","entities":[]}}}}"#;
+const READ_ALL: &str = r#"{"@type":"updateChatReadInbox","chat_id":14,"last_read_inbox_message_id":42,"unread_count":0}"#;
+
+#[test]
+fn reading_a_chat_withdraws_its_shown_notification() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    session.app_active = false;
+    apply_json(&mut session, &seq, &sink, NEW_TEXT);
+    assert_eq!(session.pending_notifications.len(), 1);
+    // The UI shows the toast and drains the queue.
+    session.pending_notifications.clear();
+    apply_json(&mut session, &seq, &sink, READ_ALL);
+    assert_eq!(session.pending_notification_clears, vec![ChatId(14)]);
+    // Nothing is cleared twice.
+    session.pending_notification_clears.clear();
+    apply_json(&mut session, &seq, &sink, READ_ALL);
+    assert!(session.pending_notification_clears.is_empty());
+}
+
+#[test]
+fn reading_before_the_toast_is_shown_drops_the_queued_one() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    session.app_active = false;
+    apply_json(&mut session, &seq, &sink, NEW_TEXT);
+    apply_json(&mut session, &seq, &sink, READ_ALL);
+    assert!(session.pending_notifications.is_empty());
+}
+
+#[test]
+fn a_partial_read_keeps_the_notification() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    session.app_active = false;
+    apply_json(&mut session, &seq, &sink, NEW_TEXT);
+    session.pending_notifications.clear();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatReadInbox","chat_id":14,"last_read_inbox_message_id":40,"unread_count":2}"#,
+    );
+    assert!(session.pending_notification_clears.is_empty());
+}
+
+#[test]
+fn an_emptied_notification_group_withdraws_the_toast() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    session.app_active = false;
+    apply_json(&mut session, &seq, &sink, NEW_TEXT);
+    session.pending_notifications.clear();
+    // Still has notifications: nothing happens.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNotificationGroup","notification_group_id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"notification_settings_chat_id":14,"notification_sound_id":"0","total_count":1,"added_notifications":[],"removed_notification_ids":[5]}"#,
+    );
+    assert!(session.pending_notification_clears.is_empty());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNotificationGroup","notification_group_id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"notification_settings_chat_id":14,"notification_sound_id":"0","total_count":0,"added_notifications":[],"removed_notification_ids":[6]}"#,
+    );
+    assert_eq!(session.pending_notification_clears, vec![ChatId(14)]);
+}
+
+#[test]
+fn active_notifications_from_a_previous_launch_can_be_cleared() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateActiveNotifications","groups":[{"@type":"notificationGroup","id":1,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":14,"total_count":2,"notifications":[]},{"@type":"notificationGroup","id":2,"type":{"@type":"notificationGroupTypeMessages"},"chat_id":15,"total_count":0,"notifications":[]}]}"#,
+    );
+    assert!(session.shown_notification_chats.contains(&ChatId(14)));
+    assert!(!session.shown_notification_chats.contains(&ChatId(15)));
+    apply_json(&mut session, &seq, &sink, READ_ALL);
+    assert_eq!(session.pending_notification_clears, vec![ChatId(14)]);
+}
+
+const REACTION_SETTINGS_ALL: &str = r#"{"@type":"updateReactionNotificationSettings","notification_settings":{"@type":"reactionNotificationSettings","message_reaction_source":{"@type":"reactionNotificationSourceAll"},"story_reaction_source":{"@type":"reactionNotificationSourceNone"},"poll_vote_source":{"@type":"reactionNotificationSourceNone"},"sound_id":"-1","show_preview":true}}"#;
+const REACTION_UPDATE: &str = r#"{"@type":"updateMessageUnreadReactions","chat_id":14,"message_id":7,"unread_reactions":[{"@type":"unreadReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"sender_id":{"@type":"messageSenderUser","user_id":31},"is_big":false}],"unread_reaction_count":COUNT}"#;
+const REACTOR: &str = r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","is_contact":false,"type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOffline","was_online":1}}}"#;
+
+fn reaction_update(count: u32) -> String {
+    REACTION_UPDATE.replace("COUNT", &count.to_string())
+}
+
+#[test]
+fn a_new_reaction_notifies_when_the_setting_allows_it() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    apply_json(&mut session, &seq, &sink, REACTOR);
+    session.app_active = false;
+    // The default source is "none": the reaction badge updates silently.
+    apply_json(&mut session, &seq, &sink, &reaction_update(1));
+    assert!(session.pending_notifications.is_empty());
+    assert_eq!(session.chats[&14].unread_reaction_count, 1);
+
+    apply_json(&mut session, &seq, &sink, REACTION_SETTINGS_ALL);
+    session.hide_notification_previews = false;
+    apply_json(&mut session, &seq, &sink, &reaction_update(2));
+    let queued = &session.pending_notifications;
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].title, "Crew");
+    assert_eq!(
+        queued[0].body,
+        "Ada Lovelace reacted \u{2764} to your message"
+    );
+}
+
+#[test]
+fn reading_a_reaction_does_not_notify() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    session.app_active = false;
+    apply_json(&mut session, &seq, &sink, REACTION_SETTINGS_ALL);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageUnreadReactions","chat_id":14,"message_id":7,"unread_reactions":[],"unread_reaction_count":0}"#,
+    );
+    assert!(session.pending_notifications.is_empty());
+}
+
+#[test]
+fn the_contacts_source_ignores_strangers() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, GROUP_CHAT);
+    apply_json(&mut session, &seq, &sink, REACTOR);
+    session.app_active = false;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &REACTION_SETTINGS_ALL.replace(
+            "reactionNotificationSourceAll",
+            "reactionNotificationSourceContacts",
+        ),
+    );
+    apply_json(&mut session, &seq, &sink, &reaction_update(1));
+    assert!(session.pending_notifications.is_empty());
+}
+
+#[test]
+fn default_auto_delete_roundtrip_and_failure() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetDefaultAutoDelete, None);
+    session.default_auto_delete_busy = true;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messageAutoDeleteTime","time":604800,"@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.default_auto_delete_secs, Some(604_800));
+    assert!(!session.default_auto_delete_busy);
+
+    let extra = session.request(
+        RequestPurpose::SetDefaultAutoDelete { seconds: 86_400 },
+        None,
+    );
+    session.default_auto_delete_busy = true;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert_eq!(session.default_auto_delete_secs, Some(86_400));
+
+    let extra = session.request(RequestPurpose::SetDefaultAutoDelete { seconds: 0 }, None);
+    session.default_auto_delete_busy = true;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"nope","@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(
+        session.default_auto_delete_secs,
+        Some(86_400),
+        "a refusal keeps the old value"
+    );
+    assert!(session.default_auto_delete_error.is_some());
+    assert!(!session.default_auto_delete_busy);
+}

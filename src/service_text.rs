@@ -1213,11 +1213,6 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
             "Story"
         }),
         A::PaidMedia { stars } => text(&format!("Paid media \u{B7} {}", stars_cost(*stars))),
-        A::Checklist { title } => text(&if title.is_empty() {
-            "Checklist".to_string()
-        } else {
-            format!("Checklist: {title}")
-        }),
     }
 }
 

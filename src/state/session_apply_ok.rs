@@ -30,6 +30,21 @@ impl Session {
             Some(RequestPurpose::ReportSupergroupSpam) => {
                 self.message_action_note = Some("spam reported".into());
             }
+            Some(RequestPurpose::DeleteMessageReactionsFromSender {
+                message_id,
+                user_id,
+            }) => {
+                self.message_action_note = Some("reaction deleted".into());
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.drop_reactor_from_audience(chat_id, MessageId(message_id), user_id);
+                }
+            }
+            Some(RequestPurpose::TransferChatOwnership { user_id }) => {
+                self.finish_ownership_transfer(
+                    user_id,
+                    pending.and_then(|p| p.chat_id).map(|c| c.0),
+                );
+            }
             _ => {}
         }
         // Slice A3: a `terminateSession` /
@@ -63,6 +78,11 @@ impl Session {
             self.sessions_stale = true;
             self.sessions_mutating = false;
             self.sessions_error = None;
+        }
+        if let Some(RequestPurpose::SetDefaultAutoDelete { seconds }) = pending.map(|p| p.purpose) {
+            self.default_auto_delete_secs = Some(seconds);
+            self.default_auto_delete_busy = false;
+            self.default_auto_delete_error = None;
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -442,12 +462,14 @@ impl Session {
                 Some(RequestPurpose::SetChatMemberStatus {
                     kind: MemberStatusChange::Restrict
                         | MemberStatusChange::Ban
-                        | MemberStatusChange::Unban,
+                        | MemberStatusChange::Unban
+                        | MemberStatusChange::Remove,
                     ..
                 })
             ) {
                 self.supergroup_members
                     .retain(|(id, _), _| *id != chat_id.0);
+                self.basic_group_members.remove(&chat_id.0);
             }
         }
         // Slice G1: `setChatMemberTag` confirmed — the custom

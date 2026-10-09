@@ -843,12 +843,6 @@ wording!(
     "Paid media \u{B7} 25 Stars"
 );
 wording!(
-    checklist_card,
-    BY_DANA,
-    r#"{"@type":"messageChecklist","list":{"@type":"checklist","title":{"text":"Groceries","entities":[]},"tasks":[]}}"#,
-    "Checklist: Groceries"
-);
-wording!(
     auto_delete_set_by_other,
     BY_DANA,
     r#"{"@type":"messageChatSetMessageAutoDeleteTime","message_auto_delete_time":86400,"from_user_id":1}"#,

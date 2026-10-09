@@ -131,6 +131,16 @@ pub struct PollSend<'a> {
     pub country_codes: &'a [&'a str],
     pub poll_type: PollTypeSend<'a>,
     pub open_period: i32,
+    /// B15: `inputPollTypeRegular.allow_adding_options` — participants may
+    /// suggest options (regular polls only; ignored for quizzes).
+    pub allow_adding_options: bool,
+    /// B15: `inputMessagePoll.hide_results_until_closes`.
+    pub hide_results_until_closes: bool,
+    /// B15: `inputMessagePoll.members_only` — subscribers only (channels).
+    pub members_only: bool,
+    /// B15: `inputMessagePoll.close_date` — absolute unix deadline; 0 = none.
+    /// TDLib takes either `open_period` or `close_date`, never both.
+    pub close_date: i32,
     pub reply_to: Option<SendReply>,
     /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
     pub topic_id: Option<i32>,
@@ -149,9 +159,8 @@ pub enum PollTypeSend<'a> {
 /// `inputPollTypeRegular` (schema line 481) / `inputPollTypeQuiz`
 /// (schema line 488) (TDLib 1.8.67). Options must already be trimmed and
 /// non-empty (2–10); the question 1–255 chars — validated by
-/// `PollDraft::validate` before this is called. `members_only`,
-/// `hide_results_until_closes`, `close_date` stay at the zero value
-/// (out of the B3 slice); `media`/`explanation_media` are null.
+/// `PollDraft::validate` before this is called. `media`/
+/// `explanation_media` are null.
 pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> String {
     let options: Vec<Value> = poll
         .options
@@ -172,7 +181,7 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
     let poll_type = match poll.poll_type {
         PollTypeSend::Regular => json!({
             "@type": "inputPollTypeRegular",
-            "allow_adding_options": false
+            "allow_adding_options": poll.allow_adding_options
         }),
         PollTypeSend::Quiz {
             correct_option_ids,
@@ -217,13 +226,13 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
             "is_anonymous": poll.is_anonymous,
             "allows_multiple_answers": poll.allows_multiple_answers,
             "allows_revoting": poll.allows_revoting,
-            "members_only": false,
+            "members_only": poll.members_only,
             "country_codes": poll.country_codes,
             "shuffle_options": poll.shuffle_options,
-            "hide_results_until_closes": false,
+            "hide_results_until_closes": poll.hide_results_until_closes,
             "type": poll_type,
             "open_period": poll.open_period,
-            "close_date": 0,
+            "close_date": poll.close_date,
             "is_closed": false
         }
     })

@@ -19,6 +19,8 @@ pub enum MessageContent {
     Audio(AudioContent),
     /// Phase 4.2: `messagePoll` (TDLib 1.8.67, `schema/td_api.tl:5241`).
     Poll(PollContent),
+    /// B15: `messageChecklist` (TDLib 1.8.67, `schema/td_api.tl:5258`).
+    Checklist(ChecklistContent),
     /// Phase 4.3: `messageLocation` (TDLib 1.8.67, `schema/td_api.tl:5214`)
     /// and `messageLiveLocation` (`schema/td_api.tl:5211`). The latter
     /// carries `LiveLocation` state; the former sets `live: None`.
@@ -320,6 +322,14 @@ impl MessageContent {
                     question.chars().take(80).collect()
                 }
             }
+            MessageContent::Checklist(checklist) => {
+                let title = checklist.list.title.trim();
+                if title.is_empty() {
+                    "\u{2611} Checklist".into()
+                } else {
+                    format!("\u{2611} {}", title.chars().take(76).collect::<String>())
+                }
+            }
             MessageContent::Location(location) => {
                 if location.live.is_some() {
                     "📍 Live location".into()
@@ -468,6 +478,7 @@ pub(crate) fn parse_content(value: Option<&Value>) -> (MessageContent, Vec<Parse
         Some("messageVoiceNote") => parse_message_voice_note(value),
         Some("messageAudio") => parse_message_audio(value),
         Some("messagePoll") => parse_message_poll(value),
+        Some("messageChecklist") => parse_message_checklist(value),
         Some("messageLocation") => parse_message_location(value),
         Some("messageLiveLocation") => parse_message_live_location(value),
         Some("messageVenue") => parse_message_venue(value),

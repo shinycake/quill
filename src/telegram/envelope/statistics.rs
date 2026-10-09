@@ -50,7 +50,7 @@ pub enum StatisticalGraph {
 }
 
 impl StatisticalGraph {
-    fn parse(value: &Value) -> Result<Self, ParseError> {
+    pub(crate) fn parse(value: &Value) -> Result<Self, ParseError> {
         match value.get("@type").and_then(Value::as_str) {
             Some("statisticalGraphData") => Ok(StatisticalGraph::Data {
                 json_data: value

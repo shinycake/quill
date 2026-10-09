@@ -86,6 +86,49 @@ fn moderation_requests_match_the_schema() {
 }
 
 #[test]
+fn member_moderation_requests_match_the_schema() {
+    let reactions = parse(
+        &crate::telegram::requests::delete_message_reactions_from_sender(
+            RequestId(1),
+            ChatId(-100),
+            MessageId(9),
+            &serde_json::json!({ "@type": "messageSenderUser", "user_id": 5 }),
+        ),
+    );
+    assert_eq!(reactions["@type"], "deleteMessageReactionsFromSender");
+    assert_eq!(reactions["message_id"], 9);
+    assert_eq!(reactions["sender_id"]["user_id"], 5);
+    let ban = parse(&crate::telegram::requests::ban_chat_member(
+        RequestId(2),
+        -100,
+        5,
+        0,
+        false,
+    ));
+    assert_eq!(ban["@type"], "banChatMember");
+    assert_eq!(ban["member_id"]["@type"], "messageSenderUser");
+    assert_eq!(ban["revoke_messages"], false);
+    let can = parse(&crate::telegram::requests::can_transfer_ownership(
+        RequestId(3),
+    ));
+    assert_eq!(can["@type"], "canTransferOwnership");
+    let owner = parse(&crate::telegram::requests::get_chat_owner_after_leaving(
+        RequestId(4),
+        -100,
+    ));
+    assert_eq!(owner["@type"], "getChatOwnerAfterLeaving");
+    let transfer = parse(&crate::telegram::requests::transfer_chat_ownership(
+        RequestId(5),
+        -100,
+        7,
+        "hunter2",
+    ));
+    assert_eq!(transfer["@type"], "transferChatOwnership");
+    assert_eq!(transfer["user_id"], 7);
+    assert_eq!(transfer["password"], "hunter2");
+}
+
+#[test]
 fn profile_audio_is_sent_by_file_id() {
     let value = parse(&add_profile_audio(RequestId(3), 12, 200, "Song", "Artist"));
     assert_eq!(value["@type"], "addProfileAudio");

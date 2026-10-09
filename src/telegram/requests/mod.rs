@@ -6,8 +6,10 @@ mod bots;
 mod calls;
 mod chat_list;
 mod chats;
+mod checklists;
 mod contacts;
 mod folders;
+mod group_admin;
 mod group_calls;
 mod groups;
 mod media;
@@ -15,11 +17,13 @@ mod message_menu;
 mod messages;
 mod misc;
 mod payments;
+mod poll_extras;
 mod polls;
 mod privacy;
 mod profile_panels;
 mod proxy;
 mod secret_chats;
+mod send_as;
 mod stickers;
 mod stories;
 #[cfg(test)]
@@ -30,6 +34,8 @@ mod tests_calls;
 mod tests_chat_list;
 #[cfg(test)]
 mod tests_chats;
+#[cfg(test)]
+mod tests_group_admin;
 #[cfg(test)]
 mod tests_groups;
 #[cfg(test)]
@@ -45,6 +51,8 @@ mod tests_polls;
 #[cfg(test)]
 mod tests_profile_panels;
 #[cfg(test)]
+mod tests_send_as;
+#[cfg(test)]
 mod tests_stickers;
 #[cfg(test)]
 mod tests_stories;
@@ -58,8 +66,10 @@ pub use bots::*;
 pub use calls::*;
 pub use chat_list::*;
 pub use chats::*;
+pub use checklists::*;
 pub use contacts::*;
 pub use folders::*;
+pub use group_admin::*;
 pub use group_calls::*;
 pub use groups::*;
 pub use media::*;
@@ -70,11 +80,13 @@ pub(crate) use messages::{
 };
 pub use misc::*;
 pub use payments::*;
+pub use poll_extras::*;
 pub use polls::*;
 pub use privacy::*;
 pub use profile_panels::*;
 pub use proxy::*;
 pub use secret_chats::*;
+pub use send_as::*;
 pub use stickers::*;
 pub use stories::*;
 pub use translate::*;

@@ -3,7 +3,8 @@
 //! the language chooser and the translation settings, injected through the
 //! normal reducer — no live Telegram. `QUILL_DEMO_TRANSLATE_VIEW` picks the
 //! scene: `bar` (default), `translated`, `box`, `rtl`, `selection`,
-//! `chooser`, `settings`, `skip`.
+//! `chooser`, `settings`, `skip`, `auto` (a Spanish channel with automatic
+//! translation, no Premium).
 
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -137,6 +138,10 @@ pub(super) fn apply_ready_translate(
     }
     session.premium_option = Some(true);
     session.open_chat(ChatId(CHAT));
+    if view == "auto" {
+        apply_auto_channel(session, &dyn_sink, seq, now);
+        return;
+    }
 
     let done = |index: usize| {
         let (_, english, bold) = SCRIPT[index];
@@ -184,4 +189,75 @@ pub(super) fn apply_ready_translate(
         );
     }
     let _ = MessageId(0);
+}
+
+/// Spanish channel posts and what they translate to.
+const AUTO_CHANNEL: i64 = 73;
+const AUTO_SCRIPT: &[(&str, &str)] = &[
+    (
+        "Buenos días a todos, esta semana publicamos las novedades de la versión nueva.",
+        "Good morning everyone, this week we are publishing the news about the new version.",
+    ),
+    (
+        "Hemos mejorado el rendimiento y también arreglado muchos errores que nos habéis contado.",
+        "We have improved performance and also fixed many bugs that you told us about.",
+    ),
+    (
+        "Gracias por vuestros comentarios, nos ayudan a hacer que la aplicación sea mejor cada día.",
+        "Thanks for your comments, they help us make the app better every day.",
+    ),
+    (
+        "Mañana por la tarde habrá una charla en directo con el equipo, no os la perdáis.",
+        "Tomorrow afternoon there will be a live talk with the team, don't miss it.",
+    ),
+    (
+        "Si tenéis preguntas, escribidlas en los comentarios y las responderemos con mucho gusto.",
+        "If you have questions, write them in the comments and we will gladly answer them.",
+    ),
+    (
+        "Nos vemos pronto, que tengáis un buen fin de semana.",
+        "See you soon, have a good weekend.",
+    ),
+];
+
+/// A channel with `has_automatic_translation`: the bar works without
+/// Premium and the posts are already shown in English.
+fn apply_auto_channel(
+    session: &mut Session,
+    dyn_sink: &Arc<dyn DiagnosticSink>,
+    seq: &AtomicU64,
+    now: i64,
+) {
+    session.premium_option = Some(false);
+    for json in [
+        format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{AUTO_CHANNEL},"has_automatic_translation":true,"status":{{"@type":"chatMemberStatusMember"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{AUTO_CHANNEL},"title":"Noticias del Equipo","type":{{"@type":"chatTypeSupergroup","supergroup_id":{AUTO_CHANNEL},"is_channel":true}},"unread_count":0,"is_translatable":true}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{AUTO_CHANNEL},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"5000","is_pinned":false}}}}"#
+        ),
+    ] {
+        apply(session, dyn_sink, seq, &json);
+    }
+    for (index, (text, english)) in AUTO_SCRIPT.iter().enumerate() {
+        let id = 2000 + index as i64;
+        let json = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{AUTO_CHANNEL},"is_outgoing":false,"date":{date},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text},"entities":[]}}}}}}}}"#,
+            date = now + index as i64 * 90,
+            text = serde_json::to_string(text).unwrap_or_default(),
+        );
+        apply(session, dyn_sink, seq, &json);
+        session.translate.messages.insert(
+            (AUTO_CHANNEL, id, "en".to_string()),
+            Translation::Done {
+                text: (*english).to_string(),
+                entities: Vec::new(),
+            },
+        );
+    }
+    session.open_chat(ChatId(AUTO_CHANNEL));
+    session.set_chat_translated_to(ChatId(AUTO_CHANNEL), Some("en"));
 }

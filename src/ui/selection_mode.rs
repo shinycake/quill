@@ -717,25 +717,26 @@ impl QuillApp {
                         if let Some(offer) = moderation_offer.clone() {
                             type Get = fn(quill::connect::ModerationChoice) -> bool;
                             type Set = fn(&mut quill::connect::ModerationChoice, bool);
+                            let name = offer.user_name.clone();
                             let rows: [(&'static str, String, bool, Get, Set); 3] = [
                                 (
                                     "delete-moderate-spam",
                                     "Report Spam".to_string(),
-                                    offer.report_spam,
+                                    offer.options.report_spam,
                                     |c| c.report_spam,
                                     |c, v| c.report_spam = v,
                                 ),
                                 (
                                     "delete-moderate-all",
-                                    format!("Delete all from {}", offer.user_name),
-                                    offer.delete_all,
+                                    format!("Delete all from {name}"),
+                                    offer.options.delete_all,
                                     |c| c.delete_all,
                                     |c, v| c.delete_all = v,
                                 ),
                                 (
                                     "delete-moderate-ban",
-                                    format!("Ban {}", offer.user_name),
-                                    offer.ban,
+                                    format!("Ban {name}"),
+                                    offer.options.ban_or_restrict,
                                     |c| c.ban,
                                     |c, v| c.ban = v,
                                 ),
@@ -758,6 +759,26 @@ impl QuillApp {
                                         }),
                                 );
                             }
+                            // tdesktop's expander under "Ban": keep the
+                            // member, take away what they may send.
+                            if offer.can_restrict_instead && moderation_state.get().ban {
+                                let state = moderation_state.clone();
+                                content = content.child(
+                                    gpui_kit::component::checkbox::Checkbox::new(
+                                        "delete-moderate-restrict",
+                                    )
+                                    .label("Only restrict: they stay and can read, nothing else")
+                                    .checked(state.get().restrict_instead)
+                                    .on_click(
+                                        move |checked, window, _| {
+                                            let mut now = state.get();
+                                            now.restrict_instead = *checked;
+                                            state.set(now);
+                                            window.refresh();
+                                        },
+                                    ),
+                                );
+                            }
                         }
                         content
                     })
@@ -768,7 +789,11 @@ impl QuillApp {
                 .on_ok(move |_, _, cx| {
                     let mut confirm = confirm.clone();
                     confirm.revoke = confirm.can_revoke && revoke.get();
-                    let (picked, offer) = (on_ok_choice.get(), on_ok_offer.clone());
+                    let offer = on_ok_offer.clone();
+                    let picked = match &offer {
+                        Some(offer) => on_ok_choice.get().clamp(offer.options),
+                        None => quill::connect::ModerationChoice::default(),
+                    };
                     let _ = app.update(cx, |this, cx| {
                         // Reports and "delete all" name the user's
                         // messages, so they go out before the delete.

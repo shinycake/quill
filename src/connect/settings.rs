@@ -835,6 +835,59 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// `getDefaultMessageAutoDeleteTime` (schema 1.8.67, line 15682). The
+    /// cached value is reused and an in-flight request never duplicated
+    /// (`Ok(None)` = nothing sent).
+    pub fn get_default_auto_delete(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self.session.default_auto_delete_secs.is_some() || self.session.default_auto_delete_busy
+        {
+            return Ok(None);
+        }
+        self.session.default_auto_delete_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::GetDefaultAutoDelete, None);
+        self.session.default_auto_delete_busy = true;
+        let json = crate::telegram::requests::get_default_message_auto_delete_time(extra);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.default_auto_delete_busy = false;
+                Err(err)
+            }
+        }
+    }
+
+    /// `setDefaultMessageAutoDeleteTime` (schema 1.8.67, line 15679). Only
+    /// 0 or whole days up to a year go out; the confirmed value lands from
+    /// the authoritative `ok`.
+    pub fn set_default_auto_delete(&mut self, seconds: i32) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active()
+            || self.session.default_auto_delete_busy
+            || !crate::auto_delete::is_valid_regular_ttl(seconds)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session.default_auto_delete_error = None;
+        let extra = self
+            .session
+            .request(RequestPurpose::SetDefaultAutoDelete { seconds }, None);
+        self.session.default_auto_delete_busy = true;
+        let json = crate::telegram::requests::set_default_message_auto_delete_time(extra, seconds);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.default_auto_delete_busy = false;
+                Err(err)
+            }
+        }
+    }
+
     /// Slice A7: send `getAccountTtl` (schema 1.8.67, line 15669). The
     /// cached value is reused and an in-flight fetch is never duplicated
     /// (`Ok(None)` = no request needed). The `password_op_send` fetch
