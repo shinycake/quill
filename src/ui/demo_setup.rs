@@ -400,6 +400,12 @@ impl QuillApp {
                 input.set_value("Outgoing photo", window, cx);
                 input.focus(window, cx);
             });
+            // B5: "Replace attachment" staged with a new photo, caption
+            // moved above the media.
+            self.set_edit_replacement(&demo_media_allowlist().join("demo-thumb.png"), cx);
+            if let Some(edit) = self.pending_edit.as_mut() {
+                edit.caption_above = true;
+            }
         }
         if matches!(demo, Some(ScreenshotDemo::ReadyReveal)) {
             // The last message "just arrived": reveal it (freeze the frame

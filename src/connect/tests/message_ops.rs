@@ -223,11 +223,81 @@ fn driver_edit_snapshot_rejects_overlong_caption() {
         kind: crate::composer::ComposerEditKind::Caption,
         scheduled: false,
         caption_above: false,
+        media_edit: Default::default(),
+        link_preview: Default::default(),
     };
     let sent_before = recorder.snapshot().len();
     let err = driver.edit_snapshot(&edit, "toolong").unwrap_err();
     assert!(matches!(err, ConnectSendError::CaptionTooLong { limit: 4 }));
     assert_eq!(recorder.snapshot().len(), sent_before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn driver_edit_snapshot_with_replacement_sends_edit_message_media() {
+    // B5: a replacement file turns the caption edit into
+    // `editMessageMedia` carrying the new caption and caption position.
+    use crate::composer::{EditMediaKind, EditMediaReplacement, EditableMedia, MediaEdit};
+    use crate::telegram::client::copy_and_parse;
+
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+    let msg_json = r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":7,"is_outgoing":true,"date":1700000000,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[]},"caption":{"@type":"formattedText","text":"hi","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}"#;
+    let owned = copy_and_parse(msg_json, &seq, &dyn_sink).expect("parse msg");
+    driver.ingest(owned).expect("ingest msg");
+
+    let picked = dir.join("replacement.png");
+    std::fs::write(&picked, [1u8]).unwrap();
+    let picked = std::fs::canonicalize(&picked).unwrap();
+    let mut edit = crate::composer::ComposerEdit {
+        chat_id: ChatId(7),
+        message_id: crate::ids::MessageId(9),
+        original_text: "hi".to_string(),
+        kind: crate::composer::ComposerEditKind::Caption,
+        scheduled: false,
+        caption_above: true,
+        media_edit: MediaEdit {
+            media: Some(EditableMedia::Photo),
+            in_album: false,
+            replacement: Some(EditMediaReplacement {
+                path: picked.clone(),
+                file_name: "replacement.png".into(),
+                kind: EditMediaKind::Photo,
+                spoiler: true,
+            }),
+        },
+        link_preview: Default::default(),
+    };
+    let extra = driver.edit_snapshot(&edit, "new caption").unwrap();
+    let json = recorder.snapshot().last().cloned().expect("request");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "editMessageMedia");
+    assert_eq!(v["@extra"], extra.0.to_string());
+    assert_eq!(v["message_id"], 9);
+    let content = &v["input_message_content"];
+    assert_eq!(content["@type"], "inputMessagePhoto");
+    assert_eq!(content["caption"]["text"], "new caption");
+    assert_eq!(content["show_caption_above_media"], true);
+    assert_eq!(content["has_spoiler"], true);
+    assert_eq!(
+        content["photo"]["photo"]["path"],
+        picked.to_string_lossy().as_ref()
+    );
+
+    // Without a replacement the same edit stays `editMessageCaption`.
+    edit.media_edit.replacement = None;
+    driver.edit_snapshot(&edit, "only caption").unwrap();
+    let json = recorder.snapshot().last().cloned().expect("request");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "editMessageCaption");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1194,6 +1264,8 @@ fn driver_edit_text_shape_and_incoming_rejected() {
         kind: ComposerEditKind::Text,
         scheduled: false,
         caption_above: false,
+        media_edit: Default::default(),
+        link_preview: Default::default(),
     };
     assert_eq!(
         driver.edit_snapshot(&incoming, "nope"),
@@ -1207,6 +1279,8 @@ fn driver_edit_text_shape_and_incoming_rejected() {
         kind: ComposerEditKind::Text,
         scheduled: false,
         caption_above: false,
+        media_edit: Default::default(),
+        link_preview: Default::default(),
     };
     assert_eq!(
         driver.edit_snapshot(&edit, "   "),
@@ -1307,6 +1381,8 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
         kind: ComposerEditKind::Text,
         scheduled: false,
         caption_above: false,
+        media_edit: Default::default(),
+        link_preview: Default::default(),
     };
     assert_eq!(
         driver.edit_snapshot(&plain, "nope"),

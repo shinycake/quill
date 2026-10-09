@@ -16,7 +16,8 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, find_urls,
+    AttachmentKind, ComposerAttachment, ComposerEdit, ComposerReplyTo, LinkPreviewChoice,
+    PreviewMediaSize, find_urls,
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
@@ -423,6 +424,18 @@ impl QuillApp {
         // An edited photo or video shows its small preview, as tdesktop's
         // field header does.
         let thumb = self.bar_thumbnail(edit.chat_id, edit.message_id, cx);
+        // B5: tdesktop `EditCaptionBox` "Replace attachment".
+        let replace_button = edit.allows_replace().then(|| {
+            Button::new("composer-edit-replace")
+                .icon(gpui_kit::assets::IconName::Paperclip)
+                .label("Replace")
+                .ghost()
+                .small()
+                .tooltip("Replace attachment")
+                .accessibility_label("Replace attachment")
+                .on_click(cx.listener(|this, _, _, cx| this.pick_edit_replacement(cx)))
+                .into_any_element()
+        });
         composer_context_bar_rich(
             "composer-edit-header",
             gpui_kit::assets::IconName::Pencil,
@@ -435,7 +448,7 @@ impl QuillApp {
                 .child(preview)
                 .into_any_element(),
             thumb,
-            None,
+            replace_button,
             Button::new("cancel-edit")
                 .icon(gpui_kit::assets::IconName::X)
                 .ghost()
@@ -460,7 +473,7 @@ impl QuillApp {
             return;
         }
         let text = self.composer.read(cx).value().to_string();
-        let Some(url) = find_urls(&text).into_iter().next() else {
+        let Some(url) = self.chosen_preview_url(&text) else {
             // No URL: drop any stale preview so the chip never shows a
             // preview for a URL that's no longer there.
             if let Some(live) = self.live.as_mut()
@@ -471,7 +484,7 @@ impl QuillApp {
             return;
         };
         // TGX never prefetches a disabled preview.
-        if self.composer_preview_disabled {
+        if self.preview_choice().disabled {
             return;
         }
         let already = self
@@ -495,10 +508,10 @@ impl QuillApp {
                 // Re-check the URL survived the quiet window; a newer
                 // keystroke schedules its own timer.
                 let text = this.composer.read(cx).value().to_string();
-                if find_urls(&text).into_iter().next().as_deref() != Some(url.as_str()) {
+                if this.chosen_preview_url(&text).as_deref() != Some(url.as_str()) {
                     return;
                 }
-                if this.composer_preview_disabled {
+                if this.preview_choice().disabled {
                     return;
                 }
                 if let Some(live) = this.live.as_mut()
@@ -523,21 +536,166 @@ impl QuillApp {
             )
     }
 
+    /// B5: the link-preview choices in effect: the edited text message's
+    /// while editing (tdesktop seeds the edit draft with the message's own
+    /// `WebPageDraft`), otherwise the next send's.
+    pub(super) fn preview_choice(&self) -> LinkPreviewChoice {
+        match self.pending_edit.as_ref() {
+            Some(edit) => edit.link_preview,
+            None => LinkPreviewChoice {
+                disabled: self.composer_preview_disabled,
+                above_text: self.composer_preview_above,
+                media: self.composer_preview_media,
+                link_index: self.composer_preview_link,
+            },
+        }
+    }
+
+    pub(super) fn set_preview_choice(&mut self, choice: LinkPreviewChoice) {
+        match self.pending_edit.as_mut() {
+            Some(edit) => edit.link_preview = choice,
+            None => {
+                self.composer_preview_disabled = choice.disabled;
+                self.composer_preview_above = choice.above_text;
+                self.composer_preview_media = choice.media;
+                self.composer_preview_link = choice.link_index;
+            }
+        }
+    }
+
+    /// The link the preview is generated from: the one picked in the
+    /// options menu, else the first (clamped to the links present).
+    pub(super) fn chosen_preview_url(&self, text: &str) -> Option<String> {
+        let urls = find_urls(text);
+        let index = self.preview_choice().link_index;
+        urls.get(index).or_else(|| urls.last()).cloned()
+    }
+
+    /// B5: tdesktop's "Link Preview Settings" popover (history_view_draft_options):
+    /// click a link to generate its preview, Move Up/Down, Shrink/Enlarge
+    /// the media, Do Not Preview. Maps to `linkPreviewOptions`
+    /// (`url`, `show_above_text`, `force_small_media` / `force_large_media`,
+    /// `is_disabled`).
+    fn link_options_menu(
+        owner: WeakEntity<Self>,
+        mut menu: gpui_kit::component::menu::PopupMenu,
+        urls: Vec<String>,
+        chosen: usize,
+        choice: LinkPreviewChoice,
+        size_toggle: Option<(bool, &'static str)>,
+    ) -> gpui_kit::component::menu::PopupMenu {
+        fn apply(
+            owner: &WeakEntity<QuillApp>,
+            cx: &mut App,
+            note: Option<&'static str>,
+            change: impl FnOnce(&mut LinkPreviewChoice),
+        ) {
+            let _ = owner.update(cx, |this, cx| {
+                let mut choice = this.preview_choice();
+                change(&mut choice);
+                this.set_preview_choice(choice);
+                if let Some(note) = note {
+                    this.status_note = note.into();
+                }
+                cx.notify();
+            });
+        }
+        menu = menu.label("Link Preview Settings");
+        if urls.len() > 1 {
+            for (index, url) in urls.iter().enumerate() {
+                let owner = owner.clone();
+                let shown: String = if url.chars().count() > 48 {
+                    format!("{}…", url.chars().take(47).collect::<String>())
+                } else {
+                    url.clone()
+                };
+                menu = menu.item(
+                    PopupMenuItem::new(shown)
+                        .checked(index == chosen && !choice.disabled)
+                        .on_click(move |_, _, cx| {
+                            apply(&owner, cx, None, |c| {
+                                c.link_index = index;
+                                c.disabled = false;
+                            });
+                        }),
+                );
+            }
+            menu = menu.separator();
+        }
+        let disabled = choice.disabled;
+        if !disabled {
+            let above = choice.above_text;
+            let toggle = owner.clone();
+            menu = menu.item(
+                PopupMenuItem::new(if above { "Move Down" } else { "Move Up" }).on_click(
+                    move |_, _, cx| {
+                        apply(
+                            &toggle,
+                            cx,
+                            Some(if above {
+                                "Link preview will appear below the text"
+                            } else {
+                                "Link preview will appear above the text"
+                            }),
+                            |c| c.above_text = !above,
+                        );
+                    },
+                ),
+            );
+            if let Some((large, noun)) = size_toggle {
+                let resize = owner.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(format!(
+                        "{} {noun}",
+                        if large { "Shrink" } else { "Enlarge" }
+                    ))
+                    .on_click(move |_, _, cx| {
+                        apply(&resize, cx, None, |c| {
+                            c.media = if large {
+                                PreviewMediaSize::ForceSmall
+                            } else {
+                                PreviewMediaSize::ForceLarge
+                            };
+                        });
+                    }),
+                );
+            }
+        }
+        let off = owner;
+        menu.item(
+            PopupMenuItem::new(if disabled {
+                "Show Preview"
+            } else {
+                "Do Not Preview"
+            })
+            .on_click(move |_, _, cx| {
+                apply(&off, cx, None, |c| c.disabled = !disabled);
+            }),
+        )
+    }
+
     /// MED4: detected-URL chip for send-time link-preview controls
-    /// (schema 1.8.67 `linkPreviewOptions`, :2237). Shows the detected
+    /// (schema 1.8.67 `linkPreviewOptions`, :2237). Shows the chosen
     /// URL, the debounced `getLinkPreview` prefetch (title/description,
-    /// "Getting link info…" while loading, "No preview" on 404), and —
-    /// TGX (`MessagesController.onRequestToggleLargeMedia` /
-    /// `onRequestToggleShowAbove`) — the large/small media toggle (only
-    /// when the preview offers large media) and the above/below-text
-    /// toggle. The choices ride the next send's
+    /// "Getting link info…" while loading, "No preview" on 404) and one
+    /// "Link options" popover (B5, tdesktop's draft options): choose the
+    /// link, move the preview above/below the text, shrink/enlarge its
+    /// media (only when it offers large media) or remove it. The choices
+    /// ride the next send's, or the text edit's,
     /// `inputMessageText.link_preview_options`.
     pub(super) fn preview_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.pending_attachments.is_empty() || self.pending_edit.is_some() {
+        let editing_text = self
+            .pending_edit
+            .as_ref()
+            .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Text));
+        if !self.pending_attachments.is_empty() || (self.pending_edit.is_some() && !editing_text) {
             return None;
         }
         let text = self.composer.read(cx).value().to_string();
-        let first = find_urls(&text).into_iter().next()?;
+        let urls = find_urls(&text);
+        let first = self.chosen_preview_url(&text)?;
+        let choice = self.preview_choice();
+        let chosen = urls.iter().position(|u| *u == first).unwrap_or(0);
         // Live prefetch state; the screenshot demo injects its own into
         // the demo session.
         let stored = self
@@ -583,19 +741,24 @@ impl QuillApp {
         };
         // TGX `LinkPreview.toggleLargeMedia`: the size toggle only
         // exists when the preview offers large media.
-        let size_toggle = !self.composer_preview_disabled
-            && fetched
-                .as_ref()
-                .is_some_and(|p| p.has_large_media && Self::preview_has_media(p));
-        // The preview's own default; the toggle flips relative to the
-        // *current* effective size (TGX `LinkPreview.toggleLargeMedia`).
-        let preview_default_large = fetched
-            .as_ref()
-            .map(|p| p.show_large_media)
-            .unwrap_or(false);
-        let effective_large = self
-            .composer_preview_media
-            .effective_large(preview_default_large);
+        let size_toggle = (!choice.disabled)
+            .then_some(fetched.as_ref())
+            .flatten()
+            .filter(|p| p.has_large_media && Self::preview_has_media(p))
+            .map(|p| {
+                // The toggle flips relative to the *current* effective size.
+                let large = choice.media.effective_large(p.show_large_media);
+                let noun = if matches!(
+                    p.kind,
+                    quill::telegram::envelope::LinkPreviewKind::EmbeddedPlayer { .. }
+                ) {
+                    "Video"
+                } else {
+                    "Photo"
+                };
+                (large, noun)
+            });
+        let owner = cx.entity().downgrade();
         let mut row = div()
             .id("composer-preview-chip")
             .flex()
@@ -605,72 +768,121 @@ impl QuillApp {
             .py_1()
             .child(
                 div()
+                    .min_w_0()
+                    .truncate()
                     .text_xs()
                     .text_color(accent())
                     .child(format!("🔗 {first}")),
             );
-        if let Some(line) = preview_line {
-            row = row.child(div().text_xs().text_color(text_muted()).child(line));
-        }
-        row = row.child(
-            Button::new("composer-preview-chip-toggle")
-                .label(if self.composer_preview_disabled {
-                    "Preview off"
-                } else {
-                    "Preview on"
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.composer_preview_disabled = !this.composer_preview_disabled;
-                    cx.notify();
-                })),
-        );
-        if !self.composer_preview_disabled {
-            if size_toggle {
-                row = row.child(
-                    Button::new("composer-preview-chip-size")
-                        .label(if effective_large {
-                            "Media: large"
-                        } else {
-                            "Media: small"
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let before = this
-                                .composer_preview_media
-                                .effective_large(preview_default_large);
-                            this.composer_preview_media =
-                                this.composer_preview_media.toggle(before);
-                            let after = this
-                                .composer_preview_media
-                                .effective_large(preview_default_large);
-                            this.status_note = format!(
-                                "link preview media: {}",
-                                if after { "large" } else { "small" }
-                            );
-                            cx.notify();
-                        })),
-                );
-            }
+        if choice.disabled {
             row = row.child(
-                Button::new("composer-preview-chip-above")
-                    .label(if self.composer_preview_above {
-                        "Above text"
-                    } else {
-                        "Below text"
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.composer_preview_above = !this.composer_preview_above;
-                        // TGX hint strings (`LinkPreviewShowAbove` /
-                        // `LinkPreviewShowBelow`).
-                        this.status_note = if this.composer_preview_above {
-                            "Link preview will appear above the text".into()
-                        } else {
-                            "Link preview will appear below the text".into()
-                        };
-                        cx.notify();
-                    })),
+                div()
+                    .text_xs()
+                    .text_color(text_muted())
+                    .child("Preview off"),
+            );
+        } else if let Some(line) = preview_line {
+            row = row.child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_xs()
+                    .text_color(text_muted())
+                    .child(line),
             );
         }
+        row = row.child(
+            Button::new("composer-preview-options")
+                .label("Link options")
+                .ghost()
+                .small()
+                .tooltip("Link Preview Settings")
+                .accessibility_label("Link Preview Settings")
+                .dropdown_menu(move |menu, _, _| {
+                    Self::link_options_menu(
+                        owner.clone(),
+                        menu,
+                        urls.clone(),
+                        chosen,
+                        choice,
+                        size_toggle,
+                    )
+                }),
+        );
         Some(row.into_any_element())
+    }
+
+    /// B5: the staged replacement file while editing media: its name,
+    /// tdesktop's "Send as a document" (outside albums) and the spoiler
+    /// option for photos and videos, and a way to drop it again.
+    pub(super) fn edit_replacement_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let edit = self.pending_edit.as_ref()?;
+        let replacement = edit.media_edit.replacement.as_ref()?;
+        let as_file_toggle = edit.can_toggle_as_file(replacement);
+        let spoiler_toggle = matches!(
+            replacement.kind,
+            quill::composer::EditMediaKind::Photo | quill::composer::EditMediaKind::Video
+        );
+        let spoiler = replacement.spoiler;
+        let as_file = replacement.kind == quill::composer::EditMediaKind::Document;
+        Some(
+            div()
+                .id("composer-edit-replacement")
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_1()
+                .child(
+                    Icon::new(IconName::Paperclip)
+                        .size(px(14.))
+                        .text_color(accent()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .text_color(text_muted())
+                        .child(format!(
+                            "Replacing attachment with {}",
+                            replacement.file_name
+                        )),
+                )
+                .when(as_file_toggle, |this| {
+                    this.child(
+                        Checkbox::new("composer-edit-replace-as-file")
+                            .label("Send as a document")
+                            .checked(as_file)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_edit_replace_as_file(cx);
+                            })),
+                    )
+                })
+                .when(spoiler_toggle, |this| {
+                    this.child(
+                        Checkbox::new("composer-edit-replace-spoiler")
+                            .label("Spoiler")
+                            .checked(spoiler)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_edit_replace_spoiler(cx);
+                            })),
+                    )
+                })
+                .child(
+                    Button::new("composer-edit-replace-clear")
+                        .icon(IconName::X)
+                        .ghost()
+                        .xsmall()
+                        .tooltip("Keep the original attachment")
+                        .accessibility_label("Keep the original attachment")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.clear_edit_replacement(cx);
+                        })),
+                )
+                .into_any_element(),
+        )
     }
 
     /// caption…" affordance, the caption-above-media toggle
@@ -686,7 +898,12 @@ impl QuillApp {
         if self.pending_attachments.is_empty() && !editing_caption {
             return None;
         }
-        let captionable = editing_caption
+        // Documents and music have no caption position; photos, videos and
+        // GIFs do (`show_caption_above_media`), also after a replacement.
+        let captionable = self
+            .pending_edit
+            .as_ref()
+            .is_some_and(|edit| editing_caption && edit.caption_position_applies())
             || self.pending_attachments.iter().any(|att| {
                 matches!(
                     att.kind,

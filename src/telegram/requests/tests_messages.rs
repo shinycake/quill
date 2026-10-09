@@ -302,6 +302,7 @@ fn edit_message_text_shape_matches_1_8_67() {
         MessageId(102),
         "edited body",
         false,
+        &crate::composer::LinkPreviewChoice::default(),
     );
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "editMessageText");
@@ -901,4 +902,66 @@ fn edit_message_scheduling_state_shape() {
         v["scheduling_state"]["@type"],
         "messageSchedulingStateSendWhenOnline"
     );
+}
+
+#[test]
+fn edit_message_text_carries_link_preview_choice() {
+    use crate::composer::{LinkPreviewChoice, PreviewMediaSize};
+    let text = "see https://a.example and https://b.example";
+    let json = edit_message_text(
+        RequestId(5),
+        ChatId(1),
+        MessageId(2),
+        text,
+        false,
+        &LinkPreviewChoice {
+            above_text: true,
+            media: PreviewMediaSize::ForceLarge,
+            link_index: 1,
+            ..LinkPreviewChoice::default()
+        },
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let options = &v["input_message_content"]["link_preview_options"];
+    assert_eq!(options["@type"], "linkPreviewOptions");
+    assert_eq!(options["url"], "https://b.example");
+    assert_eq!(options["force_large_media"], true);
+    assert_eq!(options["force_small_media"], false);
+    assert_eq!(options["show_above_text"], true);
+    assert_eq!(options["is_disabled"], false);
+}
+
+#[test]
+fn edit_message_text_remove_preview_disables_it() {
+    use crate::composer::LinkPreviewChoice;
+    let json = edit_message_text(
+        RequestId(5),
+        ChatId(1),
+        MessageId(2),
+        "https://a.example",
+        false,
+        &LinkPreviewChoice {
+            disabled: true,
+            ..LinkPreviewChoice::default()
+        },
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        v["input_message_content"]["link_preview_options"]["is_disabled"],
+        true
+    );
+}
+
+#[test]
+fn link_choice_index_past_the_end_pins_the_last_link() {
+    use crate::composer::LinkPreviewChoice;
+    let choice = LinkPreviewChoice {
+        link_index: 9,
+        ..LinkPreviewChoice::default()
+    };
+    assert_eq!(
+        choice.chosen_url("x https://a.example y"),
+        "https://a.example"
+    );
+    assert_eq!(choice.chosen_url("no links"), "");
 }

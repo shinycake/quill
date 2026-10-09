@@ -355,6 +355,7 @@ impl QuillApp {
             message.pending,
             &message.content,
         )
+        .map(|edit| edit.in_album(message.media_album_id != 0))
         .filter(|_| allows(true, |a| a.can_be_edited))
         {
             item!(

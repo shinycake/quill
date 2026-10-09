@@ -2,7 +2,7 @@
 use super::*;
 use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerScheduling, ComposerSnapshot,
-    DeleteConfirm, ForwardDraft, SendOptions,
+    DeleteConfirm, EditMediaKind, ForwardDraft, LinkPreviewChoice, SendOptions,
 };
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::rich::RichBlock;
@@ -11,12 +11,13 @@ use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
     AnimationSend, SendReply, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
     VoiceNoteSend, compose_rich_message_with_ai, compose_text_with_ai, create_rich_message_with_ai,
-    delete_messages, edit_message_caption, edit_message_scheduling_state, edit_message_text,
-    fix_rich_message_with_ai, fix_text_with_ai, forward_messages_with_options, get_chat_history,
-    get_chat_scheduled_messages, get_full_rich_message, input_message_photo, input_message_video,
-    open_message_content, recognize_speech, resend_messages, send_animation, send_document,
-    send_message_album, send_photo, send_rich_message, send_sticker, send_text, send_video,
-    send_video_note, send_voice_note,
+    delete_messages, edit_media_content, edit_message_caption, edit_message_media,
+    edit_message_scheduling_state, edit_message_text, fix_rich_message_with_ai, fix_text_with_ai,
+    forward_messages_with_options, get_chat_history, get_chat_scheduled_messages,
+    get_full_rich_message, input_message_photo, input_message_video, open_message_content,
+    recognize_speech, resend_messages, send_animation, send_document, send_message_album,
+    send_photo, send_rich_message, send_sticker, send_text, send_video, send_video_note,
+    send_voice_note,
 };
 use crate::voice::VoiceDraft;
 
@@ -1161,9 +1162,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if matches!(edit.kind, ComposerEditKind::Caption) {
             self.check_caption_length(caption)?;
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::EditMessage, Some(edit.chat_id));
         // M1 fix-up: secret chats strip `textEntityTypeBlockQuote` from
         // the edited caption too (unsupported in secret chats).
         let strip_blockquote = self
@@ -1171,13 +1169,63 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&edit.chat_id.0)
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        // B5: a replacement file turns the caption edit into
+        // `editMessageMedia` (tdesktop `EditCaptionBox` with a prepared
+        // list). Validate path and probe video before allocating `@extra`.
+        let replacement = match edit.media_edit.replacement.as_ref() {
+            Some(_) if !edit.allows_replace() => return Err(ConnectSendError::InvalidRequest),
+            other => other,
+        };
+        let mut replacement_content = None;
+        if let Some(rep) = replacement {
+            let path = rep
+                .send_path_str()
+                .ok_or(ConnectSendError::InvalidRequest)?;
+            let video = if rep.kind == EditMediaKind::Video {
+                let probe = crate::video::probe_local_video(&rep.path)
+                    .map_err(|_| ConnectSendError::InvalidRequest)?;
+                Some(VideoSend {
+                    duration: probe.duration,
+                    width: probe.width,
+                    height: probe.height,
+                    supports_streaming: probe.supports_streaming,
+                    self_destruct: None,
+                })
+            } else {
+                None
+            };
+            replacement_content = Some(
+                edit_media_content(
+                    rep,
+                    &path,
+                    caption,
+                    edit.caption_above && !strip_blockquote,
+                    video.as_ref(),
+                    strip_blockquote,
+                )
+                .ok_or(ConnectSendError::InvalidRequest)?,
+            );
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::EditMessage, Some(edit.chat_id));
+        let replacement_json = replacement_content
+            .map(|content| edit_message_media(extra, edit.chat_id, edit.message_id, content));
         let json = match edit.kind {
+            ComposerEditKind::Caption if replacement_json.is_some() => {
+                replacement_json.unwrap_or_default()
+            }
             ComposerEditKind::Text => edit_message_text(
                 extra,
                 edit.chat_id,
                 edit.message_id,
                 caption,
                 strip_blockquote,
+                // Secret chats never get previews (same rule as sends).
+                &LinkPreviewChoice {
+                    disabled: edit.link_preview.disabled || strip_blockquote,
+                    ..edit.link_preview
+                },
             ),
             ComposerEditKind::Caption => edit_message_caption(
                 extra,

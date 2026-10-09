@@ -1,6 +1,6 @@
 use crate::composer::{
-    ComposerEntity, ComposerScheduling, FormatKind, PreviewMediaSize, SendOptions, find_urls,
-    parse_format_markup,
+    ComposerEntity, ComposerScheduling, FormatKind, LinkPreviewChoice, PreviewMediaSize,
+    SendOptions, parse_format_markup,
 };
 use crate::ids::{ChatId, MessageId, RequestId};
 use serde_json::{Value, json};
@@ -204,34 +204,15 @@ pub fn send_text(
     // previews are generated on Telegram servers, which can't see E2E
     // content). `is_disabled: true` makes the default-off explicit on the
     // wire instead of relying on TDLib to skip it.
-    let link_preview_options = if options.link_preview_disabled {
-        json!({
-            "@type": "linkPreviewOptions",
-            "is_disabled": true,
-            "url": "",
-            "force_small_media": false,
-            "force_large_media": false,
-            "show_above_text": false,
-        })
-    } else if options.link_preview_above_text
-        || !matches!(options.link_preview_media, PreviewMediaSize::Auto)
-    {
-        // MED4b: full `linkPreviewOptions` (schema:2237). The force flags
-        // are ignored unless the URL is explicitly specified, so the
-        // detected first URL rides along (TGX sets `options.url` when
-        // forcing — `MessagesController.takeOutputLinkPreviewOptions`).
-        let first_url = find_urls(text).into_iter().next().unwrap_or_default();
-        json!({
-            "@type": "linkPreviewOptions",
-            "is_disabled": false,
-            "url": first_url,
-            "force_small_media": matches!(options.link_preview_media, PreviewMediaSize::ForceSmall),
-            "force_large_media": matches!(options.link_preview_media, PreviewMediaSize::ForceLarge),
-            "show_above_text": options.link_preview_above_text,
-        })
-    } else {
-        Value::Null
-    };
+    let link_preview_options = link_preview_options_value(
+        &LinkPreviewChoice {
+            disabled: options.link_preview_disabled,
+            above_text: options.link_preview_above_text,
+            media: options.link_preview_media,
+            link_index: options.link_preview_link,
+        },
+        text,
+    );
     json!({
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
@@ -490,6 +471,38 @@ pub(crate) fn self_destruct_type_value(choice: Option<SelfDestructSend>) -> Valu
     }
 }
 
+/// `linkPreviewOptions` for a text send or edit (TDLib 1.8.67,
+/// `schema/td_api.tl:2544`). Null when nothing was chosen. The force flags
+/// are ignored unless the URL is explicitly specified, so the chosen link
+/// rides along (TGX sets `options.url` when forcing; tdesktop's "choose
+/// link" pins the same field).
+pub fn link_preview_options_value(choice: &LinkPreviewChoice, text: &str) -> Value {
+    if choice.disabled {
+        json!({
+            "@type": "linkPreviewOptions",
+            "is_disabled": true,
+            "url": "",
+            "force_small_media": false,
+            "force_large_media": false,
+            "show_above_text": false,
+        })
+    } else if choice.above_text
+        || !matches!(choice.media, PreviewMediaSize::Auto)
+        || choice.link_index > 0
+    {
+        json!({
+            "@type": "linkPreviewOptions",
+            "is_disabled": false,
+            "url": choice.chosen_url(text),
+            "force_small_media": matches!(choice.media, PreviewMediaSize::ForceSmall),
+            "force_large_media": matches!(choice.media, PreviewMediaSize::ForceLarge),
+            "show_above_text": choice.above_text,
+        })
+    } else {
+        Value::Null
+    }
+}
+
 /// `editMessageText` (TDLib 1.8.67). `reply_markup` null — bots only.
 /// `input_message_content` must be `inputMessageText` (or `inputMessageRichMessage`).
 pub fn edit_message_text(
@@ -498,6 +511,7 @@ pub fn edit_message_text(
     message_id: MessageId,
     text: &str,
     strip_blockquote: bool,
+    preview: &LinkPreviewChoice,
 ) -> String {
     // M1: edits carry the same markup→entities conversion as sends.
     // M1 fix-up: secret chats strip `textEntityTypeBlockQuote`
@@ -518,7 +532,7 @@ pub fn edit_message_text(
                 "text": clean_text,
                 "entities": entities_json
             },
-            "link_preview_options": Value::Null,
+            "link_preview_options": link_preview_options_value(preview, text),
             "clear_draft": false
         }
     })
