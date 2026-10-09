@@ -372,6 +372,7 @@ fn global_search_filters_reach_search_messages() {
             chat_type: SearchChatType::Channels,
             media: SearchMediaKind::Files,
             date: SearchDateRange::Week,
+            ..GlobalSearchFilters::default()
         })
         .unwrap();
     let search = fx.last_request("searchMessages");

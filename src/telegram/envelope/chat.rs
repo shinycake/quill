@@ -131,15 +131,26 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .get("has_protected_content")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // B7: `chat.available_reactions` (schema 1.8.67, line 3627).
+        available_reactions: super::message_reactions::parse_chat_available_reactions(
+            chat.get("available_reactions"),
+        ),
         has_scheduled_messages: chat
             .get("has_scheduled_messages")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        message_sender: parse_message_sender(chat.get("message_sender_id")).ok(),
         // `chat.is_translatable` (schema 1.8.67, line 3599).
         is_translatable: chat
             .get("is_translatable")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // `chat.reply_markup_message_id` (schema 1.8.67, line 3624).
+        reply_markup_message_id: MessageId(
+            chat.get("reply_markup_message_id")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+        ),
         // Slice CL1: `chat.is_marked_as_unread` (schema 1.8.67,
         // lines 3600/3627).
         is_marked_as_unread: chat
@@ -173,6 +184,10 @@ pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError
             .unwrap_or(0) as i32,
         unread_reaction_count: chat
             .get("unread_reaction_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32,
+        unread_poll_vote_count: chat
+            .get("unread_poll_vote_count")
             .and_then(Value::as_i64)
             .unwrap_or(0) as i32,
         // Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines

@@ -6,7 +6,7 @@ use super::connect_ui::live_status_for;
 use super::notification_settings::MAX_OS_NOTIFICATION_THREADS;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::notify::{NotificationSoundKind, QueuedNotification};
+use quill::notify::{NotificationAction, NotificationSoundKind, QueuedNotification};
 use quill::state::RedrawNeed;
 use quill::telegram::envelope::{AuthorizationState, ChatNotificationSettings};
 use std::path::PathBuf;
@@ -304,6 +304,13 @@ impl QuillApp {
             progressed = true;
             need = RedrawNeed::Now;
         }
+        // Q1/R5: re-send rate-limited reads whose wait is over and sweep
+        // requests whose answer never came (no timers of their own; the
+        // poll loop already ticks).
+        if live.driver.request_tick(std::time::Instant::now()) {
+            progressed = true;
+            need = RedrawNeed::Now;
+        }
         // `parity:proxy-settings`: first `getProxies` + auto-switch.
         if live.driver.proxy_tick(quill::state::unix_ms_now()) {
             progressed = true;
@@ -445,6 +452,10 @@ impl QuillApp {
             .and_then(|live| live.driver.session.message_link_error.take())
         {
             self.status_note = err;
+            progressed = true;
+        }
+        // B7: a basic group became a supergroup: leave the old chat.
+        if self.pump_chat_upgrades(cx) {
             progressed = true;
         }
         // B10: open a profile photo gallery that was waiting for its list.
@@ -596,6 +607,14 @@ impl QuillApp {
             self.status_note = notice;
             progressed = true;
         }
+        if let Some(notice) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.flood_notice.take())
+        {
+            self.status_note = notice;
+            progressed = true;
+        }
         self.finish_successful_sends(cx);
         if progressed || send_failed || self.polled_chrome() != shown_before {
             need = RedrawNeed::Now;
@@ -649,15 +668,23 @@ impl QuillApp {
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
-        let clicks: Vec<ChatId> = self
+        let clicks: Vec<(ChatId, NotificationAction)> = self
             .notify_clicks
             .lock()
             .map(|mut guard| std::mem::take(&mut *guard))
             .unwrap_or_default();
-        for chat_id in clicks {
-            cx.activate(true);
-            window.activate_window();
-            self.select_listed_chat(chat_id, window, cx);
+        for (chat_id, action) in clicks {
+            self.run_notification_action(chat_id, action, window, cx);
+        }
+        // Notifications whose chat was read elsewhere (or removed by TDLib)
+        // are withdrawn from the OS notification center.
+        let clears: Vec<ChatId> = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.driver.session.pending_notification_clears))
+            .unwrap_or_default();
+        for chat_id in clears {
+            self.dismiss_os_notification(chat_id, cx);
         }
         // B1: force-reply — an incoming message demanded a reply; drain
         // from the live or demo session and arm the composer.
@@ -693,6 +720,48 @@ impl QuillApp {
         for path in plays {
             self.notification_sounds.play(NotificationSound::File(path));
         }
+    }
+
+    /// A notification was clicked or one of its buttons pressed. "Mark as
+    /// read" works in the background (the window stays where it is); "Open"
+    /// and "Reply" bring the app forward with the chat selected, and Reply
+    /// also focuses the composer (GPUI notifications have no inline text
+    /// field, see `quill::notify::NotificationAction`).
+    pub(super) fn run_notification_action(
+        &mut self,
+        chat_id: ChatId,
+        action: NotificationAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action == NotificationAction::MarkRead {
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.mark_chat_as_read(chat_id);
+            }
+            self.dismiss_os_notification(chat_id, cx);
+            return;
+        }
+        cx.activate(true);
+        window.activate_window();
+        self.select_listed_chat(chat_id, window, cx);
+        if action == NotificationAction::Reply {
+            self.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+    }
+
+    /// Withdraw the chat's shown notification: GPUI dismisses by tag on
+    /// macOS and Windows. Linux `notify-send --wait` processes own their
+    /// notification and cannot be recalled; the daemon expires them.
+    pub(super) fn dismiss_os_notification(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if quill::notify::current_backend() != quill::notify::NotifyBackend::Native {
+            return;
+        }
+        let account = self
+            .session()
+            .map(|s| s.account.0.as_str())
+            .unwrap_or("primary");
+        cx.dismiss_system_notification(&quill::notify::notification_tag(account, chat_id));
     }
 
     /// Parity slice: resolve a notification sound and play it. `Default`
@@ -739,7 +808,14 @@ impl QuillApp {
                 tag: quill::notify::notification_tag(account, notification.chat_id).into(),
                 title: notification.title.into(),
                 body: notification.body.into(),
-                actions: Vec::new(),
+                // Locked: no buttons, a reply must not bypass the passcode.
+                actions: quill::notify::action_buttons(self.passcode_ui.locked)
+                    .into_iter()
+                    .map(|(id, label)| SystemNotificationAction {
+                        id: id.into(),
+                        label: label.into(),
+                    })
+                    .collect(),
             });
             return;
         }
@@ -757,10 +833,10 @@ impl QuillApp {
             .spawn(move || {
                 let outcome = quill::notify::run_notification_command(&command);
                 inflight.fetch_sub(1, Ordering::SeqCst);
-                if outcome.clicked
+                if let Some(action) = outcome.action
                     && let Ok(mut guard) = clicks.lock()
                 {
-                    guard.push(notification.chat_id);
+                    guard.push((notification.chat_id, action));
                 }
             });
         if spawn.is_err() {

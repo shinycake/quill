@@ -240,7 +240,18 @@ impl QuillApp {
         // a channel's discussion group.
         let chat_id = chat.map(|c| c.id);
         let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
-        let ttl_ready = is_secret && chat.is_some_and(|c| c.can_post());
+        let ttl_ready = chat.is_some_and(|c| {
+            if is_secret {
+                c.can_post()
+            } else {
+                // tdesktop's "Auto-Delete" item: private chats, basic groups
+                // and supergroups/channels where the user can change info.
+                quill::auto_delete::can_edit_regular_ttl(quill::auto_delete::TtlFacts {
+                    kind: &c.kind,
+                    can_change_info: c.can_change_info(),
+                }) && c.supported()
+            }
+        });
         let discussion = chat_id.and_then(|id| self.session()?.discussion_chat_id(id));
         // tdesktop hides "Export chat history" for chats with protected content.
         let exportable = live
@@ -313,6 +324,13 @@ impl QuillApp {
                         menu.item(PopupMenuItem::new("Auto-Delete").on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
                                 this.ttl_picker_open = true;
+                                this.ttl_custom_open = false;
+                                this.ttl_custom_secs = this
+                                    .session()
+                                    .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
+                                    .map(|c| c.message_auto_delete_time)
+                                    .filter(|secs| *secs > 0)
+                                    .unwrap_or(86_400);
                                 cx.notify();
                             });
                         }));

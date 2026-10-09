@@ -9,10 +9,11 @@ use crate::telegram::requests::{
     delete_chat_reply_markup as delete_chat_reply_markup_request, get_bot_similar_bots,
     get_callback_query_answer, get_callback_query_answer_game,
     get_callback_query_answer_with_password, get_commands, get_game_high_scores,
-    get_inline_query_results, get_login_url, get_login_url_info, get_user_full_info,
-    search_public_chat, send_bot_start_message as send_bot_start_message_request,
-    send_game as send_game_request, send_inline_query_result_message,
-    set_message_sender_block_list,
+    get_inline_query_results, get_login_url, get_login_url_info, get_message,
+    get_recent_inline_bots, get_user_full_info, search_public_chat,
+    send_bot_start_message as send_bot_start_message_request, send_game as send_game_request,
+    send_inline_query_result_message, set_message_sender_block_list, share_chat_with_bot,
+    share_users_with_bot,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -388,6 +389,83 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::DeleteChatReplyMarkup, Some(chat_id));
         let json = delete_chat_reply_markup_request(extra, chat_id, message_id);
+        self.send_json_request(extra, &json)
+    }
+
+    /// Fetch the open chat's keyboard message when TDLib names one
+    /// (`chat.reply_markup_message_id`) that is outside the loaded history,
+    /// so the bot keyboard shows without scrolling to it.
+    pub(crate) fn maybe_fetch_reply_markup(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Ok(());
+        };
+        let Some(message_id) = self.session.reply_markup_message_to_fetch(chat_id) else {
+            return Ok(());
+        };
+        let purpose = RequestPurpose::GetChatReplyMarkupMessage;
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(());
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        self.send_json_request(extra, &get_message(extra, chat_id, message_id))
+            .map(|_| ())
+    }
+
+    /// `getRecentInlineBots`, once per session, when the user types "@".
+    pub fn maybe_fetch_recent_inline_bots(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() || self.session.reply_keyboards.recent_inline_bots.is_some() {
+            return Ok(());
+        }
+        if self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetRecentInlineBots)
+        {
+            return Ok(());
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetRecentInlineBots, None);
+        self.send_json_request(extra, &get_recent_inline_bots(extra))
+            .map(|_| ())
+    }
+
+    /// `shareUsersWithBot` after the user confirmed the picked users.
+    pub fn share_users_with_bot(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        button_id: i32,
+        user_ids: &[i64],
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || user_ids.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ShareWithBot, Some(chat_id));
+        let json = share_users_with_bot(extra, chat_id, message_id, button_id, user_ids);
+        self.send_json_request(extra, &json)
+    }
+
+    /// `shareChatWithBot` after the user confirmed the picked chat.
+    pub fn share_chat_with_bot(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        button_id: i32,
+        shared_chat_id: ChatId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::ShareWithBot, Some(chat_id));
+        let json = share_chat_with_bot(extra, chat_id, message_id, button_id, shared_chat_id);
         self.send_json_request(extra, &json)
     }
 

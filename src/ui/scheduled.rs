@@ -54,6 +54,8 @@ pub(super) enum ScheduleTarget {
     Composer,
     /// An already scheduled message (`editMessageSchedulingState`).
     Reschedule(MessageId),
+    /// The share box's destinations (`forwardMessages` scheduling state).
+    Share,
 }
 
 /// The date+time picker popup (tdesktop's `ChooseDateTimeBox`).
@@ -73,12 +75,12 @@ fn local_stamp(unix: i64) -> String {
     )
 }
 
-fn picker_value(unix: i64) -> Option<DateTime> {
+pub(super) fn picker_value(unix: i64) -> Option<DateTime> {
     Some(DateTime::Single(Some(local_stamp(unix).parse().ok()?)))
 }
 
 /// Local calendar day of `unix` as `YYYY-MM-DD`; compares lexically.
-fn local_day(unix: i64) -> String {
+pub(super) fn local_day(unix: i64) -> String {
     let c = civil_local(unix);
     format!("{:04}-{:02}-{:02}", c.year, c.month, c.day)
 }
@@ -121,6 +123,21 @@ pub(super) fn picked_unix(date: &Entity<DatePickerState>, cx: &App) -> Option<i6
         .map(|civil| civil_to_unix(&civil))
 }
 
+/// B15: the poll dialog's absolute-deadline picker (`close_date`): days
+/// from today to a year ahead, opening one day out, like tdesktop's
+/// `ChooseDateTimeBox` with `min = now + 60s`, `max = now + 365d`.
+pub(super) fn poll_deadline_picker(
+    window: &mut Window,
+    cx: &mut Context<QuillApp>,
+) -> Entity<DatePickerState> {
+    new_date_time_picker(
+        window,
+        cx,
+        now_unix() + 24 * 3600,
+        quill::poll::POLL_DEADLINE_MAX_SECS,
+    )
+}
+
 impl QuillApp {
     /// Reminder wording in Saved Messages (the chat with yourself),
     /// schedule wording everywhere else (`SendMenu::Type::Reminder`).
@@ -137,6 +154,14 @@ impl QuillApp {
     /// `CanScheduleUntilOnline`; the last-seen privacy check is left to the
     /// server, which rejects the request for hidden last-seen).
     pub(super) fn can_send_when_online(&self) -> bool {
+        // The share box schedules to several chats at once.
+        if self
+            .schedule_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target == ScheduleTarget::Share)
+        {
+            return false;
+        }
         let Some(session) = self.session() else {
             return false;
         };
@@ -165,6 +190,7 @@ impl QuillApp {
                 ComposerScheduling::SendAtDate(date) => Some(date),
                 _ => None,
             },
+            ScheduleTarget::Share => None,
             ScheduleTarget::Reschedule(id) => self.session().and_then(|s| {
                 s.scheduled_messages
                     .iter()
@@ -254,6 +280,9 @@ impl QuillApp {
             ScheduleTarget::Reschedule(message_id) => {
                 self.edit_scheduled_state(message_id, scheduling, cx);
                 self.open_scheduled_dialog(cx);
+            }
+            ScheduleTarget::Share => {
+                self.submit_share(quill::share_box::ShareSend::Scheduled(scheduling), cx);
             }
         }
     }

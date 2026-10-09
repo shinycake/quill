@@ -32,6 +32,8 @@ pub mod order {
     pub const TRANSLATE: u8 = 42;
     pub const COPY_POST_LINK: u8 = 45;
     pub const FORWARD: u8 = 50;
+    /// "Poll Stats" (`getPollVoteStatistics`).
+    pub const POLL_STATS: u8 = 54;
     pub const STOP_POLL: u8 = 55;
     pub const SEND_NOW: u8 = 56;
     pub const RETRY: u8 = 58;

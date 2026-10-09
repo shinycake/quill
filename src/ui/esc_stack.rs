@@ -119,6 +119,16 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, _, cx| app.close_media_viewer(cx)
     ),
     layer!(
+        "checklist-dialog",
+        |app| app.checklist_dialog.is_some(),
+        |app, _, cx| app.close_checklist_dialog(cx)
+    ),
+    layer!(
+        "poll-add-option",
+        |app| app.poll_add_option.is_some(),
+        |app, _, cx| app.close_poll_add_option(cx)
+    ),
+    layer!(
         "poll-dialog",
         |app| app.poll_dialog.is_some(),
         |app, _, cx| app.request_close_poll_dialog(cx)
@@ -202,6 +212,10 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             .is_some_and(|session| session.sponsored_report.is_some()),
         |app, _, cx| app.dismiss_sponsored_report_ui(cx)
     ),
+    layer!("send-as", |app| app.send_as_open, |app, _, cx| {
+        app.send_as_open = false;
+        cx.notify();
+    }),
     layer!(
         "forward-picker",
         |app| app.forward_picker_open,

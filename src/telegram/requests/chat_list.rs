@@ -97,6 +97,11 @@ pub struct SearchMessagesFilters {
     pub media: crate::search_filters::SearchMediaKind,
     /// `min_date`, 0 = no bound.
     pub min_date: i32,
+    /// `max_date`, 0 = no bound.
+    pub max_date: i32,
+    /// Search the archive (`chatListArchive`) instead of every list
+    /// (tdesktop `lng_search_filter_from_archive`).
+    pub archived: bool,
 }
 
 /// `searchMessages` (schema 1.8.67, line 11877) with the chat-type, media
@@ -122,14 +127,104 @@ pub fn search_messages_filtered(
     json!({
         "@type": "searchMessages",
         "@extra": extra.as_extra(),
-        "chat_list": Value::Null,
+        "chat_list": if filters.archived {
+            json!({ "@type": "chatListArchive" })
+        } else {
+            Value::Null
+        },
         "query": query,
         "offset": "",
         "limit": limit,
         "filter": filter,
         "chat_type_filter": chat_type_filter,
         "min_date": filters.min_date,
-        "max_date": 0,
+        "max_date": filters.max_date,
+    })
+    .to_string()
+}
+
+/// `searchChatsOnServer query:string type_filter:SearchChatTypeFilter
+/// limit:int32 = Chats;` (schema 1.8.67, line 11621): the title/username
+/// search of already-known chats done by the server, which finds chats the
+/// offline `searchChats` has not cached. Merged behind the local hits.
+pub fn search_chats_on_server(extra: RequestId, query: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchChatsOnServer",
+        "@extra": extra.as_extra(),
+        "query": query,
+        "type_filter": Value::Null,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// `searchPublicPosts query:string offset:string limit:int32
+/// star_count:int53 = FoundPublicPosts;` (schema 1.8.67, line 11918).
+/// Quill only ever sends free searches (`star_count` 0); an exhausted free
+/// quota is reported, never paid for silently.
+pub fn search_public_posts(extra: RequestId, query: &str, offset: &str, limit: i32) -> String {
+    json!({
+        "@type": "searchPublicPosts",
+        "@extra": extra.as_extra(),
+        "query": query,
+        "offset": offset,
+        "limit": limit,
+        "star_count": 0,
+    })
+    .to_string()
+}
+
+/// `searchPublicMessagesByTag tag:string offset:string limit:int32 =
+/// FoundMessages;` (schema 1.8.67, line 11924): public channel posts with
+/// a hashtag or cashtag (the "Public Posts" scope of a tag search).
+pub fn search_public_messages_by_tag(
+    extra: RequestId,
+    tag: &str,
+    offset: &str,
+    limit: i32,
+) -> String {
+    json!({
+        "@type": "searchPublicMessagesByTag",
+        "@extra": extra.as_extra(),
+        "tag": tag,
+        "offset": offset,
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// `getTopChats category:TopChatCategory limit:int32 = Chats;` (schema
+/// 1.8.67, line 11653): the "Frequent contacts" strip. tdesktop shows
+/// people (`topChatCategoryUsers`); `limit` is capped at 30 by TDLib.
+pub fn get_top_chats_users(extra: RequestId, limit: i32) -> String {
+    json!({
+        "@type": "getTopChats",
+        "@extra": extra.as_extra(),
+        "category": { "@type": "topChatCategoryUsers" },
+        "limit": limit,
+    })
+    .to_string()
+}
+
+/// `removeTopChat category:TopChatCategory chat_id:int53 = Ok;` (schema
+/// 1.8.67, line 11656): "Remove from Recent" on a frequent contact.
+pub fn remove_top_chat_users(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "removeTopChat",
+        "@extra": extra.as_extra(),
+        "category": { "@type": "topChatCategoryUsers" },
+        "chat_id": chat_id.0,
+    })
+    .to_string()
+}
+
+/// `removeRecentlyFoundChat chat_id:int53 = Ok;` (schema 1.8.67, line
+/// 11668): "Remove from Recent" on one recent search entry.
+pub fn remove_recently_found_chat(extra: RequestId, chat_id: ChatId) -> String {
+    json!({
+        "@type": "removeRecentlyFoundChat",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
     })
     .to_string()
 }

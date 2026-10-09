@@ -543,6 +543,22 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Flip the channel's "Auto-translate messages" switch.
+    pub(super) fn set_auto_translate(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let enabled = !self
+            .session()
+            .is_some_and(|session| session.chat_auto_translate(chat_id));
+        if let Some(live) = self.live.as_mut() {
+            self.status_note = match live.driver.toggle_auto_translate(chat_id, enabled) {
+                Ok(()) => "auto-translate updated".into(),
+                Err(_) => "could not change auto-translate".into(),
+            };
+        } else {
+            self.status_note = "auto-translate needs a live connection (demo)".into();
+        }
+        cx.notify();
+    }
+
     /// Slice G2: aggressive anti-spam toggle (info panel → Manage
     /// group). Gated on `supergroupFullInfo.can_toggle_aggressive_anti_spam`.
     pub(super) fn set_anti_spam(&mut self, chat_id: ChatId, enabled: bool, cx: &mut Context<Self>) {

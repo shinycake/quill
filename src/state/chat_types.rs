@@ -237,6 +237,11 @@ pub struct ChatSummary {
     /// 3612 / 3627), refreshed by `updateChatUnreadReactionCount`
     /// (schema line 10570). Drives the ♥ reaction badge on the row.
     pub unread_reaction_count: i32,
+    /// B15: `chat.unread_poll_vote_count` (schema 1.8.67, line 3613),
+    /// refreshed by `updateChatUnreadPollVoteCount` (line 10573) and
+    /// `updateMessageContainsUnreadPollVotes` (line 10457). Drives the
+    /// poll-vote badge on the row and "Read all poll votes".
+    pub unread_poll_vote_count: i32,
     /// Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines 3606 /
     /// 3627). Gates the row-menu Report item (`reportChat`, schema
     /// line 15693).

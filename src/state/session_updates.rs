@@ -44,6 +44,10 @@ impl Session {
             self.search.close();
             self.chat_search.close();
             self.in_flight_forward = None;
+            self.queued_forward_flights.clear();
+            self.chat_message_sender.clear();
+            self.send_as_options.clear();
+            self.share_search = ShareSearch::default();
             self.last_forward = None;
         }
         if matches!(state, AuthorizationState::LoggingOut) {

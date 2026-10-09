@@ -1,6 +1,15 @@
 //! Search state types: global, in-chat and topic search.
 use super::*;
 
+/// Pending inline confirmations of the search panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchConfirm {
+    /// `lng_recent_clear_sure`: clear the whole search history.
+    ClearRecents,
+    /// `lng_recent_hide_sure`: clear and disable the frequent contacts.
+    DisableTopChats,
+}
+
 /// Global search (official sidebar field): recents, then `searchChats` + `searchMessages`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchStatus {
@@ -108,6 +117,22 @@ pub struct SearchState {
     pub community_filter: Option<i64>,
     /// The filter bar under the field: chat type, media tab, date window.
     pub filters: crate::search_filters::GlobalSearchFilters,
+    /// `searchChatsOnServer` results, merged behind the offline
+    /// `searchChats` hits (see [`Self::merged_chat_ids`]). They never gate
+    /// the status: the server answer is a supplement, not a requirement.
+    pub server_chat_ids: Vec<ChatId>,
+    /// "Frequent contacts" (`getTopChats` users), shown on an empty search.
+    pub top_chats: Vec<ChatId>,
+    /// TDLib option `disable_top_chats` (tdesktop "Suggest frequent
+    /// contacts" off): the strip is hidden and nothing is fetched.
+    pub top_chats_disabled: bool,
+    /// An inline confirmation row is showing (tdesktop asks before clearing
+    /// the history or disabling the frequent contacts).
+    pub confirm: Option<SearchConfirm>,
+    /// The frequent contact whose "Remove from Recent" row is open.
+    pub top_menu: Option<ChatId>,
+    /// `searchPublicPosts` said the free daily quota is spent.
+    pub public_limits_exceeded: bool,
     /// Empty-query surface: `searchRecentlyFoundChats` (official Recent).
     pub recents: bool,
     pub(crate) chats_done: bool,
@@ -130,6 +155,12 @@ impl Default for SearchState {
             public_chat_ids: Vec::new(),
             community_filter: None,
             filters: crate::search_filters::GlobalSearchFilters::default(),
+            server_chat_ids: Vec::new(),
+            top_chats: Vec::new(),
+            top_chats_disabled: false,
+            confirm: None,
+            top_menu: None,
+            public_limits_exceeded: false,
             recents: false,
             chats_done: false,
             messages_done: false,
@@ -159,6 +190,8 @@ impl SearchState {
         self.recents = false;
         self.community_filter = None;
         self.filters = Default::default();
+        self.confirm = None;
+        self.top_menu = None;
         self.status = SearchStatus::Closed;
         self.generation = self.generation.saturating_add(1);
         self.clear_results();
@@ -205,6 +238,8 @@ impl SearchState {
         self.chat_ids.clear();
         self.messages.clear();
         self.public_chat_ids.clear();
+        self.server_chat_ids.clear();
+        self.public_limits_exceeded = false;
         self.chats_done = false;
         self.messages_done = false;
         self.public_done = false;
@@ -241,11 +276,74 @@ impl SearchState {
         self.finish_if_complete();
     }
 
+    /// The chats section: the offline hits first, then what only the server
+    /// knew (no duplicates).
+    pub fn merged_chat_ids(&self) -> Vec<ChatId> {
+        let mut merged = self.chat_ids.clone();
+        for id in &self.server_chat_ids {
+            if !merged.contains(id) {
+                merged.push(*id);
+            }
+        }
+        merged
+    }
+
+    /// The public-chats section without anything already in the chats one.
+    pub fn public_only_chat_ids(&self) -> Vec<ChatId> {
+        let merged = self.merged_chat_ids();
+        self.public_chat_ids
+            .iter()
+            .copied()
+            .filter(|id| !merged.contains(id))
+            .collect()
+    }
+
+    /// `searchChatsOnServer` answer: late hits can turn "no results" into
+    /// results, never the other way round.
+    pub(crate) fn accept_server_chats(&mut self, chat_ids: Vec<ChatId>) {
+        self.server_chat_ids = chat_ids;
+        if self.chats_done && self.messages_done && self.public_done {
+            self.finish_if_complete();
+        }
+    }
+
+    /// Public-posts scope: only one request is in flight; the chat sections
+    /// are not searched.
+    pub fn begin_public_scope(&mut self) {
+        self.chats_done = true;
+        self.public_done = true;
+    }
+
+    /// Drop one entry of the Recent list (`removeRecentlyFoundChat`).
+    pub fn remove_recent(&mut self, chat_id: ChatId) -> bool {
+        if !self.recents {
+            return false;
+        }
+        let before = self.chat_ids.len();
+        self.chat_ids.retain(|id| *id != chat_id);
+        let removed = self.chat_ids.len() != before;
+        if removed && self.chat_ids.is_empty() && self.messages.is_empty() {
+            self.status = SearchStatus::Idle;
+        }
+        removed
+    }
+
+    /// Drop one frequent contact (`removeTopChat`).
+    pub fn remove_top_chat(&mut self, chat_id: ChatId) -> bool {
+        let before = self.top_chats.len();
+        self.top_chats.retain(|id| *id != chat_id);
+        if self.top_menu == Some(chat_id) {
+            self.top_menu = None;
+        }
+        self.top_chats.len() != before
+    }
+
     pub(crate) fn finish_if_complete(&mut self) {
         if !(self.chats_done && self.messages_done && self.public_done) {
             return;
         }
         let any = !self.chat_ids.is_empty()
+            || !self.server_chat_ids.is_empty()
             || !self.messages.is_empty()
             || !self.public_chat_ids.is_empty();
         self.status = if any {
@@ -293,19 +391,23 @@ impl ChatSearchJump {
 }
 
 /// Which unread marker a corner jump button walks (tdesktop
-/// `CornerButtonType::Mentions` / `Reactions`).
+/// `CornerButtonType::Mentions` / `Reactions` / `PollVotes`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnreadJumpKind {
     Mention,
     Reaction,
+    /// B15: votes in the user's polls (`searchMessagesFilterUnreadPollVote`,
+    /// `readAllChatPollVotes`).
+    PollVote,
 }
 
 impl UnreadJumpKind {
-    /// `searchMessagesFilter*` constructor (`schema/td_api.tl:6317,6320`).
+    /// `searchMessagesFilter*` constructor (`schema/td_api.tl:6317,6320,6323`).
     pub fn filter_constructor(self) -> &'static str {
         match self {
             Self::Mention => "searchMessagesFilterUnreadMention",
             Self::Reaction => "searchMessagesFilterUnreadReaction",
+            Self::PollVote => "searchMessagesFilterUnreadPollVote",
         }
     }
 }
