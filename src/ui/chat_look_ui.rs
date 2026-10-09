@@ -46,6 +46,38 @@ pub(super) struct ChatLookDialog {
     pub remove_wallpaper: bool,
     /// Also set the wallpaper for the other person (Premium only).
     pub both: bool,
+    /// Requests Apply has sent and is waiting on; the dialog stays open
+    /// until they are acknowledged, and shows the error if one fails.
+    pub awaiting: Option<LookWait>,
+}
+
+/// Apply's in-flight requests: `sent` of them, counted from the session's
+/// acknowledgement counter `base`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LookWait {
+    pub base: u32,
+    pub sent: u32,
+}
+
+/// Where an Apply stands, from the session's counters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum LookProgress {
+    Waiting,
+    Done,
+    Failed(String),
+}
+
+/// Whether Apply's requests are acknowledged, still pending or failed. An
+/// error wins over acknowledgements: the dialog stays open to show it.
+pub(super) fn look_progress(wait: LookWait, oks: u32, error: Option<&str>) -> LookProgress {
+    if let Some(error) = error {
+        return LookProgress::Failed(error.to_owned());
+    }
+    if oks.wrapping_sub(wait.base) >= wait.sent {
+        LookProgress::Done
+    } else {
+        LookProgress::Waiting
+    }
 }
 
 /// One change `Apply` sends.
@@ -109,6 +141,7 @@ impl QuillApp {
             background: None,
             remove_wallpaper: false,
             both: false,
+            awaiting: None,
         });
         self.ensure_wallpapers_loaded(cx);
         if let Some(live) = self.live.as_mut() {
@@ -135,6 +168,7 @@ impl QuillApp {
             background: None,
             remove_wallpaper: false,
             both: false,
+            awaiting: None,
         });
         cx.notify();
     }
@@ -167,10 +201,20 @@ impl QuillApp {
         let changes = plan_changes(current_theme.as_deref(), has_own, &dialog);
         let premium = session.my_is_premium();
         let only_for_self = !(dialog.both && premium);
+        if dialog.awaiting.is_some() {
+            return;
+        }
         match self.live.as_mut() {
             Some(live) => {
+                if changes.is_empty() {
+                    self.close_chat_look_dialog(cx);
+                    return;
+                }
+                live.driver.session.background_error = None;
+                let base = live.driver.session.chat_look_oks;
+                let mut sent = 0u32;
                 for change in changes {
-                    let sent = match change {
+                    let result = match change {
                         LookChange::Theme(name) => {
                             live.driver.set_chat_theme(ChatId(chat_id), &name)
                         }
@@ -182,10 +226,24 @@ impl QuillApp {
                             live.driver.delete_chat_background(ChatId(chat_id), false)
                         }
                     };
-                    if let Err(err) = sent {
-                        self.status_note = format!("could not change the chat look: {err:?}");
+                    match result {
+                        Ok(_) => sent += 1,
+                        Err(err) => {
+                            live.driver.session.background_error =
+                                Some(format!("could not send the change ({err:?})"));
+                        }
                     }
                 }
+                if let Some(d) = self.chat_look_dialog.as_mut() {
+                    d.awaiting = (sent > 0).then_some(LookWait { base, sent });
+                }
+                // Nothing in flight and no error: nothing to wait for.
+                if sent == 0 && live.driver.session.background_error.is_none() {
+                    self.close_chat_look_dialog(cx);
+                    return;
+                }
+                cx.notify();
+                return;
             }
             None => {
                 // Screenshot demo: apply locally.
@@ -220,6 +278,35 @@ impl QuillApp {
             }
         }
         self.close_chat_look_dialog(cx);
+    }
+
+    /// Poll-loop half of Apply: close the dialog once its requests are
+    /// acknowledged; on a failure keep it open (the error shows inline).
+    pub(super) fn drain_chat_look(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(wait) = self.chat_look_dialog.as_ref().and_then(|d| d.awaiting) else {
+            return false;
+        };
+        let Some(session) = self.session() else {
+            return false;
+        };
+        match look_progress(
+            wait,
+            session.chat_look_oks,
+            session.background_error.as_deref(),
+        ) {
+            LookProgress::Waiting => false,
+            LookProgress::Done => {
+                self.close_chat_look_dialog(cx);
+                true
+            }
+            LookProgress::Failed(_) => {
+                if let Some(d) = self.chat_look_dialog.as_mut() {
+                    d.awaiting = None;
+                }
+                cx.notify();
+                true
+            }
+        }
     }
 
     /// Apply the previewed `bg/` link as the account wallpaper for the
@@ -608,6 +695,16 @@ impl QuillApp {
                                 .into_any_element()
                         });
                     }
+                    if let Some(error) = session.and_then(|s| s.background_error.clone()) {
+                        wall = wall.child(
+                            div()
+                                .id("chat-look-error")
+                                .text_sm()
+                                .text_color(super::danger_dark())
+                                .child(format!("Couldn't change the chat look: {error}")),
+                        );
+                    }
+                    let applying = state.awaiting.is_some();
                     let changed = {
                         let current_theme = this
                             .session()
@@ -629,9 +726,9 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("chat-look-apply")
-                                .label("Apply")
+                                .label(if applying { "Applying…" } else { "Apply" })
                                 .primary()
-                                .disabled(!changed)
+                                .disabled(!changed || applying)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.apply_chat_look(cx);
                                     this.close_kit_dialog_if_done(DialogKind::ChatLook, window, cx);
@@ -727,7 +824,8 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatLookDialog, LookChange, LookTarget, chat_look_allowed, is_wallpaper_image, plan_changes,
+        ChatLookDialog, LookChange, LookProgress, LookTarget, LookWait, chat_look_allowed,
+        is_wallpaper_image, look_progress, plan_changes,
     };
     use std::path::Path;
 
@@ -738,6 +836,7 @@ mod tests {
             background: None,
             remove_wallpaper: false,
             both: false,
+            awaiting: None,
         }
     }
 
@@ -785,5 +884,26 @@ mod tests {
         assert!(is_wallpaper_image(Path::new("c.webp")));
         assert!(!is_wallpaper_image(Path::new("c.gif")));
         assert!(!is_wallpaper_image(Path::new("noext")));
+    }
+
+    #[test]
+    fn apply_waits_for_every_acknowledgement() {
+        let wait = LookWait { base: 4, sent: 2 };
+        assert_eq!(look_progress(wait, 4, None), LookProgress::Waiting);
+        assert_eq!(look_progress(wait, 5, None), LookProgress::Waiting);
+        assert_eq!(look_progress(wait, 6, None), LookProgress::Done);
+    }
+
+    #[test]
+    fn a_failure_keeps_the_dialog_open_with_the_reason() {
+        let wait = LookWait { base: 0, sent: 1 };
+        assert_eq!(
+            look_progress(wait, 0, Some("BACKGROUND_INVALID")),
+            LookProgress::Failed("BACKGROUND_INVALID".into())
+        );
+        assert_eq!(
+            look_progress(wait, 1, Some("CHAT_NOT_MODIFIED")),
+            LookProgress::Failed("CHAT_NOT_MODIFIED".into())
+        );
     }
 }

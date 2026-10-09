@@ -1686,7 +1686,7 @@ impl QuillApp {
                     .filter(|shift| shift.front_removed + shift.tail_removed > 0);
                 match (first, last, self.history_ends) {
                     _ if slide.is_some() => {
-                        for shift in slide {
+                        if let Some(shift) = slide {
                             let newer_page = self.history_had_newer;
                             self.history_scroller.update(cx, |state, cx| {
                                 let following = state.is_following_tail();
