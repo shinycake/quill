@@ -900,12 +900,12 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Scheduled messages
 
-- [ ] Send now on a scheduled message <!-- parity:scheduled-send-now -->
-- [ ] Reschedule a scheduled message to a new time <!-- parity:scheduled-reschedule -->
-- [ ] Date and time picker for scheduling (today only the +1h, +8h and +24h presets) <!-- parity:scheduled-date-picker -->
-- [ ] "Set a reminder" wording when scheduling in Saved Messages <!-- parity:scheduled-reminder-wording -->
-- [ ] Send when online stays available next to the date picker in the schedule popup <!-- parity:scheduled-send-when-online -->
-- [ ] Scheduled-messages icon next to the composer when a chat has scheduled messages <!-- parity:scheduled-composer-icon -->
+- [x] Send now on a scheduled message <!-- parity:scheduled-send-now -->
+- [x] Reschedule a scheduled message to a new time <!-- parity:scheduled-reschedule -->
+- [x] Date and time picker for scheduling (today only the +1h, +8h and +24h presets) <!-- parity:scheduled-date-picker -->
+- [x] "Set a reminder" wording when scheduling in Saved Messages <!-- parity:scheduled-reminder-wording -->
+- [x] Send when online stays available next to the date picker in the schedule popup <!-- parity:scheduled-send-when-online -->
+- [x] Scheduled-messages icon next to the composer when a chat has scheduled messages <!-- parity:scheduled-composer-icon -->
 - [ ] Select several scheduled messages to send now, reschedule or delete <!-- parity:scheduled-select-many -->
 
 ### Deep links
