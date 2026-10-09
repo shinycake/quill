@@ -237,7 +237,7 @@ impl QuillApp {
 
     /// A media-timestamp link: seek the message's own voice, audio or
     /// video, or the one it replies to (Telegram Desktop).
-    fn seek_media_timestamp(
+    pub(super) fn seek_media_timestamp(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,

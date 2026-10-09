@@ -191,6 +191,12 @@ pub enum RequestPurpose {
     DeepLinkInfo {
         generation: u64,
     },
+    /// `getInternalLinkType` for a link the local parsers do not cover
+    /// (`parity:deeplink-internal-link-type`). Same slot as
+    /// [`Self::DeepLinkInfo`] (`ResolvingInfo`).
+    DeepLinkInternalType {
+        generation: u64,
+    },
     /// `parity:platform-deep-links`: deep-link follow-up resolving to a
     /// chat (`searchPublicChat` / `createPrivateChat` / `getChat`). The
     /// `chat` answer is picked up in `apply_update_new_chat` and opens

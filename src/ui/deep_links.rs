@@ -40,6 +40,7 @@ impl QuillApp {
     /// terminal session state into the next step: follow-up request,
     /// info dialog, or a deferred chat open for render.
     pub(super) fn pump_deep_link(&mut self, cx: &mut Context<Self>) {
+        self.tick_media_seek(cx);
         // `tg://proxy` / `tg://socks` (and the t.me forms) are parsed
         // locally and need no sign-in: a user who is blocked from
         // Telegram can only get in through them.
@@ -109,6 +110,14 @@ impl QuillApp {
             Some(DeepLinkState::ShowText(text)) => {
                 self.deep_link_dialog = Some(text);
             }
+            // Typed links (`deep_link_types`): the UI half runs in render.
+            Some(DeepLinkState::Ui(ui)) => {
+                self.pending_deep_link_ui = Some(ui);
+            }
+            // TDLib has no type for it: `getDeepLinkInfo` explains it.
+            Some(DeepLinkState::Unknown { link }) => {
+                let _ = live.driver.request_deep_link_text(&link);
+            }
         }
         cx.notify();
     }
@@ -139,6 +148,10 @@ impl QuillApp {
                 } => Some(*post),
                 DeepLinkAction::OpenMessage { message_id, .. } => Some(*message_id),
                 DeepLinkAction::OpenChannelPost { post, .. } => Some(*post),
+                // Already a TDLib message id.
+                DeepLinkAction::OpenChatById { message_id, .. } if *message_id > 0 => {
+                    Some(*message_id >> 20)
+                }
                 _ => None,
             };
             if let Some(message_id) = jump_to
@@ -163,6 +176,7 @@ impl QuillApp {
             self.composer
                 .update(cx, |input, cx| input.set_value(&prefill, window, cx));
         }
+        self.finish_typed_link(chat_id, action, window, cx);
         if let DeepLinkAction::OpenUsername {
             story_id: Some(story_id),
             ..

@@ -89,7 +89,7 @@ pub(super) fn demo_seed_for(
                 link: "tg://login/?token=demo_qr_login_token_not_for_network".into(),
             },
         ),
-        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
+        ScreenshotDemo::ReadyUpdateInstall | ScreenshotDemo::ReadyUpdateChangelog | ScreenshotDemo::ReadyUpdateFailure | ScreenshotDemo::ReadyTrayBehavior | ScreenshotDemo::ReadyDeepLinkInfo | ScreenshotDemo::ReadyDeepLinkInvite | ScreenshotDemo::ReadyDeepLinkShare | ScreenshotDemo::ReadyChats | ScreenshotDemo::ReadyChatsComposer | ScreenshotDemo::ReadySuggestHashtag | ScreenshotDemo::ReadySuggestEmoji | ScreenshotDemo::ReadyAppearance | ScreenshotDemo::ReadySpellcheck | ScreenshotDemo::ReadySpellcheckPanel | ScreenshotDemo::ReadySpellcheckToggle | ScreenshotDemo::ReadyKeybindings | ScreenshotDemo::ReadyAccounts | ScreenshotDemo::ReadyPasscodeSettings | ScreenshotDemo::ReadyPasscodeCreate | ScreenshotDemo::ReadyLockScreen => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — Ready chat list (injected updates, no live Telegram)".into(),
@@ -1903,6 +1903,9 @@ impl QuillApp {
             pending_deep_link: None,
             deep_link_dialog: None,
             deep_link_invite: None,
+            pending_deep_link_ui: None,
+            share_link_text: None,
+            pending_media_seek: None,
             pending_deep_link_open: None,
             pending_link: None,
             right_clicked_link: None,
