@@ -131,6 +131,7 @@ impl Session {
                 video_chat,
                 has_welcome_messages,
                 has_protected_content,
+                has_scheduled_messages,
                 is_translatable,
                 unread_mention_count,
                 unread_reaction_count,
@@ -141,6 +142,7 @@ impl Session {
                 last_message,
             } => {
                 self.set_chat_protected(chat_id.0, has_protected_content);
+                self.set_chat_has_scheduled(chat_id.0, has_scheduled_messages);
                 self.set_chat_translatable(chat_id.0, is_translatable);
                 self.set_chat_action_bar(chat_id.0, action_bar);
                 self.apply_update_new_chat(
@@ -403,6 +405,10 @@ impl Session {
                 chat_id,
                 has_protected_content,
             } => self.set_chat_protected(chat_id, has_protected_content),
+            EnvelopePayload::UpdateChatHasScheduledMessages {
+                chat_id,
+                has_scheduled_messages,
+            } => self.set_chat_has_scheduled(chat_id, has_scheduled_messages),
             EnvelopePayload::UpdateChatIsTranslatable {
                 chat_id,
                 is_translatable,

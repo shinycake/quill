@@ -258,6 +258,34 @@ impl QuillApp {
             }
             self.status_note = "screenshot demo — find in history".into();
         }
+        if matches!(demo, Some(ScreenshotDemo::ReadyScheduled)) {
+            let view = super::scheduled_demo::ScheduledView::from_env();
+            if let Some(session) = self.demo_session.as_mut() {
+                self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+                super::scheduled_demo::apply_ready_scheduled(
+                    session,
+                    &self.demo_sink,
+                    &self.demo_seq,
+                    view,
+                );
+            }
+            match view {
+                super::scheduled_demo::ScheduledView::Picker
+                | super::scheduled_demo::ScheduledView::Reminder => {
+                    self.open_schedule_picker(
+                        super::scheduled::ScheduleTarget::Composer,
+                        window,
+                        cx,
+                    );
+                }
+                super::scheduled_demo::ScheduledView::List
+                | super::scheduled_demo::ScheduledView::ReminderList => {
+                    self.scheduled_dialog_open = true;
+                }
+                super::scheduled_demo::ScheduledView::Button => {}
+            }
+            self.status_note = "screenshot demo — scheduled messages".into();
+        }
         if matches!(demo, Some(ScreenshotDemo::ReadySearchFilters)) {
             self.search_input.update(cx, |input, cx| {
                 input.set_value("hello", window, cx);

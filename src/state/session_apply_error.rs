@@ -1133,6 +1133,14 @@ impl Session {
             // status note instead of vanishing into `_ => {}` —
             // the menu item says "retrying send…" and the user
             // deserves an answer either way.
+            Some(RequestPurpose::EditMessageSchedulingState { scheduling, .. }) => {
+                let action = if scheduling == ComposerScheduling::None {
+                    "Could not send the message now"
+                } else {
+                    "Could not reschedule the message"
+                };
+                self.resend_error = Some(call_request_error_line(&err, action));
+            }
             Some(RequestPurpose::ResendMessages) => {
                 self.resend_error = Some(call_request_error_line(&err, "Could not retry the send"));
             }

@@ -858,3 +858,47 @@ fn fix_rich_message_with_ai_shape_matches_1_8_67() {
     assert_eq!(v["@extra"], "75");
     assert_eq!(v["message"]["@type"], "inputRichMessage");
 }
+
+#[test]
+fn edit_message_scheduling_state_shape() {
+    use crate::composer::ComposerScheduling;
+    let v: Value = serde_json::from_str(&edit_message_scheduling_state(
+        RequestId(5),
+        ChatId(7),
+        MessageId(70),
+        ComposerScheduling::SendAtDate(1_800_000_600),
+    ))
+    .unwrap();
+    assert_eq!(v["@type"], "editMessageSchedulingState");
+    assert_eq!(v["@extra"], "5");
+    assert_eq!(v["chat_id"], 7);
+    assert_eq!(v["message_id"], 70);
+    assert_eq!(
+        v["scheduling_state"]["@type"],
+        "messageSchedulingStateSendAtDate"
+    );
+    assert_eq!(v["scheduling_state"]["send_date"], 1_800_000_600);
+    assert_eq!(v["scheduling_state"]["repeat_period"], 0);
+
+    // Send now: a null state.
+    let v: Value = serde_json::from_str(&edit_message_scheduling_state(
+        RequestId(6),
+        ChatId(7),
+        MessageId(70),
+        ComposerScheduling::None,
+    ))
+    .unwrap();
+    assert!(v["scheduling_state"].is_null());
+
+    let v: Value = serde_json::from_str(&edit_message_scheduling_state(
+        RequestId(7),
+        ChatId(7),
+        MessageId(70),
+        ComposerScheduling::SendWhenOnline,
+    ))
+    .unwrap();
+    assert_eq!(
+        v["scheduling_state"]["@type"],
+        "messageSchedulingStateSendWhenOnline"
+    );
+}

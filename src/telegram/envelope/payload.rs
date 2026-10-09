@@ -2005,6 +2005,13 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        "updateChatHasScheduledMessages" => Ok(EnvelopePayload::UpdateChatHasScheduledMessages {
+            chat_id: int53(value.get("chat_id"))?,
+            has_scheduled_messages: value
+                .get("has_scheduled_messages")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         "updateChatIsTranslatable" => Ok(EnvelopePayload::UpdateChatIsTranslatable {
             chat_id: int53(value.get("chat_id"))?,
             is_translatable: value

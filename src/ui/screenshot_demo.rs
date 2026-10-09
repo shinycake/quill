@@ -684,6 +684,10 @@ pub enum ScreenshotDemo {
     /// (`QUILL_DEMO_PROXY=list|edit|link|link-bad`; injected data, no live
     /// Telegram, no real proxy).
     ReadyProxy,
+    /// Scheduled messages; `QUILL_DEMO_SCHEDULED=button|picker|list|reminder|reminder-list`
+    /// (composer button, date+time picker, list with Send now / Reschedule,
+    /// Saved Messages reminder wording; injected, no live Telegram).
+    ReadyScheduled,
     /// Find in history: the "Jump to date" calendar box.
     ReadyJumpDate,
     /// Find in history: the in-chat "From:" member picker.

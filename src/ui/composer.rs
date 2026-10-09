@@ -7,7 +7,7 @@ use super::actions::{
 use super::app::{PaneMode, QuillApp};
 use super::demo::demo_media_allowlist;
 use super::message_text::rich_block_element;
-use super::scheduled::format_schedule_delay;
+use super::scheduled::ScheduleTarget;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -22,7 +22,8 @@ use quill::composer::{
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::state::{Session, effective_preview, unix_ms_now};
+use quill::schedule::ScheduleKind;
+use quill::state::{Session, effective_preview};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatKind;
 use quill::telegram::requests::SelfDestructSend;
@@ -707,17 +708,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// M1: schedule the next send `secs` from now
-    /// (`messageSchedulingStateSendAtDate`; `repeat_period` stays 0 —
-    /// premium-only, never surfaced).
-    pub(super) fn schedule_send_in(&mut self, secs: i64, cx: &mut Context<Self>) {
-        let send_date = unix_ms_now() as i64 / 1000 + secs;
-        self.composer_scheduling = ComposerScheduling::SendAtDate(send_date);
-        self.schedule_popup_open = false;
-        self.status_note = format!("scheduled in {}", format_schedule_delay(secs));
-        cx.notify();
-    }
-
     /// M1: load the chat's scheduled sends and open the dialog.
     pub(super) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
         self.schedule_popup_open = false;
@@ -859,12 +849,13 @@ impl QuillApp {
         let Some(app) = owner.upgrade() else {
             return menu;
         };
-        let (silent, preview_off, scheduled) = {
+        let (silent, preview_off, scheduled, kind) = {
             let app = app.read(cx);
             (
                 app.composer_silent,
                 app.composer_preview_disabled,
                 !matches!(app.composer_scheduling, ComposerScheduling::None),
+                app.schedule_kind(),
             )
         };
         let toggle_silent = owner.clone();
@@ -881,15 +872,9 @@ impl QuillApp {
                 }),
         )
         .item(
-            PopupMenuItem::new(if scheduled {
-                "Change schedule…"
-            } else {
-                "Schedule message…"
-            })
-            .on_click(move |_, _, cx| {
+            PopupMenuItem::new(kind.menu_label(scheduled)).on_click(move |_, window, cx| {
                 let _ = schedule.update(cx, |this, cx| {
-                    this.schedule_popup_open = true;
-                    cx.notify();
+                    this.open_schedule_picker(ScheduleTarget::Composer, window, cx);
                 });
             }),
         )
@@ -953,7 +938,11 @@ impl QuillApp {
         let schedule_label = match self.composer_scheduling {
             ComposerScheduling::None => None,
             ComposerScheduling::SendAtDate(date) => Some(format!(
-                "Scheduled · {}",
+                "{} · {}",
+                match self.schedule_kind() {
+                    ScheduleKind::Reminder => "Reminder",
+                    ScheduleKind::Schedule => "Scheduled",
+                },
                 super::message_text::format_unix_date_time(date)
             )),
             ComposerScheduling::SendWhenOnline => Some("When online".to_string()),
@@ -963,9 +952,13 @@ impl QuillApp {
             row = row.child(
                 chip("chip-schedule", label, cx)
                     .cursor_pointer()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.schedule_popup_open = !this.schedule_popup_open;
-                        cx.notify();
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if this.schedule_popup_open {
+                            this.schedule_popup_open = false;
+                            cx.notify();
+                        } else {
+                            this.open_schedule_picker(ScheduleTarget::Composer, window, cx);
+                        }
                     }))
                     .child(
                         Button::new("chip-schedule-clear")
@@ -1221,78 +1214,6 @@ impl QuillApp {
             bar = bar.child(preview);
         }
         bar
-    }
-
-    /// M1: schedule picker popup above the composer (duration presets +
-    /// send-when-online, mirroring tdesktop's "Schedule message" options).
-    /// M1 fix-up: "When contact comes online" is offered only in private
-    /// (1:1) chats — `messageSchedulingStateSendWhenOnline` is
-    /// private-chats-only (schema 1.8.67 line 5905).
-    pub(super) fn schedule_popup(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut panel = div()
-            .id("schedule-popup")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .text_color(accent())
-                    .child("Schedule message"),
-            );
-        for (id, label, secs) in [
-            ("schedule-1h", "In 1 hour", 3600),
-            ("schedule-8h", "In 8 hours", 8 * 3600),
-            ("schedule-24h", "In 24 hours", 24 * 3600),
-        ] {
-            panel = panel.child(Button::new(id).label(label).ghost().on_click(cx.listener(
-                move |this, _, _, cx| {
-                    this.schedule_send_in(secs, cx);
-                },
-            )));
-        }
-        // M1 fix-up: private chats only (see `open_chat_is_private`).
-        if self.open_chat_is_private() {
-            panel = panel.child(
-                Button::new("schedule-when-online")
-                    .label("When contact comes online")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.composer_scheduling = ComposerScheduling::SendWhenOnline;
-                        this.schedule_popup_open = false;
-                        this.status_note = "will send when the contact is online".into();
-                        cx.notify();
-                    })),
-            );
-        }
-        panel = panel
-            .child(
-                Button::new("schedule-clear")
-                    .label("Send now (clear schedule)")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.composer_scheduling = ComposerScheduling::None;
-                        this.schedule_popup_open = false;
-                        this.status_note = "schedule cleared".into();
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("schedule-view")
-                    .label("View scheduled messages")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.open_scheduled_dialog(cx);
-                    })),
-            );
-        panel
     }
 
     /// M1: start a reply to a message from the context menu — the reply

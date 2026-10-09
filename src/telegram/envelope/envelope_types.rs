@@ -240,6 +240,10 @@ pub enum EnvelopePayload {
         /// — the chat's content can't be saved, forwarded or copied.
         /// Refreshed by `updateChatHasProtectedContent` (line 10582).
         has_protected_content: bool,
+        /// `chat.has_scheduled_messages` (schema 1.8.67, line 3627) — the
+        /// chat has scheduled messages; refreshed by
+        /// `updateChatHasScheduledMessages`.
+        has_scheduled_messages: bool,
         /// `chat.is_translatable` (schema 1.8.67, lines 3599 / 3627) —
         /// translation of the chat's messages must be suggested.
         /// Refreshed by `updateChatIsTranslatable` (line 10585).
@@ -1151,6 +1155,12 @@ pub enum EnvelopePayload {
     UpdateChatHasProtectedContent {
         chat_id: i64,
         has_protected_content: bool,
+    },
+    /// `updateChatHasScheduledMessages` — the chat gained its first or lost
+    /// its last scheduled message.
+    UpdateChatHasScheduledMessages {
+        chat_id: i64,
+        has_scheduled_messages: bool,
     },
     /// `updateChatIsTranslatable` (schema 1.8.67, line 10585) — translation
     /// of the chat's messages was enabled or disabled.
