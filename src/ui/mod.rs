@@ -155,6 +155,7 @@ mod recording;
 mod round_record;
 mod round_seek;
 mod scheduled;
+mod scheduled_demo;
 mod screenshot_demo;
 mod search_ui;
 mod secret_chats;

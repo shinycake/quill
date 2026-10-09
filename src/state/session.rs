@@ -811,6 +811,10 @@ pub struct Session {
     /// Chats whose content is protected (`chat.has_protected_content`,
     /// schema 1.8.67 line 3598): no saving, forwarding or copying.
     pub protected_chats: HashSet<i64>,
+    /// Chats with scheduled messages (`chat.has_scheduled_messages`,
+    /// `updateChatHasScheduledMessages`); drives the composer's
+    /// scheduled-messages button.
+    pub scheduled_chats: HashSet<i64>,
     /// Translation state (`translateText` / `translateMessageText`, the
     /// chat translate bar).
     pub translate: TranslateState,
@@ -1292,6 +1296,7 @@ impl Session {
             supergroup_send_welcome_right: HashMap::new(),
             chat_has_welcome_messages: HashMap::new(),
             protected_chats: HashSet::new(),
+            scheduled_chats: HashSet::new(),
             translate: TranslateState::default(),
             welcome_messages: HashMap::new(),
             welcome_message_fetches: HashMap::new(),

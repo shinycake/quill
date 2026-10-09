@@ -1,8 +1,8 @@
 //! Connect driver: the message send pipeline.
 use super::*;
 use crate::composer::{
-    AttachmentKind, ComposerEdit, ComposerEditKind, ComposerSnapshot, DeleteConfirm, ForwardDraft,
-    SendOptions,
+    AttachmentKind, ComposerEdit, ComposerEditKind, ComposerScheduling, ComposerSnapshot,
+    DeleteConfirm, ForwardDraft, SendOptions,
 };
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::rich::RichBlock;
@@ -11,12 +11,12 @@ use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
     AnimationSend, SendReply, StickerSend, VideoNoteSend, VideoNoteThumbnailSend, VideoSend,
     VoiceNoteSend, compose_rich_message_with_ai, compose_text_with_ai, create_rich_message_with_ai,
-    delete_messages, edit_message_caption, edit_message_text, fix_rich_message_with_ai,
-    fix_text_with_ai, forward_messages, get_chat_history, get_chat_scheduled_messages,
-    get_full_rich_message, input_message_photo, input_message_video, open_message_content,
-    recognize_speech, resend_messages, send_animation, send_document, send_message_album,
-    send_photo, send_rich_message, send_sticker, send_text, send_video, send_video_note,
-    send_voice_note,
+    delete_messages, edit_message_caption, edit_message_scheduling_state, edit_message_text,
+    fix_rich_message_with_ai, fix_text_with_ai, forward_messages, get_chat_history,
+    get_chat_scheduled_messages, get_full_rich_message, input_message_photo, input_message_video,
+    open_message_content, recognize_speech, resend_messages, send_animation, send_document,
+    send_message_album, send_photo, send_rich_message, send_sticker, send_text, send_video,
+    send_video_note, send_voice_note,
 };
 use crate::voice::VoiceDraft;
 
@@ -1375,6 +1375,43 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::DeleteMessages, Some(chat_id));
         let json = delete_messages(extra, chat_id, &[message_id], false);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
+    }
+
+    /// `editMessageSchedulingState`: reschedule a scheduled message, or send
+    /// it now with `ComposerScheduling::None`. Only messages in the loaded
+    /// scheduled list qualify.
+    pub fn edit_scheduled_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        scheduling: ComposerScheduling,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let known = self
+            .session
+            .scheduled_messages
+            .iter()
+            .any(|m| m.chat_id == chat_id && m.id == message_id);
+        if !known {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::EditMessageSchedulingState {
+                message_id,
+                scheduling,
+            },
+            Some(chat_id),
+        );
+        let json = edit_message_scheduling_state(extra, chat_id, message_id, scheduling);
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),
             Err(err) => {

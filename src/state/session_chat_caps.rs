@@ -1,5 +1,6 @@
 //! Chat capability queries: what the user may do in a chat.
 use super::*;
+use crate::telegram::envelope::MessageSchedulingState;
 
 impl Session {
     /// Private chats only, and not a known bot. Channels, groups, secret chats skip drafts.
@@ -421,6 +422,63 @@ impl Session {
     /// and copying (`chat.has_protected_content`).
     pub fn chat_has_protected_content(&self, chat_id: ChatId) -> bool {
         self.protected_chats.contains(&chat_id.0)
+    }
+
+    /// `editMessageSchedulingState` succeeded: "Send now" drops the entry
+    /// from the scheduled list (the sent copy arrives as a new message);
+    /// a reschedule rewrites its planned send time in place.
+    pub(crate) fn finish_scheduling_edit(
+        &mut self,
+        message_id: MessageId,
+        scheduling: ComposerScheduling,
+    ) {
+        match scheduling {
+            ComposerScheduling::None => {
+                self.scheduled_messages.retain(|m| m.id != message_id);
+                self.message_action_note = Some("message sent".into());
+            }
+            ComposerScheduling::SendAtDate(send_date) => {
+                if let Some(message) = self
+                    .scheduled_messages
+                    .iter_mut()
+                    .find(|m| m.id == message_id)
+                {
+                    message.scheduling_state = Some(MessageSchedulingState::SendAtDate {
+                        send_date: send_date as i32,
+                    });
+                }
+                self.message_action_note = Some("message rescheduled".into());
+            }
+            ComposerScheduling::SendWhenOnline => {
+                if let Some(message) = self
+                    .scheduled_messages
+                    .iter_mut()
+                    .find(|m| m.id == message_id)
+                {
+                    message.scheduling_state = Some(MessageSchedulingState::SendWhenOnline);
+                }
+                self.message_action_note = Some("message rescheduled".into());
+            }
+        }
+    }
+
+    /// Whether the user is a known bot.
+    pub fn is_bot_user(&self, user_id: i64) -> bool {
+        self.bot_user_ids.contains(&user_id)
+    }
+
+    /// Whether the chat has scheduled messages
+    /// (`chat.has_scheduled_messages`, `updateChatHasScheduledMessages`).
+    pub fn chat_has_scheduled_messages(&self, chat_id: ChatId) -> bool {
+        self.scheduled_chats.contains(&chat_id.0)
+    }
+
+    pub(crate) fn set_chat_has_scheduled(&mut self, chat_id: i64, has: bool) {
+        if has {
+            self.scheduled_chats.insert(chat_id);
+        } else {
+            self.scheduled_chats.remove(&chat_id);
+        }
     }
 
     pub(crate) fn set_chat_protected(&mut self, chat_id: i64, protected: bool) {
