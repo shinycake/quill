@@ -1,8 +1,0 @@
-# B15 polls and checklists: README items completed (see docs/decisions/codex-polls-checklists.md)
-parity:polls-add-option
-parity:polls-create-extras
-parity:polls-stats
-parity:polls-unread-votes
-parity:polls-checklist-tasks
-parity:render-checklist
-parity:composer-checklist
