@@ -202,6 +202,10 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             .is_some_and(|session| session.sponsored_report.is_some()),
         |app, _, cx| app.dismiss_sponsored_report_ui(cx)
     ),
+    layer!("send-as", |app| app.send_as_open, |app, _, cx| {
+        app.send_as_open = false;
+        cx.notify();
+    }),
     layer!(
         "forward-picker",
         |app| app.forward_picker_open,

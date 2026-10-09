@@ -64,6 +64,7 @@ pub mod service_text;
 #[cfg(test)]
 mod service_text_tests;
 pub mod settings;
+pub mod share_box;
 pub mod single_instance;
 pub mod spell_dict;
 #[cfg(windows)]

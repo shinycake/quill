@@ -57,6 +57,12 @@ pub enum ScreenshotDemo {
     ReadyEditDelete,
     /// Forward select + dest picker + success (injected, no live Telegram).
     ReadyForward,
+    /// B4: the share box with two destinations ticked and a comment.
+    ReadyShareBox,
+    /// B4: the forward bar above the destination chat's composer.
+    ReadyForwardBar,
+    /// B4: the composer's "send as" identity list.
+    ReadySendAs,
     /// Message selection mode: check circles, selection tint and the
     /// Forward N / Delete N / Cancel header (injected, no live Telegram).
     ReadySelectMode,

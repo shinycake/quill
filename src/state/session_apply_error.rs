@@ -122,6 +122,12 @@ impl Session {
                 | RequestPurpose::GetMessageAddedReactions { .. }),
             ) => self.fail_audience(purpose),
             Some(RequestPurpose::ViewStickerSet { set_id }) => self.fail_sticker_set_view(set_id),
+            Some(RequestPurpose::SetChatMessageSender) => {
+                self.message_action_note = Some(format!(
+                    "could not change the sender: {}",
+                    error_reason(&err)
+                ));
+            }
             Some(RequestPurpose::AddProfileAudio) => {
                 self.message_action_note = Some(format!(
                     "could not save to your profile: {}",

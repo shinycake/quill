@@ -2095,6 +2095,27 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         }),
+        "updateChatMessageSender" => Ok(EnvelopePayload::UpdateChatMessageSender {
+            chat_id: int53(value.get("chat_id"))?,
+            message_sender: parse_message_sender(value.get("message_sender_id")).ok(),
+        }),
+        "chatMessageSenders" => Ok(EnvelopePayload::ChatMessageSenders {
+            senders: value
+                .get("senders")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| {
+                    Some(AvailableMessageSender {
+                        sender: parse_message_sender(entry.get("sender")).ok()?,
+                        needs_premium: entry
+                            .get("needs_premium")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    })
+                })
+                .collect(),
+        }),
         "updateChatIsTranslatable" => Ok(EnvelopePayload::UpdateChatIsTranslatable {
             chat_id: int53(value.get("chat_id"))?,
             is_translatable: value

@@ -54,6 +54,8 @@ pub(super) enum ScheduleTarget {
     Composer,
     /// An already scheduled message (`editMessageSchedulingState`).
     Reschedule(MessageId),
+    /// The share box's destinations (`forwardMessages` scheduling state).
+    Share,
 }
 
 /// The date+time picker popup (tdesktop's `ChooseDateTimeBox`).
@@ -99,6 +101,14 @@ impl QuillApp {
     /// `CanScheduleUntilOnline`; the last-seen privacy check is left to the
     /// server, which rejects the request for hidden last-seen).
     pub(super) fn can_send_when_online(&self) -> bool {
+        // The share box schedules to several chats at once.
+        if self
+            .schedule_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target == ScheduleTarget::Share)
+        {
+            return false;
+        }
         let Some(session) = self.session() else {
             return false;
         };
@@ -127,6 +137,7 @@ impl QuillApp {
                 ComposerScheduling::SendAtDate(date) => Some(date),
                 _ => None,
             },
+            ScheduleTarget::Share => None,
             ScheduleTarget::Reschedule(id) => self.session().and_then(|s| {
                 s.scheduled_messages
                     .iter()
@@ -236,6 +247,9 @@ impl QuillApp {
             ScheduleTarget::Reschedule(message_id) => {
                 self.edit_scheduled_state(message_id, scheduling, cx);
                 self.open_scheduled_dialog(cx);
+            }
+            ScheduleTarget::Share => {
+                self.submit_share(quill::share_box::ShareSend::Scheduled(scheduling), cx);
             }
         }
     }

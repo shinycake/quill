@@ -524,6 +524,16 @@ pub struct Session {
     pub last_auth_error: Option<AuthRequestError>,
     /// In-flight `forwardMessages` (dest / source / requested count).
     pub in_flight_forward: Option<ForwardFlight>,
+    /// Further `forwardMessages` in flight while the share box sends to
+    /// several chats at once (`in_flight_forward` holds the first).
+    pub queued_forward_flights: Vec<ForwardFlight>,
+    /// `chat.message_sender_id` / `updateChatMessageSender`: the "send as"
+    /// identity selected per chat (absent when the user cannot change it).
+    pub chat_message_sender: HashMap<i64, MessageSender>,
+    /// `getChatAvailableMessageSenders` answers per chat.
+    pub send_as_options: HashMap<i64, Vec<AvailableMessageSender>>,
+    /// Share box search (local `searchChats` + `searchChatsOnServer`).
+    pub share_search: ShareSearch,
     /// Last `forwardMessages` outcome for the dest picker success surface.
     pub last_forward: Option<ForwardResult>,
     /// Last `callbackQueryAnswer` to an inline keyboard callback-button press
@@ -1226,6 +1236,10 @@ impl Session {
             last_seq: 0,
             last_auth_error: None,
             in_flight_forward: None,
+            queued_forward_flights: Vec::new(),
+            chat_message_sender: HashMap::new(),
+            send_as_options: HashMap::new(),
+            share_search: ShareSearch::default(),
             last_forward: None,
             last_callback_answer: None,
             last_login_url_info: None,

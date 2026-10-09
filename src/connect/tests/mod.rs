@@ -27,6 +27,7 @@ mod registration;
 mod search;
 mod search_upgrades;
 mod settings;
+mod share;
 mod sponsored;
 mod sticker_tabs;
 mod stories;

@@ -542,6 +542,15 @@ pub struct QuillApp {
     pub(super) selection_drag: Option<bool>,
     /// ShareBox / `ShowForwardMessagesBox` dest picker overlay.
     pub(super) forward_picker_open: bool,
+    /// Destinations ticked in the share box.
+    pub(super) share_selection: quill::share_box::ShareSelection,
+    /// The share box's optional comment, sent before the forwards.
+    pub(super) share_comment_input: Entity<TextareaState>,
+    /// The forward bar is showing above this chat's composer
+    /// (`pending_forward` follows the user into the destination).
+    pub(super) forward_bar_dest: Option<ChatId>,
+    /// The composer's "send as" identity list is open.
+    pub(super) send_as_open: bool,
     /// Last successful (or failed) `forwardMessages` result.
     pub(super) forward_result: Option<ForwardResult>,
     /// tdesktop hover React / Unigram ReactionButton picker (emoji only).

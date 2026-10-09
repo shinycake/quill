@@ -1029,6 +1029,17 @@ pub enum RequestPurpose {
     /// Phase 9.5: `getChatsToPostStories`. Response is `chats`;
     /// stored in `Session::story_post_as_chats`.
     GetChatsToPostStories,
+    /// Share box: `searchChats` for the typed query. Response is `chats`;
+    /// stored in `Session::share_search`.
+    SearchShareChats,
+    /// Share box: `searchChatsOnServer` for the typed query.
+    SearchShareChatsOnServer,
+    /// `getChatAvailableMessageSenders`. Response is `chatMessageSenders`;
+    /// stored in `Session::send_as_options[chat_id]`.
+    GetChatAvailableMessageSenders,
+    /// `setChatMessageSender`. Response is `ok`; the choice arrives via
+    /// `updateChatMessageSender`.
+    SetChatMessageSender,
     /// Phase 9.7: `getChatStoryAlbums`. Response is `storyAlbums`;
     /// replaces `Session::story_albums[chat_id]`.
     GetChatStoryAlbums,

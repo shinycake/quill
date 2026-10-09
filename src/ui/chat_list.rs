@@ -458,14 +458,7 @@ impl QuillApp {
         {
             self.pending_stop_poll = None;
         }
-        if self
-            .pending_forward
-            .as_ref()
-            .is_some_and(|draft| draft.from_chat_id != chat_id)
-        {
-            self.pending_forward = None;
-            self.forward_picker_open = false;
-        }
+        self.dismiss_forward_for_chat(chat_id);
         if self.recording_active() {
             self.cancel_recording(cx);
         }
