@@ -29,6 +29,9 @@ use quill::settings::{
 use std::cell::RefCell;
 use std::rc::Rc;
 /// Accent presets (0xRRGGBB); the "Default" chip keeps the theme accent.
+/// The kit's unscaled rem size (gpui-component `Theme::font_size`).
+const BASE_REM_PX: f32 = 16.;
+
 const ACCENT_PRESETS: &[(u32, &str)] = &[
     (0x2f81f7, "Blue"),
     (0x3fb950, "Green"),
@@ -127,7 +130,8 @@ impl QuillApp {
             ThemeMode::Light
         };
         let accent = self.appearance.accent_rgb;
-        if self.appearance_applied == Some((mode, accent, hc)) {
+        let scale = self.appearance.interface_scale_pct;
+        if self.appearance_applied == Some((mode, accent, hc, scale)) {
             return;
         }
         set_theme_mode(mode, None, cx);
@@ -156,8 +160,11 @@ impl QuillApp {
                 ..primary
             };
             colors.button_primary_foreground = gpui_kit::white();
+            // Interface scale: the kit root feeds `font_size` to the window's
+            // rem size every frame, so this scales text and rem spacing.
+            theme.font_size = px(BASE_REM_PX * f32::from(scale) / 100.);
         });
-        self.appearance_applied = Some((mode, accent, hc));
+        self.appearance_applied = Some((mode, accent, hc, scale));
         cx.notify();
     }
 
@@ -320,7 +327,10 @@ impl QuillApp {
                 body = body.child(this.appearance_suggest_emoji_section(cx));
                 body = body.child(this.appearance_auto_night_section(cx));
                 body = body.child(this.appearance_accent_section(cx));
+                body = body.child(this.appearance_scale_section(cx));
+                this.ensure_wallpapers_loaded(cx);
                 body = body.child(this.appearance_wallpaper_section(cx));
+                body = body.child(this.appearance_telegram_wallpapers_section(cx));
                 body = body.child(this.appearance_font_section(cx));
                 body = body.child(this.appearance_bubble_section(cx));
                 body = body.child(this.appearance_chat_list_section(cx));
@@ -644,8 +654,223 @@ impl QuillApp {
         )
     }
 
+    /// tdesktop's "Interface scale" (Settings > Chat settings). GPUI has no
+    /// window-wide scale factor, so this scales the rem size: text and
+    /// rem-based spacing follow, fixed-pixel widths (avatars, chat rows) do
+    /// not — the hint says so.
+    /// Telegram's wallpapers (`getInstalledBackgrounds`): color and gradient
+    /// fills paint exactly, photos show once downloaded, patterns show their
+    /// fill (the pattern layer, blur and motion are not drawn).
+    fn appearance_telegram_wallpapers_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        use super::wallpaper::{Wallpaper, background_wallpaper};
+        let dark = cx.theme().is_dark();
+        let session = self.session();
+        let list = session.and_then(|s| s.installed_backgrounds.clone());
+        let default_id = session
+            .and_then(|s| s.default_backgrounds.get(&dark))
+            .map(|b| b.id)
+            .filter(|_| self.appearance.telegram_wallpaper);
+        let error = session.and_then(|s| s.background_error.clone());
+        let muted = cx.theme().muted_foreground;
+        let mut grid = div().flex().flex_wrap().gap_2();
+        match &list {
+            None => {
+                grid = grid.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("Loading wallpapers…"),
+                );
+            }
+            Some(list) if list.is_empty() => {
+                grid = grid.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("No wallpapers installed on this account."),
+                );
+            }
+            Some(list) => {
+                for background in list {
+                    let id = background.id;
+                    let selected = default_id == Some(id);
+                    let path = background
+                        .file
+                        .as_ref()
+                        .and_then(|f| session.and_then(|s| s.files.get(&f.id.0)))
+                        .and_then(|f| f.usable_path().map(str::to_string));
+                    let paint = background_wallpaper(background, path.as_deref());
+                    let mut tile = div()
+                        .id(("appearance-tg-wallpaper", id as u64))
+                        .relative()
+                        .size(px(56.))
+                        .rounded_md()
+                        .overflow_hidden()
+                        .border_2()
+                        .border_color(if selected {
+                            cx.theme().primary
+                        } else {
+                            cx.theme().border
+                        })
+                        .role(gpui_kit::Role::Button)
+                        .aria_label(format!("Wallpaper {}", background.name))
+                        .tab_index(0)
+                        .cursor_pointer()
+                        .bg(cx.theme().muted)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.choose_telegram_wallpaper(id, cx)
+                        }));
+                    tile = match paint {
+                        Some(Wallpaper::Solid(color)) => tile.bg(rgb(color)),
+                        Some(Wallpaper::Gradient { top, bottom, angle }) => {
+                            tile.bg(linear_gradient(
+                                angle as f32,
+                                linear_color_stop(rgb(top), 0.),
+                                linear_color_stop(rgb(bottom), 1.),
+                            ))
+                        }
+                        Some(Wallpaper::Image { path, .. }) => tile.child(
+                            img(path)
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full()
+                                .object_fit(ObjectFit::Cover),
+                        ),
+                        None => tile.child(
+                            div()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    Icon::new(gpui_kit::assets::IconName::Image)
+                                        .size(px(18.))
+                                        .text_color(muted),
+                                ),
+                        ),
+                    };
+                    tile = tile.child(
+                        div().absolute().top_0().right_0().child(
+                            Button::new(("appearance-tg-wallpaper-remove", id as u64))
+                                .icon(gpui_kit::assets::IconName::X)
+                                .ghost()
+                                .xsmall()
+                                .tooltip("Remove from installed wallpapers")
+                                .accessibility_label("Remove wallpaper")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.remove_telegram_wallpaper(id, cx);
+                                })),
+                        ),
+                    );
+                    grid = grid.child(tile);
+                }
+            }
+        }
+        let mut body = div().flex().flex_col().gap_2().child(grid);
+        if let Some(error) = error {
+            body = body.child(
+                div()
+                    .id("appearance-tg-wallpaper-error")
+                    .text_xs()
+                    .text_color(super::danger_dark())
+                    .child(format!("Couldn’t update wallpapers: {error}")),
+            );
+        }
+        self.appearance_section(
+            cx,
+            "Telegram wallpapers",
+            "Your installed wallpapers. Colors, gradients and photos are drawn; pattern overlays, blur and motion are not.",
+            body.into_any_element(),
+        )
+    }
+
+    /// Make an installed wallpaper the account's default for the current
+    /// theme and show it.
+    fn choose_telegram_wallpaper(&mut self, background_id: i64, cx: &mut Context<Self>) {
+        let dark = cx.theme().is_dark();
+        match self.live.as_mut() {
+            Some(live) => {
+                if let Err(err) = live.driver.set_default_background(background_id, dark) {
+                    self.status_note = format!("could not set the wallpaper: {err:?}");
+                    return;
+                }
+            }
+            None => {
+                // Screenshot demo: apply locally.
+                if let Some(session) = self.demo_session.as_mut()
+                    && let Some(bg) = session
+                        .installed_backgrounds
+                        .iter()
+                        .flatten()
+                        .find(|b| b.id == background_id)
+                        .cloned()
+                {
+                    session.default_backgrounds.insert(dark, bg);
+                }
+            }
+        }
+        self.set_appearance(cx, |a| {
+            a.telegram_wallpaper = true;
+            a.wallpaper_rgb = None;
+        });
+    }
+
+    fn remove_telegram_wallpaper(&mut self, background_id: i64, cx: &mut Context<Self>) {
+        match self.live.as_mut() {
+            Some(live) => {
+                if let Err(err) = live.driver.remove_installed_background(background_id) {
+                    self.status_note = format!("could not remove the wallpaper: {err:?}");
+                }
+            }
+            None => {
+                if let Some(session) = self.demo_session.as_mut()
+                    && let Some(list) = session.installed_backgrounds.as_mut()
+                {
+                    list.retain(|b| b.id != background_id);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Fetch the installed wallpapers when Appearance opens, and start the
+    /// photo downloads.
+    pub(crate) fn ensure_wallpapers_loaded(&mut self, cx: &mut Context<Self>) {
+        let dark = cx.theme().is_dark();
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.session.installed_backgrounds.is_none() {
+                let _ = live.driver.fetch_installed_backgrounds(dark);
+            }
+            live.driver.download_background_files();
+        }
+    }
+
+    fn appearance_scale_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let current = self.appearance.interface_scale_pct;
+        let mut row = div().flex().flex_wrap().gap_2().items_center();
+        for pct in quill::settings::INTERFACE_SCALE_CHOICES {
+            row = row.child(self.appearance_chip(
+                format!("appearance-scale-{pct}"),
+                format!("{pct}%"),
+                current == pct,
+                cx,
+                move |this, cx| this.set_appearance(cx, |a| a.interface_scale_pct = pct),
+            ));
+        }
+        self.appearance_section(
+            cx,
+            "Interface scale",
+            "Scales text and spacing live. Avatars, chat rows and other fixed-size parts keep their size.",
+            row.into_any_element(),
+        )
+    }
+
     fn appearance_wallpaper_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = self.appearance.wallpaper_rgb;
+        let current = self
+            .appearance
+            .wallpaper_rgb
+            .filter(|_| !self.appearance.telegram_wallpaper);
         let mut row = div()
             .flex()
             .gap_2()
@@ -655,7 +880,12 @@ impl QuillApp {
                 "Default",
                 current.is_none(),
                 cx,
-                |this, cx| this.set_appearance(cx, |a| a.wallpaper_rgb = None),
+                |this, cx| {
+                    this.set_appearance(cx, |a| {
+                        a.wallpaper_rgb = None;
+                        a.telegram_wallpaper = false;
+                    })
+                },
             ));
         for &(color, name) in WALLPAPER_PRESETS {
             row = row.child(self.appearance_swatch(
@@ -664,7 +894,12 @@ impl QuillApp {
                 name,
                 current == Some(color),
                 cx,
-                move |this, cx| this.set_appearance(cx, |a| a.wallpaper_rgb = Some(color)),
+                move |this, cx| {
+                    this.set_appearance(cx, |a| {
+                        a.wallpaper_rgb = Some(color);
+                        a.telegram_wallpaper = false;
+                    })
+                },
             ));
         }
         self.appearance_section(

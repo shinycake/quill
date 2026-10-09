@@ -1819,6 +1819,11 @@ impl QuillApp {
                 .justify_center()
                 .child(super::anim_layer::occluder(div().w(px(128.)).h_full()))
         });
+        let wallpaper = self.current_wallpaper(cx);
+        let wallpaper_image = match &wallpaper {
+            Some(super::wallpaper::Wallpaper::Image { path, .. }) => Some(path.clone()),
+            _ => None,
+        };
         super::selectable_text::selection_viewport(
             div()
                 .id(id)
@@ -1833,8 +1838,26 @@ impl QuillApp {
                 .aria_label(format!("Message history — {sender_name}"))
                 // Settings → Appearance: chat wallpaper (solid color behind
                 // the message list; None keeps the theme background).
-                .when_some(self.appearance.wallpaper_rgb, |this, color| {
-                    this.bg(rgb(color))
+                .when_some(wallpaper.clone(), |this, wallpaper| match wallpaper {
+                    super::wallpaper::Wallpaper::Solid(color) => this.bg(rgb(color)),
+                    super::wallpaper::Wallpaper::Gradient { top, bottom, angle } => {
+                        this.bg(linear_gradient(
+                            angle as f32,
+                            linear_color_stop(rgb(top), 0.),
+                            linear_color_stop(rgb(bottom), 1.),
+                        ))
+                    }
+                    super::wallpaper::Wallpaper::Image { backdrop, .. } => this.bg(rgb(backdrop)),
+                })
+                .when_some(wallpaper_image, |this, path| {
+                    this.child(
+                        img(path)
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full()
+                            .object_fit(ObjectFit::Cover),
+                    )
                 })
                 .child(super::history_fx::reveal_viewport(
                     reveal,

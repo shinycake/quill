@@ -2,6 +2,7 @@
 //! Pure code-motion split of the former `requests.rs`; all public paths unchanged.
 
 mod auth;
+mod backgrounds;
 mod bots;
 mod calls;
 mod chat_list;
@@ -65,6 +66,7 @@ mod translate;
 mod users;
 
 pub use auth::*;
+pub use backgrounds::*;
 pub use bots::*;
 pub use calls::*;
 pub use chat_list::*;

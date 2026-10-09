@@ -8,7 +8,6 @@
 
 use super::app::QuillApp;
 use super::native_video::{NativeVideo, Purpose, VideoPicture};
-use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageContent;
@@ -458,10 +457,7 @@ impl QuillApp {
             }
         }
         // Masks over the video blend into the history behind it.
-        let backdrop = self
-            .appearance
-            .wallpaper_rgb
-            .map_or(cx.theme().background, |color| rgb(color).into());
+        let backdrop = self.wallpaper_backdrop(cx);
         let live = layered.then(|| LiveSource {
             videos: self.inline_videos.clone(),
             key: (chat_id.0, message_id.0),

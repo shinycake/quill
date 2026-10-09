@@ -1603,6 +1603,16 @@ pub enum EnvelopePayload {
     ChatFolder {
         spec: ChatFolderSpec,
     },
+    /// `backgrounds` — the answer of `getInstalledBackgrounds`.
+    Backgrounds(Vec<Background>),
+    /// `background` — the answer of `setDefaultBackground`.
+    Background(Background),
+    /// `updateDefaultBackground` (`schema/td_api.tl:11317`): the account's
+    /// default wallpaper for the light or dark theme changed.
+    UpdateDefaultBackground {
+        for_dark_theme: bool,
+        background: Background,
+    },
     /// `chatFolderInviteLink` — the answer of `createChatFolderInviteLink`
     /// / `editChatFolderInviteLink` (`schema/td_api.tl:13785` / `:13795`).
     ChatFolderInviteLink(ChatFolderInviteLink),

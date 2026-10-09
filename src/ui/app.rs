@@ -469,7 +469,7 @@ pub struct QuillApp {
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
-    pub(super) appearance_applied: Option<(ThemeMode, u32, bool)>,
+    pub(super) appearance_applied: Option<(ThemeMode, u32, bool, u16)>,
     /// Slice S3: Privacy settings overlay (TGX Settings → Privacy).
     pub(super) privacy_open: bool,
     /// B13: transient state of the privacy / security extras.

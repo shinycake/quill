@@ -1344,6 +1344,32 @@ impl Session {
                     self.folder_specs.insert(folder_id, spec);
                 }
             }
+            EnvelopePayload::Backgrounds(list) => {
+                for background in &list {
+                    if let Some(file) = &background.file {
+                        self.upsert_file(file.clone(), false);
+                    }
+                }
+                self.installed_backgrounds = Some(list);
+            }
+            EnvelopePayload::Background(background) => {
+                if let Some(file) = &background.file {
+                    self.upsert_file(file.clone(), false);
+                }
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::SetDefaultBackground) {
+                    self.default_backgrounds
+                        .insert(self.background_set_for_dark, background);
+                }
+            }
+            EnvelopePayload::UpdateDefaultBackground {
+                for_dark_theme,
+                background,
+            } => {
+                if let Some(file) = &background.file {
+                    self.upsert_file(file.clone(), false);
+                }
+                self.default_backgrounds.insert(for_dark_theme, background);
+            }
             EnvelopePayload::ChatFolderInviteLink(link) => {
                 // `createChatFolderInviteLink` / `editChatFolderInviteLink`:
                 // upsert into the folder's cached link list.
