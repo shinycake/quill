@@ -1025,7 +1025,7 @@ pub(super) fn transcription_row(
 }
 
 /// Round video message diameter.
-const VIDEO_NOTE_DIAMETER: f32 = 220.;
+pub(super) const VIDEO_NOTE_DIAMETER: f32 = 220.;
 
 pub(super) fn video_note_attachment(
     chat_id: ChatId,

@@ -27,6 +27,21 @@ pub(super) fn supported() -> bool {
     cfg!(target_os = "macos") || quill::video_decode::available()
 }
 
+/// Whether clips decode in software into BGRA images in this process
+/// (FFmpeg): inline tiles then decode at their own size, leave clips above
+/// 1080p still and share a memory budget (`inline_video`). AVPlayer decodes
+/// in hardware into buffers of its own.
+pub(super) fn decodes_in_process() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        ffmpeg_on_macos()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
 /// macOS development switch: `QUILL_VIDEO_BACKEND=ffmpeg` plays through the
 /// Linux/Windows decoder (built with `scripts/build-ffmpeg.sh`) instead of
 /// AVPlayer, to check that path on a Mac.

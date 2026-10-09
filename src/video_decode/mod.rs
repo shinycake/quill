@@ -41,9 +41,19 @@ pub const SYNC_TOLERANCE: f64 = 0.04;
 /// A picture is due this much before its time (half a 60 Hz refresh), so
 /// it isn't held a whole refresh for rounding.
 const DUE_SLACK: f64 = 0.008;
-/// The decode thread re-checks for room at least this often (sound is
-/// drained on the audio thread, which doesn't wake it).
+/// The decode thread re-checks for room at least this often while it has
+/// sound (drained on the audio thread, whose wake can race the check).
 const IDLE_POLL: Duration = Duration::from_millis(40);
+/// Without sound every change to the decode thread's state (a picture
+/// taken, a seek, the player dropped) happens under its lock and wakes it,
+/// so an idle silent player (a paused or offscreen inline loop) only wakes
+/// this often, as a safety net, instead of 25 times a second.
+const IDLE_SILENT: Duration = Duration::from_secs(1);
+
+/// How long an idle decode thread sleeps before re-checking on its own.
+fn idle_wait(has_sound: bool) -> Duration {
+    if has_sound { IDLE_POLL } else { IDLE_SILENT }
+}
 
 /// Whether the in-process decoder can run here: the `quillvideo` shim and
 /// its FFmpeg libraries are installed.
@@ -854,7 +864,7 @@ fn decode_loop(mut demuxer: Box<dyn Demuxer>, shared: Arc<Shared>, want_audio: b
         if state.eof || !wants_more(video_queued, audio_buffered) {
             let (guard, _) = shared
                 .wake
-                .wait_timeout(state, IDLE_POLL)
+                .wait_timeout(state, idle_wait(audio.is_some()))
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             drop(guard);
             continue;
