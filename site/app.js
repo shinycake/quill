@@ -172,6 +172,26 @@ function setupGallery() {
   });
 }
 
+// The hero clip only plays while it's on screen, and not at all for people
+// who asked for reduced motion (they see the poster frame instead).
+function setupHeroVideo() {
+  const video = document.getElementById("hero-video");
+  if (!video) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const play = () => { if (!reduce.matches) video.play().catch(() => {}); };
+  if (reduce.matches) {
+    video.removeAttribute("autoplay");
+    video.pause();
+  }
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver((entries) => {
+      for (const entry of entries) entry.isIntersecting ? play() : video.pause();
+    }).observe(video);
+  }
+  reduce.addEventListener("change", () => (reduce.matches ? video.pause() : play()));
+}
+
+setupHeroVideo();
 setupGallery();
 renderMissing();
 renderRelease();

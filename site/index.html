@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#0b0f17">
   <meta property="og:title" content="Quill">
   <meta property="og:description" content="An independent, open-source Telegram client for macOS, Windows and Linux, written in Rust.">
-  <meta property="og:image" content="img/chat-dark.webp">
+  <meta property="og:image" content="img/hero-poster.webp">
   <link rel="icon" href="img/favicon-64.png" sizes="64x64">
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
@@ -40,8 +40,8 @@
       <div class="glow" aria-hidden="true"></div>
       <div class="wrap hero-inner">
         <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Early preview · open source</p>
-        <h1>A native desktop client<br class="br"> for Telegram.</h1>
-        <p class="lede">Quill is an independent Telegram client for macOS, Windows and Linux. It's written in Rust, draws every pixel on the GPU, and talks to Telegram through the official TDLib library, so your chats, contacts and account are the real thing.</p>
+        <h1>An alternative native desktop client for Telegram, <span class="accent">written in Rust and GPUI.</span></h1>
+        <p class="lede">Quill runs on macOS, Windows and Linux and draws its whole interface on the GPU. It talks to Telegram through the official TDLib library, so your chats, contacts and account are the real thing.</p>
         <div class="cta">
           <a class="btn primary" id="hero-download" href="#download">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
@@ -50,9 +50,11 @@
           <a class="btn ghost" href="https://github.com/shinycake/quill">View source</a>
         </div>
         <p class="fine" id="hero-meta">Unofficial. Not affiliated with Telegram.</p>
-        <figure class="shot hero-shot">
-          <div class="chrome" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="img/chat-dark.webp" width="1400" height="900" alt="Quill in the dark theme: a chat list with stories and unread badges next to a group conversation with a voice message, a link preview and replies" fetchpriority="high">
+        <figure class="hero-shot">
+          <video id="hero-video" autoplay muted loop playsinline preload="auto" width="2240" height="1440" poster="img/hero-poster.webp" aria-label="Quill in action: switching between a group chat, a private chat, a group with a poll and a photo channel, then opening photos in the media viewer">
+            <source src="media/hero-1280.mp4" type="video/mp4" media="(max-width: 760px)">
+            <source src="media/hero-2240.mp4" type="video/mp4">
+          </video>
         </figure>
       </div>
     </section>
