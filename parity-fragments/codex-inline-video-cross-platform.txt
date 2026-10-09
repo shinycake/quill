@@ -1,0 +1,5 @@
+# Inline autoplay (muted GIF/video loops, round video messages) and the viewer
+# play in process through the bundled FFmpeg on Linux and Windows (#452,
+# codex/video-cross-platform); this slice sizes and bounds the inline path.
+parity:viewer-video-cross-platform
+parity:viewer-round-autoplay
