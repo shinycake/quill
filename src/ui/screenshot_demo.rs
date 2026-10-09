@@ -596,6 +596,13 @@ pub enum ScreenshotDemo {
     /// `messageChatSetMessageAutoDeleteTime` service row, and the timer
     /// picker expanded under the header.
     ReadyChatTtl,
+    /// Notifications and mute: the open chat's Mute submenu with the
+    /// Custom duration row expanded, Unmute and Disable sound (injected,
+    /// no live Telegram).
+    ReadyMuteCustom,
+    /// Auto-delete in a regular chat: the header menu's picker with the
+    /// Custom stepper expanded (injected, no live Telegram).
+    ReadyAutoDelete,
     /// Phase C3a: a joined group voice chat (injected, no live
     /// Telegram) — the overlay renders the title, participant grid
     /// (speaking / muted / hand-raised badges), E2E verification
@@ -710,6 +717,10 @@ pub enum ScreenshotDemo {
     ReadySearchFromHits,
     /// Find in history: global search narrowed by the filter bar.
     ReadySearchFilters,
+    /// Search upgrades: the empty search with Frequent contacts + Recent.
+    ReadySearchFrequent,
+    /// Search upgrades: a hashtag in the Public posts scope.
+    ReadySearchPublic,
     /// Local passcode: the settings dialog with a passcode set (auto-lock,
     /// Touch ID rows).
     ReadyPasscodeSettings,

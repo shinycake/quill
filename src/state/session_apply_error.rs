@@ -572,6 +572,18 @@ impl Session {
                     err.code
                 ));
             }
+            Some(RequestPurpose::RemoveRecentlyFoundChat) => {
+                self.chat_action_error = Some(format!(
+                    "could not remove the recent search (error {})",
+                    err.code
+                ));
+            }
+            Some(RequestPurpose::RemoveTopChat | RequestPurpose::SetTopChatsDisabled) => {
+                self.chat_action_error = Some(format!(
+                    "could not update frequent contacts (error {})",
+                    err.code
+                ));
+            }
             Some(RequestPurpose::ClearRecentlyFoundChats) => {
                 self.chat_action_error = Some(format!(
                     "could not clear recent searches (error {})",
@@ -1097,6 +1109,20 @@ impl Session {
             // never a fake success, never an optimistic change.
             // `sessions_error_line` is reused: it is a pure
             // (action, error-class) formatter, not session-bound.
+            Some(RequestPurpose::GetDefaultAutoDelete) => {
+                self.default_auto_delete_busy = false;
+                self.default_auto_delete_error = Some(sessions_error_line(
+                    "load the default auto-delete timer",
+                    &err,
+                ));
+            }
+            Some(RequestPurpose::SetDefaultAutoDelete { .. }) => {
+                self.default_auto_delete_busy = false;
+                self.default_auto_delete_error = Some(sessions_error_line(
+                    "change the default auto-delete timer",
+                    &err,
+                ));
+            }
             Some(RequestPurpose::GetAccountTtl) => {
                 self.account_ttl_loading = false;
                 self.account_error = Some(sessions_error_line(
@@ -1266,9 +1292,15 @@ impl Session {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
                     self.search.accept_chats(Vec::new(), true);
                 }
-                Some(RequestPurpose::SearchMessages) => {
+                Some(
+                    RequestPurpose::SearchMessages
+                    | RequestPurpose::SearchPublicPosts
+                    | RequestPurpose::SearchPublicMessagesByTag,
+                ) => {
                     self.search.accept_messages(Vec::new(), true);
                 }
+                // The supplement failing changes nothing the user sees.
+                Some(RequestPurpose::SearchChatsOnServer) => {}
                 Some(RequestPurpose::SearchPublicChats) => {
                     self.search.accept_public_chats(Vec::new(), true);
                 }

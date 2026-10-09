@@ -203,6 +203,18 @@ pub struct Session {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
+    /// Chats whose OS notification should be withdrawn (read elsewhere or
+    /// removed by TDLib); drained by the UI, which dismisses the toast.
+    pub pending_notification_clears: Vec<ChatId>,
+    /// Chats with an OS notification we showed (or TDLib reports active
+    /// from a previous launch); only these produce a clear.
+    pub shown_notification_chats: std::collections::HashSet<ChatId>,
+    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off).
+    pub default_auto_delete_secs: Option<i32>,
+    /// A default auto-delete fetch or write is in flight.
+    pub default_auto_delete_busy: bool,
+    /// Honest one-line failure of the last default auto-delete request.
+    pub default_auto_delete_error: Option<String>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
     pub saved_notification_sounds: Vec<NotificationSound>,
@@ -1122,6 +1134,11 @@ impl Session {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
+            pending_notification_clears: Vec::new(),
+            shown_notification_chats: std::collections::HashSet::new(),
+            default_auto_delete_secs: None,
+            default_auto_delete_busy: false,
+            default_auto_delete_error: None,
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
             saved_sounds_stale: false,

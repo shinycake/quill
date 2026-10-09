@@ -565,10 +565,20 @@ impl Session {
         {
             self.share_search.accept(pending.id, &chat_ids);
         }
+        // `getTopChats`: not tied to a query generation, only to the strip.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopChats) {
+            if !self.search.top_chats_disabled {
+                self.search.top_chats = chat_ids;
+            }
+            return;
+        }
         if self.search.matches_generation(pending) {
             match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
                     self.search.accept_chats(chat_ids, false);
+                }
+                Some(RequestPurpose::SearchChatsOnServer) => {
+                    self.search.accept_server_chats(chat_ids);
                 }
                 Some(RequestPurpose::SearchPublicChats) => {
                     self.search.accept_public_chats(chat_ids, false);

@@ -25,6 +25,7 @@ mod profile_panels;
 mod proxy;
 mod registration;
 mod search;
+mod search_upgrades;
 mod settings;
 mod share;
 mod sponsored;

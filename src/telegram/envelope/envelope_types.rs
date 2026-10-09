@@ -172,6 +172,35 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         unread_reaction_count: i32,
     },
+    /// `messageAutoDeleteTime` — `getDefaultMessageAutoDeleteTime` response
+    /// (schema 1.8.67, line 9057).
+    MessageAutoDeleteTime {
+        seconds: i32,
+    },
+    /// `updateMessageUnreadReactions` (schema 1.8.67, line 10450): the
+    /// chat's new reaction counter plus the newest unread reaction (the
+    /// notification source). `newest` is `None` when the list is empty
+    /// (a reaction was read).
+    UpdateMessageUnreadReactions {
+        chat_id: ChatId,
+        message_id: MessageId,
+        unread_reaction_count: i32,
+        newest: Option<UnreadReaction>,
+    },
+    /// `updateNotificationGroup` (schema 1.8.67, line 10685), reduced to
+    /// what clearing shown notifications needs: the chat, how many
+    /// notifications remain in the group and how many were added.
+    UpdateNotificationGroup {
+        chat_id: ChatId,
+        total_count: i32,
+        added_count: usize,
+        removed_count: usize,
+    },
+    /// `updateActiveNotifications` (schema 1.8.67, line 10688): chats that
+    /// still have notifications from a previous launch.
+    UpdateActiveNotifications {
+        chat_ids: Vec<ChatId>,
+    },
     /// Slice CL3: `updateChatBlockList` (schema 1.8.67, line 10594) —
     /// `blocked` is true when the new `block_list` is `blockListMain`.
     UpdateChatBlockList {
@@ -575,6 +604,12 @@ pub enum EnvelopePayload {
         total_count: i32,
         messages: Vec<ParsedMessage>,
         next_offset: String,
+    },
+    /// `foundPublicPosts` — `searchPublicPosts` (schema 1.8.67, line 3182).
+    FoundPublicPosts {
+        messages: Vec<ParsedMessage>,
+        next_offset: String,
+        are_limits_exceeded: bool,
     },
     /// Phase C2i: `userPrivacySettingRules` — `getUserPrivacySettingRules`.
     /// Slice S3: now carries the parsed rule details (exception user ids),

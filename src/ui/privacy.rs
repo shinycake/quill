@@ -8,6 +8,7 @@
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use gpui_kit::component::button::*;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -196,6 +197,8 @@ impl QuillApp {
         ));
         body = body.child(calls);
 
+        body = body.child(self.privacy_frequent_contacts_section(cx));
+
         body = body.child(self.privacy_blocked_section(cx));
 
         // Slice payments: the "Clear saved payment/shipping info" row
@@ -227,6 +230,51 @@ impl QuillApp {
         body = body.child(payments);
 
         self.privacy_shell(cx, "main", "Privacy", body.into_any_element())
+    }
+
+    /// tdesktop Settings > Privacy > "Suggest frequent contacts": whether
+    /// the search panel shows the people you message most
+    /// (`lng_settings_top_peers_*`; TDLib option `disable_top_chats`).
+    fn privacy_frequent_contacts_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = !self.session().is_some_and(|s| s.search.top_chats_disabled);
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .px_1()
+                    .child("Frequent contacts"),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .px_2()
+                    .child(div().text_sm().child("Suggest frequent contacts"))
+                    .child(
+                        Switch::new("privacy-suggest-frequent-contacts")
+                            .checked(enabled)
+                            .accessibility_label("Suggest frequent contacts")
+                            .on_click(cx.listener(|this, &on: &bool, _, cx| {
+                                this.set_top_chats_disabled(!on, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .px_2()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        "Display people you message frequently at the top of the search section for quick access.",
+                    ),
+            )
+            .into_any_element()
     }
 
     /// Slice S3: one visibility-rule row (label + current value).

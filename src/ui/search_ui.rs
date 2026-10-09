@@ -26,8 +26,12 @@ use quill::composer::draft_text_to_store;
 use quill::connect::{ChatSearchQueryOutcome, SEARCH_DEBOUNCE, SearchQueryOutcome};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::search_filters::{SearchChatType, SearchDateRange, SearchMediaKind};
-use quill::state::{ChatSearchJump, FromPicker, RequestPurpose, SearchStatus, Session};
+use quill::search_filters::{
+    SearchChatType, SearchDateRange, SearchMediaKind, SearchScope, tag_query,
+};
+use quill::state::{
+    ChatSearchJump, FromPicker, RequestPurpose, SearchConfirm, SearchStatus, Session,
+};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatDraft;
 use quill::telegram::envelope::MessageSender;
@@ -318,6 +322,119 @@ impl QuillApp {
             session.search.status = SearchStatus::Idle;
         }
         cx.notify();
+    }
+
+    /// "Remove from Recent" on one recent search (`removeRecentlyFoundChat`).
+    pub(super) fn remove_recent_search(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.remove_recent_search(chat_id) {
+                self.status_note = format!("could not remove the recent search: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.search.remove_recent(chat_id);
+        }
+        cx.notify();
+    }
+
+    /// "Remove from Recent" on a frequent contact (`removeTopChat`).
+    pub(super) fn remove_top_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.remove_top_chat(chat_id) {
+                self.status_note = format!("could not remove the contact: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.search.remove_top_chat(chat_id);
+        }
+        cx.notify();
+    }
+
+    /// "Suggest frequent contacts" (Privacy) and "Remove all & Disable".
+    pub(super) fn set_top_chats_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if let Err(err) = live.driver.set_top_chats_disabled(disabled) {
+                self.status_note = format!("could not change frequent contacts: {err:?}");
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.search.top_chats_disabled = disabled;
+            if disabled {
+                session.search.top_chats.clear();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Show (or dismiss) an inline confirmation / the frequent-contact row.
+    pub(super) fn set_search_prompt(
+        &mut self,
+        confirm: Option<SearchConfirm>,
+        top_menu: Option<ChatId>,
+        cx: &mut Context<Self>,
+    ) {
+        let search = if let Some(live) = self.live.as_mut() {
+            Some(&mut live.driver.session.search)
+        } else {
+            self.demo_session.as_mut().map(|s| &mut s.search)
+        };
+        if let Some(search) = search {
+            search.confirm = confirm;
+            search.top_menu = top_menu;
+        }
+        cx.notify();
+    }
+
+    /// The user accepted the pending confirmation.
+    pub(super) fn accept_search_confirm(&mut self, cx: &mut Context<Self>) {
+        let confirm = self.session().and_then(|s| s.search.confirm);
+        self.set_search_prompt(None, None, cx);
+        match confirm {
+            Some(SearchConfirm::ClearRecents) => self.clear_search_recents(cx),
+            Some(SearchConfirm::DisableTopChats) => self.set_top_chats_disabled(true, cx),
+            None => {}
+        }
+    }
+
+    /// Hashtag in another scope (tdesktop's My Messages / This Chat / Public
+    /// Posts tabs): leaves the in-chat search for the global panel.
+    pub(super) fn search_tag_in_scope(
+        &mut self,
+        tag: &str,
+        scope: SearchScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.chat_search_is_open() {
+            self.close_chat_search_ui(window, cx);
+        }
+        self.open_search_ui(window, cx);
+        let query = tag.to_string();
+        self.search_input
+            .update(cx, |input, cx| input.set_value(&query, window, cx));
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.search_hashtag(tag, scope) {
+                Ok(_) => self.status_note = "searching…".into(),
+                Err(_) => self.status_note = "could not search".into(),
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.search.filters.scope = scope;
+            session.apply_local_search_filter(tag);
+        }
+        cx.notify();
+    }
+
+    /// "This chat" tab of the global search: the same query, inside the
+    /// open chat.
+    pub(super) fn search_query_in_this_chat(
+        &mut self,
+        query: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_search_ui(window, cx);
+        self.open_chat_search_ui(window, cx);
+        let text = query.to_string();
+        self.chat_search_input
+            .update(cx, |input, cx| input.set_value(&text, window, cx));
+        self.sync_chat_search_query(query, cx);
     }
 
     /// Slice (communities-search-filter): route a community-filter chip click
@@ -748,6 +865,35 @@ impl QuillApp {
             SearchStatus::Closed => String::new(),
         };
         let picker_open = picker.is_some();
+        // A hashtag or cashtag: tdesktop's This chat / My messages / Public
+        // posts tabs. "This chat" is where we are.
+        let mut tag_chips = Vec::new();
+        if let Some(tag) = tag_query(&query).filter(|_| !picker_open) {
+            let tag = tag.to_string();
+            tag_chips.push(
+                Self::filter_chip(
+                    "chat-search-scope-chat",
+                    "This chat",
+                    true,
+                    |_, _, _| {},
+                    cx,
+                )
+                .into_any_element(),
+            );
+            for scope in SearchScope::ALL {
+                let tag = tag.clone();
+                tag_chips.push(
+                    Self::filter_chip(
+                        ("chat-search-scope", scope as u64),
+                        scope.label(),
+                        false,
+                        move |this, window, cx| this.search_tag_in_scope(&tag, scope, window, cx),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
+        }
         let mut media_chips = Vec::new();
         for kind in SearchMediaKind::ALL {
             media_chips.push(
@@ -866,6 +1012,7 @@ impl QuillApp {
                             cx,
                         ))
                     })
+                    .children(tag_chips)
                     .children(media_chips),
             )
             .child(
@@ -943,7 +1090,7 @@ impl QuillApp {
     ) {
         let chat = self
             .session()
-            .and_then(|session| session.search.chat_ids.first().copied());
+            .and_then(|session| session.search.merged_chat_ids().first().copied());
         let message = self.session().and_then(|session| {
             session
                 .search
@@ -1148,6 +1295,51 @@ impl QuillApp {
             return None;
         }
         let filters = session.search.filters;
+        let query = session.search.query.trim().to_string();
+        let has_chat = session.open_chat.is_some();
+        // tdesktop's search tabs: This chat / My messages / Public posts.
+        let mut scopes = Vec::new();
+        if has_chat {
+            let query = query.clone();
+            scopes.push(
+                Self::filter_chip(
+                    "search-scope-this-chat",
+                    "This chat",
+                    false,
+                    move |this, window, cx| this.search_query_in_this_chat(&query, window, cx),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        for scope in SearchScope::ALL {
+            scopes.push(
+                Self::filter_chip(
+                    ("search-scope", scope as u64),
+                    scope.label(),
+                    filters.scope == scope,
+                    move |this, _, cx| {
+                        let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                        next.scope = scope;
+                        this.set_search_filters(next, cx);
+                    },
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        let archive_chip = Self::filter_chip(
+            "search-filter-archived",
+            "From archive",
+            filters.archived,
+            move |this, _, cx| {
+                let mut next = this.session().map(|s| s.search.filters).unwrap_or_default();
+                next.archived = !next.archived;
+                this.set_search_filters(next, cx);
+            },
+            cx,
+        )
+        .into_any_element();
         let mut types = Vec::new();
         for kind in SearchChatType::ALL {
             types.push(
@@ -1225,17 +1417,199 @@ impl QuillApp {
                         .children(chips),
                 )
         };
+        types.push(archive_chip);
+        let public = filters.scope == SearchScope::PublicPosts;
         Some(
             div()
                 .id("search-filters")
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(group("Chats", types))
-                .child(group("Content", media))
-                .child(group("Date", dates))
+                .child(group("Search", scopes))
+                // Public posts have no chat-type, content or date narrowing.
+                .when(!public, |this| {
+                    this.child(group("Chats", types))
+                        .child(group("Content", media))
+                        .child(group("Date", dates))
+                })
                 .into_any_element(),
         )
+    }
+
+    /// tdesktop's "Frequent contacts" strip on an empty search: avatar and
+    /// first name per person; right-click opens "Remove from Recent" /
+    /// "Remove all & Disable".
+    fn frequent_contacts(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self.session()?;
+        if session.search.top_chats_disabled || session.search.top_chats.is_empty() {
+            return None;
+        }
+        let menu = session.search.top_menu;
+        let tiles: Vec<(ChatId, String)> = session
+            .search
+            .top_chats
+            .iter()
+            .map(|id| {
+                let title = session
+                    .chats
+                    .get(&id.0)
+                    .map_or_else(|| format!("chat {}", id.0), |chat| chat.title.clone());
+                (*id, title)
+            })
+            .collect();
+        let muted = cx.theme().muted_foreground;
+        let mut strip = div()
+            .id("search-frequent-strip")
+            .flex()
+            .items_start()
+            .gap_1()
+            .overflow_x_scroll();
+        for (id, title) in tiles {
+            let photo = self.chat_photo_for_row(id);
+            let first = title.split_whitespace().next().unwrap_or("").to_string();
+            let name = title.clone();
+            strip = strip.child(
+                div()
+                    .id(("search-frequent", id.0 as u64))
+                    .flex_none()
+                    .w(px(64.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .py_1()
+                    .rounded_md()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!(
+                        "{name}. Right-click to remove from frequent contacts"
+                    ))
+                    .tab_index(0)
+                    .cursor_pointer()
+                    .pressable(cx.theme())
+                    .when(menu == Some(id), |this| this.bg(cx.theme().selection))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_search_chat(id, window, cx);
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, _, _, cx| {
+                            this.set_search_prompt(None, Some(id), cx);
+                        }),
+                    )
+                    .child(super::chat_row::chat_avatar(&title, photo.as_deref(), 44.))
+                    .child(
+                        div()
+                            .w_full()
+                            .text_xs()
+                            .text_center()
+                            .truncate()
+                            .text_color(muted)
+                            .child(super::bidi_line::one_line_plain(first)),
+                    ),
+            );
+        }
+        let mut block = div()
+            .id("search-frequent")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(div().text_xs().font_semibold().child("Frequent contacts"))
+            .child(strip);
+        if let Some(target) = menu {
+            let name = session
+                .chats
+                .get(&target.0)
+                .map_or_else(|| "this contact".to_string(), |chat| chat.title.clone());
+            block = block.child(
+                div()
+                    .id("search-frequent-menu")
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        Button::new("search-frequent-remove")
+                            .label(format!("Remove {name} from Recent"))
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_top_chat(target, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("search-frequent-disable")
+                            .label("Remove all & Disable")
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_search_prompt(
+                                    Some(SearchConfirm::DisableTopChats),
+                                    None,
+                                    cx,
+                                );
+                            })),
+                    )
+                    .child(
+                        Button::new("search-frequent-cancel")
+                            .label("Cancel")
+                            .ghost()
+                            .xsmall()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_search_prompt(None, None, cx);
+                            })),
+                    ),
+            );
+        }
+        Some(block.into_any_element())
+    }
+
+    /// The inline "are you sure" of the search panel (tdesktop
+    /// `lng_recent_clear_sure` / `lng_recent_hide_sure`).
+    fn search_confirm_row(&self, confirm: SearchConfirm, cx: &mut Context<Self>) -> AnyElement {
+        let (text, action) = match confirm {
+            SearchConfirm::ClearRecents => {
+                ("Do you want to clear your search history?", "Clear all")
+            }
+            SearchConfirm::DisableTopChats => (
+                "Clear and disable the frequent contacts list? You can turn it back on in Settings > Privacy > Suggest frequent contacts.",
+                "Hide",
+            ),
+        };
+        div()
+            .id("search-confirm")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(div().text_sm().child(text))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        Button::new("search-confirm-accept")
+                            .label(action)
+                            .small()
+                            .custom(super::security::quiet_danger(cx))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.accept_search_confirm(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("search-confirm-cancel")
+                            .label("Cancel")
+                            .small()
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_search_prompt(None, None, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
     }
 
     pub(super) fn search_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1246,8 +1620,11 @@ impl QuillApp {
         let recents = session.is_some_and(|s| s.search.recents);
         let query = session.map(|s| s.search.query.clone()).unwrap_or_default();
         let chat_ids: Vec<ChatId> = session
-            .map(|s| s.search.chat_ids.clone())
+            .map(|s| s.search.merged_chat_ids())
             .unwrap_or_default();
+        let public_scope =
+            session.is_some_and(|s| s.search.filters.scope == SearchScope::PublicPosts && !recents);
+        let limits_exceeded = session.is_some_and(|s| s.search.public_limits_exceeded);
         let messages: Vec<(ChatId, MessageId, String, String, i32)> = session
             .map(|s| {
                 s.search
@@ -1289,7 +1666,7 @@ impl QuillApp {
         let public_chats: Vec<(ChatId, String, String)> = session
             .map(|s| {
                 s.search
-                    .public_chat_ids
+                    .public_only_chat_ids()
                     .iter()
                     .map(|id| {
                         s.chats
@@ -1304,22 +1681,43 @@ impl QuillApp {
         // Only states the results don't already show: still loading with
         // nothing yet, nothing found, failure.
         let hint = match status {
+            SearchStatus::Idle if recents && has_results => String::new(),
             SearchStatus::Idle => "Type to search chats and messages.".to_string(),
             SearchStatus::Searching if has_results => String::new(),
             SearchStatus::Searching if recents => "Loading recent chats…".to_string(),
             SearchStatus::Searching => format!("Searching “{query}”…"),
             SearchStatus::Ready => String::new(),
+            SearchStatus::Empty if public_scope && limits_exceeded => {
+                "The free daily limit for searching public posts is used up. Try again tomorrow."
+                    .to_string()
+            }
+            SearchStatus::Empty if public_scope => {
+                format!("No public posts match “{query}”.")
+            }
             SearchStatus::Empty => format!("No chats or messages match “{query}”."),
             SearchStatus::Failed => "Search failed.".to_string(),
             SearchStatus::Closed => String::new(),
         };
         let chat_heading = if recents { "Recent" } else { "Chats" };
+        let message_heading = if public_scope {
+            "Public posts"
+        } else {
+            "Messages"
+        };
+        let confirm = session.and_then(|s| s.search.confirm);
         div()
             .id("search-results")
             .flex()
             .flex_col()
             .gap_2()
             .when_some(self.search_filter_bar(cx), |this, bar| this.child(bar))
+            .when_some(
+                recents.then(|| self.frequent_contacts(cx)).flatten(),
+                |this, strip| this.child(strip),
+            )
+            .when_some(confirm, |this, confirm| {
+                this.child(self.search_confirm_row(confirm, cx))
+            })
             .when_some(self.search_community_filter_chips(cx), |this, chips| {
                 this.child(chips)
             })
@@ -1347,14 +1745,19 @@ impl QuillApp {
                                     .label("Clear")
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.clear_search_recents(cx);
+                                        this.set_search_prompt(
+                                            Some(SearchConfirm::ClearRecents),
+                                            None,
+                                            cx,
+                                        );
                                     })),
                             )
                         }),
                 );
                 for (id, title, preview) in chats {
                     let photo = self.chat_photo_for_row(id);
-                    block = block.child(search_result_row(
+                    let row_title = title.clone();
+                    let row = search_result_row(
                         ("search-chat", id.0 as u64),
                         title,
                         preview,
@@ -1363,7 +1766,29 @@ impl QuillApp {
                         photo,
                         cx,
                         move |this, window, cx| this.select_search_chat(id, window, cx),
-                    ));
+                    );
+                    block = block.child(if recents {
+                        // tdesktop: "Remove from Recent" on each entry.
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(div().flex_1().min_w_0().child(row))
+                            .child(
+                                Button::new(("search-recent-remove", id.0 as u64))
+                                    .icon(gpui_kit::assets::IconName::X)
+                                    .ghost()
+                                    .xsmall()
+                                    .tooltip("Remove from Recent")
+                                    .accessibility_label(format!("Remove {row_title} from Recent"))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.remove_recent_search(id, cx);
+                                    })),
+                            )
+                            .into_any_element()
+                    } else {
+                        row.into_any_element()
+                    });
                 }
                 this.child(block)
             })
@@ -1395,7 +1820,7 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(div().text_xs().font_semibold().child("Messages"));
+                    .child(div().text_xs().font_semibold().child(message_heading));
                 for (chat_id, message_id, title, preview, date) in messages {
                     let photo = self.chat_photo_for_row(chat_id);
                     block = block.child(search_result_row(

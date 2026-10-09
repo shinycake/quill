@@ -312,7 +312,7 @@ impl QuillApp {
     }
 
     /// The on-disk file of the media message: its file id and path.
-    fn menu_media_local(
+    pub(super) fn menu_media_local(
         &self,
         chat_id: ChatId,
         message_id: MessageId,
