@@ -381,6 +381,10 @@ impl WindowsPlatform {
         let text_system = Arc::downgrade(direct_write_text_system);
         let invalidate_devices = self.invalidate_devices.clone();
 
+        // Quill: read the idle-frames kill switch at startup.
+        if !idle_frames_enabled() {
+            log::info!("{IDLE_FRAMES_ENV} is off: windows will get vsync frames even when idle");
+        }
         std::thread::Builder::new()
             .name("VSyncProvider".to_owned())
             .spawn(move || {

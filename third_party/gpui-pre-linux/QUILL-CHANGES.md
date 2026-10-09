@@ -16,7 +16,8 @@ draws on demand).
   250 ms of frames that neither drew, presented nor asked for another frame,
   with no frame demand from GPUI in between, a window's frame source parks
   and gets one heartbeat frame a second; a demand unparks it. Unit tests run
-  with `scripts/test-frame-idle.sh`.
+  with `scripts/test-frame-idle.sh`. `QUILL_IDLE_FRAMES=0` (or `off`), read
+  once, disables parking (upstream behavior).
 - `src/linux/x11/window.rs`: `X11FrameIdle`, shared by the refresh timer,
   `draw` and `schedule_frame` (both mark activity) and the new `frame_waker`
   (GPUI calls it when the window becomes dirty or queues a next-frame

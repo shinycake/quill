@@ -14,7 +14,8 @@ The Quill project changed it in 2026 so an idle window stops receiving a
   decision. After 250 ms of frames that neither drew, presented nor asked for
   another frame, with no frame demand from GPUI in between, a window parks
   and gets one heartbeat invalidation a second; a demand unparks it. Unit
-  tests run with `scripts/test-frame-idle.sh`.
+  tests run with `scripts/test-frame-idle.sh`. `QUILL_IDLE_FRAMES=0` (or
+  `off`), read once, disables parking (upstream behavior).
 - `src/vsync.rs`: `FrameGate`, the set of parked windows shared with the
   vsync thread, which sleeps on a condition variable while every window is
   parked (waking for the heartbeat or an unpark).

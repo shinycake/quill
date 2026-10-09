@@ -285,7 +285,8 @@ impl WindowsWindowInner {
     /// does (a heartbeat that found work) unparks them. `keep_running`: the
     /// platform has its own reason to keep frames coming.
     pub(crate) fn frames_after_draw(&self, keep_running: bool) {
-        let active = self.state.frame_activity.take() || keep_running;
+        // The kill switch (`QUILL_IDLE_FRAMES=0`) makes every frame active.
+        let active = self.state.frame_activity.take() || keep_running || !idle_frames_enabled();
         let mut idle = self.state.frame_idle.get();
         match idle.frame(active, Instant::now()) {
             Transition::Park => FRAME_GATE.park(self.hwnd),

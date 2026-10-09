@@ -43,8 +43,9 @@ use xkbc::x11::ffi::{XKB_X11_MIN_MAJOR_XKB_VERSION, XKB_X11_MIN_MINOR_XKB_VERSIO
 use xkbcommon::xkb::{self as xkbc, STATE_LAYOUT_EFFECTIVE};
 
 use super::{
-    ButtonOrScroll, PARKED_HEARTBEAT, ScrollDirection, X11Display, X11WindowStatePtr, XcbAtoms,
-    XimCallbackEvent, XimHandler, button_or_scroll_from_event_detail, check_reply,
+    ButtonOrScroll, IDLE_FRAMES_ENV, PARKED_HEARTBEAT, ScrollDirection, X11Display,
+    X11WindowStatePtr, XcbAtoms, XimCallbackEvent, XimHandler, button_or_scroll_from_event_detail,
+    check_reply,
     clipboard::{self, Clipboard},
     get_reply, get_valuator_axis_index, handle_connection_error, modifiers_from_state,
     pressed_button_from_mask, xcb_flush,
@@ -1685,6 +1686,10 @@ impl LinuxClient for X11Client {
         .log_err();
         xcb_flush(&state.xcb_connection);
 
+        // Quill: read the kill switch while opening the first window.
+        if !super::idle_frames_enabled() {
+            log::info!("{IDLE_FRAMES_ENV} is off: X11 windows will not idle their refresh timer");
+        }
         // Quill: a ping the frame waker sends to resume this window's parked
         // refresh timer. Without it the window never parks.
         let frame_resume = calloop::ping::make_ping()

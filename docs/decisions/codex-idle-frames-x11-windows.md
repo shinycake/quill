@@ -130,7 +130,8 @@ before: anything that draws keeps the frame source at the refresh rate.
 - Cross `cargo check` of both crates from macOS, before and after the change:
   `gpui-pre-windows` for `x86_64-pc-windows-msvc` and `gpui-pre-linux`
   (X11 + Wayland) for `x86_64-unknown-linux-gnu`, no warnings.
-- `scripts/test-frame-idle.sh`: the decision's unit tests, including a
+- `scripts/test-frame-idle.sh`: the decision's unit tests (the kill
+  switch's value parsing among them), including a
   200 000-step simulated frame source (frames at a refresh rate or the
   heartbeat, random demands and activity) checking that a demand always
   unparks, a park only follows 250 ms without activity or demand, and a
@@ -169,9 +170,19 @@ it moves; inertia scrolling to the end; resizing by dragging the border
 (modal size-move loop); minimize and restore; a second window; sleep and
 resume or a driver reset (device-lost recovery).
 
-If either platform misbehaves, the change is self-contained per crate:
-removing that crate's `[patch.crates-io]` line restores upstream behavior
-for it.
+### Kill switch and rollback
+
+`QUILL_IDLE_FRAMES=0` (or `off`, any case) in Quill's environment turns the
+change off at runtime on both platforms: every frame counts as active, so no
+window ever parks, the X11 refresh timer runs at the refresh rate and the
+Windows vsync thread invalidates every window on every vblank, exactly as
+upstream. It is read once, when the first window opens (X11) or the vsync
+thread starts (Windows), and logs an info line when off. Any other value, or
+none, leaves it on. So a live check can compare both behaviors on one build,
+and a user who hits a stall can turn it off without a rebuild.
+
+For a permanent rollback, the change is self-contained per crate: removing
+that crate's `[patch.crates-io]` line restores upstream for it.
 
 ## Risks
 

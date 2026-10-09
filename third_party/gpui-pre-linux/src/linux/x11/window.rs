@@ -42,7 +42,9 @@ use std::{
     time::Instant,
 };
 
-use super::{FrameIdle, X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES};
+use super::{
+    FrameIdle, X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES, idle_frames_enabled,
+};
 
 x11rb::atom_manager! {
     pub XcbAtoms: AtomsCookie {
@@ -361,7 +363,12 @@ impl X11FrameIdle {
     /// After the refresh timer's frame request; returns whether the timer
     /// should run at the heartbeat instead of the refresh rate.
     fn after_frame(&self, keep_running: bool) -> bool {
-        let active = self.activity.take() || keep_running || self.resume.get().is_none();
+        // Never parks with the kill switch (`QUILL_IDLE_FRAMES=0`) or
+        // without a way to resume.
+        let active = self.activity.take()
+            || keep_running
+            || self.resume.get().is_none()
+            || !idle_frames_enabled();
         let mut idle = self.idle.get();
         idle.frame(active, Instant::now());
         self.idle.set(idle);

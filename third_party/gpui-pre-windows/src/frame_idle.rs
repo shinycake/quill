@@ -15,8 +15,36 @@
 //! Fail-safe by construction: anything that counts as activity keeps the
 //! source running, a demand always unparks, and the heartbeat bounds how long
 //! a demand that somehow bypassed the waker can go unserved.
+//!
+//! Kill switch: `QUILL_IDLE_FRAMES=0` (or `off`) in the environment, read
+//! once, makes every frame count as active, so frame sources never park and
+//! behave exactly as upstream.
 
-use std::time::{Duration, Instant};
+use std::{
+    ffi::OsStr,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
+
+/// The kill switch's environment variable.
+pub(crate) const IDLE_FRAMES_ENV: &str = "QUILL_IDLE_FRAMES";
+
+/// Whether frame sources may park: false when `QUILL_IDLE_FRAMES` is `0` or
+/// `off` (any case). Read once; platforms call it while setting up their
+/// first window, so later changes to the variable have no effect.
+pub(crate) fn idle_frames_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| idle_frames_enabled_from(std::env::var_os(IDLE_FRAMES_ENV).as_deref()))
+}
+
+fn idle_frames_enabled_from(value: Option<&OsStr>) -> bool {
+    let Some(value) = value else {
+        return true;
+    };
+    let value = value.to_string_lossy();
+    let value = value.trim();
+    !(value == "0" || value.eq_ignore_ascii_case("off"))
+}
 
 /// How long the frame source keeps running after the last frame that drew,
 /// presented or asked for another frame (or the last frame demand). The
@@ -105,6 +133,23 @@ mod tests {
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
+    }
+
+    #[test]
+    fn kill_switch_values() {
+        let enabled = |value: Option<&str>| idle_frames_enabled_from(value.map(OsStr::new));
+        assert!(enabled(None));
+        assert!(enabled(Some("")));
+        assert!(enabled(Some("1")));
+        assert!(enabled(Some("on")));
+        assert!(!enabled(Some("0")));
+        assert!(!enabled(Some("off")));
+        assert!(!enabled(Some(" OFF ")));
+        assert!(!enabled(Some("Off")));
+        // The documented name; the cached read itself depends on the
+        // environment the tests run in.
+        assert_eq!(IDLE_FRAMES_ENV, "QUILL_IDLE_FRAMES");
+        let _ = idle_frames_enabled();
     }
 
     #[test]
