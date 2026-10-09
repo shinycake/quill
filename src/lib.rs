@@ -19,6 +19,7 @@ pub mod connect_smoke;
 pub mod credentials;
 pub mod data_settings;
 pub mod deep_link_inbox;
+pub mod deep_link_types;
 pub mod diagnostics;
 pub mod emoji;
 pub mod emoji_catalog;

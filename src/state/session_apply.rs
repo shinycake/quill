@@ -1956,7 +1956,23 @@ impl Session {
                 is_installed,
                 ..
             } => {
-                if let Some(RequestPurpose::ViewStickerSet { set_id }) = pending.map(|p| p.purpose)
+                if let Some(RequestPurpose::DeepLinkResolve { generation }) =
+                    pending.map(|p| p.purpose)
+                    && matches!(
+                        &self.deep_link,
+                        Some(DeepLinkState::ResolvingChat {
+                            action: DeepLinkAction::StickerSet { .. },
+                            generation: slot,
+                        }) if *slot == generation
+                    )
+                {
+                    // `addstickers` / `addemoji` link: hand the set id to the
+                    // preview dialog (`getStickerSet` loads its stickers).
+                    self.deep_link = Some(DeepLinkState::Ui(
+                        crate::deep_link_types::DeepLinkUi::StickerSet { set_id: id },
+                    ));
+                } else if let Some(RequestPurpose::ViewStickerSet { set_id }) =
+                    pending.map(|p| p.purpose)
                 {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(set_id, title, is_installed, stickers);
@@ -2019,6 +2035,79 @@ impl Session {
             EnvelopePayload::Me { user_id } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMe) {
                     self.my_user_id = Some(user_id);
+                } else if let Some(RequestPurpose::DeepLinkResolve { generation }) =
+                    pending.map(|p| p.purpose)
+                    && let Some(DeepLinkState::ResolvingChat {
+                        action: DeepLinkAction::UserPhone { draft, .. },
+                        generation: slot,
+                    }) = self.deep_link.clone()
+                    && slot == generation
+                {
+                    // `searchUserByPhoneNumber` answer: open the private chat.
+                    self.deep_link = Some(DeepLinkState::Info {
+                        text: String::new(),
+                        need_update: false,
+                        action: Some(DeepLinkAction::OpenUserDraft { user_id, draft }),
+                        generation,
+                    });
+                }
+            }
+            EnvelopePayload::InternalLinkType(link) => {
+                if let Some(RequestPurpose::DeepLinkInternalType { generation }) =
+                    pending.map(|p| p.purpose)
+                    && matches!(
+                        &self.deep_link,
+                        Some(DeepLinkState::ResolvingInfo { generation: slot }) if *slot == generation
+                    )
+                {
+                    use crate::deep_link_types::{LinkRoute, route};
+                    let original = std::mem::take(&mut self.deep_link_original);
+                    self.deep_link = Some(match route(&link, &original) {
+                        LinkRoute::Resolve(action) => DeepLinkState::Info {
+                            text: String::new(),
+                            need_update: false,
+                            action: Some(action),
+                            generation,
+                        },
+                        LinkRoute::Ui(ui) => DeepLinkState::Ui(ui),
+                        LinkRoute::Unknown(link) => DeepLinkState::Unknown { link },
+                        LinkRoute::Message(text) => DeepLinkState::ShowText(text),
+                    });
+                }
+            }
+            EnvelopePayload::MessageLinkInfo {
+                chat_id,
+                message_id,
+                media_timestamp,
+                thread_id,
+            } => {
+                if let Some(RequestPurpose::DeepLinkResolve { generation }) =
+                    pending.map(|p| p.purpose)
+                    && matches!(
+                        &self.deep_link,
+                        Some(DeepLinkState::ResolvingChat {
+                            action: DeepLinkAction::MessageLink { .. },
+                            generation: slot,
+                        }) if *slot == generation
+                    )
+                {
+                    self.deep_link = Some(if chat_id == 0 {
+                        DeepLinkState::ShowText(
+                            "This message is in a chat you can't see. Join it first.".into(),
+                        )
+                    } else {
+                        DeepLinkState::Info {
+                            text: String::new(),
+                            need_update: false,
+                            action: Some(DeepLinkAction::OpenChatById {
+                                chat_id,
+                                message_id,
+                                media_timestamp,
+                                thread_id,
+                            }),
+                            generation,
+                        }
+                    });
                 }
             }
             EnvelopePayload::ChatMember { member } => {

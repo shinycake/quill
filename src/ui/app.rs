@@ -705,6 +705,13 @@ pub struct QuillApp {
     /// deep link, shown in a dialog (`DialogKind::DeepLinkInfo`).
     pub(super) deep_link_dialog: Option<String>,
     pub(super) deep_link_invite: Option<quill::state::DeepLinkState>,
+    /// A typed link that needs the `Window` (`deep_link_routes`).
+    pub(super) pending_deep_link_ui: Option<quill::deep_link_types::DeepLinkUi>,
+    /// Text of a share link while its chat chooser is open.
+    pub(super) share_link_text: Option<String>,
+    /// A linked `?t=` media timestamp waiting for its message to load
+    /// (chat, message, seconds, polls waited).
+    pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, u32)>,
     /// `parity:platform-deep-links`: resolved chat + action waiting for
     /// render (which owns the `Window`) to open it.
     pub(super) pending_deep_link_open: Option<(ChatId, quill::state::DeepLinkAction)>,

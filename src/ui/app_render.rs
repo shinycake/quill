@@ -165,6 +165,9 @@ impl Render for QuillApp {
         if let Some((chat_id, action)) = self.pending_deep_link_open.take() {
             self.open_deep_link_chat(chat_id, &action, window, cx);
         }
+        if let Some(ui) = self.pending_deep_link_ui.take() {
+            self.run_deep_link_ui(ui, window, cx);
+        }
         // A clicked mention, hashtag, command or link (`entity_links`).
         self.run_pending_link(window, cx);
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
