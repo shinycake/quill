@@ -460,7 +460,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice (communities backend core): the `createCommunity` answer
         // is `communityId`; `updateCommunity` for the new community is
         // guaranteed to have arrived first, so the id chains straight
-        // into `loadCommunityFullInfo` after apply.
+        // into `getCommunityFullInfo` after apply.
         let created_community_id: Option<i64> = match &owned.envelope.payload {
             EnvelopePayload::CommunityId { id } => owned
                 .envelope
@@ -618,7 +618,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // community is already in the model; a failed send must not
         // fail the ingest.
         if let Some(community_id) = created_community_id {
-            let _ = self.load_community_full_info(community_id);
+            let _ = self.get_community_full_info(community_id);
         }
         // Slice (communities backend core): refetch the full-info pack
         // the state dropped after a confirmed `setCommunityName`.
@@ -628,7 +628,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .community_full_infos
                 .contains_key(&community_id)
         {
-            let _ = self.load_community_full_info(community_id);
+            let _ = self.get_community_full_info(community_id);
         }
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready || load_chats_ok {

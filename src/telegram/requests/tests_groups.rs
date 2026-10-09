@@ -379,9 +379,84 @@ fn group_info_edit_request_shapes() {
     assert!(v["photo"].is_null());
 }
 
+/// The vendored schema line for `name`, and its parameter names.
+fn schema_params(name: &str) -> Vec<&'static str> {
+    let schema = include_str!("../../../schema/td_api.tl");
+    let line = schema
+        .lines()
+        .find(|l| l.starts_with(&format!("{name} ")))
+        .unwrap_or_else(|| panic!("{name} in schema"));
+    line.split_whitespace()
+        .skip(1)
+        .take_while(|token| !token.starts_with('='))
+        .map(|field| field.split(':').next().unwrap())
+        .collect()
+}
+
+/// Every schema parameter of `name` is present in `v`, and nothing else
+/// (besides `@type` / `@extra`).
+fn assert_matches_schema(v: &Value, name: &str) {
+    assert_eq!(v["@type"], name);
+    let params = schema_params(name);
+    let object = v.as_object().unwrap();
+    for param in &params {
+        assert!(object.contains_key(*param), "{name}: missing {param}");
+    }
+    for key in object.keys() {
+        assert!(
+            key.starts_with('@') || params.contains(&key.as_str()),
+            "{name}: unknown field {key}"
+        );
+    }
+}
+
+#[test]
+fn community_management_shapes_match_1_8_68() {
+    use super::{
+        delete_community, get_community_full_info, set_community_permissions, set_community_photo,
+    };
+    // TDLib 1.8.68 replaced `loadCommunityFullInfo` (answered `ok`) with
+    // `getCommunityFullInfo` (answers `communityFullInfo`).
+    assert!(
+        !include_str!("../../../schema/td_api.tl").contains("\nloadCommunityFullInfo "),
+        "loadCommunityFullInfo is gone in 1.8.68"
+    );
+    let v: Value = serde_json::from_str(&get_community_full_info(RequestId(92), 42)).unwrap();
+    assert_matches_schema(&v, "getCommunityFullInfo");
+    assert_eq!(v["community_id"], 42);
+    assert_eq!(v["@extra"], "92");
+
+    let photo = serde_json::json!({
+        "@type": "inputChatPhotoStatic",
+        "photo": { "@type": "inputFileLocal", "path": "/tmp/a.jpg" },
+    });
+    let v: Value = serde_json::from_str(&set_community_photo(RequestId(94), 42, photo)).unwrap();
+    assert_matches_schema(&v, "setCommunityPhoto");
+    assert_eq!(v["photo"]["@type"], "inputChatPhotoStatic");
+    let v: Value =
+        serde_json::from_str(&set_community_photo(RequestId(95), 42, Value::Null)).unwrap();
+    assert!(v["photo"].is_null(), "null deletes the photo");
+
+    let v: Value =
+        serde_json::from_str(&set_community_permissions(RequestId(96), 42, true)).unwrap();
+    assert_matches_schema(&v, "setCommunityPermissions");
+    assert_eq!(v["permissions"]["@type"], "communityPermissions");
+    for field in schema_params("communityPermissions") {
+        assert!(
+            v["permissions"][field].is_boolean(),
+            "communityPermissions.{field}"
+        );
+    }
+    assert_eq!(v["permissions"]["can_edit_chat_list"], true);
+
+    let v: Value = serde_json::from_str(&delete_community(RequestId(97), 42)).unwrap();
+    assert_matches_schema(&v, "deleteCommunity");
+    assert_eq!(v["community_id"], 42);
+}
+
 #[test]
 fn community_request_shapes() {
-    use super::{create_community, load_community_full_info, set_community_name};
+    use super::{create_community, set_community_name};
 
     // `createCommunity name:string chat_id:int53 is_chat_hidden:Bool
     // = CommunityId` (schema 1.8.67, line 11806).
@@ -391,13 +466,6 @@ fn community_request_shapes() {
     assert_eq!(v["name"], "Rustaceans");
     assert_eq!(v["chat_id"], 9);
     assert!(v["is_chat_hidden"].as_bool() == Some(true));
-
-    // `loadCommunityFullInfo community_id:int53 = Ok` (schema 1.8.67,
-    // line 11799).
-    let v: serde_json::Value =
-        serde_json::from_str(&load_community_full_info(RequestId(92), 42)).unwrap();
-    assert_eq!(v["@type"], "loadCommunityFullInfo");
-    assert_eq!(v["community_id"], 42);
 
     // `setCommunityName community_id:int53 name:string = Ok` (schema
     // 1.8.67, line 11811).

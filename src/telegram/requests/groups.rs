@@ -917,7 +917,7 @@ pub fn set_supergroup_username(extra: RequestId, supergroup_id: i64, username: &
 /// only chats with owned bots and owned basic group, supergroup and
 /// channel chats are allowed; basic group chats will be automatically
 /// upgraded to supergroup chats". The response is `communityId`; the
-/// driver chains it into `loadCommunityFullInfo`. Empty names are
+/// driver chains it into `getCommunityFullInfo`. Empty names are
 /// refused client-side by the driver.
 pub fn create_community(
     extra: RequestId,
@@ -935,15 +935,14 @@ pub fn create_community(
     .to_string()
 }
 
-/// Slice (communities backend core): `loadCommunityFullInfo` (TDLib
-/// 1.8.67, `schema/td_api.tl:11799`):
-/// `loadCommunityFullInfo community_id:int53 = Ok;`
-/// "Returns full information about a community. The data will be sent
-/// through update" — i.e. as `updateCommunityFullInfo`, which the
-/// reducer applies directly (it carries its own `community_id`).
-pub fn load_community_full_info(extra: RequestId, community_id: i64) -> String {
+/// `getCommunityFullInfo` (TDLib 1.8.68, `schema/td_api.tl:12178`):
+/// `getCommunityFullInfo community_id:int53 = CommunityFullInfo;`
+/// "Returns full information about a community". Replaced 1.8.67's
+/// `loadCommunityFullInfo` (which answered `ok` and sent the data through
+/// `updateCommunityFullInfo`); the answer is now the pack itself.
+pub fn get_community_full_info(extra: RequestId, community_id: i64) -> String {
     json!({
-        "@type": "loadCommunityFullInfo",
+        "@type": "getCommunityFullInfo",
         "@extra": extra.as_extra(),
         "community_id": community_id,
     })
@@ -963,6 +962,55 @@ pub fn set_community_name(extra: RequestId, community_id: i64, name: &str) -> St
         "@extra": extra.as_extra(),
         "community_id": community_id,
         "name": name,
+    })
+    .to_string()
+}
+
+/// `setCommunityPhoto` (TDLib 1.8.68, `schema/td_api.tl:12195`):
+/// `setCommunityPhoto community_id:int53 photo:InputChatPhoto = Ok;`
+/// "requires can_change_info administrator right in the community";
+/// `photo` is an `InputChatPhoto` object, or null to delete the photo
+/// (same shape as `setChatPhoto`).
+pub fn set_community_photo(extra: RequestId, community_id: i64, photo: Value) -> String {
+    json!({
+        "@type": "setCommunityPhoto",
+        "@extra": extra.as_extra(),
+        "community_id": community_id,
+        "photo": photo,
+    })
+    .to_string()
+}
+
+/// `setCommunityPermissions` (TDLib 1.8.68, `schema/td_api.tl:12200`):
+/// `setCommunityPermissions community_id:int53 permissions:communityPermissions = Ok;`
+/// "Changes permissions of regular members in the given community;
+/// requires can_ban_members administrator right". `communityPermissions`
+/// has a single flag, `can_edit_chat_list`.
+pub fn set_community_permissions(
+    extra: RequestId,
+    community_id: i64,
+    can_edit_chat_list: bool,
+) -> String {
+    json!({
+        "@type": "setCommunityPermissions",
+        "@extra": extra.as_extra(),
+        "community_id": community_id,
+        "permissions": {
+            "@type": "communityPermissions",
+            "can_edit_chat_list": can_edit_chat_list,
+        },
+    })
+    .to_string()
+}
+
+/// `deleteCommunity` (TDLib 1.8.68, `schema/td_api.tl:12203`):
+/// `deleteCommunity community_id:int53 = Ok;` — "requires owner
+/// privileges".
+pub fn delete_community(extra: RequestId, community_id: i64) -> String {
+    json!({
+        "@type": "deleteCommunity",
+        "@extra": extra.as_extra(),
+        "community_id": community_id,
     })
     .to_string()
 }

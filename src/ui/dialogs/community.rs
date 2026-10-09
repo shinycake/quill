@@ -1,11 +1,14 @@
 use super::super::app::QuillApp;
+use super::super::pressable::action_row;
 use super::super::shell::{DialogKind, QuillShell};
 use super::super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::state::{InfoPanelTarget, Session};
@@ -16,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 /// Slice G10: communities create + hub + info UI
 /// (`parity:communities-create/hub/info`). Backend landed earlier —
-/// `create_community` / `load_community_full_info` / `set_community_name`
+/// `create_community` / `get_community_full_info` / `set_community_name`
 /// drivers in connect.rs plus state sync in state.rs — this module is
 /// the UI layer only: the create dialog, the owned-communities hub
 /// dialog, and the info-panel body. Name edits reuse `UsernameDialog`
@@ -247,9 +250,13 @@ pub fn build_community_hub_dialog(
         let communities: Vec<(i64, String)> = this
             .session()
             .map(|session| {
+                // An inaccessible community (`have_access = false`, e.g.
+                // right after `deleteCommunity`) can't be passed to any
+                // method, so it has no place in the hub.
                 let mut rows: Vec<(i64, String)> = session
                     .communities
                     .values()
+                    .filter(|community| community.have_access)
                     .map(|community| (community.id, community.name.clone()))
                     .collect();
                 rows.sort_by_key(|a| a.1.to_lowercase());
@@ -279,7 +286,7 @@ pub fn build_community_hub_dialog(
                         // enter chat-list mode for this community — closes
                         // the hub, filters the main chat list to the
                         // community's chats, and fires
-                        // `loadCommunityFullInfo` so membership resolves.
+                        // `getCommunityFullInfo` so membership resolves.
                         Button::new(format!("cm-hub-view-chats-{community_id}"))
                             .label("💬 View chats")
                             .ghost()
@@ -324,8 +331,10 @@ pub fn build_community_hub_dialog(
 
 /// Slice G10: the community info panel body for
 /// `InfoPanelTarget::Community` — name with an edit button (opens the
-/// `CommunityName` text prompt), full-info counts, and the member
-/// chats with hidden badges. `loadCommunityFullInfo` is kicked off by
+/// `CommunityName` text prompt; shown with `can_change_info`), full-info
+/// counts, the member chats with hidden badges, and the TDLib 1.8.68
+/// management controls: the member chat-list permission switch
+/// (`can_ban_members`) and "Delete community" (owner). `getCommunityFullInfo` is kicked off by
 /// `open_info_panel_target`; a missing pack renders "Loading…".
 pub fn render_community_info_panel(
     app: &QuillApp,
@@ -355,14 +364,16 @@ pub fn render_community_info_panel(
                 .font_semibold()
                 .child(community.name.clone()),
         )
-        .child(
-            Button::new(format!("g10-info-edit-name-{community_id}"))
-                .label("✏️ Edit name")
-                .ghost()
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_community_name_dialog(community_id, window, cx);
-                })),
-        );
+        .when(community.can_change_info, |body| {
+            body.child(
+                Button::new(format!("g10-info-edit-name-{community_id}"))
+                    .label("✏️ Edit name")
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_community_name_dialog(community_id, window, cx);
+                    })),
+            )
+        });
     body = body.child(match full_info {
         Some(info) => {
             let stats = div()
@@ -413,6 +424,63 @@ pub fn render_community_info_panel(
             .text_color(cx.theme().muted_foreground)
             .child("Loading…"),
     });
+    // TDLib 1.8.68 `setCommunityPermissions` (needs `can_ban_members`):
+    // the community's single member permission. Not optimistic — the
+    // switch follows `updateCommunity`.
+    if community.can_ban_members {
+        let allowed = community.members_can_edit_chat_list;
+        body = body.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .w_full()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().text_sm().child("Members can edit the chat list"))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Let members add and remove community chats"),
+                        ),
+                )
+                .child(
+                    div().flex_none().child(
+                        Switch::new(format!("community-members-edit-chats-{community_id}"))
+                            .checked(allowed)
+                            .accessibility_label("Members can edit the chat list")
+                            .on_click(cx.listener(move |this, &on, _, cx| {
+                                this.set_community_members_can_edit_chat_list(community_id, on, cx);
+                            })),
+                    ),
+                ),
+        );
+    }
+    // TDLib 1.8.68 `deleteCommunity` — owner only, behind a confirm.
+    if community.is_owner {
+        body = body.child(
+            action_row(
+                format!("community-delete-{community_id}"),
+                Some(gpui_kit::assets::IconName::Trash),
+                "Delete community",
+                true,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_group_confirm(
+                    quill::ids::ChatId(0),
+                    GroupConfirmAction::DeleteCommunity { community_id },
+                    cx,
+                );
+            })),
+        );
+    }
     body.into_any_element()
 }
 
