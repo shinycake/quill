@@ -26,49 +26,89 @@ pub struct ReceiveBridge {
     tx_cmd: Sender<BridgeCommand>,
     seq: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
+    /// Set by the receive loop's exit guard when it ends without a
+    /// shutdown request (channel closed, thread panicked).
+    stopped: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
+/// Marks the bridge as stopped when the receive loop ends for any reason
+/// other than a requested shutdown, including a panic unwind.
+struct StopGuard {
+    shutdown: Arc<AtomicBool>,
+    stopped: Arc<AtomicBool>,
+}
+
+impl Drop for StopGuard {
+    fn drop(&mut self) {
+        if !self.shutdown.load(Ordering::SeqCst) {
+            self.stopped.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
 impl ReceiveBridge {
-    pub fn spawn_injected(sink: Arc<dyn DiagnosticSink>) -> Self {
+    pub fn spawn_injected(sink: Arc<dyn DiagnosticSink>) -> std::io::Result<Self> {
         let (tx_out, rx_out) = mpsc::channel();
         let (tx_cmd, rx_cmd) = mpsc::channel();
         let seq = Arc::new(AtomicU64::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
         let seq_thread = seq.clone();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let guard = StopGuard {
+            shutdown: shutdown.clone(),
+            stopped: stopped.clone(),
+        };
         let shutdown_thread = shutdown.clone();
         let thread = thread::Builder::new()
             .name("quill-td-receive".into())
-            .spawn(move || injected_loop(rx_cmd, tx_out, seq_thread, shutdown_thread, sink))
-            .expect("receive thread");
-        Self {
+            .spawn(move || {
+                let _guard = guard;
+                injected_loop(rx_cmd, tx_out, seq_thread, shutdown_thread, sink)
+            })?;
+        Ok(Self {
             rx: rx_out,
             tx_cmd,
             seq,
             shutdown,
+            stopped,
             thread: Some(thread),
-        }
+        })
     }
 
     /// Live `td_receive` loop on a dedicated thread. JSON is copied before the next receive.
-    pub fn spawn_live(api: Arc<TdJson>, sink: Arc<dyn DiagnosticSink>) -> Self {
+    pub fn spawn_live(api: Arc<TdJson>, sink: Arc<dyn DiagnosticSink>) -> std::io::Result<Self> {
         let (tx_out, rx_out) = mpsc::channel();
         let (tx_cmd, _rx_cmd) = mpsc::channel();
         let seq = Arc::new(AtomicU64::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
         let seq_thread = seq.clone();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let guard = StopGuard {
+            shutdown: shutdown.clone(),
+            stopped: stopped.clone(),
+        };
         let shutdown_thread = shutdown.clone();
         let thread = thread::Builder::new()
             .name("quill-td-receive".into())
-            .spawn(move || ordered_receive_loop(api, tx_out, seq_thread, shutdown_thread, sink))
-            .expect("receive thread");
-        Self {
+            .spawn(move || {
+                let _guard = guard;
+                ordered_receive_loop(api, tx_out, seq_thread, shutdown_thread, sink)
+            })?;
+        Ok(Self {
             rx: rx_out,
             tx_cmd,
             seq,
             shutdown,
+            stopped,
             thread: Some(thread),
-        }
+        })
+    }
+
+    /// The receive loop ended without a shutdown request, so no more
+    /// envelopes will arrive. Queued envelopes may still be drained first.
+    pub fn stopped_unexpectedly(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
     }
 
     pub fn inject(&self, json: impl Into<String>) {
@@ -147,27 +187,58 @@ pub fn copy_and_parse(
                 envelope,
             })
         }
-        Err(ParseError::InvalidJson) => {
+        Err(err) => {
+            let note = if err == ParseError::InvalidJson {
+                "invalid-json"
+            } else {
+                "parse-error"
+            };
             sink.record(Diagnostic {
                 category: "td-receive",
                 type_name: None,
                 extra: None,
                 seq: Some(next),
-                note: "invalid-json",
+                note,
             });
-            None
-        }
-        Err(_) => {
+            // A response nobody can parse would leave its request pending
+            // forever. When the `@extra` survives, deliver a synthetic
+            // error so the UI shows a failure instead of a spinner.
+            let envelope = recover_failed_response(json)?;
             sink.record(Diagnostic {
                 category: "td-receive",
                 type_name: None,
-                extra: None,
+                extra: envelope.extra.map(|id| id.0),
                 seq: Some(next),
-                note: "parse-error",
+                note: "unparsable-response-failed",
             });
-            None
+            Some(OwnedEnvelope {
+                seq: next,
+                client_id: envelope.client_id,
+                envelope,
+            })
         }
     }
+}
+
+/// Build the error envelope for an unparsable response whose `@extra` can
+/// still be read. Returns `None` for pushed updates (no `@extra`) and for
+/// non-JSON input. The raw message is never copied into the error.
+pub fn recover_failed_response(json: &str) -> Option<Envelope> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let extra = value.get("@extra")?;
+    if !(extra.is_string() || extra.is_number()) {
+        return None;
+    }
+    let mut synthetic = serde_json::json!({
+        "@type": "error",
+        "code": 500,
+        "message": "QUILL_UNPARSABLE_RESPONSE",
+        "@extra": extra,
+    });
+    if let Some(client_id) = value.get("@client_id") {
+        synthetic["@client_id"] = client_id.clone();
+    }
+    parse_envelope(&synthetic.to_string()).ok()
 }
 
 pub struct LiveTdJson {
@@ -206,6 +277,13 @@ pub fn ordered_receive_loop(
         if let Some(owned) = copy_and_parse(&json, &seq, &sink)
             && tx_out.send(owned).is_err()
         {
+            sink.record(Diagnostic {
+                category: "td-receive",
+                type_name: None,
+                extra: None,
+                seq: None,
+                note: "bridge-stopped",
+            });
             break;
         }
     }
@@ -220,7 +298,7 @@ mod tests {
     #[test]
     fn receive_order_matches_injection_order() {
         let sink = Arc::new(MemorySink::new());
-        let bridge = ReceiveBridge::spawn_injected(sink.clone());
+        let bridge = ReceiveBridge::spawn_injected(sink.clone()).unwrap();
         bridge.inject(r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitTdlibParameters"},"@extra":"1"}"#);
         bridge.inject(r#"{"@type":"ok","@extra":"1"}"#);
         bridge.inject(r#"{"@type":"updateNewMessage","message":{"id":10,"chat_id":1,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#);
@@ -246,7 +324,7 @@ mod tests {
     #[test]
     fn canary_secret_is_absent_from_diagnostics() {
         let sink = Arc::new(MemorySink::new());
-        let bridge = ReceiveBridge::spawn_injected(sink.clone());
+        let bridge = ReceiveBridge::spawn_injected(sink.clone()).unwrap();
         bridge.inject(
             r#"{"@type":"updateSomethingSecret","phone":"CANARY_PHONE_+15551212","text":"CANARY_MSG"}"#,
         );
@@ -262,12 +340,58 @@ mod tests {
     #[test]
     fn drop_injected_bridge_joins_without_panic() {
         let sink = Arc::new(MemorySink::new());
-        let mut bridge = ReceiveBridge::spawn_injected(sink);
+        let mut bridge = ReceiveBridge::spawn_injected(sink).unwrap();
         bridge.inject(r#"{"@type":"ok"}"#);
         let _ = bridge.next_timeout(Duration::from_secs(1));
         bridge.shutdown();
         assert!(bridge.is_joined());
         bridge.shutdown();
         drop(bridge);
+    }
+
+    #[test]
+    fn unparsable_response_with_extra_resolves_as_error() {
+        let sink = Arc::new(MemorySink::new());
+        let bridge = ReceiveBridge::spawn_injected(sink.clone()).unwrap();
+        // A response whose required `message` field is missing.
+        bridge.inject(r#"{"@type":"updateNewMessage","note":"CANARY_BAD","@extra":"41"}"#);
+        // A pushed update that cannot parse has no request to fail.
+        bridge.inject(r#"{"@type":"updateNewMessage","message":"CANARY_BAD"}"#);
+        bridge.inject(r#"{"@type":"ok"}"#);
+        let first = bridge.next_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(first.envelope.extra, Some(crate::ids::RequestId(41)));
+        assert!(matches!(first.envelope.payload, EnvelopePayload::Error(_)));
+        let next = bridge.next_timeout(Duration::from_secs(1)).unwrap();
+        assert!(matches!(next.envelope.payload, EnvelopePayload::Ok));
+        assert!(!sink.rendered().contains("CANARY_BAD"));
+    }
+
+    #[test]
+    fn recover_failed_response_needs_a_readable_extra() {
+        assert!(recover_failed_response("not json").is_none());
+        assert!(recover_failed_response(r#"{"@type":"x"}"#).is_none());
+        assert!(recover_failed_response(r#"{"@type":"x","@extra":{"a":1}}"#).is_none());
+        let env = recover_failed_response(r#"{"@type":"x","@extra":7,"@client_id":3}"#).unwrap();
+        assert_eq!(env.extra, Some(crate::ids::RequestId(7)));
+        assert_eq!(env.client_id, Some(3));
+    }
+
+    #[test]
+    fn bridge_reports_unexpected_stop_but_not_requested_shutdown() {
+        let sink = Arc::new(MemorySink::new());
+        let mut bridge = ReceiveBridge::spawn_injected(sink).unwrap();
+        assert!(!bridge.stopped_unexpectedly());
+        // Dropping the command side ends the loop without a shutdown flag.
+        let (dead_tx, _) = mpsc::channel();
+        bridge.tx_cmd = dead_tx;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !bridge.stopped_unexpectedly() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(bridge.stopped_unexpectedly());
+        let sink = Arc::new(MemorySink::new());
+        let mut clean = ReceiveBridge::spawn_injected(sink).unwrap();
+        clean.shutdown();
+        assert!(!clean.stopped_unexpectedly());
     }
 }

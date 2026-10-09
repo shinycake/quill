@@ -64,7 +64,7 @@ fn logout_invalidates_pending_requests() {
 fn ordered_bridge_rejects_payload_logging() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
-    let bridge = ReceiveBridge::spawn_injected(dyn_sink);
+    let bridge = ReceiveBridge::spawn_injected(dyn_sink).unwrap();
     bridge.inject(r#"{"@type":"error","code":400,"message":"CANARY_PHONE_+1999","@extra":"3"}"#);
     let env = bridge.next_timeout(Duration::from_secs(1)).unwrap();
     assert!(matches!(env.envelope.payload, EnvelopePayload::Error(_)));
