@@ -1,5 +1,0 @@
-# Sign-in polish: country picker + formatting, code-missing/email reset, banned-number box, accounts limit note
-parity:auth-country-picker
-parity:auth-code-missing
-parity:auth-phone-banned-box
-parity:auth-max-accounts-note
