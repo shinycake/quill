@@ -277,6 +277,9 @@ pub struct QuillApp {
     pub(super) composer_scheduling: ComposerScheduling,
     /// M1: the schedule picker popup above the composer.
     pub(super) schedule_popup_open: bool,
+    /// The date+time picker behind the schedule popup (created when the
+    /// popup opens, see `open_schedule_picker`).
+    pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
     /// codex:spellcheck-native: the spellcheck engine (macOS: the system
     /// NSSpellChecker; elsewhere the embedded English wordlist), shared
     /// with background check tasks.

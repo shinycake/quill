@@ -1541,3 +1541,65 @@ fn driver_add_and_remove_message_reaction_then_interaction_info() {
     assert!(!sink.rendered().contains("CANARY"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn driver_edit_scheduled_message_sends_scheduling_state() {
+    use crate::composer::ComposerScheduling;
+    use crate::ids::{ChatId, MessageId};
+    use crate::telegram::envelope::{
+        MessageContent, MessageSchedulingState, ParsedMessage, TextContent,
+    };
+
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    driver.session.scheduled_messages.push(ParsedMessage {
+        sender: None,
+        id: MessageId(70),
+        chat_id: ChatId(7),
+        date: 0,
+        is_outgoing: true,
+        is_pinned: false,
+        topic_id: None,
+        thread_id: None,
+        ephemeral: None,
+        media_album_id: 0,
+        author_signature: None,
+        scheduling_state: Some(MessageSchedulingState::SendAtDate { send_date: 999 }),
+        can_retry: false,
+        send_state: Default::default(),
+        content: MessageContent::Text(TextContent::plain("later")),
+        files: Vec::new(),
+        reply_to: None,
+        forward_info: None,
+        extras: Default::default(),
+        interaction_info: None,
+        reply_markup: None,
+        self_destruct: None,
+        auto_delete: None,
+    });
+    // Unknown ids are refused before anything is sent.
+    assert_eq!(
+        driver.edit_scheduled_message(ChatId(7), MessageId(71), ComposerScheduling::None),
+        Err(ConnectSendError::InvalidRequest)
+    );
+    let extra = driver
+        .edit_scheduled_message(
+            ChatId(7),
+            MessageId(70),
+            ComposerScheduling::SendAtDate(1_800_000_600),
+        )
+        .unwrap();
+    let json = recorder.snapshot().last().cloned().expect("request");
+    let v: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "editMessageSchedulingState");
+    assert_eq!(v["@extra"], extra.0.to_string());
+    assert_eq!(v["scheduling_state"]["send_date"], 1_800_000_600);
+    let _ = std::fs::remove_dir_all(&dir);
+}

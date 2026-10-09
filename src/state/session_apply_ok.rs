@@ -17,6 +17,10 @@ impl Session {
         }
         self.apply_proxy_ok(pending);
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::EditMessageSchedulingState {
+                message_id,
+                scheduling,
+            }) => self.finish_scheduling_edit(message_id, scheduling),
             Some(RequestPurpose::AddProfileAudio) => {
                 self.message_action_note = Some("saved to your profile".into());
             }

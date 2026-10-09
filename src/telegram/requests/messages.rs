@@ -692,6 +692,37 @@ pub fn get_chat_scheduled_messages(extra: RequestId, chat_id: ChatId) -> String 
     .to_string()
 }
 
+/// `editMessageSchedulingState chat_id message_id scheduling_state`
+/// (TDLib 1.8.67): moves a scheduled message to a new send time. A null
+/// state sends the message immediately ("Send now"); tdesktop's
+/// `Api::SendOptions` does the same through `sendScheduledMessages`.
+pub fn edit_message_scheduling_state(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    scheduling: ComposerScheduling,
+) -> String {
+    let scheduling_state = match scheduling {
+        ComposerScheduling::None => Value::Null,
+        ComposerScheduling::SendAtDate(send_date) => json!({
+            "@type": "messageSchedulingStateSendAtDate",
+            "send_date": send_date as i32,
+            "repeat_period": 0,
+        }),
+        ComposerScheduling::SendWhenOnline => {
+            json!({"@type": "messageSchedulingStateSendWhenOnline"})
+        }
+    };
+    json!({
+        "@type": "editMessageSchedulingState",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "scheduling_state": scheduling_state,
+    })
+    .to_string()
+}
+
 /// `reactionTypeEmoji` (TDLib 1.8.67). Paid reactions stay out —
 ///
 /// `setStoryReaction` can't set them (schema comment, `td_api.tl:13809`).
