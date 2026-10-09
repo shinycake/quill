@@ -29,6 +29,10 @@ pub(crate) enum PrivacyEditorTarget {
     Rule(PrivacySettingKey),
     CallAllow,
     CallP2P,
+    /// B13: "Who can message me" (`newChatPrivacySettings`).
+    NewChat,
+    /// B13: "File open confirmations" (extension whitelist + IP warning).
+    FileOpen,
 }
 
 impl PrivacyEditorTarget {
@@ -37,6 +41,8 @@ impl PrivacyEditorTarget {
             PrivacyEditorTarget::Rule(key) => key.label(),
             PrivacyEditorTarget::CallAllow => "Who can call me",
             PrivacyEditorTarget::CallP2P => "Peer-to-peer calls",
+            PrivacyEditorTarget::NewChat => "Who can message me",
+            PrivacyEditorTarget::FileOpen => "File open confirmations",
         }
     }
 }
@@ -75,6 +81,10 @@ impl QuillApp {
             }
             let _ = live.driver.fetch_read_date_privacy();
             let _ = live.driver.fetch_blocked_senders();
+            let _ = live.driver.fetch_new_chat_privacy();
+            if let Some(me) = live.driver.session.my_user_id {
+                let _ = live.driver.fetch_user_full_info(me);
+            }
         }
         cx.notify();
     }
@@ -97,7 +107,7 @@ impl QuillApp {
 
     /// Slice S3: shared dialog shell for the privacy overlays (mirrors
     /// `storage_usage_overlay`): dim backdrop + centered card.
-    fn privacy_shell(
+    pub(super) fn privacy_shell(
         &self,
         cx: &mut Context<Self>,
         id: &str,
@@ -172,34 +182,52 @@ impl QuillApp {
     pub(crate) fn privacy_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut body = div().flex().flex_col().gap_3();
 
+        if self
+            .session()
+            .is_some_and(|s| s.privacy_data.check_password_suggested)
+        {
+            body = body.child(self.password_check_card(cx));
+        }
+
         let mut visibility = div().flex().flex_col().gap_1();
         visibility = visibility.child(div().text_sm().font_semibold().px_1().child("Who can see"));
-        for key in PrivacySettingKey::all() {
+        for key in PrivacySettingKey::visibility_rows() {
             visibility = visibility.child(self.privacy_rule_row(cx, key));
         }
         body = body.child(visibility);
 
-        let mut calls = div().flex().flex_col().gap_1();
-        calls = calls.child(div().text_sm().font_semibold().px_1().child("Calls"));
-        calls = calls.child(self.privacy_call_row(
+        let mut contact = div().flex().flex_col().gap_1();
+        contact = contact.child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .px_1()
+                .child("Who can contact me"),
+        );
+        contact = contact.child(self.privacy_call_row(
             cx,
             "allow",
             "Who can call me",
             None,
             PrivacyEditorTarget::CallAllow,
         ));
-        calls = calls.child(self.privacy_call_row(
+        contact = contact.child(self.privacy_call_row(
             cx,
             "p2p",
             "Peer-to-peer calls",
             Some("Use peer-to-peer for voice and video calls when possible"),
             PrivacyEditorTarget::CallP2P,
         ));
-        body = body.child(calls);
+        contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowVoiceMessages));
+        contact = contact.child(self.new_chat_privacy_row(cx));
+        contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowChatInvites));
+        body = body.child(contact);
 
         body = body.child(self.privacy_frequent_contacts_section(cx));
 
         body = body.child(self.privacy_blocked_section(cx));
+
+        body = body.child(self.privacy_security_section(cx));
 
         // Slice payments: the "Clear saved payment/shipping info" row
         // (`parity:bots-payment-clear`) — destructive, with the shared
@@ -333,7 +361,9 @@ impl QuillApp {
                 session.is_some_and(|s| s.call_privacy_loading),
                 session.is_some_and(|s| s.call_privacy_error),
             ),
-            PrivacyEditorTarget::Rule(_) => (None, false, false),
+            PrivacyEditorTarget::Rule(_)
+            | PrivacyEditorTarget::NewChat
+            | PrivacyEditorTarget::FileOpen => (None, false, false),
         };
         let value = if loading {
             "Loading…".to_string()
@@ -625,12 +655,20 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice S3: per-rule editor overlay (TGX
-    /// `SettingsPrivacyKeyController`): Everybody / My contacts / Nobody
-    /// radios, always/never exception rows for rule targets, and the
-    /// "Hide read time" toggle for Last Seen.
+    /// Slice S3 + B13: per-rule editor overlay (tdesktop
+    /// `EditPrivacyBox`): the key's radios (Everybody / My contacts /
+    /// Nobody; "find me by number" has only the first two), always/never
+    /// exception rows with the Premium / Mini Apps rows where tdesktop
+    /// offers them, the "Hide read time" toggle for Last Seen, the "find
+    /// me by my number" choice under a hidden phone number, and the gift
+    /// settings under Gifts.
     pub(crate) fn privacy_editor_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let target = self.privacy_editor?;
+        match target {
+            PrivacyEditorTarget::NewChat => return Some(self.new_chat_editor(cx)),
+            PrivacyEditorTarget::FileOpen => return Some(self.file_open_editor(cx)),
+            _ => {}
+        }
         let session = self.session();
         let current: Option<PrivacyWho> =
             match target {
@@ -642,50 +680,96 @@ impl QuillApp {
                     }),
                 PrivacyEditorTarget::CallAllow => session.and_then(|s| s.call_privacy_allow_calls),
                 PrivacyEditorTarget::CallP2P => session.and_then(|s| s.call_privacy_p2p),
+                PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => None,
             };
         let mut body = div().flex().flex_col().gap_1();
-        for who in [
-            PrivacyWho::Everybody,
-            PrivacyWho::Contacts,
-            PrivacyWho::Nobody,
-        ] {
+        if let PrivacyEditorTarget::Rule(key) = target {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .px_1()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(key.header()),
+            );
+        }
+        let options: &[PrivacyWho] = match target {
+            PrivacyEditorTarget::Rule(key) => key.options(),
+            _ => &[
+                PrivacyWho::Everybody,
+                PrivacyWho::Contacts,
+                PrivacyWho::Nobody,
+            ],
+        };
+        for &who in options {
             body = body.child(self.privacy_radio_row(cx, target, who, current));
         }
         if let PrivacyEditorTarget::Rule(key) = target {
-            let detail = session
-                .and_then(|s| s.privacy.get(&key))
-                .and_then(|st| match st {
-                    PrivacyKeyState::Ready(d) => Some(d.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default();
-            let (always, never) = detail.exception_counts();
-            body = body.child(self.privacy_exception_row(
-                cx,
-                target,
-                PrivacyExceptionKind::Always,
-                always,
-            ));
-            body = body.child(self.privacy_exception_row(
-                cx,
-                target,
-                PrivacyExceptionKind::Never,
-                never,
-            ));
-            // TGX `SettingsPrivacyKeyController.needExtraToggle`: the
-            // "Hide read time" toggle shows unless the mode is Everybody
-            // with no never-exceptions.
-            if key == PrivacySettingKey::ShowStatus
-                && (current != Some(PrivacyWho::Everybody) || !detail.never.is_empty())
+            // tdesktop `PhoneNumberPrivacyController::setupMiddleWidget`:
+            // the find-by-number choice shows while the number is hidden
+            // from everybody.
+            if key == PrivacySettingKey::ShowPhoneNumber && current == Some(PrivacyWho::Nobody) {
+                body = body.child(self.find_by_number_block(cx));
+            }
+            if key == PrivacySettingKey::AutosaveGifts {
+                body = body.child(self.gift_settings_block(cx));
+            }
+            if key.has_exceptions() {
+                let detail = session
+                    .and_then(|s| s.privacy.get(&key))
+                    .and_then(|st| match st {
+                        PrivacyKeyState::Ready(d) => Some(d.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let (always, never) = detail.exception_counts();
+                body = body.child(self.privacy_exception_row(
+                    cx,
+                    target,
+                    PrivacyExceptionKind::Always,
+                    always,
+                ));
+                body = body.child(self.privacy_exception_row(
+                    cx,
+                    target,
+                    PrivacyExceptionKind::Never,
+                    never,
+                ));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .px_2()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(key.exceptions_note()),
+                );
+                // TGX `SettingsPrivacyKeyController.needExtraToggle`: the
+                // "Hide read time" toggle shows unless the mode is Everybody
+                // with no never-exceptions.
+                if key == PrivacySettingKey::ShowStatus
+                    && (current != Some(PrivacyWho::Everybody) || !detail.never.is_empty())
+                {
+                    body = body.child(self.read_date_toggle_row(cx));
+                }
+            }
+            if key.restriction_needs_premium()
+                && !session.is_some_and(|s| s.premium_option == Some(true))
             {
-                body = body.child(self.read_date_toggle_row(cx));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .px_2()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            "Restricting who can send you voice messages needs Telegram Premium.",
+                        ),
+                );
             }
         }
         Some(self.privacy_shell(cx, "editor", target.label(), body.into_any_element()))
     }
 
     /// Slice S3: one Everybody / My contacts / Nobody radio row.
-    fn privacy_radio_row(
+    pub(super) fn privacy_radio_row(
         &self,
         cx: &mut Context<Self>,
         target: PrivacyEditorTarget,
@@ -725,12 +809,26 @@ impl QuillApp {
     /// Slice S3: change one rule's base choice. Live: optimistic `set`
     /// that keeps the current exception rules (TGX `toggleGlobal`).
     /// Demo: mutate the fixture directly.
-    fn set_privacy_target_who(
+    pub(super) fn set_privacy_target_who(
         &mut self,
         target: PrivacyEditorTarget,
         who: PrivacyWho,
         cx: &mut Context<Self>,
     ) {
+        // tdesktop `VoicesPrivacyController::premiumClickedCallback`:
+        // narrowing who can send voice messages needs Premium.
+        if let PrivacyEditorTarget::Rule(key) = target
+            && key.restriction_needs_premium()
+            && who != PrivacyWho::Everybody
+            && !self
+                .session()
+                .is_some_and(|s| s.premium_option == Some(true))
+        {
+            self.status_note =
+                "Restricting who can send you voice messages needs Telegram Premium.".into();
+            cx.notify();
+            return;
+        }
         if self.live.is_some() {
             // Scoped borrow: the driver result is owned, so the
             // `status_note` write below doesn't alias the live borrow.
@@ -752,6 +850,7 @@ impl QuillApp {
                     PrivacyEditorTarget::CallP2P => live
                         .driver
                         .set_call_privacy(CallPrivacySetting::PeerToPeer, who),
+                    PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => return,
                 }
             };
             if let Err(err) = result {
@@ -770,6 +869,7 @@ impl QuillApp {
                 }
                 PrivacyEditorTarget::CallAllow => demo.call_privacy_allow_calls = Some(who),
                 PrivacyEditorTarget::CallP2P => demo.call_privacy_p2p = Some(who),
+                PrivacyEditorTarget::NewChat | PrivacyEditorTarget::FileOpen => return,
             }
         }
         cx.notify();
@@ -879,9 +979,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice S3: the always/never exception user list (TGX
-    /// `SettingsPrivacyKeyController` exceptions section) with Remove
-    /// per user and an Add contact picker.
+    /// Slice S3 + B13: the always/never exception list (tdesktop
+    /// `PrivacyExceptionsBoxController`): the Premium users / Mini Apps
+    /// rows where tdesktop offers them, then users and groups with Remove
+    /// and Add pickers.
     pub(crate) fn privacy_exceptions_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (target, kind) = self.privacy_exceptions?;
         let session = self.session()?;
@@ -896,18 +997,44 @@ impl QuillApp {
                 _ => None,
             })
             .unwrap_or_default();
-        let ids: &[i64] = match kind {
-            PrivacyExceptionKind::Always => &detail.always,
-            PrivacyExceptionKind::Never => &detail.never,
+        let (ids, chat_ids): (&[i64], &[i64]) = match kind {
+            PrivacyExceptionKind::Always => (&detail.always, &detail.always_chats),
+            PrivacyExceptionKind::Never => (&detail.never, &detail.never_chats),
         };
         let mut body = div().flex().flex_col().gap_1();
-        if ids.is_empty() {
+        if key.allows_premium_exception(kind == PrivacyExceptionKind::Always) {
+            body = body.child(self.exception_flag_row(
+                cx,
+                target,
+                kind,
+                ExceptionFlag::Premium,
+                "Premium users",
+                "all Telegram Premium subscribers",
+                detail.allow_premium,
+            ));
+        }
+        if key.allows_bots_exception() {
+            let on = match kind {
+                PrivacyExceptionKind::Always => detail.allow_bots,
+                PrivacyExceptionKind::Never => detail.never_bots,
+            };
+            body = body.child(self.exception_flag_row(
+                cx,
+                target,
+                kind,
+                ExceptionFlag::Bots,
+                "Mini Apps",
+                "web mini apps that you use",
+                on,
+            ));
+        }
+        if ids.is_empty() && chat_ids.is_empty() {
             body = body.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("No users added yet."),
+                    .child("No users or groups added yet."),
             );
         }
         for user_id in ids {
@@ -937,23 +1064,113 @@ impl QuillApp {
                     ),
             );
         }
+        for chat_id in chat_ids {
+            let chat_id = *chat_id;
+            let title = session
+                .chats
+                .get(&chat_id)
+                .map(|c| c.title.clone())
+                .unwrap_or_else(|| format!("Group {chat_id}"));
+            body = body.child(
+                div()
+                    .id(format!("privacy-exception-chat-{chat_id}"))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_2()
+                    .py_1()
+                    .child(div().text_sm().child(title))
+                    .child(
+                        Button::new(format!("privacy-exception-remove-chat-{chat_id}"))
+                            .small()
+                            .label("Remove")
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.edit_exception_chat(target, kind, chat_id, false, cx);
+                            })),
+                    ),
+            );
+        }
         body = body.child(
-            Button::new("privacy-exception-add")
-                .small()
-                .label("Add user…")
-                .ghost()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.exception_picker_open = true;
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.fetch_contacts();
-                    }
-                    cx.notify();
-                })),
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("privacy-exception-add")
+                        .small()
+                        .label("Add user…")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.exception_picker_open = true;
+                            this.privacy_ui.exception_picker_groups = false;
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.fetch_contacts();
+                            }
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("privacy-exception-add-group")
+                        .small()
+                        .label("Add group…")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.exception_picker_open = true;
+                            this.privacy_ui.exception_picker_groups = true;
+                            cx.notify();
+                        })),
+                ),
         );
         if self.exception_picker_open {
-            body = body.child(self.exception_picker(cx, target, kind, &detail));
+            body = if self.privacy_ui.exception_picker_groups {
+                body.child(self.exception_group_picker(cx, target, kind, &detail))
+            } else {
+                body.child(self.exception_picker(cx, target, kind, &detail))
+            };
         }
         Some(self.privacy_shell(cx, "exceptions", kind.label(), body.into_any_element()))
+    }
+
+    /// One Premium users / Mini Apps switch row of an exception list.
+    #[allow(clippy::too_many_arguments)]
+    fn exception_flag_row(
+        &self,
+        cx: &mut Context<Self>,
+        target: PrivacyEditorTarget,
+        kind: PrivacyExceptionKind,
+        flag: ExceptionFlag,
+        label: &'static str,
+        about: &'static str,
+        on: bool,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().text_sm().child(label))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(about),
+                    ),
+            )
+            .child(
+                Switch::new(format!("privacy-exception-flag-{flag:?}-{kind:?}"))
+                    .checked(on)
+                    .accessibility_label(label)
+                    .on_click(cx.listener(move |this, &on: &bool, _, cx| {
+                        this.edit_exception_flag(target, kind, flag, on, cx);
+                    })),
+            )
+            .into_any_element()
     }
 
     /// Slice S3: add-exception contact picker — contacts not already in
@@ -1012,44 +1229,98 @@ impl QuillApp {
         body.into_any_element()
     }
 
-    /// Slice S3: add or remove one user from an always/never exception
-    /// list. Adding to one list removes the user from the other (a user
-    /// can't meaningfully be in both under first-match evaluation).
-    /// Live: full-detail `set` preserving extras; demo: mutate the fixture.
-    fn edit_exception(
-        &mut self,
+    /// B13: add-exception group picker — the user's groups and
+    /// supergroups (tdesktop's exception lists take chats whose members
+    /// the rule then covers), not already in either list.
+    fn exception_group_picker(
+        &self,
+        cx: &mut Context<Self>,
         target: PrivacyEditorTarget,
         kind: PrivacyExceptionKind,
-        user_id: i64,
-        add: bool,
+        detail: &PrivacyRuleDetail,
+    ) -> AnyElement {
+        let groups: Vec<(i64, String)> = self
+            .session()
+            .map(|s| {
+                s.ordered_chats()
+                    .into_iter()
+                    .filter(|chat| {
+                        matches!(
+                            chat.kind,
+                            quill::telegram::envelope::ChatKind::BasicGroup { .. }
+                                | quill::telegram::envelope::ChatKind::Supergroup {
+                                    is_channel: false,
+                                    ..
+                                }
+                        )
+                    })
+                    .filter(|chat| {
+                        !detail.always_chats.contains(&chat.id.0)
+                            && !detail.never_chats.contains(&chat.id.0)
+                    })
+                    .map(|chat| (chat.id.0, chat.title.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut body = div().flex().flex_col().gap_1().mt_1();
+        body = body.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .px_1()
+                .child("Choose a group:"),
+        );
+        if groups.is_empty() {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .px_2()
+                    .child("No more groups."),
+            );
+        }
+        for (chat_id, title) in groups {
+            body = body.child(
+                div()
+                    .id(format!("privacy-picker-chat-{chat_id}"))
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(format!("Add {title} to privacy exceptions"))
+                    .tab_index(0)
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .child(div().text_sm().child(title))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.edit_exception_chat(target, kind, chat_id, true, cx);
+                    })),
+            );
+        }
+        body.into_any_element()
+    }
+
+    /// Apply `edit` to the key's rule detail and send/store the result.
+    /// Not Ready (Loading/Failed): ignored — an empty detail would
+    /// recompose into a base-less rule list (first-match => deny-all).
+    fn mutate_privacy_detail(
+        &mut self,
+        key: PrivacySettingKey,
+        edit: impl FnOnce(&mut PrivacyRuleDetail),
         cx: &mut Context<Self>,
     ) {
-        let PrivacyEditorTarget::Rule(key) = target else {
-            return;
-        };
         let current = self.session().and_then(|s| {
             s.privacy.get(&key).and_then(|st| match st {
                 PrivacyKeyState::Ready(d) => Some(d.clone()),
                 _ => None,
             })
         });
-        // Not Ready (Loading/Failed): ignore — an empty detail would
-        // recompose into a base-less rule list (first-match => deny-all).
         let Some(mut detail) = current else {
             return;
         };
-        let (mine, other) = match kind {
-            PrivacyExceptionKind::Always => (&mut detail.always, &mut detail.never),
-            PrivacyExceptionKind::Never => (&mut detail.never, &mut detail.always),
-        };
-        if add {
-            other.retain(|id| *id != user_id);
-            if !mine.contains(&user_id) {
-                mine.push(user_id);
-            }
-        } else {
-            mine.retain(|id| *id != user_id);
-        }
+        edit(&mut detail);
         if self.live.is_some() {
             let result = {
                 let live = self.live.as_mut().expect("live checked above");
@@ -1061,11 +1332,131 @@ impl QuillApp {
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.privacy.insert(key, PrivacyKeyState::Ready(detail));
         }
+        cx.notify();
+    }
+
+    /// Slice S3: add or remove one user from an always/never exception
+    /// list. Adding to one list removes the user from the other (a user
+    /// can't meaningfully be in both under first-match evaluation).
+    fn edit_exception(
+        &mut self,
+        target: PrivacyEditorTarget,
+        kind: PrivacyExceptionKind,
+        user_id: i64,
+        add: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let PrivacyEditorTarget::Rule(key) = target else {
+            return;
+        };
+        self.mutate_privacy_detail(
+            key,
+            |detail| {
+                let (mine, other) = match kind {
+                    PrivacyExceptionKind::Always => (&mut detail.always, &mut detail.never),
+                    PrivacyExceptionKind::Never => (&mut detail.never, &mut detail.always),
+                };
+                if add {
+                    other.retain(|id| *id != user_id);
+                    if !mine.contains(&user_id) {
+                        mine.push(user_id);
+                    }
+                } else {
+                    mine.retain(|id| *id != user_id);
+                }
+            },
+            cx,
+        );
         if add {
             self.exception_picker_open = false;
         }
         cx.notify();
     }
+
+    /// B13: add or remove one group (`...ChatMembers` rules) of an
+    /// always/never list; the other list drops it, like users.
+    pub(super) fn edit_exception_chat(
+        &mut self,
+        target: PrivacyEditorTarget,
+        kind: PrivacyExceptionKind,
+        chat_id: i64,
+        add: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let PrivacyEditorTarget::Rule(key) = target else {
+            return;
+        };
+        self.mutate_privacy_detail(
+            key,
+            |detail| {
+                let (mine, other) = match kind {
+                    PrivacyExceptionKind::Always => {
+                        (&mut detail.always_chats, &mut detail.never_chats)
+                    }
+                    PrivacyExceptionKind::Never => {
+                        (&mut detail.never_chats, &mut detail.always_chats)
+                    }
+                };
+                if add {
+                    other.retain(|id| *id != chat_id);
+                    if !mine.contains(&chat_id) {
+                        mine.push(chat_id);
+                    }
+                } else {
+                    mine.retain(|id| *id != chat_id);
+                }
+            },
+            cx,
+        );
+        if add {
+            self.exception_picker_open = false;
+        }
+        cx.notify();
+    }
+
+    /// B13: flip the Premium users / Mini Apps row of an exception list.
+    /// Choosing a row in one list clears it in the other (tdesktop
+    /// `EditPrivacyBox::editExceptions`).
+    pub(super) fn edit_exception_flag(
+        &mut self,
+        target: PrivacyEditorTarget,
+        kind: PrivacyExceptionKind,
+        flag: ExceptionFlag,
+        on: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let PrivacyEditorTarget::Rule(key) = target else {
+            return;
+        };
+        self.mutate_privacy_detail(
+            key,
+            |detail| match (flag, kind) {
+                (ExceptionFlag::Premium, _) => detail.allow_premium = on,
+                (ExceptionFlag::Bots, PrivacyExceptionKind::Always) => {
+                    detail.allow_bots = on;
+                    if on {
+                        detail.never_bots = false;
+                    }
+                }
+                (ExceptionFlag::Bots, PrivacyExceptionKind::Never) => {
+                    detail.never_bots = on;
+                    if on {
+                        detail.allow_bots = false;
+                    }
+                }
+            },
+            cx,
+        );
+    }
+}
+
+/// B13: the non-peer rows of an exception list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExceptionFlag {
+    /// `userPrivacySettingRuleAllowPremiumUsers`.
+    Premium,
+    /// `userPrivacySettingRuleAllowBots` / `...RestrictBots`.
+    Bots,
 }
 
 /// Slice S3: `ReadyPrivacy` fixture — the five privacy rules (with
@@ -1091,7 +1482,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
                 who: Some(who),
                 always: always.to_vec(),
                 never: never.to_vec(),
-                extra_rules: Vec::new(),
+                ..Default::default()
             }),
         );
     };
@@ -1125,6 +1516,77 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
         &[61],
         &[],
     );
+    ready(PrivacySettingKey::ShowBio, PrivacyWho::Contacts, &[], &[]);
+    ready(
+        PrivacySettingKey::ShowBirthdate,
+        PrivacyWho::Contacts,
+        &[61],
+        &[],
+    );
+    ready(
+        PrivacySettingKey::ShowProfileAudio,
+        PrivacyWho::Everybody,
+        &[],
+        &[62],
+    );
+    ready(
+        PrivacySettingKey::AllowFindingByPhoneNumber,
+        PrivacyWho::Contacts,
+        &[],
+        &[],
+    );
+    ready(
+        PrivacySettingKey::AllowVoiceMessages,
+        PrivacyWho::Everybody,
+        &[],
+        &[],
+    );
+    ready(
+        PrivacySettingKey::AutosaveGifts,
+        PrivacyWho::Everybody,
+        &[],
+        &[],
+    );
+    // tdesktop offers Premium users in the Always list of "Groups &
+    // Channels" and Mini Apps in both lists of "Gifts".
+    if let Some(PrivacyKeyState::Ready(detail)) = session
+        .privacy
+        .get_mut(&PrivacySettingKey::AllowChatInvites)
+    {
+        detail.allow_premium = true;
+        detail.always_chats = vec![9001];
+    }
+    if let Some(PrivacyKeyState::Ready(detail)) =
+        session.privacy.get_mut(&PrivacySettingKey::AutosaveGifts)
+    {
+        detail.never_bots = true;
+    }
+    session.my_user_id = Some(60);
+    session.premium_option = Some(true);
+    session.user_full_infos.insert(
+        60,
+        quill::state::UserFullInfoData {
+            extras: quill::telegram::envelope::UserProfileExtras {
+                gift_settings: Some(quill::privacy::GiftSettings {
+                    show_gift_button: true,
+                    limited_gifts: false,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    session.privacy_data.new_chat = Some(quill::privacy::NewChatPrivacyState::Ready(
+        quill::privacy::NewChatPrivacy {
+            allow_from_unknown: false,
+            incoming_paid_message_star_count: 0,
+        },
+    ));
+    session.privacy_data.can_ignore_sensitive = true;
+    session.privacy_data.ignore_sensitive = Some(false);
+    session.privacy_data.check_password_suggested = true;
+    session.privacy_data.inactive_session_ttl_days = Some(180);
     session.read_date_show = Some(true);
     session.call_privacy_allow_calls = Some(PrivacyWho::Contacts);
     session.call_privacy_p2p = Some(PrivacyWho::Everybody);
@@ -1149,6 +1611,26 @@ fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
                 value.push_str(&format!(" (+{always}/−{never})"));
             }
             value
+        }
+    }
+}
+
+/// B13: the "Who can message me" row value (tdesktop Messages privacy).
+pub(super) fn new_chat_privacy_value(session: &Session) -> String {
+    match session.privacy_data.new_chat {
+        None | Some(quill::privacy::NewChatPrivacyState::Loading) => "Loading…".to_string(),
+        Some(quill::privacy::NewChatPrivacyState::Failed) => "Couldn't load".to_string(),
+        Some(quill::privacy::NewChatPrivacyState::Ready(settings)) => {
+            if settings.incoming_paid_message_star_count > 0 {
+                format!(
+                    "{} Stars per message",
+                    settings.incoming_paid_message_star_count
+                )
+            } else if settings.allow_from_unknown {
+                "Everybody".to_string()
+            } else {
+                "Contacts & Premium".to_string()
+            }
         }
     }
 }

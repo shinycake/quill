@@ -28,7 +28,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
-pub(super) fn format_storage_bytes(n: i64) -> String {
+pub(crate) fn format_storage_bytes(n: i64) -> String {
     if n <= 0 {
         "0 B".to_string()
     } else if n < 1024 {
@@ -42,7 +42,7 @@ pub(super) fn format_storage_bytes(n: i64) -> String {
     }
 }
 
-fn section_header(title: &'static str) -> impl IntoElement {
+pub(super) fn section_header(title: &'static str) -> impl IntoElement {
     div()
         .id(format!("storage-heading-{title}"))
         .role(Role::Heading)
@@ -64,9 +64,14 @@ impl QuillApp {
             live.driver.session.storage_freed = None;
             let _ = live.driver.maybe_fetch_storage_statistics();
             let _ = live.driver.fetch_auto_download_presets();
+            let _ = live.driver.fetch_network_statistics();
         }
+        self.privacy_ui.network_reset_confirm = false;
         if let Some(demo) = self.demo_session.as_mut() {
             demo.storage_freed = None;
+            if demo.privacy_data.network_usage.is_none() {
+                demo.privacy_data.network_usage = Some(super::data_extra::demo_network_usage());
+            }
         }
         cx.notify();
     }
@@ -359,6 +364,8 @@ impl QuillApp {
                     ),
             );
         }
+        // --- Download folder (B13) ---
+        body = body.child(self.download_folder_section(cx));
         // --- Storage usage ---
         body = body.child(section_header("Storage usage"));
         let stats = session.as_ref().and_then(|s| s.storage_stats.clone());
@@ -380,6 +387,8 @@ impl QuillApp {
                 body = body.child(self.local_storage_section(cx, &stats));
             }
         }
+        // --- Network usage (B13) ---
+        body = body.child(self.network_usage_section(cx));
         body
     }
 

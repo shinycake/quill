@@ -1888,7 +1888,41 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 .and_then(Value::as_array)
                 .map(|list| list.iter().filter_map(parse_session).collect())
                 .unwrap_or_default();
-            Ok(EnvelopePayload::Sessions { sessions })
+            let inactive_session_ttl_days = value
+                .get("inactive_session_ttl_days")
+                .and_then(Value::as_i64)
+                .and_then(|days| i32::try_from(days).ok())
+                .filter(|days| *days > 0);
+            Ok(EnvelopePayload::Sessions {
+                sessions,
+                inactive_session_ttl_days,
+            })
+        }
+        // B13: privacy and data settings answers.
+        "newChatPrivacySettings" => Ok(EnvelopePayload::NewChatPrivacySettings(
+            crate::privacy::NewChatPrivacy::from_value(&value),
+        )),
+        "networkStatistics" => Ok(EnvelopePayload::NetworkStatistics(
+            crate::network_usage::NetworkUsage::from_value(&value),
+        )),
+        "recoveryEmailAddress" => Ok(EnvelopePayload::RecoveryEmailAddress),
+        "updateSuggestedActions" => {
+            let names = |key: &str| -> Vec<String> {
+                value
+                    .get(key)
+                    .and_then(Value::as_array)
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|a| a.get("@type").and_then(Value::as_str))
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            Ok(EnvelopePayload::UpdateSuggestedActions {
+                added: names("added_actions"),
+                removed: names("removed_actions"),
+            })
         }
         // Slice A4: `connectedWebsites` — the `getConnectedWebsites`
         // answer (schema 1.8.67, lines 9171/15124). Unparseable websites

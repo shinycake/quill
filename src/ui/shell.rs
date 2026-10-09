@@ -110,6 +110,9 @@ pub enum DialogKind {
     DeepLinkShare,
     /// "Open this link?" for a hidden or look-alike message link.
     OpenLink,
+    /// B13: the warning before opening an executable, unknown or
+    /// IP-revealing file.
+    FileOpenConfirm,
     PollVoters,
     /// The message menu's Report flow.
     MessageReport,
@@ -229,6 +232,7 @@ impl QuillShell {
             DialogKind::DeepLinkInvite => app.deep_link_invite.is_some(),
             DialogKind::DeepLinkShare => app.share_link_text.is_some(),
             DialogKind::OpenLink => app.open_link_confirm.is_some(),
+            DialogKind::FileOpenConfirm => app.privacy_ui.file_open.is_some(),
             DialogKind::PollVoters => app.poll_voters_dialog.is_some(),
             DialogKind::MessageReport => app.message_menu_ui.report_open,
             DialogKind::StickerSet => app.message_menu_ui.sticker_set_open,
@@ -295,6 +299,7 @@ impl QuillShell {
             DialogKind::DeepLinkInvite => QuillApp::build_deep_link_invite_dialog,
             DialogKind::DeepLinkShare => QuillApp::build_deep_link_share_dialog,
             DialogKind::OpenLink => QuillApp::build_open_link_dialog,
+            DialogKind::FileOpenConfirm => QuillApp::build_file_open_dialog,
             DialogKind::PollVoters => QuillApp::build_poll_voters_dialog,
             DialogKind::MessageReport => QuillApp::build_message_report_dialog,
             DialogKind::StickerSet => QuillApp::build_sticker_set_dialog,
@@ -379,6 +384,7 @@ impl QuillShell {
         DialogKind::ProxyLink,
         DialogKind::ProxyList,
         DialogKind::OpenLink,
+        DialogKind::FileOpenConfirm,
         DialogKind::PaymentForm,
         DialogKind::PaymentReceipt,
         DialogKind::Subscriptions,

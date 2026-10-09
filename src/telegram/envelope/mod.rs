@@ -67,6 +67,8 @@ mod notification_sound_tests;
 #[cfg(test)]
 mod password_state_tests;
 #[cfg(test)]
+mod privacy_data_tests;
+#[cfg(test)]
 mod sessions_tests;
 #[cfg(test)]
 mod storage_statistics_tests;

@@ -1,0 +1,9 @@
+# B13 privacy keys, security and data settings
+parity:settings-privacy-extra-keys
+parity:settings-privacy-rule-types
+parity:settings-password-remember
+parity:settings-inactive-sessions
+parity:settings-sensitive-content
+parity:settings-file-open-confirm
+parity:data-download-path
+parity:data-network-usage

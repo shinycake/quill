@@ -1195,6 +1195,16 @@ impl Session {
                 | RequestPurpose::PingProxy { .. }
                 | RequestPurpose::SetPreferIpv6 { .. }),
             ) => self.apply_proxy_error(purpose, &err),
+            Some(
+                purpose @ (RequestPurpose::GetNewChatPrivacy
+                | RequestPurpose::SetNewChatPrivacy { .. }
+                | RequestPurpose::SetGiftSettings
+                | RequestPurpose::SetInactiveSessionTtl
+                | RequestPurpose::SetSensitiveContent
+                | RequestPurpose::GetNetworkStatistics
+                | RequestPurpose::ResetNetworkStatistics
+                | RequestPurpose::CheckRememberedPassword),
+            ) => self.apply_privacy_data_error(purpose, &err),
             Some(RequestPurpose::GetActiveSessions) => {
                 self.sessions_loading = false;
                 self.sessions_stale = false;
