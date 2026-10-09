@@ -17,6 +17,7 @@ mod misc;
 mod payments;
 mod polls;
 mod privacy;
+mod profile_panels;
 mod proxy;
 mod secret_chats;
 mod stickers;
@@ -41,6 +42,8 @@ mod tests_messages;
 mod tests_misc;
 #[cfg(test)]
 mod tests_polls;
+#[cfg(test)]
+mod tests_profile_panels;
 #[cfg(test)]
 mod tests_stickers;
 #[cfg(test)]
@@ -69,6 +72,7 @@ pub use misc::*;
 pub use payments::*;
 pub use polls::*;
 pub use privacy::*;
+pub use profile_panels::*;
 pub use proxy::*;
 pub use secret_chats::*;
 pub use stickers::*;

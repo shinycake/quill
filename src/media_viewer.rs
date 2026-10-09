@@ -57,6 +57,36 @@ pub enum ViewerSource {
     /// A Shared Media tab (tdesktop `SharedMediaWithLastSlice`): the list
     /// grows toward older messages as the viewer pages toward its start.
     SharedMedia,
+    /// B10: one user's profile photos (`getUserProfilePhotos`), newest
+    /// first. Items carry the `chatPhoto.id` as their message id and no
+    /// chat, so the message-bound actions (forward, delete, show in chat,
+    /// album pin) do not apply.
+    Profile,
+}
+
+/// B10: viewer items for a profile photo gallery. The item's `message_id`
+/// is the `chatPhoto.id` ("Set as main photo" reads it back); both sizes
+/// are display candidates, the largest first.
+pub fn profile_photo_items(photos: &[crate::state::ProfilePhoto]) -> Vec<MediaViewerItem> {
+    photos
+        .iter()
+        .map(|photo| MediaViewerItem {
+            chat_id: ChatId(0),
+            message_id: MessageId(photo.id),
+            kind: MediaViewerKind::Photo,
+            display_file_ids: vec![FileId(photo.full_file_id), FileId(photo.thumb_file_id)],
+            download_file_id: FileId(photo.full_file_id),
+            play_file_id: None,
+            duration_secs: None,
+            mime_type: None,
+            start_timestamp: None,
+            caption: String::new(),
+            caption_entities: Vec::new(),
+            duration_label: None,
+            natural_size: (photo.width > 0 && photo.height > 0)
+                .then_some((photo.width, photo.height)),
+        })
+        .collect()
 }
 
 /// Items left before the loaded edge at which the viewer asks for the
@@ -138,6 +168,13 @@ impl MediaViewer {
         let mut viewer = Self::open(items, index);
         viewer.source = ViewerSource::SharedMedia;
         viewer.total = total;
+        viewer
+    }
+
+    /// B10: open over a user's profile photos on `index`.
+    pub fn open_profile(items: Vec<MediaViewerItem>, index: usize) -> Self {
+        let mut viewer = Self::open(items, index);
+        viewer.source = ViewerSource::Profile;
         viewer
     }
 
@@ -1489,6 +1526,32 @@ mod tests {
         ids.iter()
             .map(|id| item(MediaViewerKind::Photo, *id))
             .collect()
+    }
+
+    #[test]
+    fn profile_viewer_pages_over_photos_and_keeps_the_photo_id() {
+        let photo = |id, thumb, full, width, height| crate::state::ProfilePhoto {
+            id,
+            added_date: 0,
+            thumb_file_id: thumb,
+            full_file_id: full,
+            width,
+            height,
+        };
+        let items = profile_photo_items(&[photo(901, 11, 12, 800, 600), photo(902, 13, 14, 0, 0)]);
+        assert_eq!(items[0].message_id, MessageId(901));
+        assert_eq!(items[0].download_file_id, FileId(12));
+        assert_eq!(items[0].display_file_ids, vec![FileId(12), FileId(11)]);
+        assert_eq!(items[0].natural_size, Some((800, 600)));
+        assert_eq!(items[1].natural_size, None);
+        let mut viewer = MediaViewer::open_profile(items, 0);
+        assert_eq!(viewer.source(), ViewerSource::Profile);
+        assert_eq!(viewer.position(), Some((1, 2)));
+        assert!(!viewer.wants_older());
+        viewer.next();
+        assert_eq!(viewer.current().map(|i| i.message_id), Some(MessageId(902)));
+        viewer.close();
+        assert_eq!(viewer.source(), ViewerSource::Chat);
     }
 
     #[test]
