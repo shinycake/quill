@@ -910,11 +910,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 ### Deep links
 
-- [ ] Every t.me and tg:// link is classified by Telegram itself, not by a small local parser (today five link forms are handled) <!-- parity:deeplink-internal-link-type -->
-- [ ] addstickers and addemoji links open the sticker or emoji set <!-- parity:deeplink-stickers-emoji -->
-- [ ] proxy and socks links offer to add the proxy <!-- parity:deeplink-proxy -->
-- [ ] share and msg_url links open a chat picker with the draft text <!-- parity:deeplink-share-draft -->
-- [ ] Settings links open the matching settings page <!-- parity:deeplink-settings -->
+- [x] Every t.me and tg:// link is classified by Telegram itself, not by a small local parser (today five link forms are handled) <!-- parity:deeplink-internal-link-type -->
+- [x] addstickers and addemoji links open the sticker or emoji set <!-- parity:deeplink-stickers-emoji -->
+- [x] proxy and socks links offer to add the proxy <!-- parity:deeplink-proxy -->
+- [x] share and msg_url links open a chat picker with the draft text <!-- parity:deeplink-share-draft -->
+- [x] Settings links open the matching settings page <!-- parity:deeplink-settings -->
 - [ ] Login code links fill in the code <!-- parity:deeplink-login-code -->
 - [ ] Invoice links open the payment checkout <!-- parity:deeplink-invoice -->
 - [ ] Boost links open the boost dialog <!-- parity:deeplink-boost -->
@@ -922,11 +922,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Voice chat, video chat and live stream links join the call <!-- parity:deeplink-voice-chat -->
 - [ ] addlist links add a shared folder <!-- parity:deeplink-addlist -->
 - [ ] Background and theme links preview and apply them <!-- parity:deeplink-bg-theme -->
-- [ ] +phone links open a chat with that number <!-- parity:deeplink-phone -->
+- [x] +phone links open a chat with that number <!-- parity:deeplink-phone -->
 - [ ] ?startgroup and ?startchannel links add a bot to a group or channel <!-- parity:deeplink-startgroup -->
-- [ ] Message links with ?thread, ?comment, ?single and topic ids open the right thread <!-- parity:deeplink-thread-comment -->
-- [ ] Story and story album links open the story viewer <!-- parity:deeplink-story -->
-- [ ] ?t= timestamp links seek the media to that time <!-- parity:deeplink-timestamp -->
+- [x] Message links with ?thread, ?comment, ?single and topic ids open the right thread <!-- parity:deeplink-thread-comment -->
+- [x] Story and story album links open the story viewer <!-- parity:deeplink-story -->
+- [x] ?t= timestamp links seek the media to that time <!-- parity:deeplink-timestamp -->
 - [ ] Premium offer, privacy policy and language pack links <!-- parity:deeplink-premium-language -->
 - [ ] Register the tg:// scheme on Linux and Windows <!-- parity:deeplink-scheme-registration -->
 
