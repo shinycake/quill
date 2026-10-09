@@ -5,7 +5,8 @@ use super::bubble_header::{forward_header_line, reply_header_strip, via_bot_line
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::message_games::game_card;
 use super::message_media::{
-    MediaCorners, file_is_downloading, media_frame, photo_display_path, spoiler_cover,
+    MediaCorners, file_is_downloading, media_content_width, media_frame, photo_display_path,
+    single_media_width, spoiler_cover,
 };
 use super::message_media::{
     animation_attachment, audio_row, contact_row, dice_row, document_chip, location_row,
@@ -261,6 +262,7 @@ pub(super) fn album_history_row(
         chrome.avatar = Some(link.wrap(avatar));
     }
     chrome.media_led = true;
+    chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.)));
     chrome.footer_overlay = !has_caption;
     chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx).into_any_element());
     let extra = div()
@@ -1355,6 +1357,7 @@ pub(super) fn session_history_row(
             div().mt_2().child(media).into_any_element()
         }
     });
+    let extra_media_present = extra_media.is_some();
     let extra_is_empty =
         extra_media.is_none() && caption_below_el.is_none() && tail_empty && keyboard.is_none();
     #[allow(clippy::some_filter)]
@@ -1389,6 +1392,22 @@ pub(super) fn session_history_row(
                     !preview.show_above_text && preview.has_card()
                 })
         );
+    // The leading picture / video / GIF decides the bubble's width; the
+    // footer only widens it when the media is tiny.
+    let media_width = (extra_media_present && !emoji_only)
+        .then(|| {
+            single_media_width(effective_content(
+                &message.content,
+                message.ephemeral.as_ref(),
+            ))
+        })
+        .flatten()
+        .map(|width| {
+            media_content_width(
+                width,
+                footer_meta.reserve(footer_reserve(message.is_outgoing)),
+            )
+        });
     let mut more_btn = Some(more_btn);
     let mut avatar_link = avatar_link(&sender_avatar, message, cx);
     let mut chrome = |footer_inline: bool| {
@@ -1414,6 +1433,7 @@ pub(super) fn session_history_row(
             chrome.footer_rebuild = Some(std::rc::Rc::new(move || message_footer_meta(&meta)));
         }
         chrome.media_led = media_led;
+        chrome.media_width = media_width;
         chrome.actions = more_btn.take().map(IntoElement::into_any_element);
         chrome.bottom_bar = reply_bar_el.take();
         chrome
