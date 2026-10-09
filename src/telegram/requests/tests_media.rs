@@ -393,3 +393,84 @@ fn send_voice_note_shape_matches_1_8_67() {
     assert!(!json.contains("inputMessageVideoNote"));
     assert!(!json.contains("CANARY"));
 }
+
+#[test]
+fn edit_message_media_wraps_each_replacement_kind() {
+    use crate::composer::{EditMediaKind, EditMediaReplacement};
+    let rep = |kind, spoiler| EditMediaReplacement {
+        path: "/tmp/new.bin".into(),
+        file_name: "new.bin".into(),
+        kind,
+        spoiler,
+    };
+    let video = VideoSend {
+        duration: 3,
+        width: 320,
+        height: 180,
+        supports_streaming: true,
+        self_destruct: None,
+    };
+    for (kind, ty) in [
+        (EditMediaKind::Photo, "inputMessagePhoto"),
+        (EditMediaKind::Video, "inputMessageVideo"),
+        (EditMediaKind::Document, "inputMessageDocument"),
+        (EditMediaKind::Audio, "inputMessageAudio"),
+    ] {
+        let content = edit_media_content(
+            &rep(kind, false),
+            "/tmp/new.bin",
+            "CANARY_CAP",
+            true,
+            Some(&video),
+            false,
+        )
+        .expect("content");
+        let json = edit_message_media(RequestId(4), ChatId(7), MessageId(9), content);
+        let v: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["@type"], "editMessageMedia");
+        assert_eq!(v["@extra"], "4");
+        assert_eq!(v["chat_id"], 7);
+        assert_eq!(v["message_id"], 9);
+        assert_eq!(v["reply_markup"], Value::Null);
+        assert_eq!(v["input_message_content"]["@type"], ty);
+        assert_eq!(v["input_message_content"]["caption"]["text"], "CANARY_CAP");
+    }
+}
+
+#[test]
+fn edit_media_caption_position_and_spoiler_only_on_photo_video() {
+    use crate::composer::{EditMediaKind, EditMediaReplacement};
+    let rep = |kind| EditMediaReplacement {
+        path: "/tmp/x".into(),
+        file_name: "x".into(),
+        kind,
+        spoiler: true,
+    };
+    let photo =
+        edit_media_content(&rep(EditMediaKind::Photo), "/tmp/x", "c", true, None, false).unwrap();
+    assert_eq!(photo["show_caption_above_media"], true);
+    assert_eq!(photo["has_spoiler"], true);
+    let doc = edit_media_content(
+        &rep(EditMediaKind::Document),
+        "/tmp/x",
+        "c",
+        true,
+        None,
+        false,
+    )
+    .unwrap();
+    assert!(doc.get("show_caption_above_media").is_none());
+    assert!(doc.get("has_spoiler").is_none());
+    // A video needs its probe.
+    assert!(
+        edit_media_content(
+            &rep(EditMediaKind::Video),
+            "/tmp/x",
+            "c",
+            false,
+            None,
+            false
+        )
+        .is_none()
+    );
+}

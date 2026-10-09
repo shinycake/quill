@@ -1859,6 +1859,8 @@ impl QuillApp {
             composer_preview_disabled: false,
             composer_preview_above: false,
             composer_preview_media: PreviewMediaSize::Auto,
+            composer_preview_link: 0,
+            edit_replace_as_file: false,
             composer_preview_token: 0,
             composer_scheduling: ComposerScheduling::None,
             schedule_popup_open: false,

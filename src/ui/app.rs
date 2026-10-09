@@ -275,6 +275,12 @@ pub struct QuillApp {
     /// button only renders when the prefetched preview actually offers
     /// large media.
     pub(super) composer_preview_media: PreviewMediaSize,
+    /// B5: which detected link drives the preview (tdesktop "choose
+    /// link"); an index into the composer text's URLs, clamped.
+    pub(super) composer_preview_link: usize,
+    /// B5: "Send as a document" for the replacement file while editing
+    /// media (tdesktop `EditCaptionBox::_asFile`).
+    pub(super) edit_replace_as_file: bool,
     /// MED4b: debounce token for the `getLinkPreview` prefetch — each
     /// keystroke bumps it so only the latest quiet window fires (schema:
     /// "Do not call this function too often"; TGX rate-limits 400ms).

@@ -446,6 +446,25 @@ impl QuillApp {
     }
 
     pub(super) fn attach_dropped_files(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        // B5: while editing, a drop or paste replaces the message's media
+        // (tdesktop `EditCaptionBox` accepts exactly one file).
+        if self.pending_edit.is_some() {
+            match paths {
+                [only]
+                    if self
+                        .pending_edit
+                        .as_ref()
+                        .is_some_and(|e| e.allows_replace()) =>
+                {
+                    self.set_edit_replacement(only, cx);
+                }
+                _ => {
+                    self.status_note = "Drop a single file to replace the attachment.".into();
+                    cx.notify();
+                }
+            }
+            return;
+        }
         self.status_note =
             match ComposerAttachment::append_dropped_files(&mut self.pending_attachments, paths) {
                 Ok(count) => format!("Attached {count} files. Send to upload."),
@@ -564,6 +583,11 @@ impl QuillApp {
             ImageFormat::Pnm => "pnm",
         };
         match quill::composer::clipboard_image_attachment(&image.bytes, extension) {
+            // B5: a pasted image replaces the edited message's media.
+            Some(att) if self.pending_edit.is_some() => {
+                self.attach_dropped_files(std::slice::from_ref(&att.path), cx);
+                return true;
+            }
             Some(att) => {
                 let name = att.file_name.clone();
                 let before = self.pending_attachments.len();
@@ -673,6 +697,7 @@ impl QuillApp {
             link_preview_disabled: self.composer_preview_disabled,
             link_preview_above_text: self.composer_preview_above,
             link_preview_media: self.composer_preview_media,
+            link_preview_link: self.composer_preview_link,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
             ..SendOptions::default()
@@ -1479,6 +1504,86 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// B5: tdesktop `EditCaptionBox` "Replace attachment": open the file
+    /// dialog (all platforms) for one replacement file. `QUILL_EDIT_REPLACE`
+    /// skips the dialog for live testing; the offline demo uses its fixture.
+    pub(super) fn pick_edit_replacement(&mut self, cx: &mut Context<Self>) {
+        let preset = std::env::var_os("QUILL_EDIT_REPLACE")
+            .map(PathBuf::from)
+            .or_else(|| {
+                (self.live.is_none() && self.demo_session.is_some())
+                    .then(|| demo_media_allowlist().join("demo-thumb.png"))
+            });
+        if let Some(path) = preset {
+            self.set_edit_replacement(&path, cx);
+            return;
+        }
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Choose File".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = picker.await
+                && let Some(path) = paths.first().cloned()
+            {
+                let _ = this.update(cx, |this, cx| this.set_edit_replacement(&path, cx));
+            }
+        })
+        .detach();
+    }
+
+    /// B5: validate a file against tdesktop's replacement rules and stage it.
+    pub(super) fn set_edit_replacement(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let as_file = self.edit_replace_as_file;
+        let Some(edit) = self.pending_edit.as_mut() else {
+            return;
+        };
+        match edit.replacement_for(path, as_file) {
+            Ok(replacement) => {
+                self.status_note = format!("Replacing attachment with {}", replacement.file_name);
+                edit.media_edit.replacement = Some(replacement);
+            }
+            Err(note) => self.status_note = note.into(),
+        }
+        cx.notify();
+    }
+
+    /// B5: drop the staged replacement and keep the original media.
+    pub(super) fn clear_edit_replacement(&mut self, cx: &mut Context<Self>) {
+        if let Some(edit) = self.pending_edit.as_mut() {
+            edit.media_edit.replacement = None;
+        }
+        self.edit_replace_as_file = false;
+        self.status_note = "replacement cleared".into();
+        cx.notify();
+    }
+
+    /// B5: tdesktop's "Send as a document" checkbox on the replacement.
+    pub(super) fn toggle_edit_replace_as_file(&mut self, cx: &mut Context<Self>) {
+        self.edit_replace_as_file = !self.edit_replace_as_file;
+        let path = self
+            .pending_edit
+            .as_ref()
+            .and_then(|e| e.media_edit.replacement.as_ref())
+            .map(|r| r.path.clone());
+        if let Some(path) = path {
+            self.set_edit_replacement(&path, cx);
+        }
+    }
+
+    pub(super) fn toggle_edit_replace_spoiler(&mut self, cx: &mut Context<Self>) {
+        if let Some(replacement) = self
+            .pending_edit
+            .as_mut()
+            .and_then(|e| e.media_edit.replacement.as_mut())
+        {
+            replacement.spoiler = !replacement.spoiler;
+            cx.notify();
+        }
+    }
+
     pub(super) fn begin_reply_to(
         &mut self,
         reply: ComposerReplyTo,
@@ -1529,6 +1634,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.pending_attachments.clear();
+        self.edit_replace_as_file = false;
         let current = self.composer.read(cx).value().to_string();
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);

@@ -333,6 +333,98 @@ pub fn send_message_album(
     .to_string()
 }
 
+/// `inputMessageDocument` body (TDLib 1.8.67). Shared by `sendMessage` and `editMessageMedia`.
+pub fn input_message_document(path: &str, caption: &str, strip_blockquote: bool) -> Value {
+    json!({
+        "@type": "inputMessageDocument",
+        "document": {
+            "@type": "inputDocument",
+            "document": {
+                "@type": "inputFileLocal",
+                "path": path
+            },
+            "thumbnail": Value::Null,
+            "disable_content_type_detection": false
+        },
+        "caption": formatted_caption(caption, strip_blockquote)
+    })
+}
+
+/// `inputMessageAudio` body (TDLib 1.8.67, `schema/td_api.tl:6430`). Only
+/// used by `editMessageMedia`: duration, title and performer are left for
+/// TDLib/the server to fill from the file (the schema allows 0 / empty).
+pub fn input_message_audio(path: &str, caption: &str, strip_blockquote: bool) -> Value {
+    json!({
+        "@type": "inputMessageAudio",
+        "audio": {
+            "@type": "inputAudio",
+            "audio": {
+                "@type": "inputFileLocal",
+                "path": path
+            },
+            "album_cover_thumbnail": Value::Null,
+            "duration": 0,
+            "title": "",
+            "performer": ""
+        },
+        "caption": formatted_caption(caption, strip_blockquote)
+    })
+}
+
+/// B5: the `inputMessage*` content for one `editMessageMedia` replacement.
+/// `video` is required for `EditMediaKind::Video`. Spoilers apply to
+/// photos and videos only; secret chats force the caption below.
+pub fn edit_media_content(
+    replacement: &crate::composer::EditMediaReplacement,
+    path: &str,
+    caption: &str,
+    caption_above: bool,
+    video: Option<&VideoSend>,
+    strip_blockquote: bool,
+) -> Option<Value> {
+    use crate::composer::EditMediaKind;
+    let mut content = match replacement.kind {
+        EditMediaKind::Photo => {
+            input_message_photo(path, caption, caption_above, None, strip_blockquote)
+        }
+        EditMediaKind::Video => {
+            input_message_video(path, video?, caption, caption_above, strip_blockquote)
+        }
+        EditMediaKind::Document => input_message_document(path, caption, strip_blockquote),
+        EditMediaKind::Audio => input_message_audio(path, caption, strip_blockquote),
+    };
+    if replacement.spoiler
+        && matches!(
+            replacement.kind,
+            EditMediaKind::Photo | EditMediaKind::Video
+        )
+    {
+        content["has_spoiler"] = Value::Bool(true);
+    }
+    Some(content)
+}
+
+/// `editMessageMedia` (TDLib 1.8.67, `schema/td_api.tl:12722`): replace the
+/// media of an own message. `input_message_content` is an
+/// `inputMessagePhoto|Video|Document|Audio|Animation` and carries the
+/// caption too. `reply_markup` null (bots only).
+pub fn edit_message_media(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    input_message_content: Value,
+) -> String {
+    json!({
+        "@type": "editMessageMedia",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "reply_markup": Value::Null,
+        "input_message_content": input_message_content
+    })
+    .to_string()
+}
+
 /// `sendMessage` + `inputMessageDocument` / `inputDocument` / `inputFileLocal` (1.8.67).
 /// `path` must already be an explicitly picked local file — never a JSON `local.path`.
 pub fn send_document(
@@ -352,19 +444,7 @@ pub fn send_document(
         "reply_to": send_reply_value(reply_to.as_ref()),
         "options": Value::Null,
         "reply_markup": Value::Null,
-        "input_message_content": {
-            "@type": "inputMessageDocument",
-            "document": {
-                "@type": "inputDocument",
-                "document": {
-                    "@type": "inputFileLocal",
-                    "path": path
-                },
-                "thumbnail": Value::Null,
-                "disable_content_type_detection": false
-            },
-            "caption": formatted_caption(caption, strip_blockquote)
-        }
+        "input_message_content": input_message_document(path, caption, strip_blockquote)
     })
     .to_string()
 }

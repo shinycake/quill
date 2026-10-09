@@ -110,6 +110,7 @@ impl Session {
                     message.pending,
                     &message.content,
                 )
+                .map(|edit| edit.in_album(message.media_album_id != 0))
             })
     }
 

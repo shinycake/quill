@@ -799,6 +799,9 @@ impl QuillApp {
                         // control) and caption bar ("Add a caption…",
                         // above/below toggle, n / max counter).
                         .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
+                        .when_some(self.edit_replacement_chip(cx), |this, chip| {
+                            this.child(chip)
+                        })
                         .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
                         // kit Phase 5: the composer input row — attach and
                         // emoji/sticker pickers, the borderless growing
