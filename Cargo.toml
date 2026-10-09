@@ -64,7 +64,7 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 interprocess = { version = "2", default-features = false }
 
 [dependencies.gpui-kit]
-version = "=0.7.0"
+version = "=0.7.1"
 optional = true
 default-features = false
 features = ["component", "assets"]
@@ -136,17 +136,15 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Media", "Media_Playback", "Foundation"] }
 
 # Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
-# 0.7.0 with a bidi-aware input engine. The commit that adds third_party/gpui-base is
-# the pristine registry copy, so a diff against it isolates the patch.
+# 0.7.1 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names
+# the commit holding its pristine registry copy; a diff against it isolates the patch.
 [patch.crates-io]
 gpui-base = { path = "third_party/gpui-base" }
-# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.7 with a
-# display link that stops while the window has nothing to draw. The commit
-# that adds third_party/gpui-pre-macos is the pristine registry copy.
+# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.8 with a
+# display link that stops while the window has nothing to draw.
 gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
 # Idle frames on X11 and Windows (docs/decisions/codex-idle-frames-x11-windows.md):
-# gpui-pre-linux and gpui-pre-windows 0.3.7, whose per-frame wake pauses while
-# the window has nothing to draw. The commit that adds each directory is the
-# pristine registry copy.
+# gpui-pre-linux and gpui-pre-windows 0.3.8, whose per-frame wake pauses while
+# the window has nothing to draw.
 gpui-pre-linux = { path = "third_party/gpui-pre-linux" }
 gpui-pre-windows = { path = "third_party/gpui-pre-windows" }
