@@ -14,7 +14,7 @@ publish = false
 
 [features]
 default = ["ui"]
-ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:zbus", "dep:objc2-media-player", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus"]
+ui = ["dep:gpui-kit", "dep:objc2-app-kit", "dep:raw-window-handle", "dep:image", "dep:smallvec", "dep:qrcode", "dep:tray-icon", "dep:ksni", "dep:zbus", "dep:objc2-media-player", "dep:objc2-user-notifications", "dep:ureq", "dep:objc2", "dep:objc2-foundation", "dep:objc2-av-foundation", "dep:block2", "dep:objc2-core-media", "dep:objc2-core-video", "dep:core-video", "dep:core-foundation", "dep:rodio", "dep:ogg", "dep:opus-decoder", "dep:cpal", "dep:rusty-opus", "dep:resvg"]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
 demo-capture = ["ui", "gpui-kit/test-support"]
@@ -45,6 +45,9 @@ opus-decoder = { version = "0.1", optional = true }
 # through) and a pure-Rust Opus encoder, muxed with `ogg`. No external binary.
 cpal = { version = "0.17", optional = true, default-features = false }
 rusty-opus = { version = "1", optional = true }
+# Wallpaper patterns: Telegram ships them as (gzipped) SVG. Already in the
+# lockfile through GPUI; no text or raster-image features are needed.
+resvg = { version = "0.46", default-features = false, optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 sha2 = "0.10"
 # Local passcode (docs/decisions/codex-local-passcode.md): PBKDF2-HMAC-SHA512 key

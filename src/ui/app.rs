@@ -1047,6 +1047,8 @@ pub struct QuillApp {
     /// "Add folder" for an `addlist` link.
     pub(super) folder_invite: Option<FolderInviteDialog>,
     pub(super) folder_menu_open: bool,
+    /// Theme and wallpaper picker for a chat, or a `bg/` link preview.
+    pub(super) chat_look_dialog: Option<super::chat_look_ui::ChatLookDialog>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

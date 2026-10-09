@@ -1195,6 +1195,17 @@ pub(crate) fn parse_payload(type_name: &str, json: &str) -> Result<EnvelopePaylo
                 background,
             })
         }
+        "updateChatBackground" => Ok(EnvelopePayload::UpdateChatBackground {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            background: parse_chat_background(value.get("background")),
+        }),
+        "updateChatTheme" => Ok(EnvelopePayload::UpdateChatTheme {
+            chat_id: ChatId(int53(value.get("chat_id"))?),
+            theme_name: parse_chat_theme_name(value.get("theme")),
+        }),
+        "updateEmojiChatThemes" => Ok(EnvelopePayload::UpdateEmojiChatThemes(
+            parse_emoji_chat_themes(&value),
+        )),
         "chatFolderInviteLink" => parse_chat_folder_invite_link(&value)
             .map(EnvelopePayload::ChatFolderInviteLink)
             .ok_or(ParseError::MissingField),

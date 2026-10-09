@@ -139,6 +139,30 @@ pub(crate) struct BubbleLook {
     /// (Telegram Desktop's grouping): its top corner on the avatar side is
     /// small.
     pub joined_above: bool,
+    /// The chat's emoji theme: fill of outgoing bubbles (0xRRGGBB).
+    pub out_fill: Option<u32>,
+}
+
+impl BubbleLook {
+    /// Fill of an outgoing bubble: the chat theme's, else the accent.
+    pub(crate) fn outgoing_fill(&self) -> Rgba {
+        self.out_fill.map_or_else(accent_strong, rgb)
+    }
+
+    /// Text on an outgoing bubble: white, unless a light theme fill needs
+    /// dark text.
+    pub(crate) fn outgoing_text(&self) -> Hsla {
+        match self.out_fill {
+            Some(fill) if fill_is_light(fill) => Hsla::from(rgb(0x1a1a1a)),
+            _ => Hsla::from(text_on_fill()),
+        }
+    }
+}
+
+/// Whether text on this 0xRRGGBB fill must be dark (relative luminance).
+pub(crate) fn fill_is_light(fill: u32) -> bool {
+    let channel = |shift: u32| ((fill >> shift) & 0xff) as f32 / 255.0;
+    0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0) > 0.62
 }
 
 /// Radius of a corner that joins a neighbouring bubble or carries the
@@ -153,6 +177,7 @@ impl BubbleLook {
             plain: false,
             text: Hsla::from(rgb(0xffffff)),
             joined_above: false,
+            out_fill: None,
         }
     }
 }
@@ -380,7 +405,7 @@ fn message_bubble_with_quote(
         .child(super::vanish::bubble_tracker(row.id as i64))
         .when(!look.plain, |this| {
             this.bg(if row.outgoing {
-                accent_strong()
+                look.outgoing_fill()
             } else {
                 bg_bubble_incoming()
             })
@@ -388,7 +413,7 @@ fn message_bubble_with_quote(
         .text_color(if look.plain {
             look.text
         } else if row.outgoing {
-            Hsla::from(text_on_fill())
+            look.outgoing_text()
         } else {
             Hsla::from(text_bright())
         })

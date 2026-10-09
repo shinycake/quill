@@ -93,6 +93,8 @@ mod capture_block;
 mod chat;
 mod chat_bars;
 mod chat_list;
+mod chat_look_demo;
+mod chat_look_ui;
 mod chat_row;
 mod chat_swipe_ui;
 mod chatlist_demo;
@@ -223,6 +225,7 @@ mod translate_ui;
 mod video_pip;
 mod viewer_demo;
 mod wallpaper;
+mod wallpaper_pattern;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

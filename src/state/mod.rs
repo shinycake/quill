@@ -84,6 +84,7 @@ mod session_apply_queries;
 mod session_apply_users;
 mod session_calls;
 mod session_chat_caps;
+mod session_chat_look;
 mod session_chat_search;
 mod session_chatlist;
 mod session_date_jump;

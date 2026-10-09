@@ -154,6 +154,8 @@ impl Session {
                 message_sender,
                 is_translatable,
                 view_as_topics,
+                background,
+                theme_name,
                 reply_markup_message_id,
                 unread_mention_count,
                 unread_reaction_count,
@@ -167,6 +169,8 @@ impl Session {
                 if let Some(view_as_topics) = view_as_topics {
                     self.set_chat_view_as_topics(chat_id.0, view_as_topics);
                 }
+                self.set_chat_background(chat_id.0, background);
+                self.set_chat_theme_name(chat_id.0, theme_name);
                 self.set_chat_protected(chat_id.0, has_protected_content);
                 if let Some(setting) = available_reactions {
                     self.chat_available_reactions.insert(chat_id.0, setting);
@@ -1360,10 +1364,39 @@ impl Session {
                 if let Some(file) = &background.file {
                     self.upsert_file(file.clone(), false);
                 }
-                if pending.is_some_and(|p| p.purpose == RequestPurpose::SetDefaultBackground) {
-                    self.default_backgrounds
-                        .insert(self.background_set_for_dark, background);
+                match pending.map(|p| p.purpose) {
+                    Some(
+                        RequestPurpose::SetDefaultBackground
+                        | RequestPurpose::SetDefaultBackgroundLocal,
+                    ) => {
+                        self.default_backgrounds
+                            .insert(self.background_set_for_dark, background);
+                    }
+                    Some(RequestPurpose::SearchBackground) => {
+                        self.searched_background = Some(background);
+                    }
+                    _ => {}
                 }
+            }
+            EnvelopePayload::UpdateChatBackground {
+                chat_id,
+                background,
+            } => self.set_chat_background(chat_id.0, background),
+            EnvelopePayload::UpdateChatTheme {
+                chat_id,
+                theme_name,
+            } => self.set_chat_theme_name(chat_id.0, theme_name),
+            EnvelopePayload::UpdateEmojiChatThemes(themes) => {
+                for theme in &themes {
+                    for settings in [&theme.light, &theme.dark] {
+                        if let Some(file) =
+                            settings.background.as_ref().and_then(|b| b.file.as_ref())
+                        {
+                            self.upsert_file(file.clone(), false);
+                        }
+                    }
+                }
+                self.emoji_chat_themes = themes;
             }
             EnvelopePayload::UpdateDefaultBackground {
                 for_dark_theme,

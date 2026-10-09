@@ -1,5 +1,6 @@
 //! The Session reducer: central client state and constructor.
 use super::*;
+use crate::telegram::envelope::{ChatBackground, EmojiChatTheme};
 
 /// MED4b: composer `getLinkPreview` prefetch state (TGX `LinkPreview`).
 #[derive(Debug, Clone, Default)]
@@ -97,6 +98,14 @@ pub struct Session {
     pub default_backgrounds: HashMap<bool, Background>,
     /// Which theme the pending `setDefaultBackground` was for.
     pub background_set_for_dark: bool,
+    /// `chat.background` / `updateChatBackground`, by chat id.
+    pub chat_backgrounds: HashMap<i64, ChatBackground>,
+    /// `chat.theme` (emoji theme name) / `updateChatTheme`, by chat id.
+    pub chat_theme_names: HashMap<i64, String>,
+    /// `updateEmojiChatThemes`: the themes a private chat can pick.
+    pub emoji_chat_themes: Vec<EmojiChatTheme>,
+    /// `searchBackground` answer for a `bg/` link; `None` until it arrives.
+    pub searched_background: Option<Background>,
     /// One-shot: a wallpaper request failed; shown in Appearance.
     pub background_error: Option<String>,
     pub histories: HashMap<i64, HistoryState>,
@@ -1221,6 +1230,10 @@ impl Session {
             installed_backgrounds: None,
             default_backgrounds: HashMap::new(),
             background_set_for_dark: false,
+            chat_backgrounds: HashMap::new(),
+            chat_theme_names: HashMap::new(),
+            emoji_chat_themes: Vec::new(),
+            searched_background: None,
             background_error: None,
             histories: HashMap::new(),
             stale_history_requests: HashSet::new(),

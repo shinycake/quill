@@ -300,6 +300,10 @@ pub enum EnvelopePayload {
         /// `chat.view_as_topics` (schema 1.8.67, line 3627); `None` when the
         /// field is absent. Refreshed by `updateChatViewAsTopics`.
         view_as_topics: Option<bool>,
+        /// `chat.background`: the chat's own wallpaper, if any.
+        background: Option<ChatBackground>,
+        /// `chat.theme` when it is an emoji theme.
+        theme_name: Option<String>,
         /// `chat.reply_markup_message_id` (schema 1.8.67, line 3624): the
         /// message whose keyboard the chat shows; 0 for none.
         reply_markup_message_id: MessageId,
@@ -1617,6 +1621,20 @@ pub enum EnvelopePayload {
         for_dark_theme: bool,
         background: Background,
     },
+    /// `updateChatBackground` (`schema/td_api.tl:10924`); `None` when the
+    /// chat's wallpaper was removed.
+    UpdateChatBackground {
+        chat_id: ChatId,
+        background: Option<ChatBackground>,
+    },
+    /// `updateChatTheme` (`schema/td_api.tl:10927`); `None` for no emoji
+    /// theme.
+    UpdateChatTheme {
+        chat_id: ChatId,
+        theme_name: Option<String>,
+    },
+    /// `updateEmojiChatThemes` (`schema/td_api.tl:11320`).
+    UpdateEmojiChatThemes(Vec<EmojiChatTheme>),
     /// `chatFolderInviteLink` — the answer of `createChatFolderInviteLink`
     /// / `editChatFolderInviteLink` (`schema/td_api.tl:13785` / `:13795`).
     ChatFolderInviteLink(ChatFolderInviteLink),

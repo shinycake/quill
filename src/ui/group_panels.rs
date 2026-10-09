@@ -744,6 +744,25 @@ impl QuillApp {
         if let Some(actions) = self.profile_contact_actions(user_id, cx) {
             body = body.child(actions);
         }
+        // tdesktop's "Change colors" (`addThemeEdit`): the chat's theme and
+        // wallpaper, for the private chat open right now.
+        if !is_self
+            && in_own_chat
+            && let Some(chat) = session.and_then(|s| s.open_chat)
+        {
+            body = body.child(
+                action_row(
+                    "info-panel-chat-look",
+                    Some(gpui_kit::assets::IconName::Palette),
+                    "Change colors and wallpaper",
+                    false,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_chat_look_dialog(chat.0, cx);
+                })),
+            );
+        }
         let groups_in_common = info.as_ref().map_or(0, |i| i.extras.groups_in_common);
         // B10: the group rows replace the bare count once the list is
         // loaded; until then the count row stays.

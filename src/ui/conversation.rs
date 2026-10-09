@@ -1869,143 +1869,113 @@ impl QuillApp {
                 .justify_center()
                 .child(super::anim_layer::occluder(div().w(px(128.)).h_full()))
         });
-        let wallpaper = self.current_wallpaper(cx);
-        let wallpaper_image = match &wallpaper {
-            Some(super::wallpaper::Wallpaper::Image { path, .. }) => Some(path.clone()),
-            _ => None,
-        };
+        let look = self.chat_look(self.open_chat_id().map(|c| c.0), cx);
         super::selectable_text::selection_viewport(
-            div()
-                .id(id)
-                .relative()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h_0()
-                .relative()
-                // kit Phase 7: screen-reader landmark for the message history.
-                .role(Role::Log)
-                .aria_label(format!("Message history — {sender_name}"))
-                // Settings → Appearance: chat wallpaper (solid color behind
-                // the message list; None keeps the theme background).
-                .when_some(wallpaper.clone(), |this, wallpaper| match wallpaper {
-                    super::wallpaper::Wallpaper::Solid(color) => this.bg(rgb(color)),
-                    super::wallpaper::Wallpaper::Gradient { top, bottom, angle } => {
-                        this.bg(linear_gradient(
-                            angle as f32,
-                            linear_color_stop(rgb(top), 0.),
-                            linear_color_stop(rgb(bottom), 1.),
-                        ))
+            super::wallpaper::paint_wallpaper(
+                div()
+                    .id(id)
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    // kit Phase 7: screen-reader landmark for the message history.
+                    .role(Role::Log)
+                    .aria_label(format!("Message history — {sender_name}")),
+                // The chat's wallpaper, else the account's (None keeps the
+                // theme background).
+                look.wallpaper.as_ref(),
+                look.dimming,
+            )
+            .child(super::history_fx::reveal_viewport(
+                reveal,
+                MessageScroller::new(id, self.history_scroller.clone(), move |ix, _window, cx| {
+                    let gif_view = weak.clone();
+                    cx.defer(move |cx| {
+                        let _ = gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
+                    });
+                    if ix == 0 {
+                        let weak = weak.clone();
+                        cx.defer(move |cx| {
+                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
+                        });
                     }
-                    super::wallpaper::Wallpaper::Image { backdrop, .. } => this.bg(rgb(backdrop)),
+                    // Prefetch the next newer page a few rows before the
+                    // window's end so reading on rarely waits.
+                    if has_newer && ix + NEWER_PREFETCH_ROWS >= count {
+                        let weak = weak.clone();
+                        cx.defer(move |cx| {
+                            let _ = weak.update(cx, |this, cx| this.maybe_auto_load_newer(cx));
+                        });
+                    }
+                    weak.update(cx, |this, cx| this.render_history_row(ix, cx))
+                        .unwrap_or_else(|_| div().into_any_element())
                 })
-                .when_some(wallpaper_image, |this, path| {
-                    this.child(
-                        img(path)
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .size_full()
-                            .object_fit(ObjectFit::Cover),
-                    )
-                })
-                .child(super::history_fx::reveal_viewport(
-                    reveal,
-                    MessageScroller::new(
-                        id,
-                        self.history_scroller.clone(),
-                        move |ix, _window, cx| {
-                            let gif_view = weak.clone();
-                            cx.defer(move |cx| {
+                // The kit's default row wrapper pads every non-last row with
+                // pb_8 (32px); override to pb_1 to restore the old gap_1
+                // density. The kit also supplies row px and list py, so the
+                // outer div needs neither.
+                .with_row_style(StyleRefinement::default().pb_1())
+                // Jump to latest: shows the unread count, and replaces a
+                // window that stops short of the latest message instead of
+                // only scrolling to its end.
+                .with_jump_button_renderer({
+                    let jump = cx.weak_entity();
+                    move |button| {
+                        button
+                            .when(unread_count > 0, |button| {
+                                button.label(unread_count.to_string())
+                            })
+                            .on_click(move |_, _, cx| {
                                 let _ =
-                                    gif_view.update(cx, |this, cx| this.maybe_autoplay_gif(ix, cx));
-                            });
-                            if ix == 0 {
-                                let weak = weak.clone();
-                                cx.defer(move |cx| {
-                                    let _ =
-                                        weak.update(cx, |this, cx| this.maybe_auto_load_older(cx));
-                                });
-                            }
-                            // Prefetch the next newer page a few rows before the
-                            // window's end so reading on rarely waits.
-                            if has_newer && ix + NEWER_PREFETCH_ROWS >= count {
-                                let weak = weak.clone();
-                                cx.defer(move |cx| {
-                                    let _ =
-                                        weak.update(cx, |this, cx| this.maybe_auto_load_newer(cx));
-                                });
-                            }
-                            weak.update(cx, |this, cx| this.render_history_row(ix, cx))
-                                .unwrap_or_else(|_| div().into_any_element())
-                        },
-                    )
-                    // The kit's default row wrapper pads every non-last row with
-                    // pb_8 (32px); override to pb_1 to restore the old gap_1
-                    // density. The kit also supplies row px and list py, so the
-                    // outer div needs neither.
-                    .with_row_style(StyleRefinement::default().pb_1())
-                    // Jump to latest: shows the unread count, and replaces a
-                    // window that stops short of the latest message instead of
-                    // only scrolling to its end.
-                    .with_jump_button_renderer({
-                        let jump = cx.weak_entity();
-                        move |button| {
-                            button
-                                .when(unread_count > 0, |button| {
-                                    button.label(unread_count.to_string())
-                                })
-                                .on_click(move |_, _, cx| {
-                                    let _ = jump
-                                        .update(cx, |this, cx| this.jump_to_latest_messages(cx));
-                                })
+                                    jump.update(cx, |this, cx| this.jump_to_latest_messages(cx));
+                            })
+                    }
+                })
+                .size_full()
+                .min_h_0(),
+            ))
+            // Paints after the rows: the first row reaching below the
+            // top edge is what the floating date describes.
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, _, _| {
+                        let mut rows = probe.borrow_mut();
+                        reveal_probe.note(&rows, count, bounds.top());
+                        let top = rows
+                            .iter()
+                            .filter(|(_, row, _)| row.bottom() > bounds.top())
+                            .min_by_key(|(ix, _, _)| *ix)
+                            .map(|(ix, row, has_day)| (*ix, *has_day && row.top() >= bounds.top()));
+                        let on_screen = rows
+                            .iter()
+                            .filter(|(_, row, _)| {
+                                row.bottom() > bounds.top() && row.top() < bounds.bottom()
+                            })
+                            .map(|(ix, _, _)| *ix);
+                        let range = on_screen.clone().min().zip(on_screen.max());
+                        rows.clear();
+                        if top.is_some() {
+                            top_probe.set(top);
                         }
-                    })
-                    .size_full()
-                    .min_h_0(),
-                ))
-                // Paints after the rows: the first row reaching below the
-                // top edge is what the floating date describes.
-                .child(
-                    canvas(
-                        |_, _, _| {},
-                        move |bounds, _, _, _| {
-                            let mut rows = probe.borrow_mut();
-                            reveal_probe.note(&rows, count, bounds.top());
-                            let top = rows
-                                .iter()
-                                .filter(|(_, row, _)| row.bottom() > bounds.top())
-                                .min_by_key(|(ix, _, _)| *ix)
-                                .map(|(ix, row, has_day)| {
-                                    (*ix, *has_day && row.top() >= bounds.top())
-                                });
-                            let on_screen = rows
-                                .iter()
-                                .filter(|(_, row, _)| {
-                                    row.bottom() > bounds.top() && row.top() < bounds.bottom()
-                                })
-                                .map(|(ix, _, _)| *ix);
-                            let range = on_screen.clone().min().zip(on_screen.max());
-                            rows.clear();
-                            if top.is_some() {
-                                top_probe.set(top);
-                            }
-                            if range.is_some() {
-                                view_probe.set(range);
-                            }
-                        },
-                    )
-                    .absolute()
-                    .inset_0()
-                    .size_full(),
+                        if range.is_some() {
+                            view_probe.set(range);
+                        }
+                    },
                 )
-                .children(date_pill)
-                // tdesktop's corner "@" / heart buttons.
-                .children(corner_buttons.map(super::anim_layer::occluder))
-                // Where the scroller's jump-to-latest button floats while
-                // scrolled up (it is drawn inside the kit's scroller): what
-                // animates under it is drawn by the conversation.
-                .children(jump_zone),
+                .absolute()
+                .inset_0()
+                .size_full(),
+            )
+            .children(date_pill)
+            // tdesktop's corner "@" / heart buttons.
+            .children(corner_buttons.map(super::anim_layer::occluder))
+            // Where the scroller's jump-to-latest button floats while
+            // scrolled up (it is drawn inside the kit's scroller): what
+            // animates under it is drawn by the conversation.
+            .children(jump_zone),
         )
         .into_any_element()
     }
