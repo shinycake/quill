@@ -191,7 +191,7 @@ library-owned `const char*`; rlottie and ntgcalls have explicit
 create/destroy calls; FFmpeg goes through the quillvideo shim), which is the
 condition for mixing per-module CRTs safely.
 
-Measurements: see "Dry-run results" below.
+Measurements: see "Dry-run results" below (16 PE files before, 10 after).
 
 ## LGPL corresponding source
 
@@ -218,8 +218,22 @@ source by `scripts/build-tdlib.sh` (targets `tdjson tdjson_static`, Homebrew
 `MACOSX_DEPLOYMENT_TARGET=14.0` matches `LSMinimumSystemVersion`, and Sonoma
 Homebrew bottles keep the bundled OpenSSL at 14.0 as well.
 `scripts/macos-package-smoke.sh` is reused unchanged except that the Info.plist
-version now comes from `quill --version` (it was hard-coded to 0.1.0) and
-`CFBundleShortVersionString` is set. The job then requires tdjson, ntgcalls and
+version now comes from `quill --version` (it was hard-coded to 0.1.0),
+`CFBundleShortVersionString` is set, and an ERR trap names the failing command
+(the first hosted run exited 1 with no message).
+
+QR scanner self-test on the hosted VM: `quill-qr-scanner --self-test` generates
+a QR code with CoreImage and decodes it with Vision. On the hosted macOS VM
+Vision finds no barcode ("FAIL: Vision decoded no QR code instead of the
+fixture", run 37877194739), while it passes on real Macs. The self-test now
+prints why it failed, and `scripts/build-qr-scanner.sh` honours
+`QUILL_QR_SELF_TEST=warn`, which only `package-macos.yml` sets: the hosted
+release build warns, `quill-ui-build.yml` on the owner's Mac still fails hard.
+The owner considered moving the macOS release job to the self-hosted Mac and
+decided to keep the hosted runner once it was green (no personal machine in the
+release path, no fork-safety questions). Note that a self-hosted build would
+also need its own macOS 14 OpenSSL/rlottie builds: that Mac's Homebrew and
+developer builds target its own, much newer macOS. The job then requires tdjson, ntgcalls and
 rlottie in `Contents/Frameworks`, runs `codesign --verify --deep --strict`,
 checks the extracted zip with `check-bundle-macho.sh`, and runs the bundled
 binary. macOS ships no FFmpeg (AVFoundation), so there is no macOS source
@@ -237,4 +251,67 @@ archive beyond ntgcalls'.
 
 ## Dry-run results
 
-(filled in below)
+`release.yml` itself cannot be dispatched before it is on `main`, so the
+release pipeline was exercised piecewise on 2026-10-08 (the real
+`workflow_dispatch` dry run follows the merge):
+
+- PR CI run 37877194739 (head 697620d) ran the three reusable package
+  workflows exactly as `release.yml` calls them (without credentials): all
+  green, including `windows-package` and `macos-package`.
+- The `assemble release` job's commands were replayed locally against that
+  run's artifacts plus `scripts/release-lgpl-sources.sh` output: the per-package
+  `.sha256` checks passed (including the CRLF Windows file), generate-notes
+  returned 469 lines (no previous tag yet, so every merged PR, collapsed), and
+  `release-assemble.py` wrote a 59,543-character body, `latest.json` and
+  `SHA256SUMS.txt` for 12 assets.
+
+Release assets from that replay (credential-free, version 0.1.0):
+
+| Asset | Bytes |
+|---|---|
+| `quill-macos-aarch64.zip` | 46,975,645 (`Quill.app` 124 MB unpacked) |
+| `quill-linux-x86_64-bundle.tar.gz` | 84,891,626 |
+| `quill-windows-x86_64.zip` | 48,104,889 |
+| `quill-linux-x86_64` (updater binary) | 75,563,920 |
+| `quill-source-ffmpeg-n8.1.3.tar.xz` | 11,528,644 |
+| `quill-source-ntgcalls-v3.0.0.tar.xz` | 10,449,608 |
+| `quill-source-ntgcalls-ffmpeg-n9.0.1.tar.xz` | 11,811,376 |
+| `quill-source-ntgcalls-glib-2.89.4.tar.xz` | 5,856,164 |
+| `quill-source-ntgcalls-build-scripts.tar.xz` | 6,692 |
+| `LGPL-SOURCES.txt` | 5,118 |
+| `latest.json` | 59,854 |
+| `SHA256SUMS.txt` | 1,053 |
+
+macOS (hosted `macos-14`): every Mach-O in the app is `minos 14.0` (`quill`
+44.9 MB, `libtdjson` 41.8 MB, `libntgcalls` 35.0 MB, `libcrypto.3` 4.9 MB,
+`libssl.3` 0.9 MB, `librlottie` 0.6 MB, `quill-qr-scanner`), `codesign --verify
+--deep --strict` passes on the extracted zip, `check-bundle-macho.sh` reports 7
+Mach-O files depending only on the OS and the bundle, `--embedded-credentials`
+prints `none`.
+
+Windows, before (main 63d99db, run 37849702698) vs after (run 37877194739):
+
+| | Before | After |
+|---|---|---|
+| PE files in the package | 16 (quill.exe + 15 DLLs) | 10 (quill.exe + 9 DLLs) |
+| VC++ runtime / OpenSSL / zlib DLLs | vcruntime140, vcruntime140_1, msvcp140, libssl-3-x64, libcrypto-3-x64, z | none |
+| `tdjson.dll` imports | CRT API sets, msvcp140, vcruntime140(_1), libssl, libcrypto, z, system DLLs | advapi32, crypt32, kernel32, normaliz, user32, ws2_32 |
+| `rlottie.dll` imports | CRT API sets, msvcp140, vcruntime140(_1), kernel32, shlwapi | kernel32, shlwapi |
+| zip (packager's report) | 45.9 MB | 45.9 MB |
+| zip artifact bytes (zip + .sha256, compressed) | 48,084,540 | 48,010,358 |
+| `quill.exe` artifact bytes | 18,482,143 | 18,814,557 |
+
+The static runtime adds roughly what the removed DLLs weighed, so the
+download size is unchanged; the gain is no app-local Microsoft runtime to
+service or license-track and no OpenSSL DLL-search exposure. The package
+check, the negative test (missing `avutil` must fail), the load check
+(no OpenSSL/zlib module loaded) and both video probes (10 frames each) pass.
+
+Linux: unchanged package (81 MB tarball as reported by the packager); the CI
+artifact grew from 83,847,674 to 110,757,298 bytes because it now also
+carries the updater binary `quill-linux-x86_64`.
+
+Local gate before the first push: `GATE OK core=2044 0 ui=126 0`. actionlint
+and shellcheck are clean on every new or changed workflow and script
+(`.github/actionlint.yaml` declares the self-hosted `quill-ui-build` label so
+the existing `quill-ui-build.yml` lints clean too).
