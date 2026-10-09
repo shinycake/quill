@@ -1217,9 +1217,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                         // `k:key` presses one key (GPUI key names, e.g. `escape`).
                         if let Some(key) = point.strip_prefix("k:") {
                             let key = key.trim().to_string();
-                            let _ = AnyWindowHandle::from(demo_window).update(
-                                cx,
-                                |_, window, cx| {
+                            let _ =
+                                AnyWindowHandle::from(demo_window).update(cx, |_, window, cx| {
                                     use gpui_kit::gpui::{
                                         KeyDownEvent, KeyUpEvent, Keystroke, Modifiers,
                                         PlatformInput,
@@ -1241,8 +1240,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                         PlatformInput::KeyUp(KeyUpEvent { keystroke }),
                                         cx,
                                     );
-                                },
-                            );
+                                });
                             cx.background_executor()
                                 .timer(Duration::from_millis(120))
                                 .await;
