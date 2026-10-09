@@ -18,3 +18,5 @@ Workflow:
 7. Report: PR URL, summary, what was verified, anything unverified.
 
 Never: delete user data, message anyone, enter credentials, change system settings, merge PRs, or touch the reference repos.
+
+Dependencies must stay current; see docs/dependency-updates.md
