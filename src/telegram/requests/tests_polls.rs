@@ -150,6 +150,10 @@ fn send_poll_shape_matches_1_8_67() {
             country_codes: &countries,
             poll_type: PollTypeSend::Regular,
             open_period: 3 * 3600,
+            allow_adding_options: true,
+            hide_results_until_closes: true,
+            members_only: true,
+            close_date: 0,
             reply_to: Some(SendReply::plain(MessageId(101))),
             topic_id: None,
         },
@@ -177,7 +181,9 @@ fn send_poll_shape_matches_1_8_67() {
     assert_eq!(content["country_codes"], serde_json::json!(["US", "GB"]));
     assert_eq!(content["shuffle_options"], true);
     assert_eq!(content["type"]["@type"], "inputPollTypeRegular");
-    assert_eq!(content["type"]["allow_adding_options"], false);
+    assert_eq!(content["type"]["allow_adding_options"], true);
+    assert_eq!(content["hide_results_until_closes"], true);
+    assert_eq!(content["members_only"], true);
     assert_eq!(content["open_period"], 3 * 3600);
     assert_eq!(content["close_date"], 0);
     assert_eq!(content["is_closed"], false);
@@ -209,6 +215,10 @@ fn send_poll_quiz_shape_matches_1_8_67() {
                 explanation: "Paris is the capital",
             },
             open_period: 0,
+            allow_adding_options: false,
+            hide_results_until_closes: false,
+            members_only: false,
+            close_date: 1_900_000_000,
             reply_to: None,
             topic_id: None,
         },
@@ -217,6 +227,7 @@ fn send_poll_quiz_shape_matches_1_8_67() {
     let content = &v["input_message_content"];
     assert_eq!(content["@type"], "inputMessagePoll");
     assert!(content["description"].is_null());
+    assert_eq!(content["close_date"], 1_900_000_000);
     let quiz = &content["type"];
     assert_eq!(quiz["@type"], "inputPollTypeQuiz");
     assert_eq!(quiz["correct_option_ids"], serde_json::json!([0]));

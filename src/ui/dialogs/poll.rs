@@ -1,6 +1,8 @@
 use super::super::app::QuillApp;
+use gpui_kit::component::date_picker::DatePickerState;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::ids::{ChatId, MessageId};
 use quill::poll::{POLL_OPTIONS_MIN, PollDraft};
 /// Phase 4.2: poll creation dialog above the composer. Textarea entities are
 /// created when the dialog opens (option rows are dynamic); the dialog
@@ -22,7 +24,25 @@ pub struct PollDialog {
     pub(crate) quiz_correct_row: Option<usize>,
     pub(crate) allows_revoting: bool,
     pub(crate) shuffle_options: bool,
+    /// B15: "Allow Adding Options" (`inputPollTypeRegular.allow_adding_options`).
+    pub(crate) allow_adding_options: bool,
+    /// B15: "Hide results" (`hide_results_until_closes`).
+    pub(crate) hide_results_until_closes: bool,
+    /// B15: "Restrict to Subscribers" (`members_only`, channels only).
+    pub(crate) members_only: bool,
+    /// B15: absolute deadline picker (`close_date`); `Some` while the
+    /// "Set a deadline" toggle is on.
+    pub(crate) deadline: Option<Entity<DatePickerState>>,
     pub(crate) confirming_discard: bool,
+}
+
+/// B15: the inline "Add an Option" panel for an open poll that allows it
+/// (`addPollOption`, schema 1.8.67 line 12920).
+pub struct PollAddOption {
+    pub(crate) chat_id: ChatId,
+    pub(crate) message_id: MessageId,
+    pub(crate) input: Entity<TextareaState>,
+    pub(crate) error: Option<&'static str>,
 }
 
 impl PollDialog {
@@ -56,6 +76,10 @@ impl PollDialog {
             quiz_correct_row: None,
             allows_revoting: true,
             shuffle_options: false,
+            allow_adding_options: false,
+            hide_results_until_closes: false,
+            members_only: false,
+            deadline: None,
             confirming_discard: false,
         }
     }
@@ -91,7 +115,25 @@ impl PollDialog {
             shuffle_options: self.shuffle_options,
             duration_hours: value(&self.duration_input),
             country_codes,
+            allow_adding_options: self.allow_adding_options,
+            hide_results_until_closes: self.hide_results_until_closes,
+            members_only: self.members_only,
+            close_date: self.deadline_unix(cx).unwrap_or(0),
         }
+    }
+
+    /// The picked absolute deadline as unix seconds, if the toggle is on
+    /// and the picker holds a readable date.
+    pub(crate) fn deadline_unix(&self, cx: &App) -> Option<i64> {
+        let picker = self.deadline.as_ref()?;
+        picker
+            .read(cx)
+            .date_time()
+            .start()
+            .and_then(|value| {
+                quill::schedule::parse_picker_stamp(&value.format("%Y-%m-%d %H:%M").to_string())
+            })
+            .map(|civil| quill::schedule::civil_to_unix(&civil))
     }
 
     /// `true` when closing would lose user input (drives the discard prompt).
@@ -102,6 +144,10 @@ impl PollDialog {
             || self.is_quiz
             || !self.allows_revoting
             || self.shuffle_options
+            || self.allow_adding_options
+            || self.hide_results_until_closes
+            || self.members_only
+            || self.deadline.is_some()
             || !value(&self.question_input).trim().is_empty()
             || !value(&self.description_input).trim().is_empty()
             || !value(&self.explanation_input).trim().is_empty()

@@ -7,4 +7,7 @@ pub struct PollVotersDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) message_id: MessageId,
     pub(crate) selected_option: Option<usize>,
+    /// B15: opened from "Poll Stats" — shows the vote graph above the
+    /// per-option voter lists (`getPollVoteStatistics`).
+    pub(crate) show_stats: bool,
 }

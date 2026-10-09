@@ -28,6 +28,16 @@ pub const QUIZ_EXPLANATION_MAX_LINE_FEEDS: usize = 2;
 // against it instead of this fixed ceiling.
 pub const POLL_OPEN_PERIOD_MAX_HOURS: u32 = 24;
 
+/// Longest poll option text (`kMaxOptionLength` in tdesktop's poll box and
+/// `getOption("poll_answer_length_max")`'s default).
+pub const POLL_OPTION_MAX_CHARS: usize = 100;
+
+/// An absolute poll deadline must be at least a minute ahead and within a
+/// year (`create_poll_box.cpp` passes `min = now + 60`, `max = now + 365d`
+/// to `ChooseDateTimeBox`).
+pub const POLL_DEADLINE_MIN_SECS: i64 = 60;
+pub const POLL_DEADLINE_MAX_SECS: i64 = 365 * 86_400;
+
 /// Fraction of the option's percentage bar, clamped to `[0.0, 1.0]`
 /// (server `vote_percentage` can be stale or out of range).
 pub fn poll_bar_fraction(vote_percentage: i32) -> f32 {
@@ -167,6 +177,74 @@ pub fn chat_allows_polls(permissions: Option<&crate::telegram::ChatPermissions>)
     permissions.is_none_or(|permissions| permissions.can_send_polls)
 }
 
+/// Results are withheld until the poll closes (`hide_results_until_closes`
+/// on creation, `poll.can_see_results == false` on the wire). tdesktop shows
+/// `lng_polls_results_after_close` instead of the bars.
+pub fn poll_results_hidden(poll: &Poll) -> bool {
+    !poll.can_see_results && !poll.is_closed
+}
+
+/// Whether the "Add an Option" row is offered: the server said
+/// `messagePoll.can_add_option` and the poll is still open.
+pub fn can_offer_add_option(can_add_option: bool, poll: &Poll) -> bool {
+    can_add_option && !poll.is_closed
+}
+
+/// Validate a new option's text the way tdesktop's add-option field does
+/// (`lng_polls_add_option_duplicate`): non-empty, within
+/// [`POLL_OPTION_MAX_CHARS`], and not already present (case-insensitive).
+/// Returns the trimmed text to send.
+pub fn validate_new_option(poll: &Poll, text: &str) -> Result<String, &'static str> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("Type the option text.");
+    }
+    if text.chars().count() > POLL_OPTION_MAX_CHARS {
+        return Err("The option is too long (100 max).");
+    }
+    if poll.options.len() >= POLL_OPTIONS_MAX {
+        return Err("This poll already has the maximum number of options.");
+    }
+    let lowered = text.to_lowercase();
+    if poll
+        .options
+        .iter()
+        .any(|option| option.text.trim().to_lowercase() == lowered)
+    {
+        return Err("This option already exists.");
+    }
+    Ok(text.to_string())
+}
+
+/// Remaining time as tdesktop's poll "results in …" caption:
+/// `lng_polls_results_in_days` for ≥ 1 day, otherwise a short
+/// `Hh Mm` / `Mm` countdown. `None` when there is no deadline or it passed.
+pub fn poll_ends_in_label(poll: &Poll, now: i64) -> Option<String> {
+    if poll.is_closed || poll.close_date <= 0 {
+        return None;
+    }
+    let left = i64::from(poll.close_date) - now;
+    if left <= 0 {
+        return None;
+    }
+    let days = left / 86_400;
+    Some(if days >= 1 {
+        if days == 1 {
+            "ends in 1 day".to_string()
+        } else {
+            format!("ends in {days} days")
+        }
+    } else {
+        let hours = left / 3600;
+        let minutes = (left % 3600 + 59) / 60;
+        if hours >= 1 {
+            format!("ends in {hours}h {}m", minutes.min(59))
+        } else {
+            format!("ends in {}m", minutes.max(1))
+        }
+    })
+}
+
 /// A composer poll dialog frozen at "Create poll" (validated before send).
 ///
 /// `quiz_correct` is the 0-based index into the *usable* (non-empty,
@@ -187,6 +265,16 @@ pub struct PollDraft {
     pub shuffle_options: bool,
     pub duration_hours: String,
     pub country_codes: Vec<String>,
+    /// B15: `inputPollTypeRegular.allow_adding_options` ("Allow Adding
+    /// Options"); ignored for quizzes.
+    pub allow_adding_options: bool,
+    /// B15: `hide_results_until_closes` ("Hide results").
+    pub hide_results_until_closes: bool,
+    /// B15: `members_only` ("Restrict to Subscribers", channels only).
+    pub members_only: bool,
+    /// B15: absolute deadline (`close_date`, unix seconds); 0 = none. When
+    /// set it replaces the relative `duration_hours`.
+    pub close_date: i64,
 }
 
 impl PollDraft {
@@ -210,8 +298,12 @@ impl PollDraft {
     }
 
     /// `open_period` in seconds for `inputMessagePoll` (0 = no auto-close).
-    /// Only meaningful when `validate()` is `None`.
+    /// Only meaningful when `validate()` is `None`. TDLib accepts either
+    /// `open_period` or `close_date`, so an absolute deadline wins.
     pub fn open_period_secs(&self) -> i32 {
+        if self.close_date > 0 {
+            return 0;
+        }
         let hours: u32 = self.duration_hours.trim().parse().unwrap_or(0);
         if (1..=POLL_OPEN_PERIOD_MAX_HOURS).contains(&hours) {
             (hours * 3600) as i32
@@ -222,6 +314,11 @@ impl PollDraft {
 
     /// `None` when the draft is valid; otherwise the short user-facing reason.
     pub fn validate(&self) -> Option<&'static str> {
+        self.validate_at(crate::local_time::now_unix())
+    }
+
+    /// [`Self::validate`] against an explicit clock (for tests).
+    pub fn validate_at(&self, now: i64) -> Option<&'static str> {
         let question = self.question.trim();
         let question_len = question.chars().count();
         if question_len == 0 {
@@ -251,7 +348,14 @@ impl PollDraft {
                 return Some("the quiz explanation has too many line breaks (2 max)");
             }
         }
-        if !self.duration_hours.trim().is_empty() {
+        if self.close_date > 0 {
+            if self.close_date < now + POLL_DEADLINE_MIN_SECS {
+                return Some("the deadline must be in the future");
+            }
+            if self.close_date > now + POLL_DEADLINE_MAX_SECS {
+                return Some("the deadline must be within a year");
+            }
+        } else if !self.duration_hours.trim().is_empty() {
             match self.duration_hours.trim().parse::<u32>() {
                 Ok(hours) if (1..=POLL_OPEN_PERIOD_MAX_HOURS).contains(&hours) => {}
                 _ => return Some("duration must be 1–24 hours"),
@@ -298,6 +402,10 @@ mod tests {
             poll_type: PollType::Regular,
             can_get_voters: false,
             vote_restriction_reason: None,
+            can_see_results: true,
+            members_only: false,
+            open_period: 0,
+            close_date: 0,
         }
     }
 
@@ -607,10 +715,116 @@ mod tests {
     }
 
     #[test]
+    fn hidden_results_until_close() {
+        let mut poll = regular_poll(&[], false, true, false);
+        assert!(!poll_results_hidden(&poll));
+        poll.can_see_results = false;
+        assert!(poll_results_hidden(&poll));
+        poll.is_closed = true;
+        assert!(!poll_results_hidden(&poll));
+    }
+
+    #[test]
+    fn add_option_offer_needs_open_poll() {
+        let open = regular_poll(&[], false, true, false);
+        let closed = regular_poll(&[], false, true, true);
+        assert!(can_offer_add_option(true, &open));
+        assert!(!can_offer_add_option(false, &open));
+        assert!(!can_offer_add_option(true, &closed));
+    }
+
+    #[test]
+    fn new_option_validation() {
+        let poll = regular_poll(&[], false, true, false);
+        assert_eq!(validate_new_option(&poll, "  Ramen "), Ok("Ramen".into()));
+        assert_eq!(
+            validate_new_option(&poll, "   "),
+            Err("Type the option text.")
+        );
+        assert_eq!(
+            validate_new_option(&poll, &"x".repeat(101)),
+            Err("The option is too long (100 max).")
+        );
+        // "option" is the fixture's text for every option.
+        assert_eq!(
+            validate_new_option(&poll, " OPTION "),
+            Err("This option already exists.")
+        );
+        let mut full = regular_poll(&[], false, true, false);
+        full.options = (0..POLL_OPTIONS_MAX)
+            .map(|i| PollOption {
+                id: i.to_string(),
+                text: format!("o{i}"),
+                ..option(false, 0)
+            })
+            .collect();
+        assert_eq!(
+            validate_new_option(&full, "more"),
+            Err("This poll already has the maximum number of options.")
+        );
+    }
+
+    #[test]
+    fn ends_in_label_buckets() {
+        let mut poll = regular_poll(&[], false, true, false);
+        assert_eq!(poll_ends_in_label(&poll, 1000), None);
+        poll.close_date = 1000 + 90;
+        assert_eq!(
+            poll_ends_in_label(&poll, 1000).as_deref(),
+            Some("ends in 2m")
+        );
+        poll.close_date = 1000 + 3 * 3600 + 20 * 60;
+        assert_eq!(
+            poll_ends_in_label(&poll, 1000).as_deref(),
+            Some("ends in 3h 20m")
+        );
+        poll.close_date = 1000 + 86_400;
+        assert_eq!(
+            poll_ends_in_label(&poll, 1000).as_deref(),
+            Some("ends in 1 day")
+        );
+        poll.close_date = 1000 + 5 * 86_400 + 5;
+        assert_eq!(
+            poll_ends_in_label(&poll, 1000).as_deref(),
+            Some("ends in 5 days")
+        );
+        poll.close_date = 900;
+        assert_eq!(poll_ends_in_label(&poll, 1000), None);
+        poll.close_date = 5000;
+        poll.is_closed = true;
+        assert_eq!(poll_ends_in_label(&poll, 1000), None);
+    }
+
+    #[test]
+    fn absolute_deadline_validation() {
+        let now = 1_000_000;
+        let mut draft = quiz_draft();
+        draft.is_quiz = false;
+        draft.quiz_correct = None;
+        draft.close_date = now + 30;
+        assert_eq!(
+            draft.validate_at(now),
+            Some("the deadline must be in the future")
+        );
+        draft.close_date = now + POLL_DEADLINE_MAX_SECS + 1;
+        assert_eq!(
+            draft.validate_at(now),
+            Some("the deadline must be within a year")
+        );
+        draft.close_date = now + 3600;
+        assert_eq!(draft.validate_at(now), None);
+        // An absolute deadline replaces the relative duration.
+        draft.duration_hours = "5".into();
+        assert_eq!(draft.validate_at(now), None);
+        assert_eq!(draft.open_period_secs(), 0);
+    }
+
+    #[test]
     fn poll_content_used_in_message_roundtrip() {
         let content = PollContent {
             poll: regular_poll(&[0], false, true, false),
             description: String::new(),
+            can_add_option: false,
         };
         assert_eq!(content.poll.chosen_indexes(), vec![0]);
         assert!(content.poll.can_vote());

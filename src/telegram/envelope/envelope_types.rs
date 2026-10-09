@@ -172,6 +172,18 @@ pub enum EnvelopePayload {
         chat_id: ChatId,
         unread_reaction_count: i32,
     },
+    /// B15: `updateChatUnreadPollVoteCount` (schema 1.8.67, line 10573) —
+    /// the row's poll-vote badge. `updateMessageContainsUnreadPollVotes`
+    /// (line 10457) carries the same new chat counter and folds into it.
+    UpdateChatUnreadPollVoteCount {
+        chat_id: ChatId,
+        unread_poll_vote_count: i32,
+    },
+    /// B15: `pollVoteStatistics` (schema 1.8.67, line 10263) — the
+    /// `getPollVoteStatistics` answer (line 12947).
+    PollVoteStatistics {
+        graph: StatisticalGraph,
+    },
     /// `messageAutoDeleteTime` — `getDefaultMessageAutoDeleteTime` response
     /// (schema 1.8.67, line 9057).
     MessageAutoDeleteTime {
@@ -299,6 +311,8 @@ pub enum EnvelopePayload {
         /// 3612 / 3627). Refreshed by `updateChatUnreadReactionCount`
         /// (schema line 10570).
         unread_reaction_count: i32,
+        /// B15: `chat.unread_poll_vote_count` (schema 1.8.67, line 3613).
+        unread_poll_vote_count: i32,
         /// Slice CL3: `chat.can_be_reported` (schema 1.8.67, lines 3606 /
         /// 3627). Gates the row-menu Report item (`reportChat`, schema
         /// line 15693).
@@ -1681,6 +1695,8 @@ pub struct MessageActions {
     pub can_delete_reactions: bool,
     /// A scheduled message may be rescheduled or sent now.
     pub can_edit_scheduling_state: bool,
+    /// B15: `getPollVoteStatistics` works (poll creator / admin view).
+    pub can_get_poll_vote_statistics: bool,
 }
 
 impl MessageActions {

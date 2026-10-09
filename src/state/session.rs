@@ -914,6 +914,9 @@ pub struct Session {
     /// B4: `getPollVoters` fetch state for the poll-voters dialog, keyed
     /// by (chat id, message id, 0-based option index). One page per key.
     pub poll_voters: HashMap<(i64, i64, i32), PollVotersFetch>,
+    /// B15: `getPollVoteStatistics` fetch state, keyed by (chat id,
+    /// message id).
+    pub poll_stats: HashMap<(i64, i64), PollStatsFetch>,
     /// Bots slice: the single active `getInlineQueryResults` fetch (the
     /// composer has one active inline query, so a slot — not a map).
     pub inline_query: Option<InlineQuerySlot>,
@@ -1385,6 +1388,7 @@ impl Session {
             supergroup_restrict_right: HashMap::new(),
             supergroup_invite_right: HashMap::new(),
             poll_voters: HashMap::new(),
+            poll_stats: HashMap::new(),
             inline_query: None,
             inline_bot_resolve: None,
             inline_bot_resolve_seq: 0,

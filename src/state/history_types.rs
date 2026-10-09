@@ -82,6 +82,7 @@ pub(crate) fn placeholder_chat(chat_id: ChatId) -> ChatSummary {
         is_marked_as_unread: false,
         unread_mention_count: 0,
         unread_reaction_count: 0,
+        unread_poll_vote_count: 0,
         can_be_reported: false,
         blocked: false,
         // Phase B1: unknown until `updateSecretChat` / `getSecretChat`
