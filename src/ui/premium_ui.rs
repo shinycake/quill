@@ -462,7 +462,7 @@ impl QuillApp {
                     .child(div().text_lg().font_semibold().child(if subscribed {
                         "You have Telegram Premium"
                     } else {
-                        "Go beyond the limits"
+                        "Telegram Premium"
                     }))
                     .child(
                         div().text_sm().text_color(muted).text_center().child(
@@ -470,9 +470,7 @@ impl QuillApp {
                                 .as_ref()
                                 .map(|s| s.text.clone())
                                 .filter(|t| !t.is_empty())
-                                .unwrap_or_else(|| {
-                                    "Exclusive features for power users.".to_string()
-                                }),
+                                .unwrap_or_else(|| "Extra features and higher limits.".to_string()),
                         ),
                     ),
             );

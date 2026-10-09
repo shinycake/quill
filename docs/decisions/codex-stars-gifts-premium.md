@@ -1,7 +1,7 @@
 # Stars, gifts and Premium (read-only parity)
 
-Branch `codex/stars-gifts-premium`. Strictly read-only: no purchase, payment,
-transfer or gift sending exists in this slice, by design (financial actions).
+Branch `codex/stars-gifts-premium`. This slice is read-only: it has no purchase,
+payment, transfer or gift sending, because those are financial actions.
 
 ## What Telegram Desktop does
 
@@ -54,8 +54,8 @@ transfer or gift sending exists in this slice, by design (financial actions).
 
 Buying or sending Stars/gifts/Premium, gift upgrades, transfers, resale,
 pinning and collections, giveaway creation, gift-code redemption, in-app Premium
-purchase. Gift pinning and collections were left out because
-`toggleGiftIsSaved`/`sellGift` were the only own-gift mutations in scope.
+purchase. Gift pinning and collections are also left out; only
+`toggleGiftIsSaved` and `sellGift` were in scope for own gifts.
 The profile panel does not yet have a Gifts tab; the entry is the chat menu.
 
 ## How verified
