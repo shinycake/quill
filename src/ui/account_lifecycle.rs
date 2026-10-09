@@ -115,6 +115,7 @@ impl QuillApp {
         self.account_lifecycle.confirm_logout = false;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.get_account_ttl();
+            let _ = live.driver.get_default_auto_delete();
             let _ = live.driver.fetch_password_state();
         }
         cx.notify();
@@ -142,6 +143,76 @@ impl QuillApp {
             let _ = live.driver.set_account_ttl(days);
         }
         cx.notify();
+    }
+
+    /// One `setDefaultMessageAutoDeleteTime` round-trip (Settings →
+    /// Privacy → Auto-delete messages). The confirmed value lands from the
+    /// authoritative `ok`; the demo session applies it directly.
+    pub(crate) fn submit_default_auto_delete(&mut self, seconds: i32, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.set_default_auto_delete(seconds);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.default_auto_delete_secs = Some(seconds);
+        }
+        cx.notify();
+    }
+
+    /// The default auto-delete timer section: tdesktop's Privacy page
+    /// "Auto-delete messages" row, with 1 day / 1 week / 1 month presets
+    /// (`setDefaultMessageAutoDeleteTime`).
+    fn account_auto_delete_body(
+        &self,
+        cx: &mut Context<Self>,
+        mut body: Div,
+        secs: Option<i32>,
+        busy: bool,
+        error: Option<String>,
+    ) -> Div {
+        const PRESETS: [(&str, i32); 4] = [
+            ("Off", 0),
+            ("1 day", 86_400),
+            ("1 week", 604_800),
+            ("1 month", 2_678_400),
+        ];
+        body = body
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child("Auto-delete messages"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Automatically delete new messages in all your new chats after a certain period of time. You can also set a timer for each chat in its menu."),
+            )
+            .child(div().text_sm().child(match secs {
+                Some(secs) => format!("Currently: {}", quill::auto_delete::format_ttl(secs)),
+                None if busy => "Loading\u{2026}".to_string(),
+                None => "No data yet.".to_string(),
+            }));
+        if let Some(line) = error {
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(danger())
+                    .child(format!("Error: {line}")),
+            );
+        }
+        let active_ix = secs.and_then(|secs| PRESETS.iter().position(|(_, s)| *s == secs));
+        body.child(
+            RadioGroup::horizontal("default-auto-delete-options")
+                .selected_index(active_ix)
+                .children(
+                    PRESETS
+                        .iter()
+                        .map(|(label, _)| Radio::new(format!("default-ttl-{label}")).label(*label)),
+                )
+                .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
+                    this.submit_default_auto_delete(PRESETS[ix].1, cx);
+                })),
+        )
     }
 
     /// Slice A9: one `deleteAccount` round-trip. The password rides the
@@ -230,6 +301,18 @@ impl QuillApp {
                         .child(format!("Error: {line}")),
                 );
             }
+            let auto_delete = session.as_ref().and_then(|s| s.default_auto_delete_secs);
+            let auto_delete_busy = session.is_some_and(|s| s.default_auto_delete_busy);
+            let auto_delete_error = session
+                .as_ref()
+                .and_then(|s| s.default_auto_delete_error.clone());
+            body = this.account_auto_delete_body(
+                cx,
+                body,
+                auto_delete,
+                auto_delete_busy,
+                auto_delete_error,
+            );
             body = this.account_ttl_body(cx, body, ttl_days, ttl_loading, mutating);
             // Slice auth-logout-warning: Log out sits between the TTL
             // picker and the delete-account danger zone (least → most

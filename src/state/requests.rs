@@ -103,6 +103,20 @@ pub enum RequestRollback {
         supergroup_id: i64,
         previous: Option<bool>,
     },
+    /// B7: a supergroup toggle (join-to-send, history for new members,
+    /// hidden members): the previous value (`None` = unknown).
+    GroupToggle {
+        supergroup_id: i64,
+        toggle: GroupToggle,
+        previous: Option<bool>,
+    },
+    /// B7: `toggleChatHasProtectedContent`: the previous flag.
+    ProtectedContent { chat_id: i64, previous: bool },
+    /// B7: `setChatAvailableReactions`: the previous setting.
+    AvailableReactions {
+        chat_id: i64,
+        previous: Option<crate::telegram::envelope::ChatAvailableReactions>,
+    },
     /// Slice CL1: `toggleChatIsPinned` — the previous pinned flag and
     /// which list it belonged to (`archived` = archive list). The
     /// authoritative state arrives via `updateChatPosition`.

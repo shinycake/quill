@@ -6,6 +6,7 @@ pub mod account_export;
 pub mod album;
 pub mod animation;
 pub mod auth;
+pub mod auto_delete;
 pub mod autostart;
 pub mod calls;
 pub mod chat_export;
@@ -39,6 +40,7 @@ pub mod media_session;
 pub mod media_tools;
 pub mod media_viewer;
 pub mod message_menu;
+pub mod mute_menu;
 pub mod notify;
 pub mod passcode;
 pub mod peer_badge;
@@ -62,6 +64,7 @@ pub mod service_text;
 #[cfg(test)]
 mod service_text_tests;
 pub mod settings;
+pub mod share_box;
 pub mod single_instance;
 pub mod spell_dict;
 #[cfg(windows)]

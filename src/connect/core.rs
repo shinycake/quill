@@ -544,7 +544,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let topic_chat = Self::possible_topic_chat(&owned.envelope.payload);
         let topic_refresh = Self::possible_topic_refresh(&owned.envelope.payload);
         let previous_seq = self.session.last_seq;
+        // B7: the step waiting for this answer (basic group upgrade,
+        // history before a discussion link), taken before `apply`.
+        let admin_followup = self.capture_admin_followup(&owned);
         self.session.apply(owned);
+        if let Some((followup, ok)) = admin_followup {
+            self.run_admin_followup(followup, ok);
+        }
         self.maybe_fetch_bot_topics(topic_chat);
         self.maybe_refresh_forum_topic(topic_refresh);
         if self.session.last_seq != previous_seq {

@@ -43,7 +43,7 @@ use crate::telegram::envelope::{
     StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
     ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
 };
-use crate::telegram::envelope::{CallState, ReadyParams};
+use crate::telegram::envelope::{AvailableMessageSender, CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
 use crate::telegram::profile_accent::ProfileAccentColor;
 use crate::telegram::requests::{
@@ -83,6 +83,7 @@ mod session_date_jump;
 mod session_files;
 mod session_forum;
 mod session_forward;
+mod session_group_admin;
 mod session_history_window;
 mod session_members;
 mod session_message_menu;
@@ -93,6 +94,7 @@ mod session_reply;
 mod session_requests;
 mod session_search;
 mod session_service;
+mod session_share;
 mod session_sponsored;
 mod session_stickers;
 mod session_stories;
@@ -120,6 +122,7 @@ pub use requests::*;
 pub use search_types::*;
 pub use session::*;
 pub(crate) use session_chat_search::history_message;
+pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;
 pub use session_message_menu::{
     Audience, MessageAudience, MessageReportFlow, MessageReportStage, StickerSetView,
@@ -130,6 +133,7 @@ pub use session_reply::{
     ForwardHeader, ForwardLink, ReplyHeader, ReplyState, ReplyTarget, footer_tooltip,
     thumb_candidates,
 };
+pub use session_share::ShareSearch;
 pub use session_subsection_tabs::{BotTopics, TopicBadge};
 pub use session_translate::*;
 pub use shared_media_types::*;

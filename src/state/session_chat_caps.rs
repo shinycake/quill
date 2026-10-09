@@ -307,6 +307,15 @@ impl Session {
                         .copied()
                         .unwrap_or(false)
             }
+            // B7: basic group creator or administrator with the right.
+            ChatKind::BasicGroup { basic_group_id } => {
+                self.basic_group_status.get(&basic_group_id) == Some(&ChannelMemberStatus::Creator)
+                    || self
+                        .basic_group_change_info_right
+                        .get(&basic_group_id)
+                        .copied()
+                        .unwrap_or(false)
+            }
             _ => false,
         }
     }
@@ -500,7 +509,7 @@ impl Session {
 
     /// Slice G2: supergroup id for any supergroup-kind chat (channels
     /// included); `None` for basic groups and other kinds.
-    pub(crate) fn chat_supergroup(&self, chat_id: ChatId) -> Option<i64> {
+    pub fn chat_supergroup(&self, chat_id: ChatId) -> Option<i64> {
         self.chats.get(&chat_id.0).and_then(|chat| match chat.kind {
             ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
             _ => None,
@@ -608,6 +617,10 @@ impl Session {
         match chat.kind {
             ChatKind::Supergroup { supergroup_id, .. } => {
                 self.supergroup_own_status(supergroup_id) == Some(ChannelMemberStatus::Creator)
+            }
+            // B7: `updateBasicGroup.status`.
+            ChatKind::BasicGroup { basic_group_id } => {
+                self.basic_group_status.get(&basic_group_id) == Some(&ChannelMemberStatus::Creator)
             }
             _ => false,
         }

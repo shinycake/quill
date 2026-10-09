@@ -130,6 +130,12 @@ impl Session {
                 | RequestPurpose::GetMessageAddedReactions { .. }),
             ) => self.fail_audience(purpose),
             Some(RequestPurpose::ViewStickerSet { set_id }) => self.fail_sticker_set_view(set_id),
+            Some(RequestPurpose::SetChatMessageSender) => {
+                self.message_action_note = Some(format!(
+                    "could not change the sender: {}",
+                    error_reason(&err)
+                ));
+            }
             Some(RequestPurpose::AddProfileAudio) => {
                 self.message_action_note = Some(format!(
                     "could not save to your profile: {}",
@@ -361,6 +367,23 @@ impl Session {
                     self.supergroup_anti_spam_enabled.remove(&supergroup_id);
                 }
             },
+            // B7: restore the group admin toggles the server refused.
+            Some(RequestRollback::GroupToggle {
+                supergroup_id,
+                toggle,
+                previous,
+            }) => self.restore_group_toggle(supergroup_id, toggle, previous),
+            Some(RequestRollback::ProtectedContent { chat_id, previous }) => {
+                self.set_chat_protected(chat_id, previous);
+            }
+            Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
+                Some(setting) => {
+                    self.chat_available_reactions.insert(chat_id, setting);
+                }
+                None => {
+                    self.chat_available_reactions.remove(&chat_id);
+                }
+            },
             // Slice CL1: restore the pre-toggle pinned /
             // marked-as-unread flags the server refused.
             Some(RequestRollback::ChatPin { previous, archived }) => {
@@ -536,6 +559,23 @@ impl Session {
                 self.chat_action_error =
                     Some(format!("could not save the change (error {})", err.code));
             }
+            // B7: refused group admin changes were rolled back above; say
+            // so instead of showing the old value as if nothing happened.
+            Some(
+                RequestPurpose::ToggleSupergroupIsForum
+                | RequestPurpose::ToggleSupergroupIsAllHistoryAvailable
+                | RequestPurpose::ToggleSupergroupJoinToSendMessages
+                | RequestPurpose::ToggleSupergroupHasHiddenMembers
+                | RequestPurpose::ToggleChatHasProtectedContent
+                | RequestPurpose::SetChatAvailableReactions
+                | RequestPurpose::SetChatDiscussionGroup
+                | RequestPurpose::UpgradeBasicGroup,
+            ) => {
+                self.chat_action_error = Some(format!(
+                    "could not change the group setting (error {})",
+                    err.code
+                ));
+            }
             Some(RequestPurpose::RemoveChatFromList) => {
                 self.chat_action_error =
                     Some(format!("could not delete the chat (error {})", err.code));
@@ -574,6 +614,18 @@ impl Session {
             Some(RequestPurpose::ReadChatList) => {
                 self.chat_action_error = Some(format!(
                     "could not mark all chats as read (error {})",
+                    err.code
+                ));
+            }
+            Some(RequestPurpose::RemoveRecentlyFoundChat) => {
+                self.chat_action_error = Some(format!(
+                    "could not remove the recent search (error {})",
+                    err.code
+                ));
+            }
+            Some(RequestPurpose::RemoveTopChat | RequestPurpose::SetTopChatsDisabled) => {
+                self.chat_action_error = Some(format!(
+                    "could not update frequent contacts (error {})",
                     err.code
                 ));
             }
@@ -1102,6 +1154,20 @@ impl Session {
             // never a fake success, never an optimistic change.
             // `sessions_error_line` is reused: it is a pure
             // (action, error-class) formatter, not session-bound.
+            Some(RequestPurpose::GetDefaultAutoDelete) => {
+                self.default_auto_delete_busy = false;
+                self.default_auto_delete_error = Some(sessions_error_line(
+                    "load the default auto-delete timer",
+                    &err,
+                ));
+            }
+            Some(RequestPurpose::SetDefaultAutoDelete { .. }) => {
+                self.default_auto_delete_busy = false;
+                self.default_auto_delete_error = Some(sessions_error_line(
+                    "change the default auto-delete timer",
+                    &err,
+                ));
+            }
             Some(RequestPurpose::GetAccountTtl) => {
                 self.account_ttl_loading = false;
                 self.account_error = Some(sessions_error_line(
@@ -1271,9 +1337,15 @@ impl Session {
                 Some(RequestPurpose::SearchChats | RequestPurpose::SearchRecentlyFoundChats) => {
                     self.search.accept_chats(Vec::new(), true);
                 }
-                Some(RequestPurpose::SearchMessages) => {
+                Some(
+                    RequestPurpose::SearchMessages
+                    | RequestPurpose::SearchPublicPosts
+                    | RequestPurpose::SearchPublicMessagesByTag,
+                ) => {
                     self.search.accept_messages(Vec::new(), true);
                 }
+                // The supplement failing changes nothing the user sees.
+                Some(RequestPurpose::SearchChatsOnServer) => {}
                 Some(RequestPurpose::SearchPublicChats) => {
                     self.search.accept_public_chats(Vec::new(), true);
                 }

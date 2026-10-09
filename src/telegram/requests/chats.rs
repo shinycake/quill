@@ -341,6 +341,32 @@ pub fn set_chat_message_auto_delete_time(
     .to_string()
 }
 
+/// `getDefaultMessageAutoDeleteTime = MessageAutoDeleteTime;` (TDLib
+/// 1.8.67, `schema/td_api.tl:15682`): the default timer applied to new
+/// private chats.
+pub fn get_default_message_auto_delete_time(extra: RequestId) -> String {
+    json!({
+        "@type": "getDefaultMessageAutoDeleteTime",
+        "@extra": extra.as_extra(),
+    })
+    .to_string()
+}
+
+/// `setDefaultMessageAutoDeleteTime message_auto_delete_time:
+/// messageAutoDeleteTime = Ok;` (TDLib 1.8.67, `schema/td_api.tl:15679`).
+/// 0 disables the default; otherwise a multiple of 86400 seconds.
+pub fn set_default_message_auto_delete_time(extra: RequestId, seconds: i32) -> String {
+    json!({
+        "@type": "setDefaultMessageAutoDeleteTime",
+        "@extra": extra.as_extra(),
+        "message_auto_delete_time": {
+            "@type": "messageAutoDeleteTime",
+            "time": seconds,
+        },
+    })
+    .to_string()
+}
+
 /// `joinChat` for a public channel (TDLib 1.8.67). Response is
 /// `ChatJoinResult`.
 pub fn join_chat(extra: RequestId, chat_id: ChatId) -> String {
