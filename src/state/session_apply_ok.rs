@@ -410,6 +410,11 @@ impl Session {
             self.folder_specs.remove(&folder_id);
             self.folder_chats_exhausted.remove(&folder_id);
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::ToggleHasSponsoredMessagesEnabled)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            self.accept_sponsored_hidden(chat_id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {

@@ -11,7 +11,8 @@ use crate::telegram::requests::{
     get_chat_message_by_date, get_chat_message_calendar, get_chat_sponsored_messages,
     report_chat_sponsored_message, search_chat_members, search_chat_messages,
     search_chat_messages_from, search_chats, search_messages_filter_json, search_messages_filtered,
-    search_public_chats, search_recently_found_chats, view_messages, view_sponsored_chat,
+    search_public_chats, search_recently_found_chats, toggle_has_sponsored_messages_enabled,
+    view_messages, view_sponsored_chat,
 };
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -101,9 +102,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Premium "hide ads": `reportChatSponsoredMessage` with option `-1`, as
-    /// tdesktop's `HideSponsoredClickHandler` does. TDLib answers
-    /// `AdsHidden` (done) or `PremiumRequired`.
+    /// "Hide ads" (tdesktop `HideSponsoredClickHandler`): Premium accounts
+    /// send `toggleHasSponsoredMessagesEnabled(false)`; for anyone else the
+    /// session records the "needs Premium" notice and nothing is sent
+    /// (`Ok(None)`).
     pub fn hide_sponsored_messages(
         &mut self,
         chat_id: ChatId,
@@ -112,19 +114,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.begin_sponsored_hide(chat_id, message_id) {
+        if self.session.begin_sponsored_hide(chat_id, message_id) != Some(true) {
             return Ok(None);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
-        match self.sender.send_json(&report_chat_sponsored_message(
-            extra, chat_id, message_id, "-1",
-        )) {
+        let extra = self.session.request(
+            RequestPurpose::ToggleHasSponsoredMessagesEnabled,
+            Some(chat_id),
+        );
+        match self
+            .sender
+            .send_json(&toggle_has_sponsored_messages_enabled(extra, false))
+        {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.dismiss_sponsored_report();
                 Err(err)
             }
         }

@@ -447,8 +447,10 @@ impl QuillApp {
         }
     }
 
-    /// Premium "hide ads" (tdesktop `HideSponsoredClickHandler`). Live: the
-    /// driver reports option `-1`. Demo: resolve through the same reducer.
+    /// "Hide ads" (tdesktop `HideSponsoredClickHandler`): Premium accounts
+    /// turn sponsored messages off (`toggleHasSponsoredMessagesEnabled`);
+    /// others get the "needs Telegram Premium" banner without any request.
+    /// Demo: the same reducer calls, with `ok` injected for Premium.
     pub(super) fn hide_sponsored_messages_ui(
         &mut self,
         chat_id: ChatId,
@@ -458,23 +460,13 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.status_note = match live.driver.hide_sponsored_messages(chat_id, message_id) {
                 Ok(Some(_)) => "hiding ads…".into(),
-                Ok(None) => "ad is no longer available".into(),
+                Ok(None) => self.status_note.clone(),
                 Err(_) => "could not hide ads".into(),
             };
         } else if let Some(session) = self.demo_session.as_mut()
-            && session.begin_sponsored_hide(chat_id, message_id)
+            && session.begin_sponsored_hide(chat_id, message_id) == Some(true)
         {
-            let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
-            let kind = if session.my_is_premium() {
-                "reportSponsoredResultAdsHidden"
-            } else {
-                "reportSponsoredResultPremiumRequired"
-            };
-            let json = format!(r#"{{"@type":"{kind}","@extra":"{}"}}"#, extra.0);
-            let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_sink.clone();
-            if let Some(owned) = copy_and_parse(&json, &self.demo_seq, &dyn_sink) {
-                session.apply(owned);
-            }
+            session.accept_sponsored_hidden(chat_id);
         }
         cx.notify();
     }

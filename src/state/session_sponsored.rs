@@ -139,16 +139,36 @@ impl Session {
         }
     }
 
-    /// Start the Premium "hide ads" flow for a shown ad (tdesktop reports
-    /// option `-1`); unlike a report it needs no `can_be_reported`.
-    pub fn begin_sponsored_hide(&mut self, chat_id: ChatId, message_id: i64) -> bool {
-        if self.sponsored_message(chat_id, message_id).is_none() {
-            return false;
-        }
+    /// The user chose "Hide ads" on a shown ad. Hiding is the Premium
+    /// `toggleHasSponsoredMessagesEnabled(false)` setting (tdesktop's
+    /// `HideSponsoredClickHandler`). `None`: the ad is gone. `Some(true)`:
+    /// Premium, the caller sends the request. `Some(false)`: not Premium,
+    /// the "needs Telegram Premium" notice is recorded and nothing is sent.
+    pub fn begin_sponsored_hide(&mut self, chat_id: ChatId, message_id: i64) -> Option<bool> {
+        self.sponsored_message(chat_id, message_id)?;
         self.sponsored_report = None;
-        self.sponsored_report_target = Some((chat_id, message_id));
-        self.last_sponsored_report = None;
-        true
+        self.sponsored_report_target = None;
+        if self.my_is_premium() {
+            self.last_sponsored_report = None;
+            return Some(true);
+        }
+        self.last_sponsored_report = Some(SponsoredReportOutcome {
+            chat_id,
+            message_id,
+            result: ReportSponsoredResult::PremiumRequired,
+        });
+        Some(false)
+    }
+
+    /// `toggleHasSponsoredMessagesEnabled(false)` answered `ok`: no ads are
+    /// shown or fetched for the rest of the session.
+    pub fn accept_sponsored_hidden(&mut self, chat_id: ChatId) {
+        self.sponsored_hidden = true;
+        self.last_sponsored_report = Some(SponsoredReportOutcome {
+            chat_id,
+            message_id: 0,
+            result: ReportSponsoredResult::AdsHidden,
+        });
     }
 
     /// Sponsored rows for the open chat in TDLib's response order. Empty for
@@ -188,6 +208,7 @@ impl Session {
         Some((chat_id, message_id))
     }
 
+    /// Apply a `ReportSponsoredResult` for a finished `ReportChatSponsoredMessage`.
     /// Apply a `ReportSponsoredResult` for a finished `ReportChatSponsoredMessage`.
     /// `OptionRequired` arms the option picker; any other result closes it.
     pub fn accept_sponsored_report(

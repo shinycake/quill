@@ -54,17 +54,38 @@ fn sponsored_tail_hides_after_report_and_hide() {
     );
     assert!(session.open_sponsored_tail().is_none());
 
-    // Hide ads: nothing shown or fetched afterwards.
-    assert!(session.begin_sponsored_hide(chat_id, 9002));
-    let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    // Hide ads without Premium: notice only, ads stay available.
+    assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(false));
+    assert_eq!(
+        session
+            .last_sponsored_report
+            .clone()
+            .unwrap()
+            .user_message(),
+        "Hiding sponsored messages needs Telegram Premium"
+    );
+    assert!(!session.sponsored_hidden);
+
+    // Premium: the driver sends toggleHasSponsoredMessagesEnabled(false);
+    // `ok` hides everything.
     apply_all_seq(
         &mut session,
         &sink,
         &seq,
-        &[&format!(
-            r#"{{"@type":"reportSponsoredResultAdsHidden","@extra":"{}"}}"#,
-            extra.0
-        )],
+        &[
+            r#"{"@type":"updateOption","name":"is_premium","value":{"@type":"optionValueBoolean","value":true}}"#,
+        ],
+    );
+    assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(true));
+    let extra = session.request(
+        RequestPurpose::ToggleHasSponsoredMessagesEnabled,
+        Some(chat_id),
+    );
+    apply_all_seq(
+        &mut session,
+        &sink,
+        &seq,
+        &[&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0)],
     );
     assert!(session.sponsored_hidden);
     assert!(session.open_sponsored_tail().is_none());
