@@ -35,7 +35,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
@@ -54,7 +54,7 @@ jobs:
         run: cargo build --release --features ui --locked
       - name: tests (core + replay)
         run: cargo test --no-default-features --locked -- --nocapture
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-exe
           path: target/release/quill.exe
@@ -66,7 +66,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: ilammy/msvc-dev-cmd@v1
@@ -74,7 +74,7 @@ jobs:
           arch: x64
       - name: restore TDLib build
         id: tdlib-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: native/prefix
           key: tdlib-windows-mt-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
@@ -86,7 +86,7 @@ jobs:
       # bump (build-tdlib-windows.ps1 refuses a source tree at another commit).
       - name: restore TDLib work tree
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             native/td
@@ -99,7 +99,7 @@ jobs:
         run: scripts/build-tdlib-windows.ps1
       - name: save TDLib work tree
         if: always() && steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: |
             native/td
@@ -107,14 +107,14 @@ jobs:
           key: tdlib-windows-mt-work-${{ hashFiles('src/pins.rs', 'native/patches/*') }}-${{ github.run_id }}
       - name: save TDLib build
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: native/prefix
           key: tdlib-windows-mt-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib-windows.ps1', 'scripts/windows-common.ps1', 'native/patches/*') }}
       - name: vendor ntgcalls (checksum pinned)
         shell: bash
         run: bash scripts/vendor-ntgcalls.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-native
           path: |
@@ -128,13 +128,13 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
       - name: restore rlottie build
         id: rlottie-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: vendor/rlottie/prefix
           key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1') }}
@@ -144,11 +144,11 @@ jobs:
         run: scripts/build-rlottie-windows.ps1
       - name: save rlottie build
         if: steps.rlottie-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: vendor/rlottie/prefix
           key: rlottie-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie-windows.ps1', 'scripts/windows-common.ps1') }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-rlottie
           path: vendor/rlottie/prefix/bin/rlottie.dll
@@ -166,10 +166,10 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: restore FFmpeg build
         id: ffmpeg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
@@ -186,11 +186,11 @@ jobs:
         run: bash scripts/build-ffmpeg.sh
       - name: save FFmpeg build
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-ffmpeg
           path: |
@@ -205,23 +205,23 @@ jobs:
     needs: [windows-build, windows-native, windows-rlottie, windows-ffmpeg]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: quill-windows-exe
           path: target/release
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: quill-windows-native
           path: .
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: quill-windows-rlottie
           path: vendor/rlottie/prefix/bin
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: quill-windows-ffmpeg
           path: vendor/ffmpeg/prefix
@@ -267,7 +267,7 @@ jobs:
             Write-Host $probe
             if ($probe -notmatch 'frames=10') { throw "video probe failed for ${clip}: $probe" }
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-x86_64
           path: |
