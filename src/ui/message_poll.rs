@@ -35,13 +35,17 @@ pub(super) fn poll_body(
         .flex_col()
         .gap_1()
         .mt_1()
-        .child(div().text_sm().font_semibold().child(poll.question.clone()));
+        .child(
+            super::bidi_line::aligned_block(poll.question.clone())
+                .text_sm()
+                .font_semibold(),
+        );
     if !content.description.is_empty() {
         body = body.child(
             div()
                 .text_xs()
                 .text_color(text_muted())
-                .child(content.description.clone()),
+                .child(super::bidi_line::aligned_block(content.description.clone())),
         );
     }
     let mut meta = format!(
@@ -118,7 +122,7 @@ pub(super) fn poll_body(
             div()
                 .text_xs()
                 .text_color(warning())
-                .child(format!("💡 {explanation}")),
+                .child(super::bidi_line::aligned_block(format!("💡 {explanation}"))),
         );
     }
     // B4: voter list (`getPollVoters`, schema line 12941) — a single
@@ -209,7 +213,9 @@ pub(super) fn poll_option_row(
                     div()
                         .text_sm()
                         .text_color(if quiz_correct { success() } else { text_menu() })
-                        .child(option_label),
+                        .flex_1()
+                        .min_w_0()
+                        .child(super::bidi_line::aligned_block(option_label)),
                 )
                 .child(div().text_sm().text_color(text_muted()).child(stats)),
         )

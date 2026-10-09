@@ -217,7 +217,13 @@ impl QuillApp {
                             .text_color(success())
                             .child(label),
                     )
-                    .child(div().text_sm().text_color(text_primary()).child(detail)),
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(text_primary())
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(detail)),
+                    ),
             )
             .child(
                 Button::new("dismiss-forward-success")

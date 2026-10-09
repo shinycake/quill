@@ -77,7 +77,11 @@ pub(super) fn checklist_body(
                 .text_color(text_muted())
                 .child(checklist_kind_label(list)),
         )
-        .child(div().text_sm().font_semibold().child(list.title.clone()))
+        .child(
+            super::bidi_line::aligned_block(list.title.clone())
+                .text_sm()
+                .font_semibold(),
+        )
         .child(
             div()
                 .text_xs()
@@ -139,13 +143,16 @@ fn checklist_task_row(
         .text_color(text_bright())
         .child(if done { "\u{2713}" } else { "" });
     let mut text = div().flex().flex_col().flex_1().min_w_0().child(
-        div()
+        super::bidi_line::aligned_block(task.text.clone())
             .text_sm()
-            .text_color(if done { text_muted() } else { text_menu() })
-            .child(task.text.clone()),
+            .text_color(if done { text_muted() } else { text_menu() }),
     );
     if let Some(caption) = completion_caption(session, task) {
-        text = text.child(div().text_xs().text_color(text_muted()).child(caption));
+        text = text.child(
+            super::bidi_line::aligned_block(caption)
+                .text_xs()
+                .text_color(text_muted()),
+        );
     }
     let mut row = div()
         .id(("checklist-task", message_id.0 as u64 * 64 + task_id as u64))

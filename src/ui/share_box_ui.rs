@@ -80,7 +80,7 @@ fn share_dest_row(
                 .min_w_0()
                 .truncate()
                 .font_medium()
-                .child(title),
+                .child(super::bidi_line::one_line_plain(title)),
         )
 }
 
@@ -613,14 +613,14 @@ impl QuillApp {
                                     .text_sm()
                                     .font_medium()
                                     .text_color(text_primary())
-                                    .child(from),
+                                    .child(super::bidi_line::one_line_plain(from)),
                             )
                             .child(
                                 div()
                                     .truncate()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(text),
+                                    .child(super::bidi_line::one_line_plain(text)),
                             ),
                     )
                     .child(
@@ -795,7 +795,12 @@ impl QuillApp {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().truncate().font_medium().child(title))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .font_medium()
+                                    .child(super::bidi_line::one_line_plain(title)),
+                            )
                             .child(
                                 div()
                                     .text_xs()

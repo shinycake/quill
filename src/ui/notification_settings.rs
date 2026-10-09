@@ -2359,7 +2359,13 @@ impl QuillApp {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .child(div().text_sm().child(title))
+                    .child(
+                        div()
+                            .text_sm()
+                            .min_w_0()
+                            .truncate()
+                            .child(super::bidi_line::one_line_plain(title)),
+                    )
                     .child(
                         Button::new(format!("exception-reset-{id}"))
                             .small()
