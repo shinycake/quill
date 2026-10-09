@@ -158,6 +158,52 @@ fn join_chat_results_parse_without_invented_variants() {
 }
 
 #[test]
+fn can_transfer_ownership_results_parse() {
+    for (json, expected) in [
+        (
+            r#"{"@type":"canTransferOwnershipResultOk"}"#,
+            CanTransferOwnershipResult::Ok,
+        ),
+        (
+            r#"{"@type":"canTransferOwnershipResultPasswordNeeded"}"#,
+            CanTransferOwnershipResult::PasswordNeeded,
+        ),
+        (
+            r#"{"@type":"canTransferOwnershipResultPasswordTooFresh","retry_after":600}"#,
+            CanTransferOwnershipResult::PasswordTooFresh { retry_after: 600 },
+        ),
+        (
+            r#"{"@type":"canTransferOwnershipResultSessionTooFresh","retry_after":7200}"#,
+            CanTransferOwnershipResult::SessionTooFresh { retry_after: 7200 },
+        ),
+    ] {
+        match parse_envelope(json).unwrap().payload {
+            EnvelopePayload::CanTransferOwnershipResult { result } => assert_eq!(result, expected),
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[test]
+fn update_basic_group_keeps_own_status_and_rights() {
+    let json = r#"{"@type":"updateBasicGroup","basic_group":{"@type":"basicGroup","id":5,"member_count":9,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_restrict_members":true,"can_promote_members":false}}}}"#;
+    match parse_envelope(json).unwrap().payload {
+        EnvelopePayload::UpdateBasicGroup {
+            basic_group_id,
+            status,
+            can_restrict_members,
+            can_promote_members,
+            ..
+        } => {
+            assert_eq!(basic_group_id, 5);
+            assert_eq!(status, ChannelMemberStatus::Administrator);
+            assert!(can_restrict_members && !can_promote_members);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn me_response_keeps_id_only() {
     let env = parse_envelope(r#"{"@type":"user","id":777,"is_bot":false}"#).unwrap();
     match env.payload {

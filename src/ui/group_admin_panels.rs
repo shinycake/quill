@@ -591,14 +591,34 @@ impl QuillApp {
                 })),
             );
         }
+        // The owner hands the chat to someone else (password-confirmed).
+        if self.group_flavor(chat_id).is_some() && session.is_some_and(|s| s.chat_is_owner(chat_id))
+        {
+            row!(
+                "g1-transfer-ownership",
+                I::Crown,
+                if is_channel {
+                    "Transfer channel ownership"
+                } else {
+                    "Transfer group ownership"
+                },
+                |this, window, cx| {
+                    this.open_transfer_ownership(chat_id, window, cx);
+                }
+            );
+        }
         if is_member {
             let label = if is_channel {
                 "Leave channel"
             } else {
                 "Leave group"
             };
-            danger_row!("g1-leave-chat", I::LogOut, label, |this, _window, cx| {
-                this.open_group_confirm(chat_id, GroupConfirmAction::LeaveChat, cx);
+            danger_row!("g1-leave-chat", I::LogOut, label, |this, window, cx| {
+                // An owner sees who inherits first (tdesktop
+                // `select_future_owner_box`).
+                if !this.open_owner_leave(chat_id, window, cx) {
+                    this.open_group_confirm(chat_id, GroupConfirmAction::LeaveChat, cx);
+                }
             });
         }
         // `deleteChat` (schema 1.8.67, line 11850): TDLib deletes for

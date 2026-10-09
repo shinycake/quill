@@ -83,6 +83,44 @@ fn local_day(unix: i64) -> String {
     format!("{:04}-{:02}-{:02}", c.year, c.month, c.day)
 }
 
+/// A date+time picker that opens at `initial` and allows days from today
+/// to `max_ahead_secs` ahead. Shared by the schedule popup and the
+/// restrict-until picker of the member dialogs.
+pub(super) fn new_date_time_picker(
+    window: &mut Window,
+    cx: &mut Context<QuillApp>,
+    initial: i64,
+    max_ahead_secs: i64,
+) -> Entity<DatePickerState> {
+    let now = now_unix();
+    // Days outside [today, today + max_ahead] cannot be picked.
+    let first_day = local_day(now);
+    let last_day = local_day(now + max_ahead_secs);
+    let date = cx.new(|cx| {
+        DatePickerState::new(window, cx)
+            .time_precision(TimePrecision::Minute)
+            .hour_cycle(HourCycle::H23)
+            .disabled_matcher(Matcher::custom(move |day| {
+                let day = day.format("%Y-%m-%d").to_string();
+                day < first_day || day > last_day
+            }))
+    });
+    if let Some(value) = picker_value(initial) {
+        date.update(cx, |state, cx| state.set_date_time(value, window, cx));
+    }
+    date
+}
+
+/// The unix time a date picker currently shows (local zone), if it holds
+/// a complete date and time.
+pub(super) fn picked_unix(date: &Entity<DatePickerState>, cx: &App) -> Option<i64> {
+    date.read(cx)
+        .date_time()
+        .start()
+        .and_then(|value| parse_picker_stamp(&value.format("%Y-%m-%d %H:%M").to_string()))
+        .map(|civil| civil_to_unix(&civil))
+}
+
 impl QuillApp {
     /// Reminder wording in Saved Messages (the chat with yourself),
     /// schedule wording everywhere else (`SendMenu::Type::Reminder`).
@@ -142,21 +180,7 @@ impl QuillApp {
         let initial = existing
             .filter(|date| validate_send_date(*date, now).is_ok())
             .unwrap_or_else(|| default_schedule_time(now));
-        // Days outside [today, today + a year] cannot be picked.
-        let first_day = local_day(now);
-        let last_day = local_day(now + MAX_SCHEDULE_SECS);
-        let date = cx.new(|cx| {
-            DatePickerState::new(window, cx)
-                .time_precision(TimePrecision::Minute)
-                .hour_cycle(HourCycle::H23)
-                .disabled_matcher(Matcher::custom(move |day| {
-                    let day = day.format("%Y-%m-%d").to_string();
-                    day < first_day || day > last_day
-                }))
-        });
-        if let Some(value) = picker_value(initial) {
-            date.update(cx, |state, cx| state.set_date_time(value, window, cx));
-        }
+        let date = new_date_time_picker(window, cx, initial, MAX_SCHEDULE_SECS);
         self.schedule_picker = Some(SchedulePicker {
             target,
             date,
@@ -187,13 +211,7 @@ impl QuillApp {
             return;
         };
         let target = picker.target;
-        let picked = picker
-            .date
-            .read(cx)
-            .date_time()
-            .start()
-            .and_then(|value| parse_picker_stamp(&value.format("%Y-%m-%d %H:%M").to_string()))
-            .map(|civil| civil_to_unix(&civil))
+        let picked = picked_unix(&picker.date, cx)
             .ok_or(ScheduleError::Invalid)
             .and_then(|unix| validate_send_date(unix, now_unix()));
         match picked {

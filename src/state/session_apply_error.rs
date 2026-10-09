@@ -138,6 +138,27 @@ impl Session {
                 self.message_action_note =
                     Some(format!("could not report the spam: {}", error_reason(&err)));
             }
+            Some(RequestPurpose::DeleteMessageReactionsFromSender { .. }) => {
+                self.message_action_note = Some(format!(
+                    "could not delete the reaction: {}",
+                    error_reason(&err)
+                ));
+            }
+            Some(RequestPurpose::CanTransferOwnership) => {
+                self.ownership.check_in_flight = false;
+                self.ownership.check_error = Some(format!(
+                    "Could not check whether you can transfer ownership: {}",
+                    error_reason(&err)
+                ));
+            }
+            Some(RequestPurpose::TransferChatOwnership { .. }) => {
+                self.fail_ownership_transfer(&err);
+            }
+            Some(RequestPurpose::GetChatOwnerAfterLeaving) => {
+                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.fail_owner_lookup(chat_id.0, &err);
+                }
+            }
             Some(RequestPurpose::ReportStory) => {
                 if let Some(pending) = pending {
                     self.fail_story_report(

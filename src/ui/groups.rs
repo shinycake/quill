@@ -594,16 +594,6 @@ impl QuillApp {
         })
     }
 
-    /// Slice G1: days (0 = forever) to a TDLib `banned_until_date` Unix
-    /// timestamp (schema 1.8.67, line 2510: 0 = forever).
-    pub(super) fn restrict_until_date(days: i32) -> i32 {
-        if days <= 0 {
-            0
-        } else {
-            (quill::state::unix_ms_now() / 1000) as i32 + days.saturating_mul(86_400)
-        }
-    }
-
     pub(super) fn open_create_chat_dialog(
         &mut self,
         kind: CreateChatKind,
@@ -1312,6 +1302,10 @@ impl QuillApp {
                         .driver
                         .clear_saved_payment_info()
                         .map(|_| "clearing saved payment info…".to_string()),
+                    GroupConfirmAction::RemoveMember { user_id } => live
+                        .driver
+                        .remove_chat_member(dialog.chat_id, user_id)
+                        .map(|id| sent_note(id, "removing member…")),
                 };
                 match result {
                     Ok(note) => note,
@@ -1718,6 +1712,19 @@ impl QuillApp {
                         "Remove this sticker set from your installed stickers? You can install it again later.".to_string(),
                         "Remove".to_string(),
                     ),
+                    GroupConfirmAction::RemoveMember { user_id } => {
+                        let name = this.contact_display_name(user_id);
+                        let place = if this.group_flavor(dialog_state.chat_id) == Some(quill::moderation::GroupFlavor::Channel) {
+                            "channel"
+                        } else {
+                            "group"
+                        };
+                        (
+                            "Remove member".to_string(),
+                            format!("Remove {name} from the {place}?"),
+                            "Remove".to_string(),
+                        )
+                    }
                     GroupConfirmAction::ClearPaymentInfo => (
                         "Clear saved payment info".to_string(),
                         "Delete the shipping info and payment credentials Telegram saved from past checkouts? This cannot be undone.".to_string(),
@@ -1736,6 +1743,7 @@ impl QuillApp {
                     | GroupConfirmAction::RemoveInstalledStickerSets
                     | GroupConfirmAction::RemoveStickerSet { .. }
                     | GroupConfirmAction::RemoveEmojiSet { .. }
+                    | GroupConfirmAction::RemoveMember { .. }
             );
             let body = div()
                 .flex()

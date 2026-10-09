@@ -745,6 +745,7 @@ pub struct QuillApp {
     pub(super) username_dialog: Option<UsernameDialog>,
     /// Slice G1: restrict/ban dialog.
     pub(super) restrict_dialog: Option<RestrictDialog>,
+    pub(super) ownership_dialog: Option<OwnershipDialog>,
     /// Slice G1: delete / leave / broadcast-upgrade / ban confirmations.
     pub(super) group_confirm_dialog: Option<GroupConfirmDialog>,
     /// Slice G2: forum-topic management dialog.

@@ -679,6 +679,10 @@ pub enum ScreenshotDemo {
     /// edit-contact|birthday|channel|share|gallery|similar`; injected data,
     /// no live Telegram).
     ReadyProfilePanels,
+    /// Member moderation (`QUILL_DEMO_MODERATION=members|restrict|ban|
+    /// remove|delete|leave|pick|confirm|blocked`; injected data, no live
+    /// Telegram).
+    ReadyMemberModeration,
     /// Slice A5: like `ReadyProfileEdit`, but the username field holds a
     /// freshly-checked value with a seeded `checkChatUsernameResultOk`
     /// verdict — intended for a taller capture
