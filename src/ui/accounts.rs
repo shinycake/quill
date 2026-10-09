@@ -180,6 +180,15 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        // tdesktop `Domain::maxAccounts`: three accounts, one more per
+        // Premium account (this build only knows the connected one).
+        let premium = usize::from(self.session().and_then(|s| s.premium_option) == Some(true));
+        if let Some(note) = quill::signin::add_account_blocker(list_accounts(&root).len(), premium)
+        {
+            self.accounts_ui.error = Some(note);
+            cx.notify();
+            return;
+        }
         match add_account(&root, &name) {
             Ok(key) => {
                 self.accounts_ui
@@ -373,6 +382,16 @@ impl QuillApp {
                         .child("Switching restarts the connection under the other account."),
                 )
                 .child(div().font_semibold().text_sm().child("Add another account"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "Up to {} accounts; Telegram Premium on an account adds one more (up to {}).",
+                            quill::signin::MAX_ACCOUNTS,
+                            quill::signin::MAX_ACCOUNTS_PREMIUM
+                        )),
+                )
                 .child(
                     Textarea::new(&this.accounts_ui.add_name)
                         .aria_label("Account display name")

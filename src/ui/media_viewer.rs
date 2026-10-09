@@ -477,9 +477,20 @@ impl QuillApp {
                 .map(|(_, image)| image.clone());
         }
         let image = Self::video_render_image(frame)?;
+        // Tiles of any other call are dead weight.
+        self.prune_group_video_images(Some(call_id));
         self.group_video_images
             .insert(key, (frame.seq, image.clone()));
         Some(image)
+    }
+
+    /// Drop cached group-call tiles that don't belong to `live_call`
+    /// (`None`: no call, drop all), handing them to the atlas sweeper.
+    pub(super) fn prune_group_video_images(&mut self, live_call: Option<i32>) {
+        let images = take_dead_call_tiles(&mut self.group_video_images, live_call)
+            .into_iter()
+            .map(|(_, image)| image);
+        super::image_budget::retire_all(images);
     }
 
     /// Phase C2g: newest frame for one group participant slot. Live
@@ -3040,5 +3051,38 @@ impl QuillApp {
                 Animation::new(Duration::from_millis(VIEWER_SHOW_MS)),
                 |overlay, t| overlay.opacity(if still_frame() { 1.0 } else { t }),
             )
+    }
+}
+
+/// Remove and return every tile whose call isn't `live_call`.
+fn take_dead_call_tiles<V>(
+    tiles: &mut std::collections::HashMap<(i32, i64, bool), V>,
+    live_call: Option<i32>,
+) -> Vec<V> {
+    let dead: Vec<_> = tiles
+        .keys()
+        .filter(|(call, _, _)| Some(*call) != live_call)
+        .copied()
+        .collect();
+    dead.into_iter()
+        .filter_map(|key| tiles.remove(&key))
+        .collect()
+}
+
+#[cfg(test)]
+mod group_tile_tests {
+    use super::take_dead_call_tiles;
+    use std::collections::HashMap;
+
+    #[test]
+    fn tiles_empty_when_the_call_ends_and_drop_when_it_changes() {
+        let mut tiles: HashMap<(i32, i64, bool), u8> = HashMap::new();
+        tiles.insert((1, 10, false), 0);
+        tiles.insert((1, 11, true), 1);
+        tiles.insert((2, 10, false), 2);
+        assert_eq!(take_dead_call_tiles(&mut tiles, Some(2)).len(), 2);
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(take_dead_call_tiles(&mut tiles, None).len(), 1);
+        assert!(tiles.is_empty());
     }
 }

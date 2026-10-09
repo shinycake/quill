@@ -49,6 +49,7 @@ pub mod network_usage;
 pub mod notify;
 pub mod passcode;
 pub mod peer_badge;
+pub mod phone;
 pub mod pin_reorder;
 pub mod pins;
 pub mod platform;
@@ -71,6 +72,7 @@ pub mod service_text;
 mod service_text_tests;
 pub mod settings;
 pub mod share_box;
+pub mod signin;
 pub mod single_instance;
 pub mod spell_dict;
 #[cfg(windows)]
@@ -91,6 +93,7 @@ pub mod subsection_tabs;
 pub mod suggest;
 pub mod telegram;
 pub mod text;
+pub mod text_split;
 pub mod translate;
 pub mod tray;
 #[cfg(all(target_os = "macos", feature = "ui"))]

@@ -173,6 +173,11 @@ pub struct Session {
     /// (TDLib 1.8.67, `schema/td_api.tl:10926`); default 1024 is TDLib's
     /// compiled default. Guards caption edits and media-send captions.
     pub message_caption_length_max: i32,
+    /// R8: `getOption("message_text_length_max")` via `updateOption`; 4096 is
+    /// the compiled default (Premium raises it). Plain text sends are cut
+    /// into several messages at this size (tdesktop `CutPart`); edits over
+    /// it are refused.
+    pub message_text_length_max: i32,
     /// Slice CL1: `getOption("pinned_chat_count_max")` /
     /// `getOption("pinned_archived_chat_count_max")` via `updateOption`
     /// (schema 1.8.67, line 13674). Defaults 5 / 100 are TDLib's
@@ -352,6 +357,10 @@ pub struct Session {
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
     /// self-destruct-if-away picker (UI half ships post-Phase-9).
     pub account_ttl_days: Option<i32>,
+    /// `getCountries` rows for the sign-in picker (`None` until answered).
+    pub countries: Option<Vec<crate::phone::Country>>,
+    /// Uppercase ISO code from `getCountryCode`: the default country guess.
+    pub guessed_country_iso: Option<String>,
     /// Slice A7: a `getAccountTtl` round trip is in flight.
     pub account_ttl_loading: bool,
     /// Slice A7: a `deleteAccount` / `setAccountTtl` round trip is in
@@ -1235,6 +1244,7 @@ impl Session {
             message_link_result: None,
             message_link_public: false,
             message_caption_length_max: 1024,
+            message_text_length_max: 4096,
             // Slice CL1: TDLib's compiled defaults for the pin limits
             // (schema 1.8.67, line 13674); `updateOption` overrides.
             pinned_chat_count_max: 5,
@@ -1297,6 +1307,8 @@ impl Session {
             sessions_error: None,
             sessions_stale: false,
             account_ttl_days: None,
+            countries: None,
+            guessed_country_iso: None,
             account_ttl_loading: false,
             account_mutating: false,
             account_error: None,

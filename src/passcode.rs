@@ -692,8 +692,10 @@ pub fn autolock_label(secs: u32) -> String {
 /// OS-wide idle time (time since the last keyboard or mouse input anywhere
 /// on the desktop) where the platform exposes it without extra
 /// dependencies: macOS (CoreGraphics) and Windows (`GetLastInputInfo`).
-/// `None` on Linux, where idle time needs a compositor-specific protocol;
-/// callers fall back to in-window input ("inactive" instead of "away").
+/// On Linux it asks GNOME's idle monitor through `gdbus` ([`linux_idle_ms`]);
+/// `None` on other desktops, where idle time needs a compositor-specific
+/// protocol, so callers fall back to in-window input ("inactive" instead of
+/// "away").
 pub fn os_idle_ms() -> Option<u64> {
     #[cfg(target_os = "macos")]
     {
@@ -726,9 +728,138 @@ pub fn os_idle_ms() -> Option<u64> {
         let now = unsafe { GetTickCount() };
         Some(u64::from(now.wrapping_sub(info.dwTime)))
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_idle_ms()
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         None
+    }
+}
+
+/// Parse `gdbus call ... GetIdletime` output, e.g. `(uint64 1234,)`.
+#[cfg(any(target_os = "linux", test))]
+fn parse_gdbus_idletime(output: &str) -> Option<u64> {
+    let rest = output.trim().strip_prefix('(')?.trim_start();
+    let rest = rest.strip_prefix("uint64").unwrap_or(rest).trim_start();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// Sampled idle state shared between the poller thread and readers.
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdleCache {
+    /// Poller not started or no sample yet.
+    Unknown,
+    /// `ms` of idle time measured `age_ms` ago relative to the read.
+    Sample { ms: u64, taken_ms: u64 },
+    /// The query failed once; never retried.
+    Failed,
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl IdleCache {
+    /// Idle time at `now_ms` (same clock as `taken_ms`), extrapolated from
+    /// the last sample. `None` until a sample exists and forever after a
+    /// failure.
+    fn read(self, now_ms: u64) -> Option<u64> {
+        match self {
+            Self::Sample { ms, taken_ms } => Some(ms + now_ms.saturating_sub(taken_ms)),
+            Self::Unknown | Self::Failed => None,
+        }
+    }
+}
+
+/// Reads the cache a background thread refreshes every two seconds from
+/// GNOME Mutter's `org.gnome.Mutter.IdleMonitor.GetIdletime` via `gdbus`.
+/// The first call starts the thread; it stops for good after the first
+/// failure (no `gdbus`, not GNOME). Never blocks on a subprocess.
+#[cfg(target_os = "linux")]
+fn linux_idle_ms() -> Option<u64> {
+    linux_idle_start();
+    linux_idle_cache().read(linux_now_ms())
+}
+
+/// True once a sample succeeded; starts nothing (safe from render).
+#[cfg(target_os = "linux")]
+fn linux_idle_known() -> bool {
+    linux_idle_cache().read(0).is_some()
+}
+
+#[cfg(target_os = "linux")]
+static IDLE: std::sync::Mutex<IdleCache> = std::sync::Mutex::new(IdleCache::Unknown);
+
+#[cfg(target_os = "linux")]
+fn linux_idle_cache() -> IdleCache {
+    *IDLE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_now_ms() -> u64 {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+#[cfg(target_os = "linux")]
+fn linux_idle_start() {
+    use std::sync::Once;
+    use std::time::Duration;
+    static STARTED: Once = Once::new();
+    STARTED.call_once(|| {
+        linux_now_ms(); // pin the clock origin before the first sample
+        let spawned = std::thread::Builder::new()
+            .name("quill-idle".into())
+            .spawn(|| {
+                loop {
+                    let ms = std::process::Command::new("gdbus")
+                        .args([
+                            "call",
+                            "--session",
+                            "--dest",
+                            "org.gnome.Mutter.IdleMonitor",
+                            "--object-path",
+                            "/org/gnome/Mutter/IdleMonitor/Core",
+                            "--method",
+                            "org.gnome.Mutter.IdleMonitor.GetIdletime",
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|o| o.status.success())
+                        .and_then(|o| parse_gdbus_idletime(&String::from_utf8_lossy(&o.stdout)));
+                    let state = match ms {
+                        Some(ms) => IdleCache::Sample {
+                            ms,
+                            taken_ms: linux_now_ms(),
+                        },
+                        None => IdleCache::Failed,
+                    };
+                    *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = state;
+                    if state == IdleCache::Failed {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            });
+        if spawned.is_err() {
+            *IDLE.lock().unwrap_or_else(|e| e.into_inner()) = IdleCache::Failed;
+        }
+    });
+}
+
+/// Whether OS idle time is currently known, without starting any sampling
+/// (for render paths). Equivalent to `os_idle_ms().is_some()` elsewhere.
+pub fn os_idle_known() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        linux_idle_known()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        os_idle_ms().is_some()
     }
 }
 
@@ -736,6 +867,27 @@ pub fn os_idle_ms() -> Option<u64> {
 mod tests {
     use crate::passcode::*;
     use crate::platform::MemorySecretStore;
+
+    #[test]
+    fn idle_cache_extrapolates_and_fails_closed() {
+        assert_eq!(IdleCache::Unknown.read(10), None);
+        assert_eq!(IdleCache::Failed.read(10), None);
+        let sample = IdleCache::Sample {
+            ms: 500,
+            taken_ms: 1000,
+        };
+        assert_eq!(sample.read(1000), Some(500));
+        assert_eq!(sample.read(2500), Some(2000));
+        assert_eq!(sample.read(900), Some(500));
+    }
+
+    #[test]
+    fn gdbus_idletime_output_parses() {
+        assert_eq!(parse_gdbus_idletime("(uint64 1234,)\n"), Some(1234));
+        assert_eq!(parse_gdbus_idletime("(0,)"), Some(0));
+        assert_eq!(parse_gdbus_idletime("Error: no such name"), None);
+        assert_eq!(parse_gdbus_idletime("()"), None);
+    }
 
     const FAST: u32 = 8;
 

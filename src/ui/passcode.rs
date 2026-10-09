@@ -175,7 +175,7 @@ impl PasscodeUi {
     /// "Auto-Lock if away for…" where the OS reports idle time, otherwise
     /// "inactive" (idle measured by input to this window).
     pub(crate) fn autolock_title() -> &'static str {
-        if passcode::os_idle_ms().is_some() {
+        if passcode::os_idle_known() {
             "Auto-lock if away for"
         } else {
             "Auto-lock if inactive for"

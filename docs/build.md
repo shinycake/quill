@@ -74,6 +74,15 @@ pwsh scripts/windows-package.ps1         # -> dist/windows/quill-windows-x86_64{
 
 The package is a flat directory: `quill.exe` plus the DLLs beside it. Everything links the VC++ runtime statically (`.cargo/config.toml` sets `+crt-static`; TDLib and rlottie build with `/MT`, OpenSSL and zlib are linked into `tdjson.dll`), so no `vcruntime`/`msvcp` DLL ships. `scripts/check-bundle-pe.ps1 <dir>` fails if a DLL imports anything that is neither bundled nor a Windows system DLL. For a developer run without packaging, set `QUILL_TDJSON_PATH`, `QUILL_RLOTTIE_PATH`, `QUILL_NTGCALLS_LIB` to the DLL paths. The CI jobs `windows-build`, `windows-native` and `windows-package` run all of this (not required checks). Details: `docs/decisions/codex-windows-package.md`.
 
+## Troubleshooting
+
+- **Linux (X11) or Windows: the window stops updating until the mouse moves,
+  or touchpad scrolling starts late.** Quill's vendored GPUI backends stop
+  per-frame wakeups while a window is idle
+  (`docs/decisions/codex-idle-frames-x11-windows.md`). Start Quill with
+  `QUILL_IDLE_FRAMES=0` to turn that off (upstream behavior: a frame every
+  vblank) and report the case. Wayland and macOS do not read it.
+
 ## Native TDLib (optional)
 
 Ordinary `cargo test` / `cargo run` do **not** fetch or execute tdjson. To build the pinned runtime:

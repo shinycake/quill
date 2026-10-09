@@ -1,3 +1,4 @@
+use super::SatI32;
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,7 +188,8 @@ pub(crate) fn parse_chat_list(value: Option<&Value>) -> ChatList {
             value
                 .and_then(|v| v.get("chat_folder_id"))
                 .and_then(Value::as_i64)
-                .unwrap_or(0) as i32,
+                .unwrap_or(0)
+                .sat_i32(),
         ),
         _ => ChatList::Unknown,
     }
@@ -214,10 +216,18 @@ pub(crate) fn parse_chat_folder_info(value: &Value) -> Option<ChatFolderInfo> {
         .unwrap_or("")
         .to_string();
     Some(ChatFolderInfo {
-        id: value.get("id").and_then(Value::as_i64).unwrap_or(0) as i32,
+        id: value
+            .get("id")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         name,
         icon_name,
-        color_id: value.get("color_id").and_then(Value::as_i64).unwrap_or(-1) as i32,
+        color_id: value
+            .get("color_id")
+            .and_then(Value::as_i64)
+            .unwrap_or(-1)
+            .sat_i32(),
         is_shareable: value
             .get("is_shareable")
             .and_then(Value::as_bool)

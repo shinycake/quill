@@ -141,3 +141,9 @@ gpui-base = { path = "third_party/gpui-base" }
 # display link that stops while the window has nothing to draw. The commit
 # that adds third_party/gpui-pre-macos is the pristine registry copy.
 gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
+# Idle frames on X11 and Windows (docs/decisions/codex-idle-frames-x11-windows.md):
+# gpui-pre-linux and gpui-pre-windows 0.3.7, whose per-frame wake pauses while
+# the window has nothing to draw. The commit that adds each directory is the
+# pristine registry copy.
+gpui-pre-linux = { path = "third_party/gpui-pre-linux" }
+gpui-pre-windows = { path = "third_party/gpui-pre-windows" }

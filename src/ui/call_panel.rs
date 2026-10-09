@@ -111,16 +111,16 @@ pub(super) fn call_status(
 /// `PanelBackground`): the first color around the photo, the last at the
 /// edges. Cached per palette.
 fn backdrop(colors: &[u32]) -> Option<Arc<RenderImage>> {
+    use super::lru::Lru;
     use std::cell::RefCell;
-    use std::collections::HashMap;
     thread_local! {
-        static CACHE: RefCell<HashMap<Vec<u32>, Arc<RenderImage>>> = RefCell::new(HashMap::new());
+        static CACHE: RefCell<Lru<Vec<u32>, Arc<RenderImage>>> = RefCell::new(Lru::new(8));
     }
     if colors.len() < 2 {
         return None;
     }
     let key = colors.to_vec();
-    if let Some(hit) = CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+    if let Some(hit) = CACHE.with(|cache| cache.borrow_mut().get(&key)) {
         return Some(hit);
     }
     let (w, h) = (360u32, 270u32);
@@ -143,12 +143,10 @@ fn backdrop(colors: &[u32]) -> Option<Arc<RenderImage>> {
         image::Frame::new(image),
     ])));
     CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
         // One per peer palette; a few calls' worth is plenty.
-        if cache.len() >= 8 {
-            super::image_budget::retire_all(cache.drain().map(|(_, image)| image));
+        if let Some(old) = cache.borrow_mut().insert(key, render.clone()) {
+            super::image_budget::retire_all([old]);
         }
-        cache.insert(key, render.clone());
     });
     Some(render)
 }

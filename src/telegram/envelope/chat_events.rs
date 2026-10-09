@@ -245,7 +245,7 @@ pub(crate) fn parse_chat_event_action(value: Option<&Value>) -> ChatEventAction 
 pub(crate) fn parse_chat_event(value: &Value) -> Option<ParsedChatEvent> {
     Some(ParsedChatEvent {
         id: int53(value.get("id")).ok()?,
-        date: int53(value.get("date")).ok()? as i32,
+        date: int53(value.get("date")).ok()?.sat_i32(),
         member_id: parse_message_sender(value.get("member_id")).ok()?,
         action: parse_chat_event_action(value.get("action")),
     })

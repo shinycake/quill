@@ -196,6 +196,12 @@ pub enum ConnectSendError {
     CaptionTooLong {
         limit: i32,
     },
+    /// R8: an edited text exceeded `getOption("message_text_length_max")`
+    /// (tdesktop refuses the edit with `lng_edit_limit_reached`). New
+    /// messages are split instead, so only edits can raise this.
+    TextTooLong {
+        limit: i32,
+    },
 }
 
 /// MED4: outcome of an Instant View open attempt (TGX

@@ -1,3 +1,4 @@
+use super::SatI32;
 use serde_json::Value;
 
 /// `botCommand` (TDLib 1.8.67, `schema/td_api.tl:826`):
@@ -129,9 +130,17 @@ pub(crate) fn parse_game_high_scores(value: &Value) -> Vec<GameHighScore> {
             scores
                 .iter()
                 .map(|score| GameHighScore {
-                    position: score.get("position").and_then(Value::as_i64).unwrap_or(0) as i32,
+                    position: score
+                        .get("position")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .sat_i32(),
                     user_id: score.get("user_id").and_then(Value::as_i64).unwrap_or(0),
-                    score: score.get("score").and_then(Value::as_i64).unwrap_or(0) as i32,
+                    score: score
+                        .get("score")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .sat_i32(),
                 })
                 .collect()
         })

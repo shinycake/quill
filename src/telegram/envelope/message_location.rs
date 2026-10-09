@@ -168,13 +168,19 @@ pub(crate) fn parse_live_location_state(value: Option<&Value>) -> Option<LiveLoc
         live_period: value
             .get("live_period")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         expires_in: 0,
-        heading: value.get("heading").and_then(Value::as_i64).unwrap_or(0) as i32,
+        heading: value
+            .get("heading")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         proximity_alert_radius: value
             .get("proximity_alert_radius")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
     })
 }
 
@@ -209,7 +215,11 @@ pub(crate) fn parse_message_live_location(value: &Value) -> (MessageContent, Vec
         parse_live_location_state(live_location),
     ) {
         (Some(location), Some(mut live)) => {
-            live.expires_in = value.get("expires_in").and_then(Value::as_i64).unwrap_or(0) as i32;
+            live.expires_in = value
+                .get("expires_in")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32();
             (
                 MessageContent::Location(LocationContent {
                     location,

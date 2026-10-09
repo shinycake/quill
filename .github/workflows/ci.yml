@@ -28,6 +28,10 @@ jobs:
         run: cargo clippy --no-default-features --all-targets --locked -- -D warnings
       - name: tests (core + replay)
         run: cargo test --no-default-features --locked -- --nocapture
+      # The vendored X11 / Windows GPUI backends only build on their own OS;
+      # their shared idle-frame decision is std-only and tested standalone.
+      - name: tests (vendored GPUI frame idle)
+        run: bash scripts/test-frame-idle.sh
       - name: secret scan (gitleaks)
         uses: gitleaks/gitleaks-action@v2
         env:

@@ -226,7 +226,8 @@ pub(crate) fn parse_sponsored_messages(value: &Value) -> Result<EnvelopePayload,
         messages_between: value
             .get("messages_between")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
     })
 }
 
@@ -367,7 +368,8 @@ pub(crate) fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
                 interaction_date: entry
                     .get("interaction_date")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 reaction_emoji,
                 reaction_extra,
                 kind,
@@ -378,7 +380,8 @@ pub(crate) fn parse_story_interactions(value: &Value) -> StoryInteractionsView {
         total_count: value
             .get("total_count")
             .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
+            .unwrap_or(0)
+            .sat_i32(),
         interactions,
         next_offset: json_field_str(value, "next_offset"),
     }

@@ -85,7 +85,7 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
                     .get("text")
                     .and_then(|formatted| formatted.get("text"))
                     .and_then(Value::as_str)?;
-                let position = quote.get("position").and_then(Value::as_i64)? as i32;
+                let position = quote.get("position").and_then(Value::as_i64)?.sat_i32();
                 Some((text.to_string(), position))
             });
             (id, quote)

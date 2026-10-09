@@ -261,6 +261,7 @@ impl Render for QuillApp {
         // Phase 4.6: push the playback clock into the seek slider entity so
         // the thumb follows elapsed time (the tick has no `&mut Window`).
         self.sync_seek_slider(window, cx);
+        self.sync_signin(window, cx);
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
         let inputs_live = self.live.is_some() || self.demo_auth_inputs;

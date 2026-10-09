@@ -165,6 +165,7 @@ pub struct QuillApp {
     pub(super) registration_notify_contacts: bool,
     pub(super) email_input: Entity<TextareaState>,
     pub(super) phone_input: Entity<TextareaState>,
+    pub(super) signin: super::signin_ui::SignInUi,
     pub(super) code_input: Entity<TextareaState>,
     pub(super) password_input: Entity<InputState>,
     /// Slice A10: recovery-code entry for 2FA password recovery. The code

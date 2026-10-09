@@ -106,7 +106,11 @@ pub(crate) fn parse_message_scheduling_state(
     }
     match value.get("@type").and_then(Value::as_str) {
         Some("messageSchedulingStateSendAtDate") => Some(MessageSchedulingState::SendAtDate {
-            send_date: value.get("send_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+            send_date: value
+                .get("send_date")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .sat_i32(),
         }),
         Some("messageSchedulingStateSendWhenOnline") => {
             Some(MessageSchedulingState::SendWhenOnline)
@@ -232,10 +236,11 @@ impl MessageSelfDestruct {
         if self.expires_in_ms <= 0 {
             return None;
         }
-        let elapsed_ms = now_ms.saturating_sub(self.fetched_at_ms) as i64;
-        let remaining_ms = self.expires_in_ms - elapsed_ms;
+        let elapsed_ms =
+            i64::try_from(now_ms.saturating_sub(self.fetched_at_ms)).unwrap_or(i64::MAX);
+        let remaining_ms = self.expires_in_ms.saturating_sub(elapsed_ms);
         Some(if remaining_ms > 0 {
-            ((remaining_ms + 999) / 1000) as u64
+            (remaining_ms.saturating_add(999) / 1000) as u64
         } else {
             0
         })
@@ -317,10 +322,11 @@ impl MessageAutoDelete {
     /// Locally decayed whole seconds left. The value keeps decaying to 0
     /// (the row stays until TDLib's `updateDeleteMessages` removes it).
     pub fn remaining_secs(&self, now_ms: u64) -> u64 {
-        let elapsed_ms = now_ms.saturating_sub(self.fetched_at_ms) as i64;
-        let remaining_ms = self.expires_in_ms - elapsed_ms;
+        let elapsed_ms =
+            i64::try_from(now_ms.saturating_sub(self.fetched_at_ms)).unwrap_or(i64::MAX);
+        let remaining_ms = self.expires_in_ms.saturating_sub(elapsed_ms);
         if remaining_ms > 0 {
-            ((remaining_ms + 999) / 1000) as u64
+            (remaining_ms.saturating_add(999) / 1000) as u64
         } else {
             0
         }
@@ -408,7 +414,7 @@ pub struct ParsedWelcomeMessage {
 }
 
 pub(crate) fn parse_welcome_message(value: &Value) -> Option<ParsedWelcomeMessage> {
-    let id = value.get("id")?.as_i64()? as i32;
+    let id = value.get("id")?.as_i64()?.sat_i32();
     let (content, _) = parse_content(value.get("content"));
     Some(ParsedWelcomeMessage { id, content })
 }
@@ -432,7 +438,11 @@ pub(crate) fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> 
         sender: parse_message_sender(value.get("sender_id")).ok(),
         id: MessageId(int53(value.get("id"))?),
         chat_id: ChatId(int53(value.get("chat_id"))?),
-        date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        date: value
+            .get("date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         is_outgoing: value
             .get("is_outgoing")
             .and_then(Value::as_bool)
@@ -498,14 +508,18 @@ pub(crate) fn parse_message_topic(value: Option<&Value>) -> Option<i32> {
         Some("messageTopicForum") => value
             .get("forum_topic_id")
             .and_then(Value::as_i64)
-            .map(|id| id as i32),
+            .map(|id| id.sat_i32()),
         _ => None,
     }
 }
 
 pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
     MessageExtras {
-        edit_date: value.get("edit_date").and_then(Value::as_i64).unwrap_or(0) as i32,
+        edit_date: value
+            .get("edit_date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
         via_bot_user_id: int53_or_zero(value.get("via_bot_user_id")),
         import_info: value
             .get("import_info")
@@ -516,7 +530,11 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
-                date: info.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+                date: info
+                    .get("date")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .sat_i32(),
             }),
     }
 }
@@ -531,7 +549,11 @@ pub(crate) fn parse_forward_info(value: Option<&Value>) -> Option<MessageForward
             let origin = parse_message_origin(value.get("origin"))?;
             Some(MessageForwardInfo {
                 origin,
-                date: value.get("date").and_then(Value::as_i64).unwrap_or(0) as i32,
+                date: value
+                    .get("date")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .sat_i32(),
             })
         }
         _ => None,
@@ -614,7 +636,8 @@ pub(crate) fn parse_reply_to(value: Option<&Value>) -> Option<MessageReplyTo> {
                 origin_send_date: value
                     .get("origin_send_date")
                     .and_then(Value::as_i64)
-                    .unwrap_or(0) as i32,
+                    .unwrap_or(0)
+                    .sat_i32(),
                 content: reply_content,
             })
         }

@@ -24,6 +24,7 @@ mod force_reply;
 mod frame_clock;
 mod image_budget;
 mod inline_video;
+mod lru;
 mod motion;
 mod native_video;
 mod photo_edit;
@@ -198,6 +199,7 @@ mod shared_media;
 mod shell;
 mod shortcuts;
 mod showcase_demo;
+mod signin_ui;
 #[cfg(target_os = "macos")]
 mod spellcheck_mac;
 mod spellcheck_ui;

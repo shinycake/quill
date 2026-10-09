@@ -108,6 +108,14 @@ impl Session {
                 {
                     self.message_caption_length_max = limit.max(0).min(i64::from(i32::MAX)) as i32;
                 }
+                // R8: plain-text limit (tdesktop `messageLengthCurrent`).
+                // A zero or negative value would make every send look
+                // oversized, so floor it at 1.
+                if name == "message_text_length_max"
+                    && let OptionValue::Integer(limit) = value
+                {
+                    self.message_text_length_max = limit.clamp(1, i64::from(i32::MAX)) as i32;
+                }
                 // Slice CL1: pin-limit options (schema:13674) for the
                 // client-side pin pre-check.
                 if (name == "pinned_chat_count_max" || name == "pinned_archived_chat_count_max")
@@ -781,11 +789,7 @@ impl Session {
                         (0, _) => events,
                         (_, Some(ChatEventLogFetch::Loaded(page))) => {
                             let mut merged = page.events.clone();
-                            for event in events {
-                                if !merged.iter().any(|old| old.id == event.id) {
-                                    merged.push(event);
-                                }
-                            }
+                            super::paging::append_new_by_id(&mut merged, events, |event| event.id);
                             merged
                         }
                         _ => events,
@@ -3153,7 +3157,20 @@ impl Session {
             // the driver pump (`ntg_connect`).
             // `startGroupCallScreenSharing` returns `text` — the
             // presentation answer, consumed by the driver pump.
+            EnvelopePayload::Countries { countries } => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCountries)
+                    && !countries.is_empty()
+                {
+                    self.countries = Some(countries);
+                }
+            }
             EnvelopePayload::Text { text } => match pending.map(|p| p.purpose) {
+                Some(RequestPurpose::GetCountryCode) => {
+                    let iso = text.trim().to_ascii_uppercase();
+                    if iso.len() == 2 && iso.chars().all(|c| c.is_ascii_alphabetic()) {
+                        self.guessed_country_iso = Some(iso);
+                    }
+                }
                 Some(RequestPurpose::JoinVideoChat { group_call_id }) => {
                     self.set_group_call_join_payload(group_call_id, text);
                 }

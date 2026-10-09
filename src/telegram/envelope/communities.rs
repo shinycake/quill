@@ -89,7 +89,7 @@ pub(crate) fn parse_community(value: &Value) -> Option<ParsedCommunity> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned(),
-        date: int53(value.get("date")).ok().unwrap_or(0) as i32,
+        date: int53(value.get("date")).ok().unwrap_or(0).sat_i32(),
         is_owner,
         can_change_info: is_owner || admin_right("can_change_info"),
         can_ban_members: is_owner || admin_right("can_ban_members"),
@@ -128,8 +128,14 @@ pub(crate) fn parse_community_full_info(value: &Value) -> Option<ParsedCommunity
             .and_then(Value::as_array)
             .map(|chats| chats.iter().filter_map(parse_community_chat).collect())
             .unwrap_or_default(),
-        administrator_count: int53(value.get("administrator_count")).ok().unwrap_or(0) as i32,
-        banned_count: int53(value.get("banned_count")).ok().unwrap_or(0) as i32,
-        add_chat_request_count: int53(value.get("add_chat_request_count")).ok().unwrap_or(0) as i32,
+        administrator_count: int53(value.get("administrator_count"))
+            .ok()
+            .unwrap_or(0)
+            .sat_i32(),
+        banned_count: int53(value.get("banned_count")).ok().unwrap_or(0).sat_i32(),
+        add_chat_request_count: int53(value.get("add_chat_request_count"))
+            .ok()
+            .unwrap_or(0)
+            .sat_i32(),
     })
 }
