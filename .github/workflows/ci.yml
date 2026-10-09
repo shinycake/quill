@@ -48,6 +48,12 @@ jobs:
     name: windows
     uses: ./.github/workflows/package-windows.yml
 
+  # The release's Quill.app, on a GitHub-hosted arm64 runner (never the
+  # personal Mac), so release packaging breaks show up before a tag does.
+  macos-package:
+    name: macos-package
+    uses: ./.github/workflows/package-macos.yml
+
   # The required macos-ui-build check is dispatched after source review through
   # quill-ui-build.yml. Public PR workflows must never target the personal Mac.
 
