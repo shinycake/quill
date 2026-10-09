@@ -45,9 +45,13 @@ pub enum AuthAction {
     EnterCode,
     EnterPassword,
     WaitOtherDevice,
-    UnsupportedHalt { reason: &'static str },
+    UnsupportedHalt {
+        reason: &'static str,
+    },
     Ready,
     LoggingOut,
+    /// The client closed without a logout: offer Retry (sign-out restarts
+    /// on its own and never lands here).
     Closed,
     Closing,
 }
@@ -153,8 +157,8 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             blocking: true,
         },
         AuthorizationState::Closed => AuthView {
-            title: "Closed",
-            body: "Signed out.".into(),
+            title: "Connection closed",
+            body: "The connection to Telegram was closed.".into(),
             action: AuthAction::Closed,
             blocking: true,
         },
@@ -190,6 +194,14 @@ mod tests {
     use crate::telegram::requests::{
         recover_authentication_password, request_authentication_password_recovery,
     };
+
+    #[test]
+    fn closed_view_offers_retry_not_signed_out() {
+        let view = view_for(&AuthorizationState::Closed);
+        assert_eq!(view.action, AuthAction::Closed);
+        assert_eq!(view.title, "Connection closed");
+        assert!(!view.body.contains("Signed out"));
+    }
 
     #[test]
     fn unsupported_auth_does_not_auto_act() {

@@ -75,6 +75,11 @@ impl LiveConnect {
         if self.bridge.is_joined() {
             return;
         }
+        // A dead receive loop can never deliver Closed; do not wait for it.
+        if self.bridge.stopped_unexpectedly() {
+            self.bridge.shutdown();
+            return;
+        }
         let _ = wait_closed(
             &mut self.driver,
             |timeout| self.bridge.next_timeout(timeout),
@@ -135,7 +140,8 @@ pub fn start_prepared_live_connect(
         _ => ConnectBlocker::TdjsonLoad,
     })?;
     let sender = LiveSender::from_live(&live);
-    let bridge = ReceiveBridge::spawn_live(live.api.clone(), diagnostics.clone());
+    let bridge = ReceiveBridge::spawn_live(live.api.clone(), diagnostics.clone())
+        .map_err(|_| ConnectBlocker::ReceiveThread)?;
     let session = Session::new(prepared.account.clone(), diagnostics.clone());
     // Phase C2i: local call prefs (confirm-before-calling, less-data)
     // are loaded once here; the UI saves them back on toggle.
