@@ -191,6 +191,19 @@ impl QuillApp {
         }
     }
 
+    /// Redraw for TDLib updates that only change chat-list rows: the chat
+    /// list slice, and `QuillApp` itself as its ancestor (the chrome,
+    /// side panels and render-time drains), while the conversation and
+    /// composer replay their last frame. Outside the ready layout the
+    /// chat list is not a slice, so everything redraws.
+    pub(super) fn notify_chat_list(&self, cx: &mut Context<Self>) {
+        if self.pane_mode() == super::app::PaneMode::Ready {
+            self.notify_sidebar(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
     /// Redraw only the conversation (state that nothing else shows
     /// changed); the whole app before the slices exist.
     pub(super) fn notify_conversation(&self, cx: &mut Context<Self>) {

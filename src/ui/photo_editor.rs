@@ -380,7 +380,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_photo_editor(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_photo_editor(&mut self, cx: &mut Context<Self>) {
         self.photo_editor = None;
         cx.notify();
     }
