@@ -15,7 +15,9 @@
 # line tools, ffmpeg with libx264, cwebp, python3 with numpy and pillow, a
 # release build (cargo build --release --features ui,demo-capture), and
 # Screen Recording and Accessibility permission for the terminal. Don't touch
-# the mouse while it records (about a minute).
+# the mouse while it records (about a minute). The demo's timestamps follow
+# the local clock: late at night, run it with a TZ where it is mid-day (e.g.
+# TZ=Asia/Tokyo) so they read naturally and no date divider shows up.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
