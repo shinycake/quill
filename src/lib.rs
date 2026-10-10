@@ -3,6 +3,7 @@
 
 pub mod about;
 pub mod account_export;
+pub mod admin_extras;
 pub mod album;
 pub mod animation;
 pub mod auth;
