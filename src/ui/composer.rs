@@ -7,6 +7,7 @@ use super::actions::{
 use super::app::{PaneMode, QuillApp};
 use super::demo::demo_media_allowlist;
 use super::message_text::rich_block_element;
+use super::nested_click::SwallowPress;
 use super::scheduled::ScheduleTarget;
 use super::*;
 use gpui_kit::component::button::*;
@@ -1026,9 +1027,9 @@ impl QuillApp {
                             .xsmall()
                             .ghost()
                             .accessibility_label("Send now")
+                            .swallow_press()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.composer_scheduling = ComposerScheduling::None;
-                                cx.stop_propagation();
                                 cx.notify();
                             })),
                     ),

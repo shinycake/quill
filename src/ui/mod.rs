@@ -30,6 +30,7 @@ pub(crate) mod interface_zoom;
 mod lru;
 mod motion;
 mod native_video;
+mod nested_click;
 mod photo_edit;
 mod photo_editor;
 mod pin_box;

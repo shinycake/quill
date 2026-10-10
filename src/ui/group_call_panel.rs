@@ -14,6 +14,7 @@
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::format_helpers::format_starts_in;
+use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu, PopupMenu, PopupMenuItem};
@@ -1033,8 +1034,8 @@ impl QuillApp {
                         .items_center()
                         .justify_center()
                         .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
+                        .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            cx.stop_propagation();
                             this.toggle_group_call_self_mute(cx);
                         }))
                         .child(
@@ -1075,8 +1076,8 @@ impl QuillApp {
                         .items_center()
                         .justify_center()
                         .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
+                        .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            cx.stop_propagation();
                             this.leave_active_group_call(cx);
                         }))
                         .child(Icon::new(IconName::Close).with_size(px(18.))),
