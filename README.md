@@ -243,13 +243,13 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Add to GIFs and Open GIF from the message menu <!-- parity:menu-gif-actions -->
 - [x] Add or remove favorite sticker, View Sticker Set and Add Stickers from the message menu <!-- parity:menu-sticker-actions -->
 - [x] Attached Stickers for photos that contain stickers <!-- parity:menu-attached-stickers -->
-- [ ] "This message contains emoji from X pack" footer <!-- parity:menu-emoji-pack-footer -->
+- [x] "This message contains emoji from X pack" footer <!-- parity:menu-emoji-pack-footer -->
 - [x] Report a message with a reason flow, also from the selection bar <!-- parity:menu-report-message -->
 - [x] "N Seen / N Reacted" row with reader and reactor lists and read date <!-- parity:menu-seen-by -->
 - [x] "Sent today at 12:34" row in the message menu <!-- parity:menu-sent-time-row -->
 - [x] Translate message and Translate selected text <!-- parity:menu-translate -->
-- [ ] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
-- [ ] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
+- [x] Reply in Another Chat <!-- parity:menu-reply-another-chat -->
+- [x] Reply options popover: Update Quote, Do Not Reply, Show in Chat <!-- parity:menu-reply-options -->
 - [x] Reply with a timecode on videos and voice messages <!-- parity:menu-reply-timecode -->
 - [ ] Edit Image, Edit Video and Edit Cover on your own media <!-- parity:menu-edit-media-items -->
 - [x] Replace or add media when editing a message <!-- parity:menu-edit-message-media -->
@@ -259,7 +259,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Copy Post Link versus Copy Message Link wording and "members only" hint <!-- parity:menu-copy-post-link-wording -->
 - [x] Copy Card Number for bank-card entities <!-- parity:menu-copy-card-number -->
 - [ ] Poll menu: Retract vote, View results and ends-in note <!-- parity:menu-poll-actions -->
-- [ ] Saved Messages tag menu: Filter by Tag, Add or Edit Name, Remove Tag <!-- parity:menu-saved-tag-menu -->
+- [x] Saved Messages tag menu: Filter by Tag, Add or Edit Name, Remove Tag <!-- parity:menu-saved-tag-menu -->
 - [x] Info line explaining why Forward and Copy are missing in protected chats <!-- parity:menu-noforwards-note -->
 - [x] Admin delete box: delete all from user, ban and report spam in one step <!-- parity:menu-moderate-delete -->
 - [x] Delete a member's reaction as an admin <!-- parity:menu-delete-reaction -->
