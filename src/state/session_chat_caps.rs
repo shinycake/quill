@@ -153,24 +153,38 @@ impl Session {
     /// users carry verification, Premium and an emoji status; supergroups
     /// and channels carry verification only; basic groups have none.
     pub fn chat_title_badge(&self, chat: &ChatSummary) -> Option<crate::peer_badge::TitleBadge> {
+        let (verification, premium, status) = self.chat_badge_inputs(chat)?;
+        crate::peer_badge::title_badge(verification, premium, status)
+    }
+
+    /// The badges after the open chat's title in the header
+    /// (`peer_badge::header_badges`): the status and the check together.
+    pub fn chat_header_badges(&self, chat: &ChatSummary) -> Vec<crate::peer_badge::TitleBadge> {
+        self.chat_badge_inputs(chat)
+            .map(|(verification, premium, status)| {
+                crate::peer_badge::header_badges(verification, premium, status)
+            })
+            .unwrap_or_default()
+    }
+
+    fn chat_badge_inputs(
+        &self,
+        chat: &ChatSummary,
+    ) -> Option<(crate::peer_badge::VerificationStatus, bool, i64)> {
         use crate::telegram::envelope::ChatKind;
         match chat.kind {
             ChatKind::Private { user_id } | ChatKind::Secret { user_id, .. } => {
                 let user = self.user(user_id.0)?;
-                crate::peer_badge::title_badge(
-                    user.verification,
-                    user.is_premium,
-                    user.emoji_status_id,
-                )
+                Some((user.verification, user.is_premium, user.emoji_status_id))
             }
-            ChatKind::Supergroup { supergroup_id, .. } => crate::peer_badge::title_badge(
+            ChatKind::Supergroup { supergroup_id, .. } => Some((
                 self.supergroup_verification
                     .get(&supergroup_id)
                     .copied()
                     .unwrap_or_default(),
                 false,
                 0,
-            ),
+            )),
             ChatKind::BasicGroup { .. } | ChatKind::Unknown => None,
         }
     }

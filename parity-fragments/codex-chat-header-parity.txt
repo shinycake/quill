@@ -1,0 +1,6 @@
+# chat header slice: verified by demo captures and unit tests
+parity:chrome-header-status
+parity:chrome-header-chips
+parity:chrome-window-title
+parity:chrome-composer-states
+parity:chrome-middle-click-scroll

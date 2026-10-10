@@ -1190,7 +1190,7 @@ fn draft_prefix(reply: bool, bare: bool) -> impl IntoElement {
 
 /// The mark after a row title: verified check, Premium star or status
 /// emoji, or a bordered SCAM / FAKE label (`Ui::PeerBadge`).
-fn title_badge_element(
+pub(super) fn title_badge_element(
     badge: TitleBadge,
     emoji: Option<std::path::PathBuf>,
     cx: &App,

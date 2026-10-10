@@ -363,6 +363,7 @@ pub(super) fn demo_seed_for(
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyJoinBar
+        | ScreenshotDemo::ReadyChatHeader
         | ScreenshotDemo::ReadyTopBars
         | ScreenshotDemo::ReadySearchPreviews
         | ScreenshotDemo::ReadyMultilineRows => (
@@ -1318,7 +1319,11 @@ pub(super) fn demo_seed_for(
                 .into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyPrivacy | ScreenshotDemo::ReadyPrivacyGifts => (
+        ScreenshotDemo::ReadyPrivacy
+        | ScreenshotDemo::ReadyPrivacyGifts
+        | ScreenshotDemo::ReadyPrivacyCalls
+        | ScreenshotDemo::ReadySettingsHelp
+        | ScreenshotDemo::ReadyAskQuestion => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — privacy settings (injected, no live Telegram)".into(),
@@ -2233,6 +2238,8 @@ impl QuillApp {
             animation_sound: Default::default(),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),
             window_active: std::cell::Cell::new(true),
+            window_title_shown: Default::default(),
+            autoscroll: Default::default(),
             presence: Default::default(),
             login_prevented: None,
             terms_step: Default::default(),

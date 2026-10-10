@@ -400,6 +400,10 @@ pub struct QuillApp {
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.
     pub(super) window_active: std::cell::Cell<bool>,
+    /// The title last handed to the platform window (`window_chrome`).
+    pub(super) window_title_shown: std::cell::RefCell<String>,
+    /// Middle-click autoscroll over the history (`autoscroll_ui`).
+    pub(super) autoscroll: super::autoscroll_ui::AutoscrollUi,
     /// Batch 4: the last `online` value sent to TDLib.
     pub(super) presence: quill::presence::PresenceSync,
     /// Batch 4: the attempts the user just terminated from the new-login

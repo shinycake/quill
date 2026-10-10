@@ -158,6 +158,9 @@ pub enum ScreenshotDemo {
     /// Premium / SCAM / FAKE title badges, online dot (injected, no live
     /// Telegram).
     ReadyChatRows,
+    /// Chat header badges and the bars that replace the composer
+    /// (`QUILL_DEMO_HEADER=<variant>`; see `chat_header_demo`).
+    ReadyChatHeader,
     /// Non-member public channel opened from search: the bottom bar must
     /// resolve to "Join channel" (injected, no live Telegram).
     ReadyJoinBar,
@@ -757,6 +760,14 @@ pub enum ScreenshotDemo {
     /// B13: the Gifts privacy editor — who can show gifts, the gift icon
     /// switch and the accepted gift types (injected, no live Telegram).
     ReadyPrivacyGifts,
+    /// Who can call me: the editor with its Always/Never allow lists
+    /// (injected, no live Telegram).
+    ReadyPrivacyCalls,
+    /// Settings with the help rows and the version footer (injected, no
+    /// live Telegram).
+    ReadySettingsHelp,
+    /// Settings > Ask a Question (injected, no live Telegram).
+    ReadyAskQuestion,
     /// B13: the session details view (application, system, IP address,
     /// location) with Terminate (injected, no live Telegram).
     ReadySessionDetails,
