@@ -30,7 +30,7 @@ fn replay_login_to_ready_without_live_network() {
 }
 
 #[test]
-fn replay_unsupported_auth_halts() {
+fn replay_premium_purchase_explains_without_a_purchase_flow() {
     let sink = Arc::new(MemorySink::new());
     let dyn_sink: Arc<dyn quill::diagnostics::DiagnosticSink> = sink.clone();
     let mut session = Session::new(AccountKey::primary(), dyn_sink);
@@ -41,12 +41,10 @@ fn replay_unsupported_auth_halts() {
             r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateWaitPremiumPurchase","store_product_id":"x","premium_day_count":0,"support_email_address":"a@b.c","support_email_subject":"s"}}"#,
         ],
     );
-    assert!(matches!(
+    assert_eq!(
         session.auth_view.action,
-        quill::auth::AuthAction::UnsupportedHalt {
-            reason: "premium-purchase"
-        }
-    ));
+        quill::auth::AuthAction::PremiumRequired
+    );
 }
 
 #[test]

@@ -74,6 +74,22 @@ pub(super) fn demo_seed_for(
             "screenshot demo — sign-in phone step (injected auth, no live Telegram)".into(),
             AuthorizationState::WaitPhoneNumber,
         ),
+        ScreenshotDemo::WaitCodeFirebase
+        | ScreenshotDemo::WaitCodeFlash
+        | ScreenshotDemo::WaitCodeFragment
+        | ScreenshotDemo::WaitCodeMissed => (
+            None,
+            ConnectUiStatus::DemoWaitCode,
+            "screenshot demo — WaitCode by call/Fragment/Firebase (injected auth)".into(),
+            AuthorizationState::WaitCode {
+                code_length: match demo {
+                    ScreenshotDemo::WaitCodeFlash => None,
+                    ScreenshotDemo::WaitCodeMissed => Some(6),
+                    _ => Some(5),
+                },
+                delivery: typed_code_delivery(Some(demo)),
+            },
+        ),
         ScreenshotDemo::WaitCodeResend => (
             None,
             ConnectUiStatus::DemoWaitCode,
@@ -84,6 +100,7 @@ pub(super) fn demo_seed_for(
                     kind: quill::telegram::envelope::CodeKind::TelegramMessage,
                     next: Some(quill::telegram::envelope::CodeKind::Sms),
                     timeout_secs: 60,
+                    detail: Default::default(),
                 },
             },
         ),
@@ -105,7 +122,11 @@ pub(super) fn demo_seed_for(
             None,
             ConnectUiStatus::DemoWaitPhone,
             "screenshot demo — WaitPremiumPurchase (injected auth, no live Telegram)".into(),
-            AuthorizationState::WaitPremiumPurchase,
+            AuthorizationState::WaitPremiumPurchase {
+                premium_day_count: 365,
+                support_email_address: "premium-support@example.invalid".into(),
+                support_email_subject: "Premium sign-in".into(),
+            },
         ),
         ScreenshotDemo::WaitQr => (
             None,
@@ -1574,6 +1595,20 @@ impl QuillApp {
                     flood_wait_secs: None,
                 });
             }
+            Some(
+                ScreenshotDemo::WaitCodeFirebase
+                | ScreenshotDemo::WaitCodeFlash
+                | ScreenshotDemo::WaitCodeFragment
+                | ScreenshotDemo::WaitCodeMissed,
+            ) => {
+                signin.submitted_phone = "+1 555 010 0199".into();
+                signin.code_clock = Some((
+                    typed_code_delivery(demo),
+                    std::time::Instant::now()
+                        .checked_sub(Duration::from_secs(18))
+                        .unwrap_or_else(std::time::Instant::now),
+                ));
+            }
             Some(ScreenshotDemo::WaitCodeResend) => {
                 signin.submitted_phone = "+1 555 010 0199".into();
                 // 18 seconds into the 60-second wait.
@@ -1582,6 +1617,7 @@ impl QuillApp {
                         kind: quill::telegram::envelope::CodeKind::TelegramMessage,
                         next: Some(quill::telegram::envelope::CodeKind::Sms),
                         timeout_secs: 60,
+                        detail: Default::default(),
                     },
                     std::time::Instant::now()
                         .checked_sub(Duration::from_secs(18))
@@ -2127,6 +2163,10 @@ impl QuillApp {
                         | ScreenshotDemo::WaitPhoneFormatted
                         | ScreenshotDemo::WaitPhoneBanned
                         | ScreenshotDemo::WaitCodeResend
+                        | ScreenshotDemo::WaitCodeFirebase
+                        | ScreenshotDemo::WaitCodeFlash
+                        | ScreenshotDemo::WaitCodeFragment
+                        | ScreenshotDemo::WaitCodeMissed
                         | ScreenshotDemo::WaitCode
                         | ScreenshotDemo::WaitPassword
                         | ScreenshotDemo::WaitPremium
@@ -2875,5 +2915,42 @@ impl QuillApp {
             participant_user_id: None,
             is_screen: true,
         }
+    }
+}
+
+/// Fake `authenticationCodeInfo` for the typed-delivery code demos: a fake
+/// +1 555 number and example.invalid-style hosts, never contacting anyone.
+fn typed_code_delivery(demo: Option<ScreenshotDemo>) -> quill::telegram::envelope::CodeDelivery {
+    use quill::telegram::envelope::{CodeDelivery, CodeDetail, CodeKind};
+    let (kind, detail) = match demo {
+        Some(ScreenshotDemo::WaitCodeFlash) => (
+            CodeKind::FlashCall,
+            CodeDetail {
+                call_number: "+155501*****".into(),
+                ..CodeDetail::default()
+            },
+        ),
+        Some(ScreenshotDemo::WaitCodeMissed) => (
+            CodeKind::MissedCall,
+            CodeDetail {
+                call_number: "+155501".into(),
+                missed_digits: Some(6),
+                ..CodeDetail::default()
+            },
+        ),
+        Some(ScreenshotDemo::WaitCodeFragment) => (
+            CodeKind::Fragment,
+            CodeDetail {
+                url: "https://fragment.example.invalid/login".into(),
+                ..CodeDetail::default()
+            },
+        ),
+        _ => (CodeKind::Firebase, CodeDetail::default()),
+    };
+    CodeDelivery {
+        kind,
+        next: Some(CodeKind::Sms),
+        timeout_secs: 60,
+        detail,
     }
 }
