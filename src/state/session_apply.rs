@@ -2653,6 +2653,29 @@ impl Session {
                     });
                 }
             }
+            EnvelopePayload::ChatBoostLinkInfo { chat_id } => {
+                if let Some(RequestPurpose::DeepLinkResolve { generation }) =
+                    pending.map(|p| p.purpose)
+                    && matches!(
+                        &self.deep_link,
+                        Some(DeepLinkState::ResolvingChat {
+                            action: DeepLinkAction::BoostLink { .. },
+                            generation: slot,
+                        }) if *slot == generation
+                    )
+                {
+                    self.deep_link = Some(if chat_id == 0 {
+                        DeepLinkState::ShowText("This boost link is broken.".into())
+                    } else {
+                        DeepLinkState::Info {
+                            text: String::new(),
+                            need_update: false,
+                            action: Some(DeepLinkAction::OpenChannelBoost { chat_id }),
+                            generation,
+                        }
+                    });
+                }
+            }
             EnvelopePayload::ChatMember { member } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMember)
                     && let Some(pending) = pending

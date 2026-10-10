@@ -1,18 +1,19 @@
 //! impl Render for QuillApp (root view composition).
 
 use super::actions::{
-    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow, ComposerEditLink,
-    ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer, FocusSidebar, FormatBlockQuote,
-    FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler, FormatStrikethrough,
-    FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat,
-    LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder, OpenArchive,
-    OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages, OpenSearch,
-    OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious,
-    SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer, SelectionFocusOlder,
-    ShowChatMenu, ShowChatPreview, SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn,
-    StoryTogglePause, SubmitCode, SubmitPassword, SubmitPhone, ToggleFullscreen,
-    ToggleMessageSelection, ToggleTheme, ViewerCopy, ViewerFlipHorizontal, ViewerFlipVertical,
-    ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn, ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
+    ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat,
+    FocusComposer, FocusSidebar, FormatBlockQuote, FormatBold, FormatClear, FormatItalic,
+    FormatMonospace, FormatSpoiler, FormatStrikethrough, FormatUnderline, HistoryPageDown,
+    HistoryPageUp, HistoryToBottom, HistoryToTop, LastChat, LoadOlder, LockApp, MarkChatRead,
+    MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenChatSearch, OpenContacts, OpenHelp,
+    OpenPinnedChat, OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat,
+    PrevFolder, QuitApp, ReplyToNext, ReplyToPrevious, SelectionExtendNewer, SelectionExtendOlder,
+    SelectionFocusNewer, SelectionFocusOlder, ShowChatMenu, ShowChatPreview, SpellingIgnore,
+    SpellingLearn, SpellingReplace, SpellingUnlearn, StoryTogglePause, SubmitCode, SubmitPassword,
+    SubmitPhone, ToggleFullscreen, ToggleMessageSelection, ToggleTheme, ViewerCopy,
+    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
+    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::shell::title_bar;
@@ -667,6 +668,11 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &ComposerEditLink, window, cx| {
                 this.composer_link_chord(window, cx);
             }))
+            .on_action(
+                cx.listener(|this, _: &ComposerEditCodeLanguage, window, cx| {
+                    this.open_code_language_dialog(window, cx);
+                }),
+            )
             .on_action(cx.listener(|this, _: &ComposerPastePlain, window, cx| {
                 this.paste_plain_text(window, cx);
             }))
@@ -789,7 +795,7 @@ impl Render for QuillApp {
                                 }
                             })
                             .child(self.sidebar_resize_handle(cx))
-                            .child(self.conversation_slot())
+                            .child(self.conversation_slot(cx))
                             // Phase 6: user / group info panel beside the conversation.
                             .when_some(self.info_panel(cx), |this, panel| this.child(panel))
                             // MED3: downloads manager panel beside the conversation.

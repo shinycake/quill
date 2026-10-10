@@ -1,0 +1,4 @@
+# composer-core: landed in full, verified by tests and demo captures
+parity:composer-drop-modes
+parity:composer-code-language
+parity:settings-large-emoji

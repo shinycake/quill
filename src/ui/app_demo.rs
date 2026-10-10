@@ -401,6 +401,14 @@ pub(super) fn demo_seed_for(
             "screenshot demo — link + web page preview".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyDropZones
+        | ScreenshotDemo::ReadyDropFolder
+        | ScreenshotDemo::ReadyCodeLanguage => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — file drop zones".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyComposerPreview => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -729,6 +737,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — message menu".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyServiceMedia => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — service and media cards".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyServiceMessages => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -843,7 +857,9 @@ pub(super) fn demo_seed_for(
             "screenshot demo — fullscreen media viewer".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVideoPlayback | ScreenshotDemo::ReadyVideoPip => (
+        ScreenshotDemo::ReadyVideoPlayback
+        | ScreenshotDemo::ReadyVideoPip
+        | ScreenshotDemo::ReadyViewerExtras => (
             Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — in-viewer video playback".into(),
@@ -2215,6 +2231,7 @@ impl QuillApp {
             frame_clock_running: Default::default(),
             motion: Default::default(),
             composer_link_dialog: None,
+            composer_code_language: None,
             send_morph: Default::default(),
             slices: Default::default(),
             stream_reveal: Default::default(),
@@ -2232,6 +2249,9 @@ impl QuillApp {
             video_note_capture: None,
             record_locked: false,
             record_discard_confirm: false,
+            drop_paths: Vec::new(),
+            drop_state: None,
+            drop_preview: None,
             voice_tick: false,
             recording_auto_send: false,
             round_preview: Default::default(),
