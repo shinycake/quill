@@ -22,6 +22,9 @@ pub struct LinkPreview {
     /// MED4: the `linkPreviewType*` behind the card (embedded players /
     /// album strips need more than the plain card).
     pub kind: LinkPreviewKind,
+    /// The call-to-action under the card ("View channel", "View bot"...)
+    /// for previews of Telegram entities, as Telegram Desktop labels them.
+    pub view_button: Option<&'static str>,
 }
 
 /// MED4: `linkPreviewType*` (TDLib 1.8.67, `schema/td_api.tl:4392` album,
@@ -89,9 +92,63 @@ pub(crate) fn parse_link_preview(value: Option<&Value>) -> (Option<LinkPreview>,
             instant_view_version: int53_or_zero(value.get("instant_view_version")).sat_i32(),
             photo,
             kind,
+            view_button: value.get("type").and_then(view_button_label),
         }),
         files,
     )
+}
+
+/// Telegram Desktop's `PageToPhrase` label for a `linkPreviewType*` that
+/// points at a Telegram entity; `None` for plain article / media cards.
+pub(crate) fn view_button_label(preview_type: &Value) -> Option<&'static str> {
+    let flag = |key: &str| preview_type.get(key).and_then(Value::as_bool) == Some(true);
+    let name = preview_type
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    Some(match name {
+        "linkPreviewTypeChat" => {
+            let is_channel = preview_type
+                .get("type")
+                .and_then(|kind| kind.get("@type"))
+                .and_then(Value::as_str)
+                == Some("inviteLinkChatTypeChannel");
+            if flag("creates_join_request") {
+                "Request to Join"
+            } else if is_channel {
+                "View channel"
+            } else {
+                "View group"
+            }
+        }
+        "linkPreviewTypeUser" => {
+            if flag("is_bot") {
+                "View bot"
+            } else {
+                "Send message"
+            }
+        }
+        "linkPreviewTypeMessage" => "View message",
+        "linkPreviewTypeStory" => "View story",
+        "linkPreviewTypeStoryAlbum" => "View Album",
+        "linkPreviewTypeTheme" => "View theme",
+        "linkPreviewTypeBackground" => "View wallpaper",
+        "linkPreviewTypeChannelBoost" | "linkPreviewTypeSupergroupBoost" => "Boost",
+        "linkPreviewTypePremiumGiftCode" => "Open",
+        "linkPreviewTypeVideoChat" => {
+            if flag("is_live_stream") {
+                "Live stream"
+            } else {
+                "Video chat"
+            }
+        }
+        "linkPreviewTypeGroupCall" => "Join call",
+        "linkPreviewTypeWebApp" => "Launch",
+        "linkPreviewTypeStickerSet" => "View stickers",
+        "linkPreviewTypeUpgradedGift" => "View collectible",
+        "linkPreviewTypeGiftCollection" => "View Collection",
+        _ => return None,
+    })
 }
 
 /// MED4: classify the `linkPreview.type` object (schema:4392 album,

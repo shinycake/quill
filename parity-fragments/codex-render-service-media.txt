@@ -1,0 +1,6 @@
+# Suggested photo (View Photo / Set as My Photo) and birthday (View) rows
+parity:render-service-suggestions
+# Photo-change rows show the photo and open the viewer
+parity:render-service-photo-thumb
+# View channel / bot / message buttons under entity link previews
+parity:render-preview-view-button
