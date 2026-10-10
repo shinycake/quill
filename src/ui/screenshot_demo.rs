@@ -661,6 +661,9 @@ pub enum ScreenshotDemo {
     ReadySpellcheckPanel,
     /// Appearance dialog with the Spelling / Check spelling row visible.
     ReadySpellcheckToggle,
+    /// Appearance → Spelling with the Manage dictionaries list open
+    /// (fixture rows: enabled, installed, downloading 42%, failed, available).
+    ReadyDictionaries,
     /// Slice `parity:platform-custom-keybindings`: the Appearance dialog
     /// open on the Keyboard shortcuts section (injected, no live Telegram).
     ReadyKeybindings,

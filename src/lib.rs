@@ -97,7 +97,9 @@ pub mod settings_account;
 pub mod share_box;
 pub mod signin;
 pub mod single_instance;
+pub mod spell_catalog;
 pub mod spell_dict;
+pub mod spell_download;
 #[cfg(windows)]
 pub mod spell_win;
 pub mod spellcheck;

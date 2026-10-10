@@ -308,6 +308,9 @@ pub struct QuillApp {
     pub(super) spellchecker: std::sync::Arc<quill::spellcheck::SpellChecker>,
     /// Which engine that is and its dictionaries (Appearance → Spelling).
     pub(super) spell_info: super::spellcheck_ui::SpellInfo,
+    /// Appearance → Spelling → Manage dictionaries (parity:appearance-dictionaries).
+    pub(super) dict_manager: super::spell_dictionaries::DictManager,
+    pub(super) dict_filter_input: Entity<TextareaState>,
     /// Misspellings underlined in the composer; byte ranges into
     /// `spell_checked_text`.
     pub(super) spell_misspellings: Vec<quill::spellcheck::Misspelling>,
