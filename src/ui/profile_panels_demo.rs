@@ -6,7 +6,7 @@
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist};
 use super::dialogs::ProfileDialog;
-use super::screenshot_demo::ScreenshotDemo;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
@@ -138,18 +138,21 @@ fn apply_profile_panels(session: &mut Session, sink: &Arc<MemorySink>, seq: &Ato
     );
 }
 
+register_demos![
+    // B10: profile and contact panels (`QUILL_DEMO_PROFILE=contact|self|
+    // edit-contact|birthday|channel|share|gallery|similar`; injected data,
+    // no live Telegram).
+    DemoSpec::chats(
+        "ready-profile-panels",
+        "screenshot demo — profile and contact panels (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_setup_profile_panels),
+];
+
 impl QuillApp {
     /// `QUILL_DEMO_PROFILE=contact|self|edit-contact|birthday|channel|share|
     /// gallery|similar` (default `contact`).
-    pub(super) fn demo_setup_profile_panels(
-        &mut self,
-        demo: Option<ScreenshotDemo>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if demo != Some(ScreenshotDemo::ReadyProfilePanels) {
-            return;
-        }
+    fn demo_setup_profile_panels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = std::env::var("QUILL_DEMO_PROFILE").unwrap_or_else(|_| "contact".into());
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_seq.store(session.last_seq, Ordering::SeqCst);

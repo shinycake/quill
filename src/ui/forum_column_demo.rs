@@ -3,12 +3,36 @@
 //! inside the topic. Injected through the normal reducer; no live Telegram.
 //! `QUILL_DEMO_FORUM_COLUMN_VIEW=topics|topic|thread` (default `topics`).
 
+use super::app::QuillApp;
+use super::screenshot_demo::{DemoSpec, register_demos};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+register_demos![
+    // The forum topic column next to the chat list, a topic with replies and
+    // its thread (injected, no live Telegram):
+    // `QUILL_DEMO_FORUM_COLUMN_VIEW=topics|topic|thread` (default `topics`).
+    DemoSpec::chats(
+        "ready-forum-column",
+        "screenshot demo — forum topic column and topic threads"
+    )
+    .setup(|app, _, _| app.demo_forum_column()),
+];
+
+impl QuillApp {
+    fn demo_forum_column(&mut self) {
+        let view = std::env::var("QUILL_DEMO_FORUM_COLUMN_VIEW").unwrap_or_default();
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_forum_column(session, &self.demo_sink, &self.demo_seq, &view);
+        }
+        self.status_note = "screenshot demo — forum topic column and topic threads".into();
+    }
+}
 
 /// The topic the `topic` and `thread` views open.
 const TOPIC: i32 = 2;

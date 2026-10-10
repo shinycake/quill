@@ -6,14 +6,16 @@
 //! pattern, another chat's name and a story. Injected through the normal
 //! reducer; no live Telegram.
 
+use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
+use super::screenshot_demo::{DemoSpec, register_demos};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId};
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{StickerFormat, StickerItem};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const ME: i64 = 9;
 const DANA: i64 = 1;
@@ -277,6 +279,30 @@ pub(super) fn apply_ready_render_followups(
         requires_premium: false,
     });
     session.open_chat(ChatId(CHAT));
+}
+
+register_demos![
+    // Private chat with the follow-ups of the render slice.
+    // `QUILL_DEMO_FOLLOWUPS_VIEW=media|replies` (default `media`): slot
+    // machines, a running live location, expired media and timestamp
+    // links; or reply strips with a picture, quote, emoji pattern, another
+    // chat and a story.
+    DemoSpec::chats(
+        "ready-render-followups",
+        "screenshot demo — render follow-ups"
+    )
+    .setup(|app, _, _| app.demo_render_followups()),
+];
+
+impl QuillApp {
+    fn demo_render_followups(&mut self) {
+        let view = std::env::var("QUILL_DEMO_FOLLOWUPS_VIEW").unwrap_or_default();
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_render_followups(session, &self.demo_sink, &self.demo_seq, &view);
+        }
+        self.status_note = "screenshot demo — render follow-ups".into();
+    }
 }
 
 #[cfg(test)]
