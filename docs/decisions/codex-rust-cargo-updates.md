@@ -28,8 +28,8 @@ New clippy lints, fixed in code with no `allow`s. The gate runs clippy without t
 Done (three, all compile for `ui` and core, tests pass):
 
 - `libloading` 0.8 to 0.9, in the root crate and `crates/ntgcalls-sys`. We only use `Library::new` and `get`. `clang-sys` (build-time, via gpui-pre) still pulls 0.8; that is a second copy in the lockfile and does no harm.
-- `resvg` 0.46 to 0.48, used for the wallpaper pattern rasteriser. No call-site changes. The wallpaper unit tests pass and the wallpaper demo capture is byte-identical.
-- `tray-icon` 0.21 to 0.26 (macOS and Windows only; Linux uses ksni). No call-site changes. Not exercised on Windows here.
+- `resvg` 0.46 to 0.48, used for the wallpaper pattern rasteriser. resvg 0.48 made gzip (SVGZ, the TGV wallpaper format) an optional feature, so Cargo.toml now enables `svgz`; without it `gzipped_svg_is_the_tgv_format` fails. The wallpaper demo capture is byte-identical.
+- `tray-icon` 0.21 to 0.26 (macOS and Windows only; Linux uses ksni). The template-icon methods are deprecated in 0.26 and macOS only, so `src/tray.rs` uses `with_icon_templated` / `set_icon_templated` on macOS and plain `with_icon` / `set_icon` elsewhere. Tested compile-wise on macOS only; the Windows branch is unverified.
 
 Left for their own PRs:
 
