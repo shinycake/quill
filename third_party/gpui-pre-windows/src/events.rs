@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
 // windows stop receiving vsync frames while idle. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
 
@@ -1369,9 +1369,15 @@ impl WindowsWindowInner {
             // will rebuild the scene with fresh atlas textures.
             self.state.renderer.borrow_mut().mark_drawable();
         }
+        let (signal_at, signal_source) = self.state.frame_signal.take().map_or(
+            (None, FrameRequestSource::NativeCallback),
+            |(at, source)| (Some(at), source),
+        );
         request_frame(RequestFrameOptions {
             require_presentation: false,
             force_render,
+            signal_at,
+            signal_source,
         });
 
         self.state.callbacks.request_frame.set(Some(request_frame));

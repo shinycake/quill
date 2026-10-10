@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
 // adds the frame_idle module. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![cfg(target_os = "windows")]
 

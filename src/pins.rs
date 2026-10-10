@@ -1,10 +1,10 @@
 //! Exact pins for this checkout. Recheck together; never refresh one layer alone.
 
-/// crates.io `gpui-kit` version selected on 2026-09-17.
-/// Research snapshot cited git `d604a2ace` as package 0.6.1; crates.io default
-/// is now 0.6.1 (0.6.0 also exists). The whole UI family is this Kit release
-/// (`gpui-pre` ^0.3.1, resolved in Cargo.lock).
-pub const GPUI_KIT_VERSION: &str = "0.6.1";
+/// crates.io `gpui-kit` version (`=0.7.1` in Cargo.toml, 2026-10-09). The
+/// whole UI family is this Kit release, with GPUI from the `gpui-pre` 0.3.8
+/// snapshot crates; `gpui-base` and `gpui-pre-{macos,linux,windows}` are
+/// patched copies in `third_party/` (docs/decisions/codex-gpui-kit-0.7.1.md).
+pub const GPUI_KIT_VERSION: &str = "0.7.1";
 
 /// Official TDLib git commit used as the schema/runtime baseline.
 pub const TDLIB_GIT_COMMIT: &str = "c15d3f5a5de6e3ba5839822c451152e5e18bb700";

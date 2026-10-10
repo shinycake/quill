@@ -6,14 +6,18 @@ description: 'How to build desktop applications with GPUI Kit, the Rust framewor
 # GPUI Kit
 
 > **Quill pin (local note, not upstream).** This copy is vendored from
-> `longbridge/gpui-component` tag `v0.7.0` (Apache-2.0, see `LICENSE-APACHE`),
-> matching `gpui-kit = "=0.7.0"` in Quill's `Cargo.toml`. gpui-kit.com docs
-> track the *latest* release and may describe APIs this version lacks. The
-> source of truth for signatures is the local registry source:
-> `~/.cargo/registry/src/index.crates.io-*/` → `gpui-kit-0.7.0`,
-> `gpui-component-0.7.0`, `gpui-base-0.7.0`, and GPUI itself in
-> `gpui-pre-0.3.7` (plus `gpui-pre-*` sub-crates). Grep there before using
-> any API. When bumping gpui-kit, refresh this skill from the matching tag.
+> `longbridge/gpui-kit` (formerly `gpui-component`) tag `v0.7.1` (Apache-2.0,
+> see `LICENSE-APACHE`), matching `gpui-kit = "=0.7.1"` in Quill's
+> `Cargo.toml`. gpui-kit.com docs track the *latest* release and may describe
+> APIs this version lacks. The source of truth for signatures is the local
+> registry source: `~/.cargo/registry/src/index.crates.io-*/` →
+> `gpui-kit-0.7.1`, `gpui-component-0.7.1`, `gpui-base-0.7.1`, and GPUI itself
+> in `gpui-pre-0.3.8` (plus `gpui-pre-*` sub-crates). Grep there before using
+> any API. Quill builds patched copies of `gpui-base` and
+> `gpui-pre-{macos,linux,windows}` from `third_party/` (`[patch.crates-io]`),
+> so for those crates the code that runs is in `third_party/`. Quill does not
+> enable the `speech` feature, so `SpeechButton` / `SpeechState` are not
+> available. When bumping gpui-kit, refresh this skill from the matching tag.
 
 Applications depend on one crate, `gpui-kit`. GPUI is `use gpui_kit::*;`, and
 each layer is reachable by name: `gpui_kit::component` (styled components),
@@ -143,6 +147,7 @@ fetch the component's `.md` doc.
 | `Editor`      | `input::{Editor, EditorState}`                  | Stateful. Code editor, `tree-sitter` feature |
 | `NumberInput` | `input::{NumberInput, NumberInputEvent}`        | Stateful. Numeric with step                  |
 | `OtpInput`    | `input::OtpInput`                               | Stateful. One-time password                  |
+| `SpeechButton` | `speech::{SpeechButton, SpeechState}`          | Stateful. Dictation, `speech` feature        |
 | `Select`      | `select::{Select, SelectState}`                 | Stateful. Dropdown picker                    |
 | `Combobox`    | `combobox::{Combobox, ComboboxState}`           | Stateful. Searchable select                  |
 | `Checkbox`    | `checkbox::Checkbox`                            | Stateless. `on_click` receives `&bool`       |
