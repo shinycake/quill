@@ -115,6 +115,7 @@ mod session_translate;
 mod session_updates;
 mod shared_media_types;
 mod sticker_gif_types;
+mod story_insights;
 mod story_types;
 mod thread_types;
 
@@ -140,6 +141,7 @@ pub use requests::*;
 pub use saved_types::*;
 pub use search_types::*;
 pub use session::*;
+pub use session_chat_caps::FastButtonTarget;
 pub(crate) use session_chat_search::history_message;
 pub use session_group_admin::*;
 pub use session_history_window::MentionSearch;
@@ -160,6 +162,7 @@ pub use session_subsection_tabs::{BotTopics, TopicBadge};
 pub use session_translate::*;
 pub use shared_media_types::*;
 pub use sticker_gif_types::*;
+pub use story_insights::*;
 pub use story_types::*;
 pub use thread_types::*;
 

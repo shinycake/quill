@@ -310,6 +310,11 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_search();
         }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.clear_story_search();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.clear_story_search();
+        }
         self.search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         window.focus(&self.focus_sidebar, cx);
@@ -1806,6 +1811,9 @@ impl QuillApp {
                     });
                 }
                 this.child(block)
+            })
+            .when_some(self.story_search_section(&query, cx), |this, section| {
+                this.child(section)
             })
             .when(!public_chats.is_empty(), |this| {
                 let mut block = div()

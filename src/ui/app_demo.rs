@@ -712,6 +712,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — bot chat with / command menu".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyBotExtras => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — bot extras (injected, no live Telegram)".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyBotProfile => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
@@ -771,6 +777,12 @@ pub(super) fn demo_seed_for(
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — comments and threads".into(),
+            AuthorizationState::Ready,
+        ),
+        ScreenshotDemo::ReadyForumThreadStories => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — topic info, story statistics and search".into(),
             AuthorizationState::Ready,
         ),
         ScreenshotDemo::ReadyForumsSaved => (
@@ -2082,6 +2094,9 @@ impl QuillApp {
             share_comment_input,
             story_reply_input,
             story_viewers_open: false,
+            story_stats_open: false,
+            topic_info_open: false,
+            thread_info_open: false,
             story_report_open: false,
             story_report_text_input,
             story_page: None,
@@ -2526,6 +2541,7 @@ impl QuillApp {
         app.demo_setup_stories(demo, window, cx);
         app.demo_setup_groups_admin(demo, window, cx);
         app.demo_setup_bots_profile(demo, window, cx);
+        app.demo_setup_bot_extras(demo, window, cx);
         app.demo_setup_proxy(demo, window, cx);
         app.demo_setup_profile_panels(demo, window, cx);
         app.demo_setup_member_moderation(demo, window, cx);
@@ -2685,6 +2701,24 @@ impl QuillApp {
             }
             let handled = edit_app
                 .update(cx, |this, cx| this.try_edit_last_message(window, cx))
+                .unwrap_or(false);
+            if handled {
+                cx.stop_propagation();
+            }
+        })
+        .detach();
+        // Fast buttons mode: keys 1 to 9 in an empty composer press the
+        // last message's inline buttons (tdesktop `setupFastButtonMode`).
+        let fast_app = cx.weak_entity();
+        cx.intercept_keystrokes(move |event, window, cx| {
+            let keystroke = &event.keystroke;
+            let Some(index) =
+                quill::fast_buttons::index_for_key(&keystroke.key, keystroke.modifiers.modified())
+            else {
+                return;
+            };
+            let handled = fast_app
+                .update(cx, |this, cx| this.try_fast_button(index, window, cx))
                 .unwrap_or(false);
             if handled {
                 cx.stop_propagation();

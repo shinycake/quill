@@ -337,6 +337,10 @@ pub enum ScreenshotDemo {
     /// button), `botInfo` with a menu button and a privacy-policy URL,
     /// and a loaded `getBotSimilarBots` answer (Slice B2).
     ReadyBotProfile,
+    /// Bot extras demo (injected, no live Telegram): fast buttons mode,
+    /// adding a bot to a group or channel, verification badges, sharing
+    /// a game and owned bots; the mode comes from `QUILL_DEMO_BOTEXTRAS`.
+    ReadyBotExtras,
     /// Text-entity demo (injected, no live Telegram): a message with mixed
     /// entities (bold/italic/underline/strikethrough/spoiler/code/pre, incl.
     /// nested runs) plus a photo whose caption carries entities (Phase 4.1).
@@ -365,6 +369,10 @@ pub enum ScreenshotDemo {
     /// bars, `thread` a post's comment thread in its discussion group,
     /// `group` a group message with replies.
     ReadyThreads,
+    /// Topic and thread info cards, story statistics with public shares,
+    /// and public story search (injected, no live Telegram):
+    /// `QUILL_DEMO_FTS_VIEW=topic|thread|stats|search` (default `topic`).
+    ReadyForumThreadStories,
     /// Forums and Saved Messages sublists (injected, no live Telegram):
     /// `QUILL_DEMO_FORUMS_SAVED_VIEW=sublists|sublist|tag|editor` shows the
     /// sublist list, one sublist, a tag filter, or the forum topic editor

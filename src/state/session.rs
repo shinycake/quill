@@ -1172,6 +1172,10 @@ pub struct Session {
     /// accumulates them). `None` when the panel is closed or the viewer
     /// moved to a different story.
     pub story_viewers: Option<StoryViewersState>,
+    /// Statistics and public forwards of the story open in the viewer.
+    pub story_insights: Option<StoryInsightsState>,
+    /// The public story search (hashtag, location or venue) and its pages.
+    pub story_search: Option<StorySearchState>,
     /// Phase 9.5: the in-progress `reportStory` flow for the story open in
     /// the viewer — the reason picker and the optional details step.
     /// `None` when no report is in flight.
@@ -1621,6 +1625,8 @@ impl Session {
             story_tray_refresh: HashSet::new(),
             story_post: StoryPostState::default(),
             story_viewers: None,
+            story_insights: None,
+            story_search: None,
             story_report: None,
             story_stealth: StoryStealthMode::default(),
             story_stealth_error: None,

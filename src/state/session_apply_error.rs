@@ -173,6 +173,21 @@ impl Session {
                     );
                 }
             }
+            Some(
+                purpose @ (RequestPurpose::GetStoryStatistics
+                | RequestPurpose::GetStoryPublicForwards),
+            ) => {
+                if let Some(pending) = pending {
+                    self.fail_story_insights(
+                        pending,
+                        purpose,
+                        format!("Could not load statistics: {}", error_reason(&err)),
+                    );
+                }
+            }
+            Some(RequestPurpose::SearchPublicStories) => {
+                self.fail_story_search(format!("Could not search stories: {}", error_reason(&err)));
+            }
             // The message menu's Report flow and audience lists.
             Some(RequestPurpose::ReportMessages) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
@@ -1924,6 +1939,10 @@ pub(crate) fn deep_link_error_text(flow: Option<&DeepLinkState>, code: i32) -> S
         }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
         Some(DeepLinkState::ResolvingChat {
             action: DeepLinkAction::OpenPublicChatDraft { domain, .. },
+            ..
+        }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
+        Some(DeepLinkState::ResolvingChat {
+            action: DeepLinkAction::ShareGame { domain, .. } | DeepLinkAction::AddBot { domain, .. },
             ..
         }) if not_found => format!("The username \"{domain}\" is not occupied by anyone."),
         Some(DeepLinkState::ResolvingChat {
