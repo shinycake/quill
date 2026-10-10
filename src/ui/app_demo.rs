@@ -827,7 +827,9 @@ pub(super) fn demo_seed_for(
             "screenshot demo — fullscreen media viewer".into(),
             AuthorizationState::Ready,
         ),
-        ScreenshotDemo::ReadyVideoPlayback | ScreenshotDemo::ReadyVideoPip => (
+        ScreenshotDemo::ReadyVideoPlayback
+        | ScreenshotDemo::ReadyVideoPip
+        | ScreenshotDemo::ReadyViewerExtras => (
             Some(seed_ready_media_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
             "screenshot demo — in-viewer video playback".into(),
