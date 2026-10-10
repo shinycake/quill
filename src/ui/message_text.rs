@@ -1539,7 +1539,13 @@ pub(super) fn link_preview_card(
         );
     }
     if !title_empty {
-        copy = copy.child(div().text_size(font).font_medium().child(title));
+        copy = copy.child(
+            div()
+                .text_size(font)
+                .font_medium()
+                .text_color(text_primary())
+                .child(title),
+        );
     }
     if !description_empty {
         copy = copy.child(
@@ -1607,6 +1613,23 @@ pub(super) fn link_preview_card(
             this.open_preview_url(&preview_for_tap, cx);
         }))
         .child(body)
+        .when_some(preview.view_button, |this, label| {
+            // Telegram Desktop's call-to-action under entity previews. The
+            // whole card is the click target, so this is a label.
+            this.child(
+                div()
+                    .id(("link-preview-view", row_id))
+                    .mt_1()
+                    .pt_1()
+                    .border_t_1()
+                    .border_color(text_muted().opacity(0.25))
+                    .text_size(small)
+                    .font_semibold()
+                    .text_center()
+                    .text_color(accent())
+                    .child(label),
+            )
+        })
         .into_any_element()
 }
 

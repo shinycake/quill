@@ -84,6 +84,8 @@ mod tests_entities;
 #[cfg(test)]
 mod tests_keyboards;
 #[cfg(test)]
+mod tests_live_location;
+#[cfg(test)]
 mod tests_media;
 #[cfg(test)]
 mod tests_messages;
@@ -91,6 +93,8 @@ mod tests_messages;
 mod tests_payments;
 #[cfg(test)]
 mod tests_threads;
+#[cfg(test)]
+mod tests_view_button;
 
 pub use super::story_areas::{StoryAreaKind, StoryAreaView};
 pub use account_notices::*;
