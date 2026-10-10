@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.7 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
 // reports when a touchpad gesture needs vsync frames. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

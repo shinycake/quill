@@ -474,6 +474,10 @@ pub struct QuillApp {
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
     pub(super) appearance_applied: Option<(ThemeMode, u32, bool, u16)>,
+    /// Settings → Appearance: the custom accent color field (kit
+    /// `ColorSelect`), tdesktop's "custom" accent circle. Holds the last
+    /// custom color; choosing one sets `appearance.accent_rgb`.
+    pub(super) accent_picker: Entity<gpui_kit::component::color_picker::ColorPickerState>,
     /// Slice S3: Privacy settings overlay (TGX Settings → Privacy).
     pub(super) privacy_open: bool,
     /// B13: transient state of the privacy / security extras.

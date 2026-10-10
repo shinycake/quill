@@ -1,10 +1,13 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-macos 0.3.7 from crates.io (Apache-2.0,
+This directory is gpui-pre-macos 0.3.8 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's macOS platform, used through `[patch.crates-io]` in
-Quill's `Cargo.toml`. Commit `e49b3724` added the unmodified registry copy
+Quill's `Cargo.toml`. Commit `126460ec` added the unmodified registry copy
 (without the registry's `.cargo-ok`, `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff e49b3724 -- third_party/gpui-pre-macos` shows every change.
+`git diff 126460ec -- third_party/gpui-pre-macos` shows every change. (The
+patch was first made on 0.3.7 and carried to 0.3.8 in
+`docs/decisions/codex-gpui-kit-0.7.1.md`; `step` keeps 0.3.8's frame
+signal timestamps.)
 
 The Quill project changed it in 2026 so an idle window stops costing CPU:
 
