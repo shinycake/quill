@@ -10,36 +10,11 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::folder_picker::PickerMode;
 use quill::ids::ChatId;
-use quill::state::Session;
-use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatList;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-/// `ReadyFolders` fixture (Phase 7.1): inject `updateChatFolders` with two
-/// folders ("Work" id 1, "News" id 2) and `updateChatPosition` folder
-/// positions for the seeded demo chats — chat 11 (Demo chat A) and chat 13
-/// (Demo channel) go to "News", chat 12 (Demo chat B) goes to "Work".
-/// The demo block then selects the "News" folder tab.
-pub(super) fn apply_ready_folders(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let folders = r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":1,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false},{"@type":"chatFolderInfo","id":2,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"News","entities":[]},"animate_custom_emoji":false},"icon":{"@type":"chatFolderIcon","name":"Channels"},"color_id":4,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#;
-    if let Some(owned) = copy_and_parse(folders, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-    for (chat_id, folder_id, order) in [(11, 2, "70"), (13, 2, "60"), (12, 1, "65")] {
-        let json = format!(
-            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListFolder","chat_folder_id":{folder_id}}},"order":"{order}","is_pinned":false}}}}"#
-        );
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
 
 impl QuillApp {
     /// kit Phase 2 (redo): folder editor hosted in a kit `Dialog` via

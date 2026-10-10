@@ -15,125 +15,13 @@ use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
 use quill::local_path::sandboxed_display_path;
-use quill::state::{RequestPurpose, Session};
-use quill::telegram::client::copy_and_parse;
+use quill::state::RequestPurpose;
 use quill::telegram::envelope::ForumTopic;
 use quill::telegram::requests::TOPIC_ICON_COLORS;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-/// Shared seed for the forum-topics screenshot fixtures: forum supergroup
-/// (id 16) via `updateNewChat` + `updateChatPosition`, marked a forum via
-/// `updateSupergroup`, with a three-topic `getForumTopics` response
-/// (General pinned + unread, Announcements with a preview, Random closed)
-/// injected through the same reducer the live path uses.
-pub(super) fn seed_forum_chat_16(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let topic_json = |id: i32,
-                      name: &str,
-                      general: bool,
-                      closed: bool,
-                      pinned: bool,
-                      unread: i32,
-                      preview: Option<&str>| {
-        let last_message = match preview {
-            Some(text) => format!(
-                r#""last_message":{{"id":{}, "chat_id":16, "is_outgoing":false, "content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{}","entities":[]}}}}}}"#,
-                9000 + id,
-                text
-            ),
-            None => r#""last_message":null"#.to_string(),
-        };
-        format!(
-            r#"{{"info":{{"@type":"forumTopicInfo","chat_id":16,"forum_topic_id":{id},"name":"{name}","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"creation_date":1760000000,"creator_id":{{"@type":"messageSenderUser","user_id":6}},"is_general":{general},"is_outgoing":false,"is_closed":{closed},"is_hidden":false,"is_name_implicit":false}},{last_message},"order":"{order}","is_pinned":{pinned},"unread_count":{unread},"last_read_inbox_message_id":0,"last_read_outbox_message_id":0,"unread_mention_count":0,"unread_reaction_count":0,"unread_poll_vote_count":0,"notification_settings":{{"@type":"chatNotificationSettings"}},"draft_message":null}}"#,
-            id = id,
-            name = name,
-            general = general,
-            closed = closed,
-            pinned = pinned,
-            unread = unread,
-            order = 900 - id,
-        )
-    };
-    let jsons = [
-        r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Demo forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":3}}"#.to_string(),
-        r#"{"@type":"updateChatPosition","chat_id":16,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"25","is_pinned":false}}"#.to_string(),
-        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true}}"#.to_string(),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(16)));
-    let topics = [
-        topic_json(
-            1,
-            "General",
-            true,
-            false,
-            true,
-            3,
-            Some("Pinned: please read the rules before posting."),
-        ),
-        topic_json(
-            2,
-            "Announcements",
-            false,
-            false,
-            false,
-            0,
-            Some("v2.1 is rolling out this week."),
-        ),
-        topic_json(3, "Random", false, true, false, 0, None),
-    ]
-    .join(",");
-    let json = format!(
-        r#"{{"@type":"forumTopics","@extra":"{}","total_count":3,"topics":[{topics}],"next_offset_date":0,"next_offset_message_id":0,"next_offset_forum_topic_id":0}}"#,
-        extra.0,
-    );
-    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-}
-
-/// `ReadyForumTopics` fixture: the demo opens the forum with no topic
-/// selected, so the topic list shows.
-pub(super) fn apply_ready_forum_topics(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    seed_forum_chat_16(session, sink, seq);
-    session.open_chat(ChatId(16));
-}
-
-/// `ReadyTopicPost` fixture (parity slice 4): the forum's General topic is
-/// open with a two-message injected history and the composer enabled — the
-/// composer now posts into the topic via `sendMessage` with
-/// `topic_id = messageTopicForum`.
-pub(super) fn apply_ready_topic_post(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    seed_forum_chat_16(session, sink, seq);
-    session.open_chat(ChatId(16));
-    session.select_topic(ChatId(16), 1);
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 1);
-    let json = format!(
-        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":0,"messages":[{{"id":101,"chat_id":16,"is_outgoing":false,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":1}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Welcome to General — say hello!","entities":[]}}}}}},{{"id":102,"chat_id":16,"is_outgoing":true,"topic_id":{{"@type":"messageTopicForum","forum_topic_id":1}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Hello from the new topic composer.","entities":[]}}}}}}]}}"#,
-        extra.0,
-    );
-    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-}
 
 impl QuillApp {
     /// Slice G2: open the forum-topic management dialog.

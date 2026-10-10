@@ -10,13 +10,9 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::state::{InfoPanelTarget, Session};
-use quill::telegram::client::copy_and_parse;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 /// Slice G10: communities create + hub + info UI
 /// (`parity:communities-create/hub/info`). Backend landed earlier —
 /// `create_community` / `get_community_full_info` / `set_community_name`
@@ -482,26 +478,6 @@ pub fn render_community_info_panel(
         );
     }
     body.into_any_element()
-}
-
-/// Slice G10: injected community fixtures (no live Telegram) — two
-/// communities plus a full-info pack for the first, through the real
-/// `updateCommunity` / `updateCommunityFullInfo` reducer path.
-pub fn apply_ready_communities(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let jsons = [
-        r#"{"@type":"updateCommunity","community":{"@type":"community","id":9001,"have_access":true,"name":"Rustaceans","date":1759000000,"status":{"@type":"communityMemberStatusCreator"},"permissions":{"@type":"communityPermissions","can_edit_chat_list":true}}}"#
-            .to_string(),
-        r#"{"@type":"updateCommunity","community":{"@type":"community","id":9002,"have_access":true,"name":"Demo makers","date":1759100000,"status":{"@type":"communityMemberStatusMember"},"permissions":{"@type":"communityPermissions"}}}"#
-            .to_string(),
-        r#"{"@type":"updateCommunityFullInfo","community_id":9001,"community_full_info":{"@type":"communityFullInfo","chats":[{"@type":"communityChat","chat_id":11,"can_view_history":true,"is_hidden":false},{"@type":"communityChat","chat_id":13,"can_view_history":true,"is_hidden":true}],"administrator_count":3,"banned_count":1,"add_chat_request_count":2}}"#
-            .to_string(),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
 }
 
 crate::ui::shell::register_dialogs! {

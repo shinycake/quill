@@ -10,9 +10,9 @@ use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::*;
 use quill::calls::audio_level::{
     LevelAnimation, METER_HEIGHT, METER_LINE_COUNT, METER_LINE_SPACING, METER_LINE_WIDTH,
-    MIC_TEST_ANIMATION_MS, MIC_TEST_UPDATE_MS, VOICE_LEVEL, meter_lit_lines, peak_from_level,
+    MIC_TEST_ANIMATION_MS, MIC_TEST_UPDATE_MS, meter_lit_lines, peak_from_level,
 };
-use quill::calls::level_tap::{FixedLevel, LevelSource, LevelTap};
+use quill::calls::level_tap::{LevelSource, LevelTap};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
@@ -176,28 +176,13 @@ impl QuillApp {
         .detach();
     }
 
-    /// Screenshot demos: the test running with a fixed peak (`0..=1` of
-    /// full scale), no device opened and no watchdog.
-    pub(super) fn start_mic_test_demo(&mut self, peak: f32) {
-        let level = peak * 32768.0 / quill::calls::audio_level::LEVEL_PEAK_DIVISOR;
-        let test = MicTest::new(Box::new(FixedLevel(std::sync::Mutex::new(level))));
-        test.anim.set(LevelAnimation::new(
-            peak.clamp(0.0, 1.0),
-            MIC_TEST_ANIMATION_MS,
-        ));
-        self.calls.mic_test = Some(test);
-    }
-
-    /// Your own level and speaking state in the voice chat: the driver's
-    /// tap, or the demo level.
+    /// Your own level and speaking state in the voice chat, from the
+    /// driver's tap.
     pub(super) fn group_call_self_level(&self) -> (f32, bool) {
         if let Some(live) = self.live.as_ref() {
             return live.driver.group_call_self_level();
         }
-        self.group_call
-            .demo_level
-            .map(|level| (level, level >= VOICE_LEVEL))
-            .unwrap_or((0.0, false))
+        (0.0, false)
     }
 
     /// Milliseconds on the voice chat window's clock (the push-to-talk

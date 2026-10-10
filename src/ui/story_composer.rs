@@ -1,7 +1,6 @@
 //! story composer overlay.
 
 use super::app::QuillApp;
-use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::component::button::*;
@@ -11,116 +10,10 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{RequestPurpose, Session, StoryPostOutcome, StoryPostState};
+use quill::state::{StoryPostOutcome, StoryPostState};
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
-use quill::telegram::client::copy_and_parse;
 use quill::telegram::requests::input_story_content;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-/// `ReadyStoryPost` fixture (Phase 9.2 / stories-custom-reactions): same
-/// seed as `ReadyStories`, but Demo chat A's photo story (id 5) is an *own*
-/// story — chosen ❤ reaction, interaction counts, `can_be_deleted` /
-/// `can_be_replied` — plus `availableReactions` (emoji + one custom-emoji
-/// Premium tile) and a cached `getCustomEmojiStickers` answer so the picker
-/// renders a real custom-emoji sticker thumb (demo-thumb.png).
-pub(super) fn apply_ready_story_post(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
-    let video_thumb_file = demo_file_json(92, &demo_thumb_png_path(), true);
-    let video_file = demo_file_json(93, &demo_thumb_png_path(), true);
-    let tray = |chat_id: i64, order: i64, max_read: i32, story_ids: &[i32]| -> String {
-        let stories = story_ids
-            .iter()
-            .map(|id| {
-                format!(
-                    r#"{{"@type":"storyInfo","story_id":{id},"date":1700000000,"is_for_close_friends":false,"is_live":false}}"#
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            r#"{{"@type":"updateChatActiveStories","active_stories":{{"@type":"chatActiveStories","chat_id":{chat_id},"list":{{"@type":"storyListMain"}},"order":"{order}","can_be_archived":false,"max_read_story_id":{max_read},"stories":[{stories}]}}}}"#
-        )
-    };
-    let caption = |text: &str| -> String {
-        format!(
-            r#"{{"@type":"formattedText","text":{},"entities":[]}}"#,
-            serde_json::to_string(text).unwrap()
-        )
-    };
-    let own_photo_story = format!(
-        r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"chosen_reaction_type":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"interaction_info":{{"@type":"storyInteractionInfo","view_count":42,"forward_count":3,"reaction_count":7,"recent_viewer_user_ids":[]}},"can_be_deleted":true,"can_be_replied":true,"can_get_interactions":true,"caption":{}}}"#,
-        caption(
-            "Phase 9.2: ❤ quick-react, reaction picker, reply and delete for own stories. \
-             Post stories from the tray \"+\" composer (Phase 9.3).",
-        ),
-    );
-    let jsons = [
-        tray(11, 30, 4, &[4, 5]),
-        tray(12, 20, 6, &[6]),
-        // Chat 11, story 4: video story with a thumbnail (read).
-        format!(
-            r#"{{"@type":"story","id":4,"poster_chat_id":11,"date":1700000000,"content":{{"@type":"storyContentVideo","video":{{"@type":"storyVideo","duration":9.0,"video":{video_file},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":90,"height":120,"file":{video_thumb_file}}}}},"alternative_video":null}},"caption":{}}}"#,
-            caption("Demo story — the video shows its thumbnail (playback is out of slice)."),
-        ),
-        own_photo_story,
-        // Chat 12, story 6: photo story (read).
-        format!(
-            r#"{{"@type":"story","id":6,"poster_chat_id":12,"date":1700000000,"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"caption":{}}}"#,
-            caption("Demo chat B story."),
-        ),
-        // Seeded picker options (`getStoryAvailableReactions` response) —
-        // emoji rows plus one custom-emoji Premium option (id 4242).
-        r#"{"@type":"availableReactions","top_reactions":[{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"❤"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"👍"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🔥"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"🎉"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"4242"},"needs_premium":true},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😮"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😢"},"needs_premium":false},{"@type":"availableReaction","type":{"@type":"reactionTypeEmoji","emoji":"😂"},"needs_premium":false}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":true,"are_tags":false,"unavailability_reason":null}"#.to_string(),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    // Phase 9.2+: seed `getCustomEmojiStickers` for custom emoji 4242 with a
-    // completed local thumb so the picker tile renders `img()` (not ✨).
-    let custom_extra = session.request(RequestPurpose::GetStoryCustomEmojiStickers, None);
-    let custom_thumb = demo_file_json(94, &demo_thumb_png_path(), true);
-    let stickers = format!(
-        r#"{{"@type":"stickers","@extra":"{extra}","stickers":[{{"@type":"sticker","id":"4242","set_id":"0","width":100,"height":100,"emoji":"✨","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeCustomEmoji","custom_emoji_id":"4242"}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatPng"}},"width":100,"height":100,"file":{thumb}}},"sticker":{thumb}}}]}}"#,
-        extra = custom_extra.0,
-        thumb = custom_thumb,
-    );
-    if let Some(owned) = copy_and_parse(&stickers, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-}
-
-/// `ReadyStoryEdit` fixture (Phase 9.5): Demo chat A's photo story
-/// (id 5) is an editable own story — `can_be_edited`, `is_edited`, a
-/// `storyRepostInfo` public origin (chat 12, story 6), link +
-/// suggested-reaction areas, and close-friends privacy. The demo opens
-/// the composer in edit mode, which prefills caption + area inputs
-/// from this seed.
-pub(super) fn apply_ready_story_edit(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let photo_file = demo_file_json(91, &demo_thumb_png_path(), true);
-    let tray = r#"{"@type":"updateChatActiveStories","active_stories":{"@type":"chatActiveStories","chat_id":11,"list":{"@type":"storyListMain"},"order":"30","can_be_archived":false,"max_read_story_id":4,"stories":[{"@type":"storyInfo","story_id":5,"date":1700000000,"is_for_close_friends":false,"is_live":false}]}}"#.to_string();
-    let story = format!(
-        r#"{{"@type":"story","id":5,"poster_chat_id":11,"date":1700000000,"is_edited":true,"can_be_edited":true,"can_be_deleted":true,"can_be_forwarded":true,"can_set_privacy_settings":true,"repost_info":{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":12,"story_id":6}},"is_content_modified":false}},"privacy_settings":{{"@type":"storyPrivacySettingsCloseFriends"}},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"y","photo":{photo_file},"width":960,"height":1280,"progressive_sizes":[]}}]}}}},"areas":[{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":35.0,"y_percentage":80.0,"width_percentage":30.0,"height_percentage":9.0,"rotation_angle":0.0,"corner_radius_percentage":20.0}},"type":{{"@type":"storyAreaTypeLink","url":"https://t.me/quill"}}}},{{"@type":"storyArea","position":{{"@type":"storyAreaPosition","x_percentage":50.0,"y_percentage":50.0,"width_percentage":20.0,"height_percentage":20.0,"rotation_angle":0.0,"corner_radius_percentage":50.0}},"type":{{"@type":"storyAreaTypeSuggestedReaction","reaction_type":{{"@type":"reactionTypeEmoji","emoji":"🔥"}},"total_count":1,"is_dark":false,"is_flipped":false}}}}],"caption":{{"@type":"formattedText","text":"Phase 9.5: edit posted stories — caption, areas, cover and privacy.","entities":[]}}}}"#,
-    );
-    for json in [tray, story] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
 
 impl QuillApp {
     /// Phase 9.3: open the story composer (tray "+" tile). Resets the

@@ -5,7 +5,6 @@
 //! (`boxes/connection_box.cpp`); the data lives in TDLib, so everything
 //! here is a view over `Session::proxy` plus driver calls.
 use super::app::QuillApp;
-use super::screenshot_demo::{DemoSpec, register_demos};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
@@ -1115,95 +1114,6 @@ impl QuillApp {
                 .footer(footer)
                 .on_close(on_close)
         })
-    }
-}
-
-/// Injected proxies for the demo capture: one enabled SOCKS5 proxy, an
-/// MTProto and an HTTP proxy, with one ping result each. No real proxy
-/// is ever contacted.
-fn demo_proxy_entries() -> Vec<ProxyEntry> {
-    let mk = |id, kind, server: &str, port, enabled, last_used| {
-        let mut proxy = ProxyDraft::empty(kind);
-        proxy.server = server.into();
-        proxy.port = port;
-        if kind == ProxyKind::Mtproto {
-            proxy.secret = quill::proxy::synthetic_fake_tls_secret();
-        }
-        ProxyEntry {
-            id,
-            last_used_date: last_used,
-            is_enabled: enabled,
-            comment: String::new(),
-            proxy,
-        }
-    };
-    vec![
-        mk(
-            1,
-            ProxyKind::Socks5,
-            "socks.example.net",
-            1080,
-            true,
-            1_700_000_300,
-        ),
-        mk(
-            2,
-            ProxyKind::Mtproto,
-            "mt.example.org",
-            443,
-            false,
-            1_700_000_200,
-        ),
-        mk(3, ProxyKind::Http, "10.0.0.5", 8080, false, 0),
-    ]
-}
-
-register_demos![
-    // `parity:proxy-settings`: proxy list / editor / link confirmation
-    // (`QUILL_DEMO_PROXY=list|edit|link|link-bad`; injected data, no live
-    // Telegram, no real proxy).
-    DemoSpec::chats(
-        "ready-proxy",
-        "screenshot demo — proxy settings (injected, no live Telegram)"
-    )
-    .setup(QuillApp::demo_setup_proxy),
-];
-
-impl QuillApp {
-    /// `QUILL_DEMO_PROXY=list|edit|link|link-bad` over the seeded chat
-    /// list (`ready-proxy`).
-    fn demo_setup_proxy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mode = std::env::var("QUILL_DEMO_PROXY").unwrap_or_else(|_| "list".into());
-        if let Some(session) = self.demo_session.as_mut() {
-            session.connection = ConnectionState::Ready;
-            let proxy = &mut session.proxy;
-            proxy.list = Some(demo_proxy_entries());
-            proxy.pings.insert(1, PingStatus::Available(42));
-            proxy.pings.insert(2, PingStatus::Checking);
-            proxy.pings.insert(3, PingStatus::Unavailable);
-            proxy.prefs.auto_switch = true;
-            if mode == "link" {
-                proxy.pings.insert(LINK_PING_ID, PingStatus::Available(87));
-            }
-        }
-        match mode.as_str() {
-            "edit" => self.open_proxy_editor(Some(2), false, window, cx),
-            "link" => {
-                let link = format!(
-                    "tg://proxy?server=proxy.example.com&port=443&secret={}",
-                    quill::proxy::synthetic_fake_tls_secret()
-                );
-                self.handle_proxy_link(&link, cx);
-            }
-            "link-bad" => {
-                self.handle_proxy_link(
-                    "tg://proxy?server=proxy.example.com&port=443&secret=zz",
-                    cx,
-                );
-            }
-            _ => self.open_proxy_list(cx),
-        }
-        self.connection.status_note = "screenshot demo — proxy settings".into();
     }
 }
 

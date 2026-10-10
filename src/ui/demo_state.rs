@@ -21,7 +21,7 @@ pub(crate) struct DemoUi {
     /// Phase C2e: demo-mode camera pick (live picks go to the driver).
     pub(super) selected_camera: Option<String>,
     /// Phase C2g: synthetic per-participant frames injected by the
-    /// ready-group-call demo fixture, keyed `(user_id, is_screen)`.
+    /// group-call demo fixture, keyed `(user_id, is_screen)`.
     /// Injected demo data, not real media.
     pub(super) group_frames: HashMap<(i64, bool), quill::calls::engine::VideoFrame>,
     /// Demo captures can't go full screen: show the stage anyway.

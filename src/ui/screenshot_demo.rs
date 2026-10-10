@@ -113,13 +113,6 @@ impl DemoSpec {
         }
     }
 
-    pub(super) const fn window_title(self, window_title: &'static str) -> Self {
-        Self {
-            window_title,
-            ..self
-        }
-    }
-
     pub(super) const fn tray(self) -> Self {
         Self { tray: true, ..self }
     }
@@ -233,8 +226,6 @@ impl PartialEq for ScreenshotDemo {
         self.kind() == other.kind()
     }
 }
-
-impl Eq for ScreenshotDemo {}
 
 impl std::fmt::Debug for ScreenshotDemo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

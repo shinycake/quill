@@ -267,18 +267,6 @@ impl QuillApp {
         }));
     }
 
-    /// Screenshot fixture: leave `chat` held mid-swipe at `ratio`, as a
-    /// trackpad gesture that has not ended.
-    pub(super) fn demo_hold_swipe(&mut self, chat: i64, ratio: f32) {
-        let now = self.swipe_now_ms();
-        let m = &mut self.chat_list.swipe.machine;
-        m.feed(Phase::Started, 0.0, 0.0, Some(chat), now);
-        m.feed(Phase::Moved, -1.0, 0.0, Some(chat), now);
-        m.feed(Phase::Moved, -20.0, 0.0, Some(chat), now);
-        let raw = ratio * quill::chat_swipe::THRESHOLD / quill::chat_swipe::WHEEL_SLOW - 20.0;
-        m.feed(Phase::Moved, -raw, 0.0, Some(chat), now);
-    }
-
     /// Run a due action and abandon a gesture that lost its end event.
     /// Returns whether the timer must keep running.
     fn poll_swipe(&mut self, cx: &mut Context<Self>) -> bool {

@@ -2,37 +2,10 @@
 //! updates).
 
 use crate::ui::app::QuillApp;
-use crate::ui::demo::{
-    seed_ready_offline_session, seed_ready_reconnecting_session, seed_ready_unread_read_session,
-    seed_ready_unread_session,
-};
+use crate::ui::demo::{seed_ready_unread_read_session, seed_ready_unread_session};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 
 register_demos![
-    // Slice parity:platform-offline-indicator — the ReadyChats fixture
-    // with `connection` forced to `WaitingForNetwork`, so the offline
-    // banner renders below the title bar (injected, no live Telegram).
-    DemoSpec::ready(
-        "ready-offline",
-        seed_ready_offline_session,
-        "screenshot demo — offline indicator (injected updates, no live Telegram)"
-    ),
-    // Slice parity:platform-offline-errors — ReadyOffline fixture plus
-    // the product offline-send toast ("You're offline — will send when
-    // you reconnect") so kit notifications proof the note.
-    DemoSpec::ready(
-        "ready-offline-toast",
-        seed_ready_offline_session,
-        "You're offline — will send when you reconnect"
-    ),
-    // Slice parity:platform-reconnect-states — the ReadyChats fixture
-    // with `connection` forced to `Updating`, so the transitional strip
-    // renders with its per-state label ("Updating…").
-    DemoSpec::ready(
-        "ready-reconnecting",
-        seed_ready_reconnecting_session,
-        "screenshot demo — reconnecting indicator (injected updates, no live Telegram)"
-    ),
     DemoSpec::chat_list("ready-tray-behavior")
         .tray()
         .setup(|app, _, _| app.appearance.minimize_to_tray = true),

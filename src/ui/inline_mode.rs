@@ -18,13 +18,8 @@ use super::pressable::PressableDiv;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::gpui::{AnyElement, Context, Window, div, prelude::*};
 use quill::composer::inline_query_trigger;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::ChatId;
-use quill::state::{InlineBotResolve, InlineQueryFetch, InlineQuerySlot, Session};
-use quill::telegram::client::copy_and_parse;
+use quill::state::{InlineBotResolve, InlineQueryFetch};
 use quill::telegram::envelope::InlineQueryResultSummary;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 /// One dropdown row: a status line, a result, or the "load more" row.
 #[derive(Clone)]
@@ -552,59 +547,4 @@ impl QuillApp {
         }
         Some(list.into_any_element())
     }
-}
-
-/// Screenshot demo fixture (`ready-inline-results`): like
-/// `apply_ready_bot_chat`, but the Demo Bot is an inline bot (`@gif`,
-/// `is_inline: true`) with an injected resolved slot and a loaded
-/// results page, so the inline-results dropdown renders open above the
-/// composer (injected, no live Telegram).
-pub(super) fn apply_ready_inline_results(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    super::bots::apply_ready_bot_chat(session, sink, seq);
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    // Re-inject the bot user with a username and inline capability (the
-    // `updateUser` reducer replaces the cached object).
-    let user_json = r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","usernames":{"@type":"usernames","active_usernames":["gif"],"disabled_usernames":[],"editable_username":"gif"},"type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"is_inline":true,"inline_query_placeholder":"Search GIFs…","supports_guest_queries":false,"need_location":false,"active_user_count":0}}}"#;
-    if let Some(owned) = copy_and_parse(user_json, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-    session.inline_bot_resolve = Some(InlineBotResolve::Resolved {
-        username: "gif".into(),
-        user_id: 21,
-        is_inline: Some(true),
-    });
-    session.inline_query = Some(InlineQuerySlot {
-        chat_id: ChatId(21),
-        bot_user_id: 21,
-        query: "cats".into(),
-        fetch: InlineQueryFetch::Loaded {
-            inline_query_id: 99,
-            button: None,
-            results: vec![
-                InlineQueryResultSummary {
-                    id: "a1".into(),
-                    kind: "article".into(),
-                    title: "Cute cats".into(),
-                    description: "The cutest cats on Telegram".into(),
-                },
-                InlineQueryResultSummary {
-                    id: "p2".into(),
-                    kind: "photo".into(),
-                    title: String::new(),
-                    description: "A sleepy kitten".into(),
-                },
-                InlineQueryResultSummary {
-                    id: "g3".into(),
-                    kind: "gif".into(),
-                    title: "Cat GIF".into(),
-                    description: String::new(),
-                },
-            ],
-            next_offset: "10".into(),
-        },
-    });
 }

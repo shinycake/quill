@@ -20,8 +20,6 @@ pub enum ConnectUiStatus {
     DemoWaitCode,
     /// Synthetic WaitPassword surface for screenshot proof (no live TDLib).
     DemoWaitPassword,
-    /// Slice A1: synthetic QR-login surface for screenshot proof (no live TDLib).
-    DemoWaitQr,
     /// Injected Ready + main chat list (no live Telegram).
     DemoReadyChats,
     Live,

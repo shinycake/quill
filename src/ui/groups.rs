@@ -1,7 +1,6 @@
 //! group/channel management: create dialogs, info edit, admin helpers, group confirm.
 
 use super::app::QuillApp;
-use super::group_invites::apply_ready_admin_log;
 use super::message_text::looks_like_emoji;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -14,12 +13,9 @@ use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, RequestId};
 use quill::state::GroupsPurpose;
-use quill::state::{MemberListFilter, RequestPurpose, Session, WelcomeMessagesFetch};
+use quill::state::{MemberListFilter, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{
-    ChannelMemberStatus, ChatAdminRights, ChatKind, ChatPermissions, MessageContent,
-    ParsedWelcomeMessage,
-};
+use quill::telegram::envelope::{ChannelMemberStatus, ChatAdminRights, ChatKind, ChatPermissions};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -280,41 +276,6 @@ pub(super) fn apply_ready_channels_admin(
             session.apply(owned);
         }
     }
-}
-
-/// `ReadyGroups2` fixture (Slice G2): on top of `apply_ready_admin_log`
-/// (channel 13, viewer 777 admin, loaded event log), flips the channel
-/// signature flags on via `updateSupergroup`, grants
-/// `can_send_welcome_messages` via `updateSupergroup` admin status, and
-/// seeds boost status + a loaded one-message welcome pack directly.
-pub(super) fn apply_ready_groups2(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    apply_ready_admin_log(session, sink, seq);
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let jsons = [
-        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"sign_messages":true,"show_message_sender":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}}}"#.to_string(),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    session.supergroup_send_welcome_right.insert(13, true);
-    session.chat_boost_status.insert(13, (4, 38));
-    session
-        .welcome_message_fetches
-        .insert(13, WelcomeMessagesFetch::Loaded);
-    session.welcome_messages.insert(
-        13,
-        vec![ParsedWelcomeMessage {
-            id: 5,
-            content: MessageContent::Text(quill::telegram::envelope::TextContent {
-                text: "Welcome to Demo channel! Read the pinned post first.".to_string(),
-                entities: Vec::new(),
-                link_preview: None,
-            }),
-        }],
-    );
-    session.chat_has_welcome_messages.insert(13, true);
 }
 
 /// `ReadyGroupManage` fixture (Slice G1): a demo supergroup ("Demo

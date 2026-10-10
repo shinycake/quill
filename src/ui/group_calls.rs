@@ -12,46 +12,7 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::telegram::envelope::MessageSender;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
-/// Phase C2g: synthetic per-participant frames for the ready-group-call
-/// demo fixture — a camera frame for Zed (user 41) and a screen-share
-/// frame for Mia (user 42), keyed `(user_id, is_screen)`. Deterministic
-/// test-pattern pixels, not real media. Injected demo data.
-pub(super) fn demo_group_video_frames() -> HashMap<(i64, bool), quill::calls::engine::VideoFrame> {
-    fn pattern(width: u16, height: u16, base: [u8; 3]) -> Vec<u8> {
-        let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
-        for y in 0..height {
-            for x in 0..width {
-                let stripe = (((x / 16 + y / 16) % 2) * 40) as u8;
-                rgba.push(base[0].saturating_add(stripe));
-                rgba.push(base[1].saturating_add(stripe));
-                rgba.push(base[2].saturating_add(stripe));
-                rgba.push(255);
-            }
-        }
-        rgba
-    }
-    let camera = quill::calls::engine::VideoFrame {
-        seq: 1,
-        width: 96,
-        height: 72,
-        rgba: pattern(96, 72, [60, 120, 200]),
-        is_local: false,
-        participant_user_id: Some(41),
-        is_screen: false,
-    };
-    let screen = quill::calls::engine::VideoFrame {
-        seq: 1,
-        width: 128,
-        height: 72,
-        rgba: pattern(128, 72, [200, 170, 60]),
-        is_local: false,
-        participant_user_id: Some(42),
-        is_screen: true,
-    };
-    HashMap::from([((41i64, false), camera), ((42i64, true), screen)])
-}
 
 impl QuillApp {
     /// kit Phase 2 (redo): group-call start hosted in a kit `Dialog` via

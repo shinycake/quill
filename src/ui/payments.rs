@@ -11,10 +11,8 @@ use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
 use quill::state::{LoginUrlRequest, Session};
-use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     LoginUrlInfo, PaymentFormData, PaymentFormTypeData, PaymentProviderKind, StarSubscriptionData,
     StarSubscriptionPricing, StarSubscriptionTypeData, format_payment_price, price_parts_total,
@@ -22,79 +20,6 @@ use quill::telegram::envelope::{
 use quill::telegram::requests::{input_credentials_new, input_credentials_saved};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-/// `ReadyPoll` fixture (Phase 4.2): open a dedicated "Demo polls" chat
-/// (id 15) with two injected `messagePoll` messages through the normal
-/// reducer — an open regular poll with a voted option (percentage bars +
-/// counts, the chosen option marked) and a closed quiz poll (results only,
-/// no voting affordance, correct answer marked).
-/// Slice P1 payments demo (injected, no live Telegram): a bot chat with a
-/// `messageInvoice` (Buy button), a `messagePaymentSuccessful` row, a paid
-/// invoice linking to a receipt, and a seeded `paymentForm` (regular
-/// provider, order fields, a saved credential, terms) so the checkout
-/// dialog renders open.
-pub(super) fn apply_ready_payments(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    use quill::state::RequestPurpose;
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let chat_id = 51;
-    let chat_json = format!(
-        r#"{{"@type":"updateNewChat","chat":{{"id":{chat_id},"title":"Demo shop bot","type":{{"@type":"chatTypePrivate","user_id":{chat_id}}},"unread_count":0}}}}"#
-    );
-    let position_json = format!(
-        r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"49","is_pinned":false}}}}"#
-    );
-    for json in [chat_json, position_json] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    session.open_chat(ChatId(chat_id));
-
-    let formatted = |text: &str| -> String {
-        let text_json = serde_json::to_string(text).unwrap();
-        format!(r#"{{"@type":"formattedText","text":{text_json},"entities":[]}}"#)
-    };
-    let buy_markup = r#"{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"💳 Buy","type":{"@type":"inlineKeyboardButtonTypeBuy"}}]]}"#;
-    let invoice_message = |message_id: i32,
-                           title: &str,
-                           description: &str,
-                           total: i64,
-                           is_test: bool,
-                           receipt: i64| {
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageInvoice","product_info":{{"@type":"productInfo","title":{title_json},"description":{description_json},"photo":null}},"currency":"USD","total_amount":{total},"start_parameter":"buy","is_test":{is_test},"need_shipping_address":false,"receipt_message_id":{receipt},"paid_media":null,"paid_media_caption":{empty_caption}}},"reply_markup":{buy_markup}}}}}"#,
-            title_json = serde_json::to_string(title).unwrap(),
-            description_json = formatted(description),
-            empty_caption = formatted(""),
-        )
-    };
-    let success_message = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":203,"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePaymentSuccessful","invoice_chat_id":{chat_id},"invoice_message_id":201,"currency":"USD","total_amount":1999,"is_recurring":false,"invoice_name":"Time machine"}}}}}}"#
-    );
-    for json in [
-        invoice_message(201, "Time machine", "Visit your ancestors", 1999, true, 0),
-        success_message,
-        invoice_message(204, "Time machine — paid", "Delivered", 1999, false, 205),
-    ] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-
-    // Seed a `paymentForm` answer (regular provider, order fields, one
-    // saved credential, terms) through a reserved GetPaymentForm extra so
-    // the reducer accepts it exactly like a live answer.
-    let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(chat_id)));
-    let form_json = format!(
-        r#"{{"@type":"paymentForm","@extra":"{}","id":7,"type":{{"@type":"paymentFormTypeRegular","invoice":{{"@type":"invoice","currency":"USD","price_parts":[{{"@type":"labeledPricePart","label":"Machine","amount":1999}}],"subscription_period":0,"max_tip_amount":0,"suggested_tip_amounts":[],"recurring_payment_terms_of_service_url":"","terms_of_service_url":"https://example.com/tos","is_test":true,"need_name":true,"need_phone_number":false,"need_email_address":true,"need_shipping_address":false,"send_phone_number_to_provider":false,"send_email_address_to_provider":false,"is_flexible":false}},"payment_provider_user_id":99,"payment_provider":{{"@type":"paymentProviderOther","url":"https://pay.example.com/x"}},"additional_payment_options":[],"saved_order_info":{{"@type":"orderInfo","name":"Ada","phone_number":"","email_address":"","shipping_address":{{"@type":"address","country_code":"","state":"","city":"","street_line1":"","street_line2":"","postal_code":""}}}},"saved_credentials":[{{"@type":"savedCredentials","id":"cred1","title":"Visa •• 4242"}}],"can_save_credentials":true,"need_password":false}},"seller_bot_user_id":{chat_id},"product_info":{{"@type":"productInfo","title":"Time machine","description":{description_json},"photo":null}}}}"#,
-        extra.0,
-        description_json = formatted("Visit your ancestors"),
-    );
-    if let Some(owned) = copy_and_parse(&form_json, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-}
 
 impl QuillApp {
     /// Slice P1: Buy button press — fetch the `paymentForm`

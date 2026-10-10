@@ -8,73 +8,8 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::ChatId;
-use quill::state::{RequestPurpose, Session, SharedMediaTab, SharedMediaTabStatus};
-use quill::telegram::client::copy_and_parse;
+use quill::state::{SharedMediaTab, SharedMediaTabStatus};
 use quill::telegram::envelope::ChatKind;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-/// Slice media-shared-gallery fixture: the gallery open on chat 11 with the
-/// Media tab empty and the Files tab holding two injected documents — all
-/// through the real `foundChatMessages` reducer path, no live Telegram.
-pub(super) fn apply_ready_shared_media(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let chat_id = ChatId(11);
-    let tab = session.shared_media.open_for(chat_id);
-    assert_eq!(tab, SharedMediaTab::Media);
-    // Media tab: an empty `foundChatMessages` → the Empty state (never a
-    // blank panel, never "empty" while loading).
-    let generation = session.shared_media.begin_fetch(SharedMediaTab::Media);
-    let extra = session.request(
-        RequestPurpose::GetSharedMedia {
-            tab: SharedMediaTab::Media,
-            generation,
-        },
-        Some(chat_id),
-    );
-    let empty = format!(
-        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":0,"next_from_message_id":0,"messages":[]}}"#,
-        extra.0
-    );
-    if let Some(owned) = copy_and_parse(&empty, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-    assert_eq!(
-        session.shared_media.tabs[SharedMediaTab::Media.index()].status,
-        SharedMediaTabStatus::Empty
-    );
-    // Files tab: two injected documents → the Ready state with rows.
-    let generation = session.shared_media.begin_fetch(SharedMediaTab::Files);
-    let extra = session.request(
-        RequestPurpose::GetSharedMedia {
-            tab: SharedMediaTab::Files,
-            generation,
-        },
-        Some(chat_id),
-    );
-    let files = format!(
-        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":0,"messages":[{{"id":201,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"report.pdf","mime_type":"application/pdf","document":{{"@type":"file","id":901,"size":12345,"expected_size":12345,"local":{{"@type":"localFile","path":"","is_downloading_completed":false,"is_downloading_active":false}},"remote":{{"@type":"remoteFile","id":"x"}}}}}},"caption":{{"@type":"formattedText","text":"Q3 numbers","entities":[]}}}}}},{{"id":202,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"demo-notes.txt","mime_type":"text/plain","document":{{"@type":"file","id":902,"size":24,"expected_size":24,"local":{{"@type":"localFile","path":"","is_downloading_completed":false,"is_downloading_active":false}},"remote":{{"@type":"remoteFile","id":"x"}}}}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}]}}"#,
-        extra.0
-    );
-    if let Some(owned) = copy_and_parse(&files, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-    assert_eq!(
-        session.shared_media.tabs[SharedMediaTab::Files.index()].status,
-        SharedMediaTabStatus::Ready
-    );
-    assert_eq!(
-        session.shared_media.tabs[SharedMediaTab::Files.index()]
-            .items
-            .len(),
-        2
-    );
-}
 
 impl QuillApp {
     /// Phase B2: the "Encryption key" section of a secret chat partner's

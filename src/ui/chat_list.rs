@@ -7,7 +7,6 @@ use super::chat_row::{
     ChatListItem, chat_list_caption, chat_list_empty_state, chat_list_skeleton_row,
     chat_row_height, chat_row_tags, static_chat_row,
 };
-use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::notifications::notification_settings_json;
 use super::*;
 use gpui_kit::component::button::*;
@@ -26,117 +25,11 @@ use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
     AuthorizationState, ChatKind, ChatNotificationSettings, MUTE_FOREVER,
 };
-use quill::telegram::requests::ArchiveChatListSettings;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
-/// `ReadyChatAvatars` fixture (parity slice): chat-list avatars and the
-/// channel/supergroup header — all injected through the normal reducer, no
-/// live Telegram.
-///
-/// - `updateChatPhoto` gives "Demo chat A" (private, id 11) and the demo
-///   channel (id 13) downloaded `chatPhotoInfo.small` thumbnails (the
-///   shared demo-thumb fixture, marked completed).
-/// - "Demo chat B" (private, id 12), "Demo basic group" (id 14) and "Demo
-///   discussion" (supergroup, id 16) keep no photo → colored-initial
-///   fallbacks.
-/// - `updateSupergroup` caches the channel's primary `@username`
-///   (`demochannel`).
-/// - A `getSupergroupFullInfo` round-trip seeds the channel description,
-///   12,345 subscribers and `linked_chat_id: 16`, so the header shows the
-///   description snippet, the count, and the "Discuss" affordance.
-/// - The channel is opened with two broadcast posts.
-pub(super) fn apply_ready_chat_avatars(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let thumb_path = demo_thumb_png_path();
-    let chat_photo = |file_id: i32| {
-        let small = demo_file_json(file_id, &thumb_path, true);
-        format!(
-            r#"{{"@type":"chatPhotoInfo","small":{small},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}}"#
-        )
-    };
-    let position = |chat_id: i64, order: &str| {
-        format!(
-            r#"{{"@type":"updateChatPosition","chat_id":{chat_id},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}}}"#
-        )
-    };
-    let usernames = |names: &[&str]| {
-        let active = names
-            .iter()
-            .map(|n| serde_json::to_string(n).unwrap())
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            r#"{{"@type":"usernames","active_usernames":[{active}],"disabled_usernames":[],"editable_username":{first},"collectible_usernames":[]}}"#,
-            first = serde_json::to_string(names.first().copied().unwrap_or("")).unwrap(),
-        )
-    };
-    let full_info_extra = session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, 13);
-    let group_full_info_extra =
-        session.request_for_supergroup(RequestPurpose::GetSupergroupFullInfo, 16);
-    let description = "Demo channel — product updates, release notes, and the occasional meme. New posts every weekday morning.";
-    let description_json = serde_json::to_string(description).unwrap();
-    let group_description_json =
-        serde_json::to_string("The discussion group for the Demo channel.").unwrap();
-    let views = |count: i32| {
-        format!(
-            r#""interaction_info":{{"@type":"messageInteractionInfo","view_count":{count},"forward_count":7,"reply_info":null,"reactions":null}}"#
-        )
-    };
-    let post = |id: i64, text: &str, view_count: i32| {
-        // Phase D2: channel author signatures (`message.author_signature`,
-        // schema 1.8.67 line 3165) render below the post.
-        let signature = if id == 201 { "Demo Admin" } else { "News Desk" };
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":13,"sender_id":{{"@type":"messageSenderChat","chat_id":13}},"is_outgoing":false,"is_channel_post":true,"author_signature":"{signature}",{},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#,
-            views(view_count),
-        )
-    };
-    let jsons = [
-        // Photos for the private chat and the channel.
-        format!(
-            r#"{{"@type":"updateChatPhoto","chat_id":11,"photo":{}}}"#,
-            chat_photo(91)
-        ),
-        format!(
-            r#"{{"@type":"updateChatPhoto","chat_id":13,"photo":{}}}"#,
-            chat_photo(93)
-        ),
-        // A basic group (initials fallback) and the discussion supergroup.
-        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Demo basic group","type":{"@type":"chatTypeBasicGroup","basic_group_id":14},"unread_count":0}}"#.to_string(),
-        r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Demo discussion","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#.to_string(),
-        position(14, "25"),
-        position(16, "5"),
-        // Channel + discussion-group metadata.
-        format!(
-            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":13,"usernames":{},"is_forum":false,"is_channel":true}}}}"#,
-            usernames(&["demochannel"])
-        ),
-        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"usernames":null,"is_forum":false,"is_channel":false}}"#.to_string(),
-        format!(
-            r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":{description_json},"member_count":12345,"linked_chat_id":16}}"#,
-            full_info_extra.0,
-        ),
-        format!(
-            r#"{{"@type":"supergroupFullInfo","@extra":"{}","description":{group_description_json},"member_count":42,"linked_chat_id":0}}"#,
-            group_full_info_extra.0,
-        ),
-        post(201, "Broadcast one — channel post from the channel itself.", 12345),
-        post(202, "Broadcast two — a second post with fewer views.", 987),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    session.open_chat(ChatId(13));
-}
 
 pub(super) fn apply_ready_mute_archive(
     session: &mut Session,
@@ -163,39 +56,6 @@ pub(super) fn apply_ready_mute_archive(
         if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
             session.apply(owned);
         }
-    }
-}
-
-/// Slice CL1: chat-list screenshot fixture — chat 11 stays pinned
-/// (base seed), chat 12 moves to the archive section, chat 13 is
-/// marked as unread (badge dot). Injected, no live Telegram.
-pub(super) fn apply_ready_chat_list_menu(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let jsons = [
-        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#
-            .to_string(),
-        r#"{"@type":"updateChatRemovedFromList","chat_id":12,"chat_list":{"@type":"chatListMain"}}"#
-            .to_string(),
-        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"20","is_pinned":false}}"#
-            .to_string(),
-        r#"{"@type":"updateChatAddedToList","chat_id":12,"chat_list":{"@type":"chatListArchive"}}"#
-            .to_string(),
-        r#"{"@type":"updateChatIsMarkedAsUnread","chat_id":13,"is_marked_as_unread":true}"#.to_string(),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    // The demo seed doesn't carry delete-capability flags; TDLib sends
-    // them for real private chats — set directly so the fixture shows
-    // the full row menu (Clear history / Delete chat).
-    if let Some(chat) = session.chats.get_mut(&11) {
-        chat.can_be_deleted_only_for_self = true;
     }
 }
 
@@ -233,157 +93,6 @@ pub(super) fn apply_ready_chat_list_3(
         chat.blocked = true;
         chat.notification_settings =
             ChatNotificationSettings::default().with_mute_for(MUTE_FOREVER);
-    }
-}
-
-/// Slice CL: chat peek-preview screenshot fixture — a few messages on
-/// chat 12 ("Demo chat B") so the preview has rows to show; chat 11
-/// stays the open chat. All injected through the normal reducer, no
-/// live Telegram.
-pub(super) fn apply_ready_chat_preview(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let photo_file = demo_file_json(41, "", false);
-    let jsons = [
-        r#"{"@type":"updateNewMessage","message":{"id":41,"chat_id":12,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Are we still on for lunch tomorrow?","entities":[]}}}}"#
-            .to_string(),
-        r#"{"@type":"updateNewMessage","message":{"id":42,"chat_id":12,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Yes — noon at the usual place.","entities":[]}}}}"#
-            .to_string(),
-        format!(
-            r#"{{"@type":"updateNewMessage","message":{{"id":43,"chat_id":12,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{photo_file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"The menu, in case you forgot","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
-        ),
-        r#"{"@type":"updateNewMessage","message":{"id":44,"chat_id":12,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"See you there!","entities":[]}}}}"#
-            .to_string(),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
-/// Slice CL2: chat-list screenshot fixture — folder tabs (Work/News;
-/// the chats stay on Main so the Main tab renders with the category
-/// chips), chat 12 moved to the archive (expanded section), chat 11
-/// pinned + unread, and the archive auto-settings seeded. All injected
-/// through the normal reducer, no live Telegram.
-pub(super) fn apply_ready_chat_list(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let folders = r#"{"@type":"updateChatFolders","chat_folders":[{"@type":"chatFolderInfo","id":1,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]}},"icon":{"@type":"chatFolderIcon","name":"Work"},"color_id":2,"is_shareable":false,"has_my_invite_links":false},{"@type":"chatFolderInfo","id":2,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"News","entities":[]}},"icon":{"@type":"chatFolderIcon","name":"Channels"},"color_id":4,"is_shareable":false,"has_my_invite_links":false}],"main_chat_list_position":0,"are_tags_enabled":false}"#;
-    if let Some(owned) = copy_and_parse(folders, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-    let jsons = [
-        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#.to_string(),
-        r#"{"@type":"updateChatRemovedFromList","chat_id":12,"chat_list":{"@type":"chatListMain"}}"#.to_string(),
-        r#"{"@type":"updateChatPosition","chat_id":12,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"20","is_pinned":false}}"#.to_string(),
-        r#"{"@type":"updateChatAddedToList","chat_id":12,"chat_list":{"@type":"chatListArchive"}}"#.to_string(),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    session.archive_chat_list_settings = Some(ArchiveChatListSettings {
-        archive_and_mute_new_chats_from_unknown_users: false,
-        keep_unmuted_chats_archived: true,
-        keep_chats_from_folders_archived: false,
-    });
-}
-
-/// Chat-row polish fixture: drafts (with and without a reply), a sending
-/// and a failed outgoing message, delivered / read ticks, an online user
-/// with Premium, and verified / Premium / SCAM / FAKE titles. All injected
-/// through the normal reducer, no live Telegram.
-pub(super) fn apply_ready_chat_rows(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let now = quill::local_time::now_unix() - 600;
-    let user = |id: i64, first: &str, last: &str, status: &str, extra: &str| {
-        format!(
-            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":{status},"profile_photo":null,"is_contact":true,"type":{{"@type":"userTypeRegular"}}{extra}}}}}"#
-        )
-    };
-    let verified = r#","verification_status":{"@type":"verificationStatus","is_verified":true,"is_scam":false,"is_fake":false}"#;
-    let scam = r#","verification_status":{"@type":"verificationStatus","is_verified":false,"is_scam":true,"is_fake":false}"#;
-    let fake = r#","verification_status":{"@type":"verificationStatus","is_verified":false,"is_scam":false,"is_fake":true}"#;
-    let premium = r#","is_premium":true"#;
-    let offline = r#"{"@type":"userStatusRecently"}"#;
-    let online = r#"{"@type":"userStatusOnline","expires":4102444800}"#;
-    let draft = |text: &str, reply: bool| {
-        let reply_to = if reply {
-            r#"{"@type":"inputMessageReplyToMessage","message_id":5,"quote":null,"checklist_task_id":0,"poll_option_id":""}"#
-        } else {
-            "null"
-        };
-        format!(
-            r#","draft_message":{{"@type":"draftMessage","reply_to":{reply_to},"date":{now},"content":{{"@type":"draftMessageContentText","text":{{"@type":"formattedText","text":"{text}","entities":[]}},"link_preview_options":null}},"effect_id":"0","suggested_post_info":null}}"#
-        )
-    };
-    let new_chat = |id: i64, title: &str, kind: &str, unread: i32, extra: &str| {
-        format!(
-            r#"{{"@type":"updateNewChat","chat":{{"id":{id},"title":"{title}","type":{kind},"unread_count":{unread}{extra}}}}}"#
-        )
-    };
-    let private = |id: i64| format!(r#"{{"@type":"chatTypePrivate","user_id":{id}}}"#);
-    let last = |chat: i64, id: i64, outgoing: bool, state: &str, text: &str, order: i64| {
-        format!(
-            r#"{{"@type":"updateChatLastMessage","chat_id":{chat},"last_message":{{"id":{id},"chat_id":{chat},"date":{now},"is_outgoing":{outgoing},{state}"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"{order}","is_pinned":false}}]}}"#
-        )
-    };
-    let pending = r#""sending_state":{"@type":"messageSendingStatePending","sending_id":0},"#;
-    let failed = r#""sending_state":{"@type":"messageSendingStateFailed","can_retry":true},"#;
-    let step = 1_048_576_i64;
-    let jsons = [
-        user(21, "Mira", "Cohen", offline, premium),
-        new_chat(21, "Mira Cohen", &private(21), 0, &draft("see you at six, bring the notes", false)),
-        last(21, 3 * step, false, "", "Are we still on for tonight?", 960),
-        user(22, "Noam", "Katz", offline, verified),
-        new_chat(22, "Noam Katz", &private(22), 0, ""),
-        last(22, -1, true, pending, "On my way, two minutes", 950),
-        user(23, "Dana", "Levi", offline, ""),
-        new_chat(23, "Dana Levi", &private(23), 0, ""),
-        last(23, -2, true, failed, "Did the files arrive?", 940),
-        user(24, "Omar", "Haddad", online, premium),
-        new_chat(24, "Omar Haddad", &private(24), 0, &draft("", true)),
-        last(24, 4 * step, false, "", "Sounds good", 930),
-        new_chat(
-            124,
-            "Quill News",
-            r#"{"@type":"chatTypeSupergroup","supergroup_id":124,"is_channel":true}"#,
-            3,
-            "",
-        ),
-        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":124,"is_channel":true,"verification_status":{"@type":"verificationStatus","is_verified":true,"is_scam":false,"is_fake":false}}}"#.to_string(),
-        last(124, 5 * step, false, "", "Release notes for this week are out", 920),
-        user(25, "Quick", "Crypto Profit", offline, scam),
-        new_chat(25, "Quick Crypto Profit", &private(25), 1, ""),
-        last(25, 6 * step, false, "", "Double your coins in 24 hours", 910),
-        user(26, "Support", "Desk", offline, fake),
-        new_chat(26, "Support Desk", &private(26), 0, ""),
-        last(26, 7 * step, false, "", "Please confirm your account", 900),
-        user(27, "Yael", "Barak", offline, ""),
-        new_chat(27, "Yael Barak", &private(27), 0, ""),
-        last(27, 8 * step, true, "", "Delivered, not read yet", 890),
-        user(28, "Eli", "Mor", offline, ""),
-        new_chat(28, "Eli Mor", &private(28), 0, ""),
-        last(28, 9 * step, true, "", "Read by Eli", 880),
-        r#"{"@type":"updateChatReadOutbox","chat_id":28,"last_read_outbox_message_id":9437184}"#.to_string(),
-    ];
-    for json in jsons {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
     }
 }
 

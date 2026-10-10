@@ -207,32 +207,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Open the dialog already on a chosen chat (screenshot demos).
-    pub(super) fn open_add_bot_target_demo(
-        &mut self,
-        bot_id: i64,
-        chat_id: i64,
-        cx: &mut Context<Self>,
-    ) {
-        let invite = Invite::default();
-        let rights = self.bot_invite_facts(bot_id).and_then(|facts| {
-            choices(&facts, &invite, &self.add_bot_chat_facts())
-                .into_iter()
-                .find(|row| row.chat_id == chat_id)
-                .map(|row| match row.plan {
-                    Plan::Admin(rights) => quill::bot_invite::mask_rights(rights, row.is_channel),
-                    Plan::Member => ChatAdminRights::default(),
-                })
-        });
-        self.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
-            bot_id,
-            invite,
-            target: Some(chat_id),
-            rights: rights.unwrap_or_default(),
-        });
-        cx.notify();
-    }
-
     /// The groups and channels the person could add the bot to, by title.
     fn add_bot_chat_facts(&self) -> Vec<ChatFacts> {
         let Some(session) = self.session() else {
