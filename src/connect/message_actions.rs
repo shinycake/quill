@@ -6,7 +6,7 @@ use crate::state::{ComposerLinkPreview, RequestPurpose, UnreadJumpKind};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
     get_replied_message, get_web_page_instant_view, pin_chat_message, read_all_chat_markers,
-    remove_message_reaction, search_chat_messages, search_messages_filter_json,
+    remove_message_reaction, search_chat_messages, search_messages_filter_json, stop_live_location,
     unpin_all_chat_messages, unpin_chat_message,
 };
 
@@ -327,6 +327,48 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(())
+    }
+
+    /// "Stop sharing" on your own running live location
+    /// (`editMessageLiveLocation` with a null location). The guard checks
+    /// the message is an outgoing live location with time left; the
+    /// message then updates through `updateMessageContent`.
+    pub fn stop_live_location(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let can_stop = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.get(&message_id.0))
+            .filter(|message| !message.pending && message.id.0 > 0)
+            .is_some_and(|message| match &message.content {
+                crate::telegram::envelope::MessageContent::Location(location) => {
+                    location.live.is_some_and(|live| {
+                        live.can_stop_at(message.is_outgoing, crate::local_time::now_unix())
+                    })
+                }
+                _ => false,
+            });
+        if !can_stop {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::StopLiveLocation, Some(chat_id));
+        let json = stop_live_location(extra, chat_id, message_id);
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(extra),
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     pub fn unpin_all_chat_messages(

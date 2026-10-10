@@ -1019,3 +1019,26 @@ fn nameless_preview_never_says_loading() {
     let (content, _) = parse(r#"{"@type":"messagePinMessage","message_id":5}"#);
     assert_eq!(content.preview(), "Someone pinned a message");
 }
+
+#[test]
+fn birthday_card_table_hides_an_unset_year() {
+    use crate::service_text::birthday_table;
+    assert_eq!(
+        birthday_table(6, 10, 1990),
+        vec![
+            ("Day", "6".to_string()),
+            ("Month", "October".to_string()),
+            ("Year", "1990".to_string())
+        ]
+    );
+    assert_eq!(birthday_table(6, 10, 0).len(), 2);
+}
+
+#[test]
+fn birthday_card_prefills_the_form_or_nothing() {
+    use crate::service_text::birthday_form_parts;
+    assert_eq!(birthday_form_parts(6, 10, 1990), Some((6, 10, Some(1990))));
+    assert_eq!(birthday_form_parts(29, 2, 0), Some((29, 2, None)));
+    assert_eq!(birthday_form_parts(0, 10, 0), None);
+    assert_eq!(birthday_form_parts(6, 13, 0), None);
+}

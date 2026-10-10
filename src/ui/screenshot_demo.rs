@@ -343,6 +343,10 @@ pub enum ScreenshotDemo {
     /// Service-message tour in a group: members, pins with excerpt,
     /// photo change, calls, gifts, giveaways, topics, timers, boosts.
     ReadyServiceMessages,
+    /// Private chat with the cards of the render-service-media slice:
+    /// suggested photo and birthday, expired media, live locations with
+    /// Stop sharing, and link previews with a View button.
+    ReadyServiceMedia,
     /// Channel comments and reply threads (injected, no live Telegram):
     /// `QUILL_DEMO_THREADS_VIEW=posts` shows channel posts with comment
     /// bars, `thread` a post's comment thread in its discussion group,

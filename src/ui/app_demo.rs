@@ -740,6 +740,12 @@ pub(super) fn demo_seed_for(
             "screenshot demo — message menu".into(),
             AuthorizationState::Ready,
         ),
+        ScreenshotDemo::ReadyServiceMedia => (
+            Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
+            ConnectUiStatus::DemoReadyChats,
+            "screenshot demo — service and media cards".into(),
+            AuthorizationState::Ready,
+        ),
         ScreenshotDemo::ReadyServiceMessages => (
             Some(seed_ready_chats_session as fn(Arc<MemorySink>) -> Session),
             ConnectUiStatus::DemoReadyChats,
