@@ -12,6 +12,7 @@ use super::chat_theme::{set_high_contrast, set_theme_mode};
 use super::synthetic::BubbleLook;
 use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::color_picker::{ColorPickerEvent, ColorPickerState, ColorSelect};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
@@ -31,6 +32,29 @@ use std::rc::Rc;
 /// Accent presets (0xRRGGBB); the "Default" chip keeps the theme accent.
 /// The kit's unscaled rem size (gpui-component `Theme::font_size`).
 const BASE_REM_PX: f32 = 16.;
+
+/// tdesktop's lightness limits for a custom accent (`ColorizerFrom` in
+/// window_themes_embedded.cpp, applied by the accent `ColorEditor`): at
+/// most 160/255 on day themes and at least 64/255 on night themes, so
+/// white text on the accent and the accent on the window stay readable.
+/// Opaque: the accent has no alpha.
+pub(crate) fn limit_custom_accent(color: Hsla, dark: bool) -> Hsla {
+    let l = if dark {
+        color.l.max(64. / 255.)
+    } else {
+        color.l.min(160. / 255.)
+    };
+    Hsla { l, a: 1., ..color }
+}
+
+/// `color` as the `accent_rgb` setting (0xRRGGBB). 0 means "theme
+/// default" there, so pure black is stored as 0x000001.
+pub(crate) fn accent_rgb_from(color: Hsla) -> u32 {
+    let rgba = Rgba::from(color);
+    let channel = |v: f32| (v.clamp(0., 1.) * 255.).round() as u32;
+    let value = (channel(rgba.r) << 16) | (channel(rgba.g) << 8) | channel(rgba.b);
+    value.max(1)
+}
 
 const ACCENT_PRESETS: &[(u32, &str)] = &[
     (0x2f81f7, "Blue"),
@@ -649,12 +673,72 @@ impl QuillApp {
                 move |this, cx| this.set_appearance(cx, |a| a.accent_rgb = color),
             ));
         }
+        // tdesktop's last accent circle opens a free-form color editor;
+        // here it is the kit's framed color field, with the presets
+        // featured at the top of its palette.
+        let custom = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().text_sm().child("Custom"))
+            .child(
+                ColorSelect::new(&self.accent_picker)
+                    .featured_colors(
+                        ACCENT_PRESETS
+                            .iter()
+                            .map(|&(color, _)| Hsla::from(rgb(color)))
+                            .collect(),
+                    )
+                    .accessibility_label("Custom accent color")
+                    .w(px(180.)),
+            );
         self.appearance_section(
             cx,
             "Accent color",
-            "Highlights, selections and links across the app.",
-            row.into_any_element(),
+            "Highlights, selections and links across the app. Custom colors are \
+             kept light enough on dark themes and dark enough on light ones.",
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(row)
+                .child(custom)
+                .into_any_element(),
         )
+    }
+
+    /// The custom accent field's state, showing `accent_rgb` (or the
+    /// theme's accent when that is the default). A committed color is
+    /// limited like tdesktop's (`limit_custom_accent`) and becomes the
+    /// accent.
+    pub(super) fn new_accent_picker(
+        accent_rgb: u32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ColorPickerState> {
+        let initial = if accent_rgb == 0 {
+            Hsla::from(super::chat_theme::accent_strong())
+        } else {
+            Hsla::from(rgb(accent_rgb))
+        };
+        let picker = cx.new(|cx| ColorPickerState::new(window, cx).default_value(initial));
+        cx.subscribe_in(
+            &picker,
+            window,
+            |this, picker, event: &ColorPickerEvent, window, cx| {
+                let ColorPickerEvent::Change(Some(color)) = event else {
+                    return;
+                };
+                let limited = limit_custom_accent(*color, cx.theme().is_dark());
+                if limited != *color {
+                    picker.update(cx, |picker, cx| picker.set_value(limited, window, cx));
+                }
+                let value = accent_rgb_from(limited);
+                this.set_appearance(cx, |a| a.accent_rgb = value);
+            },
+        )
+        .detach();
+        picker
     }
 
     /// tdesktop's "Interface scale" (Settings > Chat settings). GPUI has no
@@ -1550,5 +1634,34 @@ impl QuillApp {
         }
         self.keybinding_capture = None;
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{accent_rgb_from, limit_custom_accent};
+    use gpui_kit::{Hsla, rgb};
+
+    #[test]
+    fn custom_accent_lightness_follows_tdesktop_limits() {
+        let pale = Hsla::from(rgb(0xf0f4ff));
+        let light = limit_custom_accent(pale, false);
+        assert!((light.l - 160. / 255.).abs() < 1e-6);
+        assert_eq!(limit_custom_accent(pale, true).l, pale.l);
+
+        let deep = Hsla::from(rgb(0x0a1020));
+        assert!((limit_custom_accent(deep, true).l - 64. / 255.).abs() < 1e-6);
+        assert_eq!(limit_custom_accent(deep, false).l, deep.l);
+
+        let translucent = Hsla { a: 0.3, ..deep };
+        assert_eq!(limit_custom_accent(translucent, false).a, 1.);
+    }
+
+    #[test]
+    fn accent_rgb_round_trips_and_never_means_default() {
+        for value in [0x2f81f7, 0x3fb950, 0xf85149, 0xffffff, 0x123456] {
+            assert_eq!(accent_rgb_from(Hsla::from(rgb(value))), value);
+        }
+        assert_eq!(accent_rgb_from(Hsla::from(rgb(0x000000))), 0x000001);
     }
 }

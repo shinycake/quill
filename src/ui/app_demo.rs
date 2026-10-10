@@ -1355,6 +1355,8 @@ impl QuillApp {
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
+        let appearance_prefs = Self::load_appearance();
+        let accent_picker = Self::new_accent_picker(appearance_prefs.accent_rgb, window, cx);
         let emoji_status_hours_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Custom duration in hours")
@@ -2090,7 +2092,7 @@ impl QuillApp {
             event_log_search: None,
             event_log_admin_filter: None,
             storage_usage_open: false,
-            appearance: Self::load_appearance(),
+            appearance: appearance_prefs,
             chat_prefs,
             translate_ui: super::translate_ui::TranslateUi::load(),
             appearance_open: false,
@@ -2102,6 +2104,7 @@ impl QuillApp {
             keybindings_applied: false,
             keybindings_screenshot: false,
             appearance_applied: None,
+            accent_picker,
             // codex:spellcheck-native: platform engine + persisted app words.
             spellchecker,
             spell_info,
