@@ -184,9 +184,7 @@ pub(super) fn apply_ready_gift_cards(
         format!(
             r#"{{"@type":"updateChatPosition","chat_id":{CHAT},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"4998","is_pinned":false}}}}"#
         ),
-        format!(
-            r#"{{"@type":"updateUser","user":{{"@type":"user","id":1,"first_name":"Dana","last_name":"Cole","usernames":null,"phone_number":"","status":{{"@type":"userStatusRecently"}},"profile_photo":null,"is_contact":true,"type":{{"@type":"userTypeRegular"}}}}}}"#
-        ),
+        r#"{"@type":"updateUser","user":{"@type":"user","id":1,"first_name":"Dana","last_name":"Cole","usernames":null,"phone_number":"","status":{"@type":"userStatusRecently"},"profile_photo":null,"is_contact":true,"type":{"@type":"userTypeRegular"}}}"#.to_string(),
     ];
     let contents = vec![
         (

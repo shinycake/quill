@@ -24,7 +24,7 @@ base64 = "0.22"
 directories = "6"
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
-libloading = "0.8"
+libloading = "0.9"
 libc = "0.2"
 ntgcalls-sys = { path = "crates/ntgcalls-sys" }
 qrcode = { version = "0.14", optional = true, default-features = false, features = ["image"] }
@@ -47,7 +47,7 @@ cpal = { version = "0.17", optional = true, default-features = false }
 rusty-opus = { version = "1", optional = true }
 # Wallpaper patterns: Telegram ships them as (gzipped) SVG. Already in the
 # lockfile through GPUI; no text or raster-image features are needed.
-resvg = { version = "0.46", default-features = false, optional = true }
+resvg = { version = "0.48", default-features = false, features = ["svgz"], optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 sha2 = "0.10"
 # Local passcode (docs/decisions/codex-local-passcode.md): PBKDF2-HMAC-SHA512 key
@@ -76,7 +76,7 @@ features = ["component", "assets"]
 # loop, neither of which a GPUI process has; Linux uses ksni (pure-Rust
 # StatusNotifierItem over D-Bus, same zbus/async-io stack as GPUI) instead.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-tray-icon = { version = "0.21", optional = true, default-features = false }
+tray-icon = { version = "0.26", optional = true, default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", optional = true, default-features = false, features = ["async-io", "blocking"] }

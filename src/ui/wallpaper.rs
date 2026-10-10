@@ -308,6 +308,50 @@ impl QuillApp {
     }
 }
 
+/// Screenshot fixture: five installed wallpapers (fills only, no photos),
+/// the second one the account default for both themes.
+pub(super) fn apply_demo_wallpapers(session: &mut quill::state::Session) {
+    let fill = |id: i64, name: &str, fill: BackgroundFill| Background {
+        id,
+        is_default: false,
+        is_dark: false,
+        name: name.into(),
+        file: None,
+        kind: BackgroundType::Fill(fill),
+    };
+    let list = vec![
+        fill(1, "Mint", BackgroundFill::Solid(0xb8e0c9)),
+        fill(
+            2,
+            "Dusk",
+            BackgroundFill::Gradient {
+                top: 0x2b3a67,
+                bottom: 0xb56576,
+                angle: 0,
+            },
+        ),
+        fill(
+            3,
+            "Sunrise",
+            BackgroundFill::Gradient {
+                top: 0xffd89b,
+                bottom: 0x19547b,
+                angle: 45,
+            },
+        ),
+        fill(4, "Sand", BackgroundFill::Solid(0xe9dcc3)),
+        fill(
+            5,
+            "Aurora",
+            BackgroundFill::Freeform(vec![0x0f2027, 0x2c5364, 0x42a5a5]),
+        ),
+    ];
+    let default = list[1].clone();
+    session.installed_backgrounds = Some(list);
+    session.default_backgrounds.insert(false, default.clone());
+    session.default_backgrounds.insert(true, default);
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Wallpaper, background_wallpaper, gradient_angle, resolve_wallpaper};
@@ -405,48 +449,4 @@ mod tests {
         assert_eq!(gradient_angle(180), 0);
         assert_eq!(gradient_angle(225), 45);
     }
-}
-
-/// Screenshot fixture: five installed wallpapers (fills only, no photos),
-/// the second one the account default for both themes.
-pub(super) fn apply_demo_wallpapers(session: &mut quill::state::Session) {
-    let fill = |id: i64, name: &str, fill: BackgroundFill| Background {
-        id,
-        is_default: false,
-        is_dark: false,
-        name: name.into(),
-        file: None,
-        kind: BackgroundType::Fill(fill),
-    };
-    let list = vec![
-        fill(1, "Mint", BackgroundFill::Solid(0xb8e0c9)),
-        fill(
-            2,
-            "Dusk",
-            BackgroundFill::Gradient {
-                top: 0x2b3a67,
-                bottom: 0xb56576,
-                angle: 0,
-            },
-        ),
-        fill(
-            3,
-            "Sunrise",
-            BackgroundFill::Gradient {
-                top: 0xffd89b,
-                bottom: 0x19547b,
-                angle: 45,
-            },
-        ),
-        fill(4, "Sand", BackgroundFill::Solid(0xe9dcc3)),
-        fill(
-            5,
-            "Aurora",
-            BackgroundFill::Freeform(vec![0x0f2027, 0x2c5364, 0x42a5a5]),
-        ),
-    ];
-    let default = list[1].clone();
-    session.installed_backgrounds = Some(list);
-    session.default_backgrounds.insert(false, default.clone());
-    session.default_backgrounds.insert(true, default);
 }

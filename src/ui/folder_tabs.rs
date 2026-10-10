@@ -208,9 +208,9 @@ impl QuillApp {
             // the tab's prefix instead.
             let mut tab = Tab::new().label(slot.name.clone());
             tab = match (show_icon, show_text) {
-                (true, false) => tab.icon(slot.glyph.clone()).aria_label(slot.name.clone()),
+                (true, false) => tab.icon(slot.glyph).aria_label(slot.name.clone()),
                 (true, true) => tab.prefix(
-                    Icon::new(slot.glyph.clone())
+                    Icon::new(slot.glyph)
                         .size(px(14.))
                         .text_color(cx.theme().muted_foreground),
                 ),
@@ -326,11 +326,7 @@ impl QuillApp {
                         )
                     })
                     .when(show_icon, |this| {
-                        this.child(
-                            Icon::new(slot.glyph.clone())
-                                .size(px(22.))
-                                .text_color(color),
-                        )
+                        this.child(Icon::new(slot.glyph).size(px(22.)).text_color(color))
                     })
                     .when(show_text, |this| {
                         this.child(
