@@ -3,12 +3,15 @@
 
 pub mod about;
 pub mod account_export;
+pub mod admin_extras;
 pub mod album;
 pub mod animation;
 pub mod auth;
 pub mod auto_delete;
+pub mod autoscroll;
 pub mod autostart;
 pub mod calls;
+pub mod chat_bottom_bar;
 pub mod chat_export;
 pub mod chat_swipe;
 pub mod chatlist_archive;
@@ -86,6 +89,7 @@ pub mod service_text;
 #[cfg(test)]
 mod service_text_tests;
 pub mod settings;
+pub mod settings_account;
 pub mod share_box;
 pub mod signin;
 pub mod single_instance;
@@ -128,6 +132,7 @@ pub mod voice;
 pub mod voice_input;
 #[cfg(feature = "ui")]
 pub mod voice_opus;
+pub mod window_title;
 #[cfg(windows)]
 pub mod winreg;
 

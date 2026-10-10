@@ -27,6 +27,7 @@ use quill::telegram::envelope::{
     AuthorizationState, ChatKind, ChatNotificationSettings, MUTE_FOREVER,
 };
 use quill::telegram::requests::ArchiveChatListSettings;
+use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -853,8 +854,10 @@ impl QuillApp {
             if let Err(err) = live.driver.fetch_call_history() {
                 self.status_note = format!("call history request failed: {err:?}");
             }
-            if let Err(err) = live.driver.fetch_call_privacy() {
-                self.status_note = format!("call privacy request failed: {err:?}");
+            for key in [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer] {
+                if let Err(err) = live.driver.fetch_privacy_rules(key) {
+                    self.status_note = format!("call privacy request failed: {err:?}");
+                }
             }
             // Slice S4: the call-settings "Use less data for calls"
             // toggle reads the TDLib-backed per-network settings —

@@ -37,6 +37,11 @@ pub enum PrivacySettingKey {
     /// B13: `userPrivacySettingAutosaveGifts` (tdesktop "Gifts": who can
     /// display gifts on the profile).
     AutosaveGifts,
+    /// `userPrivacySettingAllowCalls` (tdesktop "Calls": who can call me).
+    AllowCalls,
+    /// `userPrivacySettingAllowPeerToPeerCalls` (tdesktop "Peer-to-peer in
+    /// calls").
+    PeerToPeer,
 }
 
 impl PrivacySettingKey {
@@ -61,6 +66,8 @@ impl PrivacySettingKey {
                 "userPrivacySettingAllowPrivateVoiceAndVideoNoteMessages"
             }
             PrivacySettingKey::AutosaveGifts => "userPrivacySettingAutosaveGifts",
+            PrivacySettingKey::AllowCalls => "userPrivacySettingAllowCalls",
+            PrivacySettingKey::PeerToPeer => "userPrivacySettingAllowPeerToPeerCalls",
         }
     }
 
@@ -78,14 +85,15 @@ impl PrivacySettingKey {
             PrivacySettingKey::AllowFindingByPhoneNumber => "Who can find me by my number",
             PrivacySettingKey::AllowVoiceMessages => "Voice Messages",
             PrivacySettingKey::AutosaveGifts => "Gifts",
+            PrivacySettingKey::AllowCalls => "Who can call me",
+            PrivacySettingKey::PeerToPeer => "Peer-to-peer calls",
         }
     }
 
-    /// Every rule key the screen fetches and keeps in sync. The call
-    /// settings (`userPrivacySettingAllowCalls`,
-    /// `userPrivacySettingAllowPeerToPeerCalls`) keep their Phase C2i
-    /// plumbing and are edited separately.
-    pub const fn all() -> [PrivacySettingKey; 11] {
+    /// Every rule key the screen fetches and keeps in sync. The two call
+    /// settings also feed the older `call_privacy_*` fields (see
+    /// `Session::mirror_call_privacy`).
+    pub const fn all() -> [PrivacySettingKey; 13] {
         [
             PrivacySettingKey::ShowStatus,
             PrivacySettingKey::ShowPhoneNumber,
@@ -98,6 +106,8 @@ impl PrivacySettingKey {
             PrivacySettingKey::AllowFindingByPhoneNumber,
             PrivacySettingKey::AllowVoiceMessages,
             PrivacySettingKey::AutosaveGifts,
+            PrivacySettingKey::AllowCalls,
+            PrivacySettingKey::PeerToPeer,
         ]
     }
 
@@ -117,8 +127,10 @@ impl PrivacySettingKey {
 
     /// Rows of the "Who can contact me" block (the call rows and the
     /// new-chat row sit between them in the UI).
-    pub const fn contact_rows() -> [PrivacySettingKey; 2] {
+    pub const fn contact_rows() -> [PrivacySettingKey; 4] {
         [
+            PrivacySettingKey::AllowCalls,
+            PrivacySettingKey::PeerToPeer,
             PrivacySettingKey::AllowVoiceMessages,
             PrivacySettingKey::AllowChatInvites,
         ]
@@ -140,6 +152,8 @@ impl PrivacySettingKey {
             PrivacySettingKey::AllowFindingByPhoneNumber => "Who can find me by my number",
             PrivacySettingKey::AllowVoiceMessages => "Who can send me voice messages",
             PrivacySettingKey::AutosaveGifts => "Who can display gifts on my profile",
+            PrivacySettingKey::AllowCalls => "Who can call me",
+            PrivacySettingKey::PeerToPeer => "Use peer-to-peer with",
         }
     }
 
@@ -164,6 +178,12 @@ impl PrivacySettingKey {
             }
             PrivacySettingKey::AllowVoiceMessages => {
                 "These users will or will not be able to send voice and video messages to you regardless of the settings above."
+            }
+            PrivacySettingKey::AllowCalls => {
+                "These users will or will not be able to call you regardless of the settings above."
+            }
+            PrivacySettingKey::PeerToPeer => {
+                "Peer-to-peer in calls will or will not be used with these users regardless of the settings above."
             }
             _ => "Add users or groups to override the settings above.",
         }

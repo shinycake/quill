@@ -210,3 +210,16 @@ impl Session {
         }
     }
 }
+
+impl Session {
+    /// The two call rules also feed `call_privacy_allow_calls` /
+    /// `call_privacy_p2p`, which the older call code reads. Called
+    /// whenever the rule detail for a call key changes.
+    pub fn mirror_call_privacy(&mut self, key: PrivacySettingKey, detail: &PrivacyRuleDetail) {
+        match key {
+            PrivacySettingKey::AllowCalls => self.call_privacy_allow_calls = detail.who,
+            PrivacySettingKey::PeerToPeer => self.call_privacy_p2p = detail.who,
+            _ => {}
+        }
+    }
+}

@@ -139,6 +139,24 @@ pub(super) fn apply_ready_calls_settings(
     }
     session.call_privacy_allow_calls = Some(PrivacyWho::Contacts);
     session.call_privacy_p2p = Some(PrivacyWho::Everybody);
+    for (key, who) in [
+        (
+            quill::telegram::requests_privacy::PrivacySettingKey::AllowCalls,
+            PrivacyWho::Contacts,
+        ),
+        (
+            quill::telegram::requests_privacy::PrivacySettingKey::PeerToPeer,
+            PrivacyWho::Everybody,
+        ),
+    ] {
+        session.privacy.insert(
+            key,
+            quill::privacy::PrivacyKeyState::Ready(quill::privacy::PrivacyRuleDetail {
+                who: Some(who),
+                ..Default::default()
+            }),
+        );
+    }
     session.call_prefs.confirm_before_calling = true;
 }
 

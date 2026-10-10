@@ -599,6 +599,10 @@ pub enum RequestPurpose {
     GetMapThumbnailFile,
     /// `getMe`. Response is `user`; only the id is kept.
     GetMe,
+    /// `getSupportUser` (Settings > Ask a Question). Response is `user`;
+    /// the id is parked in `Session::support_user_ready` and the driver
+    /// opens the chat.
+    GetSupportUser,
     /// `getChatMember` for the current user in a channel. Response is
     /// `chatMember`; drives the composer gate and join/leave affordance.
     GetChatMember,

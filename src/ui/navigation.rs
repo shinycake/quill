@@ -593,6 +593,9 @@ impl QuillApp {
                                         .into_any_element(),
                                     "Contacts" => this.contacts_settings_section(cx),
                                     "Privacy and security" => this.privacy_settings_navigation(cx),
+                                    super::settings_account_ui::ASK_QUESTION_PAGE => {
+                                        this.ask_question_page(cx)
+                                    }
                                     _ => this.call_settings_section(cx).into_any_element(),
                                 })
                                 .into_any_element()
@@ -638,7 +641,9 @@ impl QuillApp {
                                 }),
                         );
                     }
-                    content.child(list)
+                    content
+                        .child(list)
+                        .child(app_c.update(cx, |this, cx| this.settings_help_footer(cx)))
                 },
             ))
     }
