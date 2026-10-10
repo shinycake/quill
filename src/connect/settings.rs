@@ -75,6 +75,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.privacy.insert(key, PrivacyKeyState::Failed);
             return Err(err);
         }
+        self.session.mirror_call_privacy(key, &detail);
         self.session
             .privacy
             .insert(key, PrivacyKeyState::Ready(detail));

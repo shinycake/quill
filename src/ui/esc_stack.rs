@@ -53,11 +53,13 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.message_menu.is_some()
             || app.chat_menu.is_some()
             || app.archive_menu.is_some()
+            || app.global.story_menu.is_some()
             || app.folder_tab_menu.is_some(),
         |app, _, cx| {
             app.message_menu = None;
             app.chat_menu = None;
             app.archive_menu = None;
+            app.global.story_menu = None;
             app.folder_tab_menu = None;
             cx.notify();
         }

@@ -204,6 +204,12 @@ impl QuillApp {
                     .pressable(cx.theme())
                     .child(avatar)
                     .child(name(title))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.open_story_menu(chat_id, event.position, cx);
+                        }),
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_story_viewer(ChatId(chat_id), latest_story, cx);
                     })),
